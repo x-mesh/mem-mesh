@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>mem-mesh Web UI Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 2rem;
+            line-height: 1.6;
+        }
+        .test-section {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .test-result {
+            margin-top: 1rem;
+            padding: 1rem;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 0.5rem;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>mem-mesh Web UI Test</h1>
+    
+    <div class="test-section">
+        <h2>API Connection Test</h2>
+        <button onclick="testAPI()">Test API Connection</button>
+        <div id="api-result" class="test-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Statistics Test</h2>
+        <button onclick="testStats()">Test Statistics API</button>
+        <div id="stats-result" class="test-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Search Test</h2>
+        <button onclick="testSearch()">Test Search API</button>
+        <div id="search-result" class="test-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Web Components Test</h2>
+        <button onclick="testComponents()">Test Web Components</button>
+        <div id="components-result" class="test-result"></div>
+        <div id="component-demo"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Full Web UI Test</h2>
+        <button onclick="openWebUI()">Open Web UI</button>
+        <p>This will open the full Web UI in a new tab.</p>
+    </div>
+
+    <script type="module">
+        import { APIClient } from '/static/js/services/api-client.js';
+        
+        window.apiClient = new APIClient();
+        
+        window.testAPI = async function() {
+            const resultDiv = document.getElementById('api-result');
+            try {
+                const health = await window.apiClient.healthCheck();
+                resultDiv.className = 'test-result success';
+                resultDiv.textContent = 'API Connection: SUCCESS\n' + JSON.stringify(health, null, 2);
+            } catch (error) {
+                resultDiv.className = 'test-result error';
+                resultDiv.textContent = 'API Connection: FAILED\n' + error.message;
+            }
+        };
+        
+        window.testStats = async function() {
+            const resultDiv = document.getElementById('stats-result');
+            try {
+                const stats = await window.apiClient.getStats();
+                resultDiv.className = 'test-result success';
+                resultDiv.textContent = 'Statistics: SUCCESS\n' + JSON.stringify(stats, null, 2);
+            } catch (error) {
+                resultDiv.className = 'test-result error';
+                resultDiv.textContent = 'Statistics: FAILED\n' + error.message;
+            }
+        };
+        
+        window.testSearch = async function() {
+            const resultDiv = document.getElementById('search-result');
+            try {
+                const results = await window.apiClient.searchMemories('', { limit: 3 });
+                resultDiv.className = 'test-result success';
+                resultDiv.textContent = 'Search: SUCCESS\n' + JSON.stringify(results, null, 2);
+            } catch (error) {
+                resultDiv.className = 'test-result error';
+                resultDiv.textContent = 'Search: FAILED\n' + error.message;
+            }
+        };
+        
+        window.testComponents = async function() {
+            const resultDiv = document.getElementById('components-result');
+            const demoDiv = document.getElementById('component-demo');
+            
+            try {
+                // Import components
+                await import('/static/js/components/memory-card.js');
+                await import('/static/js/components/search-bar.js');
+                
+                // Test if components are defined
+                const memoryCardDefined = customElements.get('memory-card') !== undefined;
+                const searchBarDefined = customElements.get('search-bar') !== undefined;
+                
+                if (memoryCardDefined && searchBarDefined) {
+                    resultDiv.className = 'test-result success';
+                    resultDiv.textContent = 'Web Components: SUCCESS\nMemoryCard and SearchBar components loaded successfully.';
+                    
+                    // Create demo components
+                    demoDiv.innerHTML = `
+                        <h3>Component Demo:</h3>
+                        <search-bar placeholder="Test search..." style="margin-bottom: 1rem;"></search-bar>
+                        <memory-card 
+                            memory-id="test-123"
+                            content="This is a test memory card component"
+                            category="task"
+                            project="test-project"
+                            created-at="2026-01-11T12:00:00Z"
+                            tags='["test", "demo"]'
+                        ></memory-card>
+                    `;
+                } else {
+                    throw new Error('Components not properly defined');
+                }
+            } catch (error) {
+                resultDiv.className = 'test-result error';
+                resultDiv.textContent = 'Web Components: FAILED\n' + error.message;
+            }
+        };
+        
+        window.openWebUI = function() {
+            window.open('/', '_blank');
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>mem-mesh Web UI Tests</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 2rem;
+            background: #f8fafc;
+            color: #1e293b;
+        }
+        
+        .test-header {
+            text-align: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        
+        .test-header h1 {
+            margin: 0;
+            color: #0f172a;
+        }
+        
+        .test-controls {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .test-button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        
+        .test-button:hover {
+            background: #2563eb;
+        }
+        
+        .test-button:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+        
+        .test-output {
+            background: #1e293b;
+            color: #f1f5f9;
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.875rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            max-height: 600px;
+            overflow-y: auto;
+            margin-bottom: 2rem;
+        }
+        
+        .test-results {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .result-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        
+        .result-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        
+        .result-label {
+            color: #64748b;
+            font-size: 0.875rem;
+        }
+        
+        .passed { color: #059669; }
+        .failed { color: #dc2626; }
+        .skipped { color: #d97706; }
+        .total { color: #3b82f6; }
+        
+        .test-status {
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            font-weight: 500;
+        }
+        
+        .status-running {
+            background: #dbeafe;
+            color: #1e40af;
+            border: 1px solid #93c5fd;
+        }
+        
+        .status-success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 1px solid #6ee7b7;
+        }
+        
+        .status-error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .component-tests {
+            margin-top: 2rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .component-tests h3 {
+            margin-top: 0;
+            color: #0f172a;
+        }
+        
+        .test-component {
+            margin: 1rem 0;
+            padding: 1rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.375rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-header">
+        <h1>🧪 mem-mesh Web UI Tests</h1>
+        <p>Automated testing for Web Components and Services</p>
+    </div>
+    
+    <div class="test-controls">
+        <button id="run-all-tests" class="test-button">Run All Tests</button>
+        <button id="run-component-tests" class="test-button">Run Component Tests</button>
+        <button id="run-service-tests" class="test-button">Run Service Tests</button>
+        <button id="clear-output" class="test-button">Clear Output</button>
+    </div>
+    
+    <div id="test-status" class="test-status hidden"></div>
+    
+    <div id="test-results" class="test-results hidden">
+        <div class="result-card">
+            <div id="total-tests" class="result-value total">0</div>
+            <div class="result-label">Total Tests</div>
+        </div>
+        <div class="result-card">
+            <div id="passed-tests" class="result-value passed">0</div>
+            <div class="result-label">Passed</div>
+        </div>
+        <div class="result-card">
+            <div id="failed-tests" class="result-value failed">0</div>
+            <div class="result-label">Failed</div>
+        </div>
+        <div class="result-card">
+            <div id="skipped-tests" class="result-value skipped">0</div>
+            <div class="result-label">Skipped</div>
+        </div>
+    </div>
+    
+    <div id="test-output" class="test-output"></div>
+    
+    <div class="component-tests">
+        <h3>Test Components (for manual testing)</h3>
+        <div class="test-component">
+            <h4>Memory Card</h4>
+            <memory-card id="test-memory-card"></memory-card>
+        </div>
+        <div class="test-component">
+            <h4>Search Bar</h4>
+            <search-bar id="test-search-bar"></search-bar>
+        </div>
+        <div class="test-component">
+            <h4>Filter Panel</h4>
+            <filter-panel id="test-filter-panel"></filter-panel>
+        </div>
+    </div>
+
+    <!-- Load CSS variables -->
+    <link rel="stylesheet" href="static/css/main.css">
+    
+    <!-- Load components and services -->
+    <script type="module">
+        // Import test framework
+        import { testRunner, expect, createMock, DOMTestUtils } from './static/js/tests/test-runner.js';
+        
+        // Import components (needed for testing)
+        import './static/js/components/memory-card.js';
+        import './static/js/components/search-bar.js';
+        import './static/js/components/filter-panel.js';
+        import './static/js/components/context-timeline.js';
+        import './static/js/components/network-graph.js';
+        
+        // Import services
+        import './static/js/services/api-client.js';
+        import './static/js/services/router.js';
+        import './static/js/services/app-state.js';
+        
+        // Import test suites
+        import './static/js/tests/components.test.js';
+        import './static/js/tests/services.test.js';
+        
+        // DOM elements
+        const runAllBtn = document.getElementById('run-all-tests');
+        const runComponentBtn = document.getElementById('run-component-tests');
+        const runServiceBtn = document.getElementById('run-service-tests');
+        const clearBtn = document.getElementById('clear-output');
+        const statusEl = document.getElementById('test-status');
+        const resultsEl = document.getElementById('test-results');
+        const outputEl = document.getElementById('test-output');
+        
+        // Override console.log to capture test output
+        const originalLog = console.log;
+        const originalError = console.error;
+        
+        function captureOutput(message) {
+            outputEl.textContent += message + '\n';
+            outputEl.scrollTop = outputEl.scrollHeight;
+        }
+        
+        console.log = (...args) => {
+            captureOutput(args.join(' '));
+            originalLog.apply(console, args);
+        };
+        
+        console.error = (...args) => {
+            captureOutput('ERROR: ' + args.join(' '));
+            originalError.apply(console, args);
+        };
+        
+        // Test runner functions
+        async function runAllTests() {
+            setStatus('running', 'Running all tests...');
+            disableButtons(true);
+            
+            try {
+                const results = await testRunner.run();
+                updateResults(results);
+                
+                if (results.failed === 0) {
+                    setStatus('success', `All tests passed! (${results.passed}/${results.total})`);
+                } else {
+                    setStatus('error', `${results.failed} test(s) failed out of ${results.total}`);
+                }
+            } catch (error) {
+                setStatus('error', 'Test run failed: ' + error.message);
+                console.error('Test run error:', error);
+            } finally {
+                disableButtons(false);
+            }
+        }
+        
+        async function runComponentTests() {
+            setStatus('running', 'Running component tests...');
+            disableButtons(true);
+            
+            try {
+                // Filter and run only component tests
+                const componentSuites = Array.from(testRunner.suites.entries())
+                    .filter(([name]) => name.includes('Component') || name.includes('Integration'));
+                
+                let totalResults = { passed: 0, failed: 0, skipped: 0, total: 0 };
+                
+                for (const [suiteName, suite] of componentSuites) {
+                    await testRunner.runSuite(suite);
+                    // Aggregate results would need to be implemented
+                }
+                
+                setStatus('success', 'Component tests completed');
+            } catch (error) {
+                setStatus('error', 'Component tests failed: ' + error.message);
+            } finally {
+                disableButtons(false);
+            }
+        }
+        
+        async function runServiceTests() {
+            setStatus('running', 'Running service tests...');
+            disableButtons(true);
+            
+            try {
+                // Filter and run only service tests
+                const serviceSuites = Array.from(testRunner.suites.entries())
+                    .filter(([name]) => name.includes('APIClient') || name.includes('Router') || name.includes('AppState') || name.includes('Service'));
+                
+                for (const [suiteName, suite] of serviceSuites) {
+                    await testRunner.runSuite(suite);
+                }
+                
+                setStatus('success', 'Service tests completed');
+            } catch (error) {
+                setStatus('error', 'Service tests failed: ' + error.message);
+            } finally {
+                disableButtons(false);
+            }
+        }
+        
+        function clearOutput() {
+            outputEl.textContent = '';
+            statusEl.classList.add('hidden');
+            resultsEl.classList.add('hidden');
+        }
+        
+        function setStatus(type, message) {
+            statusEl.className = `test-status status-${type}`;
+            statusEl.textContent = message;
+            statusEl.classList.remove('hidden');
+        }
+        
+        function updateResults(results) {
+            document.getElementById('total-tests').textContent = results.total;
+            document.getElementById('passed-tests').textContent = results.passed;
+            document.getElementById('failed-tests').textContent = results.failed;
+            document.getElementById('skipped-tests').textContent = results.skipped;
+            resultsEl.classList.remove('hidden');
+        }
+        
+        function disableButtons(disabled) {
+            runAllBtn.disabled = disabled;
+            runComponentBtn.disabled = disabled;
+            runServiceBtn.disabled = disabled;
+        }
+        
+        // Event listeners
+        runAllBtn.addEventListener('click', runAllTests);
+        runComponentBtn.addEventListener('click', runComponentTests);
+        runServiceBtn.addEventListener('click', runServiceTests);
+        clearBtn.addEventListener('click', clearOutput);
+        
+        // Initialize test components with sample data
+        window.addEventListener('DOMContentLoaded', () => {
+            // Setup test memory card
+            const testMemoryCard = document.getElementById('test-memory-card');
+            if (testMemoryCard) {
+                testMemoryCard.setAttribute('memory-data', JSON.stringify({
+                    id: 'test-123',
+                    content: 'This is a test memory for demonstrating the memory card component.',
+                    category: 'task',
+                    project_id: 'test-project',
+                    tags: ['test', 'demo', 'ui'],
+                    created_at: new Date().toISOString(),
+                    similarity_score: 0.95
+                }));
+            }
+            
+            // Setup test search bar
+            const testSearchBar = document.getElementById('test-search-bar');
+            if (testSearchBar) {
+                testSearchBar.setAttribute('placeholder', 'Test search functionality...');
+            }
+            
+            console.log('🚀 Test environment initialized');
+            console.log('Click "Run All Tests" to start automated testing');
+        });
+        
+        // Make test utilities available globally for debugging
+        window.testRunner = testRunner;
+        window.expect = expect;
+        window.createMock = createMock;
+        window.DOMTestUtils = DOMTestUtils;
+    </script>
+</body>
+</html>

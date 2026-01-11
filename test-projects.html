@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projects Page Test</title>
+    <style>
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8f9fa;
+            --bg-tertiary: #e9ecef;
+            --text-primary: #212529;
+            --text-secondary: #6c757d;
+            --text-muted: #adb5bd;
+            --border-color: #dee2e6;
+            --primary-color: #2563eb;
+            --primary-hover: #1d4ed8;
+            --primary-color-alpha: rgba(37, 99, 235, 0.1);
+            --secondary-color: #64748b;
+            --success-color: #059669;
+            --error-color: #dc2626;
+            --error-bg: #fef2f2;
+            --error-text: #991b1b;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --border-radius: 8px;
+            --border-radius-sm: 4px;
+            --transition: all 0.2s ease;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <projects-page></projects-page>
+    </div>
+
+    <script type="module">
+        // Mock app object for testing
+        window.app = {
+            apiClient: {
+                async searchMemories(query, options = {}) {
+                    const url = new URL('/api/memories/search', window.location.origin);
+                    url.searchParams.append('query', query || '');
+                    if (options.limit) url.searchParams.append('limit', options.limit.toString());
+                    
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return await response.json();
+                }
+            },
+            router: {
+                navigate(path) {
+                    console.log('Navigate to:', path);
+                    window.location.href = path;
+                }
+            }
+        };
+
+        // Import and initialize projects page
+        import('./static/js/pages/projects.js');
+    </script>
+</body>
+</html>

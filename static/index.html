@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>mem-mesh Web UI</title>
+  <meta name="description" content="Central memory server with vector search and context retrieval">
+  <link rel="stylesheet" href="/static/css/main.css">
+  <link rel="icon" href="/static/assets/favicon.ico" type="image/x-icon">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-content">
+        <h1 class="logo">
+          <span class="logo-icon">🧠</span>
+          mem-mesh
+        </h1>
+        <nav class="main-nav">
+          <a href="/" class="nav-link" data-route="/">Dashboard</a>
+          <a href="/search" class="nav-link" data-route="/search">Search</a>
+          <a href="/projects" class="nav-link" data-route="/projects">Projects</a>
+          <a href="/analytics" class="nav-link" data-route="/analytics">Analytics</a>
+        </nav>
+        <div class="header-actions">
+          <button id="theme-toggle" class="icon-button" title="Toggle theme">
+            <span class="theme-icon">🌙</span>
+          </button>
+          <button id="create-memory" class="primary-button" data-route="/create">
+            + New Memory
+          </button>
+        </div>
+      </div>
+    </header>
+    
+    <!-- Main Content -->
+    <main id="main-content" class="main-content">
+      <!-- Loading state -->
+      <div id="loading-state" class="loading-state">
+        <div class="spinner"></div>
+        <p>Loading...</p>
+      </div>
+      
+      <!-- Dynamic content will be loaded here -->
+      <div id="page-content" class="page-content hidden">
+        <!-- Page content will be rendered here -->
+      </div>
+    </main>
+    
+    <!-- Sidebar (for filters, navigation) -->
+    <aside id="sidebar" class="sidebar">
+      <!-- Dynamic sidebar content -->
+    </aside>
+  </div>
+  
+  <!-- Loading overlay -->
+  <div id="loading-overlay" class="loading-overlay hidden">
+    <div class="spinner"></div>
+  </div>
+  
+  <!-- Toast notifications -->
+  <div id="toast-container" class="toast-container"></div>
+  
+  <!-- Modal container -->
+  <div id="modal-container" class="modal-container hidden"></div>
+  
+  <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

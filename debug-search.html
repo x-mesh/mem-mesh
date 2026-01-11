@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search Debug Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .result {
+            background: #f5f5f5;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 3px;
+        }
+        .error {
+            background: #ffe6e6;
+            color: #d00;
+        }
+        .success {
+            background: #e6ffe6;
+            color: #060;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Search API Debug Test</h1>
+    
+    <div class="test-section">
+        <h2>1. API Client Test</h2>
+        <button onclick="testAPIClient()">Test API Client</button>
+        <div id="api-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>2. Direct API Test</h2>
+        <button onclick="testDirectAPI()">Test Direct API</button>
+        <div id="direct-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>3. Search Page Component Test</h2>
+        <button onclick="testSearchComponent()">Test Search Component</button>
+        <div id="component-result" class="result"></div>
+    </div>
+
+    <script type="module">
+        import { APIClient } from './static/js/services/api-client.js';
+        
+        window.apiClient = new APIClient();
+        
+        window.testAPIClient = async function() {
+            const resultDiv = document.getElementById('api-result');
+            resultDiv.innerHTML = 'Testing API Client...';
+            
+            try {
+                console.log('Testing API Client searchMemories...');
+                const result = await window.apiClient.searchMemories('', { limit: 5 });
+                console.log('API Client result:', result);
+                
+                resultDiv.innerHTML = `
+                    <div class="success">
+                        <strong>Success!</strong><br>
+                        Results: ${result.results ? result.results.length : 0}<br>
+                        Response: <pre>${JSON.stringify(result, null, 2)}</pre>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('API Client error:', error);
+                resultDiv.innerHTML = `
+                    <div class="error">
+                        <strong>Error:</strong> ${error.message}<br>
+                        Status: ${error.status}<br>
+                        Details: <pre>${JSON.stringify(error, null, 2)}</pre>
+                    </div>
+                `;
+            }
+        };
+        
+        window.testDirectAPI = async function() {
+            const resultDiv = document.getElementById('direct-result');
+            resultDiv.innerHTML = 'Testing Direct API...';
+            
+            try {
+                console.log('Testing direct API call...');
+                const response = await fetch('/api/memories/search?query=&limit=5');
+                console.log('Direct API response status:', response.status);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                console.log('Direct API result:', result);
+                
+                resultDiv.innerHTML = `
+                    <div class="success">
+                        <strong>Success!</strong><br>
+                        Status: ${response.status}<br>
+                        Results: ${result.results ? result.results.length : 0}<br>
+                        Response: <pre>${JSON.stringify(result, null, 2)}</pre>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Direct API error:', error);
+                resultDiv.innerHTML = `
+                    <div class="error">
+                        <strong>Error:</strong> ${error.message}<br>
+                        Details: <pre>${JSON.stringify(error, null, 2)}</pre>
+                    </div>
+                `;
+            }
+        };
+        
+        window.testSearchComponent = async function() {
+            const resultDiv = document.getElementById('component-result');
+            resultDiv.innerHTML = 'Testing Search Component...';
+            
+            try {
+                // 앱 초기화 시뮬레이션
+                if (!window.app) {
+                    window.app = {
+                        apiClient: window.apiClient
+                    };
+                }
+                
+                console.log('Testing search component logic...');
+                
+                // SearchPage 클래스 로드
+                const { SearchPage } = await import('./static/js/pages/search.js');
+                
+                // 컴포넌트 생성
+                const searchPage = new SearchPage();
+                searchPage.searchQuery = '';
+                searchPage.selectedCategory = '';
+                searchPage.selectedProject = '';
+                searchPage.pageSize = 5;
+                
+                // performSearch 메서드 직접 호출
+                await searchPage.performSearch();
+                
+                resultDiv.innerHTML = `
+                    <div class="success">
+                        <strong>Component Test Success!</strong><br>
+                        Search Results: ${searchPage.searchResults.length}<br>
+                        Loading State: ${searchPage.isLoading}<br>
+                        Results: <pre>${JSON.stringify(searchPage.searchResults, null, 2)}</pre>
+                    </div>
+                `;
+                
+            } catch (error) {
+                console.error('Component test error:', error);
+                resultDiv.innerHTML = `
+                    <div class="error">
+                        <strong>Component Error:</strong> ${error.message}<br>
+                        Stack: <pre>${error.stack}</pre>
+                    </div>
+                `;
+            }
+        };
+    </script>
+</body>
+</html>
