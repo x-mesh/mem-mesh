@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>mem-mesh Web UI</title>
   <meta name="description" content="Central memory server with vector search and context retrieval">
+  
   <link rel="stylesheet" href="/static/css/main.css">
   <link rel="icon" href="/static/assets/favicon.ico" type="image/x-icon">
 </head>
@@ -14,7 +15,11 @@
     <header class="app-header">
       <div class="header-content">
         <h1 class="logo">
-          <span class="logo-icon">🧠</span>
+          <svg class="logo-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+          </svg>
           mem-mesh
         </h1>
         <nav class="main-nav">
@@ -25,10 +30,15 @@
         </nav>
         <div class="header-actions">
           <button id="theme-toggle" class="icon-button" title="Toggle theme">
-            <span class="theme-icon">🌙</span>
+            <svg class="theme-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            </svg>
           </button>
-          <button id="create-memory" class="primary-button" data-route="/create">
-            + New Memory
+          <button id="create-memory" class="btn-primary" data-route="/create">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            New Memory
           </button>
         </div>
       </div>

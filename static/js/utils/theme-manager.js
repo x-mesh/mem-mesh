@@ -92,11 +92,21 @@ export class ThemeManager {
    */
   updateThemeToggle(effectiveTheme) {
     const themeToggle = document.getElementById('theme-toggle');
-    const themeIcon = themeToggle?.querySelector('.theme-icon');
+    const themeIcon = themeToggle?.querySelector('.theme-icon path');
     
     if (themeIcon) {
-      themeIcon.textContent = effectiveTheme === 'light' ? '🌙' : '☀️';
+      if (effectiveTheme === 'light') {
+        // Moon icon for light theme (to switch to dark)
+        themeIcon.setAttribute('d', 'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z');
+      } else {
+        // Sun icon for dark theme (to switch to light)
+        themeIcon.setAttribute('d', 'M12 3V1M12 23V21M4.22 4.22L5.64 5.64M18.36 18.36L19.78 19.78M1 12H3M21 12H23M4.22 19.78L5.64 18.36M18.36 5.64L19.78 4.22');
+      }
+      
       themeToggle.setAttribute('aria-label', 
+        `Switch to ${effectiveTheme === 'light' ? 'dark' : 'light'} theme`
+      );
+      themeToggle.setAttribute('title', 
         `Switch to ${effectiveTheme === 'light' ? 'dark' : 'light'} theme`
       );
     }

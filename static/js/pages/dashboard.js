@@ -309,7 +309,12 @@ class DashboardPage extends HTMLElement {
     return `
       <div class="stats-grid">
         <div class="stat-card" data-type="total">
-          <div class="stat-icon">📊</div>
+          <div class="stat-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M3 3V21H21V3H3Z" stroke="currentColor" stroke-width="2"/>
+              <path d="M7 12L12 7L17 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
           <div class="stat-content">
             <div class="stat-number">${totalMemories.toLocaleString()}</div>
             <div class="stat-label">Total Memories</div>
@@ -317,7 +322,11 @@ class DashboardPage extends HTMLElement {
         </div>
         
         <div class="stat-card" data-type="project">
-          <div class="stat-icon">📁</div>
+          <div class="stat-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M22 19C22 19.5304 21.7893 20.0391 21.4142 20.4142C21.0391 20.7893 20.5304 21 20 21H4C3.46957 21 2.96086 20.7893 2.58579 20.4142C2.21071 20.0391 2 19.5304 2 19V5C2 4.46957 2.21071 3.96086 2.58579 3.58579C2.96086 3.21071 3.46957 3 4 3H9L11 6H20C20.5304 6 21.0391 6.21071 21.4142 6.58579C21.7893 6.96086 22 7.46957 22 8V19Z" stroke="currentColor" stroke-width="2"/>
+            </svg>
+          </div>
           <div class="stat-content">
             <div class="stat-number">${totalProjects}</div>
             <div class="stat-label">Projects</div>
@@ -325,7 +334,12 @@ class DashboardPage extends HTMLElement {
         </div>
         
         <div class="stat-card" data-type="category">
-          <div class="stat-icon">🏷️</div>
+          <div class="stat-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M20.59 13.41L13.42 20.58C13.2343 20.766 13.0137 20.9135 12.7709 21.0141C12.5281 21.1148 12.2678 21.1666 12.005 21.1666C11.7422 21.1666 11.4819 21.1148 11.2391 21.0141C10.9963 20.9135 10.7757 20.766 10.59 20.58L2 12V2H12L20.59 10.59C20.9625 10.9647 21.1716 11.4716 21.1716 12C21.1716 12.5284 20.9625 13.0353 20.59 13.41V13.41Z" stroke="currentColor" stroke-width="2"/>
+              <circle cx="7" cy="7" r="1" fill="currentColor"/>
+            </svg>
+          </div>
           <div class="stat-content">
             <div class="stat-number">${totalCategories}</div>
             <div class="stat-label">Categories</div>
@@ -333,7 +347,12 @@ class DashboardPage extends HTMLElement {
         </div>
         
         <div class="stat-card" data-type="leadtime">
-          <div class="stat-icon">⏱️</div>
+          <div class="stat-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+              <path d="M12 6V12L16 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
           <div class="stat-content">
             <div class="stat-number">${avgLeadTime.toFixed(1)}d</div>
             <div class="stat-label">Avg Lead Time</div>
@@ -358,22 +377,36 @@ class DashboardPage extends HTMLElement {
       return '<div class="no-data">No data available</div>';
     }
     
+    // 일관된 회색 톤 색상 팔레트
     const categoryColors = {
-      task: '#2563eb',
-      bug: '#ef4444',
-      idea: '#f59e0b',
-      decision: '#8b5cf6',
-      incident: '#ef4444',
-      code_snippet: '#10b981'
+      task: '#525252',
+      bug: '#737373',
+      idea: '#a3a3a3',
+      decision: '#404040',
+      incident: '#262626',
+      code_snippet: '#171717'
     };
     
+    // SVG 아이콘으로 변경
     const categoryIcons = {
-      task: '📋',
-      bug: '🐛',
-      idea: '💡',
-      decision: '⚖️',
-      incident: '🚨',
-      code_snippet: '💻'
+      task: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+               <path d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2"/>
+             </svg>`,
+      bug: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M8 2V5M16 2V5M8 19L16 5M16 19L8 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>`,
+      idea: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+               <path d="M9 21H15M12 3C8.68629 3 6 5.68629 6 9C6 11.973 7.818 14.441 10.5 15.5V17C10.5 17.8284 11.1716 18.5 12 18.5C12.8284 18.5 13.5 17.8284 13.5 17V15.5C16.182 14.441 18 11.973 18 9C18 5.68629 15.3137 3 12 3Z" stroke="currentColor" stroke-width="2"/>
+             </svg>`,
+      decision: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 3L2 12L12 21L22 12L12 3Z" stroke="currentColor" stroke-width="2"/>
+                </svg>`,
+      incident: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 9V13M12 17H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2"/>
+                </svg>`,
+      code_snippet: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M16 18L22 12L16 6M8 6L2 12L8 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>`
     };
     
     let chartHTML = '<div class="category-chart">';
@@ -397,7 +430,7 @@ class DashboardPage extends HTMLElement {
     Object.entries(categories).forEach(([category, count]) => {
       const percentage = ((count / total) * 100).toFixed(1);
       const color = categoryColors[category] || '#64748b';
-      const icon = categoryIcons[category] || '📝';
+      const icon = categoryIcons[category] || categoryIcons.task;
       
       chartHTML += `
         <div class="legend-item">
@@ -504,7 +537,10 @@ class DashboardPage extends HTMLElement {
           <p class="header-subtitle">Overview of your memory collection</p>
         </div>
         <button class="refresh-btn" title="Refresh data">
-          <span class="refresh-icon">🔄</span>
+          <svg class="refresh-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1 4V10H7M23 20V14H17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M20.49 9C19.9828 7.56678 19.1209 6.28392 17.9845 5.27493C16.8482 4.26595 15.4745 3.56905 13.9917 3.24575C12.5089 2.92246 10.9652 2.98546 9.51691 3.42597C8.06861 3.86648 6.76302 4.66921 5.64 5.76L1 10M23 14L18.36 18.24C17.237 19.3308 15.9314 20.1335 14.4831 20.574C13.0348 21.0145 11.4911 21.0775 10.0083 20.7542C8.52547 20.431 7.1518 19.7341 6.01547 18.7251C4.87913 17.7161 4.01717 16.4332 3.51 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
           Refresh
         </button>
       </div>
@@ -611,7 +647,8 @@ style.textContent = `
   }
   
   .refresh-icon {
-    font-size: 1rem;
+    width: 1rem;
+    height: 1rem;
   }
   
   .dashboard-section {
@@ -673,8 +710,15 @@ style.textContent = `
   }
   
   .stat-icon {
-    font-size: 2rem;
+    width: 2rem;
+    height: 2rem;
+    color: var(--text-secondary);
     opacity: 0.8;
+  }
+  
+  .stat-icon svg {
+    width: 100%;
+    height: 100%;
   }
   
   .stat-content {
@@ -735,7 +779,14 @@ style.textContent = `
   }
   
   .legend-icon {
-    font-size: 1rem;
+    width: 1rem;
+    height: 1rem;
+    color: var(--text-secondary);
+  }
+  
+  .legend-icon svg {
+    width: 100%;
+    height: 100%;
   }
   
   .legend-text {

@@ -368,7 +368,7 @@ class SearchPage extends HTMLElement {
       if (this.searchResults.length === 0) {
         resultsContainer.innerHTML = `
           <div class="no-results">
-            <p>📭 No memories found</p>
+            <p><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/><path d="M8 5v4"/><path d="M16 5v4"/><path d="M3 9h18"/></svg> No memories found</p>
             <p>Try adjusting your search terms or filters</p>
           </div>
         `;
@@ -388,15 +388,15 @@ class SearchPage extends HTMLElement {
    */
   renderMemoryItem(memory) {
     const categoryIcons = {
-      task: '📋',
-      bug: '🐛',
-      idea: '💡',
-      decision: '⚖️',
-      incident: '🚨',
-      code_snippet: '💻'
+      task: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><path d="m9 9 2 2 4-4"/></svg>',
+      bug: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="m12 20-5-6 6.5-1 3.5 7Z"/><path d="m8.5 8.5-1 1"/><path d="m16.5 8.5 1 1"/></svg>',
+      idea: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+      decision: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="7.5,4.21 12,6.81 16.5,4.21"/><polyline points="7.5,19.79 7.5,14.6 3,12"/><polyline points="21,12 16.5,14.6 16.5,19.79"/><polyline points="3.27,6.96 12,12.01 20.73,6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
+      incident: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+      code_snippet: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16,18 22,12 16,6"/><polyline points="8,6 2,12 8,18"/></svg>'
     };
     
-    const icon = categoryIcons[memory.category] || '📝';
+    const icon = categoryIcons[memory.category] || '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10,9 9,9 8,9"/></svg>';
     const content = this.escapeHtml(memory.content || '');
     const truncatedContent = content.length > 200 ? content.substring(0, 200) + '...' : content;
     const date = this.formatDate(memory.created_at);
@@ -451,7 +451,7 @@ class SearchPage extends HTMLElement {
     
     this.innerHTML = `
       <div class="search-header">
-        <h1>🔍 Search Memories</h1>
+        <h1><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> Search Memories</h1>
         <p>Find and explore your memory collection</p>
       </div>
       
@@ -471,12 +471,12 @@ class SearchPage extends HTMLElement {
         <div class="search-filters">
           <select class="category-filter">
             <option value="">All Categories</option>
-            <option value="task" ${this.selectedCategory === 'task' ? 'selected' : ''}>📋 Task</option>
-            <option value="bug" ${this.selectedCategory === 'bug' ? 'selected' : ''}>🐛 Bug</option>
-            <option value="idea" ${this.selectedCategory === 'idea' ? 'selected' : ''}>💡 Idea</option>
-            <option value="decision" ${this.selectedCategory === 'decision' ? 'selected' : ''}>⚖️ Decision</option>
-            <option value="incident" ${this.selectedCategory === 'incident' ? 'selected' : ''}>🚨 Incident</option>
-            <option value="code_snippet" ${this.selectedCategory === 'code_snippet' ? 'selected' : ''}>💻 Code Snippet</option>
+            <option value="task" ${this.selectedCategory === 'task' ? 'selected' : ''}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><path d="m9 9 2 2 4-4"/></svg> Task</option>
+            <option value="bug" ${this.selectedCategory === 'bug' ? 'selected' : ''}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="m12 20-5-6 6.5-1 3.5 7Z"/><path d="m8.5 8.5-1 1"/><path d="m16.5 8.5 1 1"/></svg> Bug</option>
+            <option value="idea" ${this.selectedCategory === 'idea' ? 'selected' : ''}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> Idea</option>
+            <option value="decision" ${this.selectedCategory === 'decision' ? 'selected' : ''}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="7.5,4.21 12,6.81 16.5,4.21"/><polyline points="7.5,19.79 7.5,14.6 3,12"/><polyline points="21,12 16.5,14.6 16.5,19.79"/><polyline points="3.27,6.96 12,12.01 20.73,6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg> Decision</option>
+            <option value="incident" ${this.selectedCategory === 'incident' ? 'selected' : ''}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> Incident</option>
+            <option value="code_snippet" ${this.selectedCategory === 'code_snippet' ? 'selected' : ''}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16,18 22,12 16,6"/><polyline points="8,6 2,12 8,18"/></svg> Code Snippet</option>
           </select>
           
           <input 
@@ -500,7 +500,7 @@ class SearchPage extends HTMLElement {
         
         <div class="results-container">
           <div class="initial-message">
-            <p>🔍 Enter a search term or browse all memories</p>
+            <p><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> Enter a search term or browse all memories</p>
           </div>
         </div>
       </div>
@@ -529,6 +529,15 @@ style.textContent = `
     margin: 0 0 0.5rem 0;
     font-size: 2rem;
     color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  
+  .search-header h1 svg {
+    width: 24px;
+    height: 24px;
+    stroke: currentColor;
   }
   
   .search-header p {
@@ -675,6 +684,29 @@ style.textContent = `
   
   .no-results p {
     margin: 0.5rem 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+  }
+  
+  .no-results p svg {
+    width: 24px;
+    height: 24px;
+    stroke: currentColor;
+  }
+  
+  .initial-message p {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+  }
+  
+  .initial-message p svg {
+    width: 24px;
+    height: 24px;
+    stroke: currentColor;
   }
   
   .error-message {
@@ -719,6 +751,16 @@ style.textContent = `
     background: var(--bg-tertiary);
     padding: 0.25rem 0.5rem;
     border-radius: var(--border-radius-sm);
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  
+  .memory-category svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    flex-shrink: 0;
   }
   
   .memory-project {

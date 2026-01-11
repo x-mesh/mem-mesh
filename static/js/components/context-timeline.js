@@ -387,7 +387,7 @@ class ContextTimeline extends HTMLElement {
                 <option value="5" ${this.depth === 5 ? 'selected' : ''}>5</option>
               </select>
             </label>
-            <button class="refresh-btn" title="Refresh context">🔄</button>
+            <button class="refresh-btn" title="Refresh context"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg></button>
           </div>
         </div>
         <div class="timeline-loading">
@@ -415,7 +415,7 @@ class ContextTimeline extends HTMLElement {
               <option value="5" ${this.depth === 5 ? 'selected' : ''}>5</option>
             </select>
           </label>
-          <button class="refresh-btn" title="Refresh context">🔄</button>
+          <button class="refresh-btn" title="Refresh context"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg></button>
         </div>
       </div>
       <div class="timeline-container">
@@ -521,6 +521,15 @@ style.textContent = `
     cursor: pointer;
     font-size: 1rem;
     transition: var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .refresh-btn svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
   }
   
   .refresh-btn:hover {

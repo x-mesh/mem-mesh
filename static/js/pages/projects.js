@@ -444,8 +444,8 @@ class ProjectsPage extends HTMLElement {
       <div class="page-header">
         <h1>Projects</h1>
         <div class="header-actions">
-          <button class="refresh-btn secondary-button">🔄 Refresh</button>
-          <button class="export-btn secondary-button">📤 Export</button>
+          <button class="refresh-btn secondary-button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg> Refresh</button>
+          <button class="export-btn secondary-button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export</button>
         </div>
       </div>
       
@@ -840,6 +840,15 @@ style.textContent = `
     cursor: pointer;
     font-size: 0.875rem;
     transition: var(--transition);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  
+  .secondary-button svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
   }
   
   .secondary-button:hover {

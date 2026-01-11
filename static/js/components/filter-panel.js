@@ -230,14 +230,14 @@ class FilterPanel extends HTMLElement {
    */
   getCategoryIcon(category) {
     const icons = {
-      task: '📋',
-      bug: '🐛',
-      idea: '💡',
-      decision: '⚖️',
-      incident: '🚨',
-      code_snippet: '💻'
+      task: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><path d="m9 9 2 2 4-4"/></svg>',
+      bug: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="m12 20-5-6 6.5-1 3.5 7Z"/><path d="m8.5 8.5-1 1"/><path d="m16.5 8.5 1 1"/></svg>',
+      idea: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+      decision: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="7.5,4.21 12,6.81 16.5,4.21"/><polyline points="7.5,19.79 7.5,14.6 3,12"/><polyline points="21,12 16.5,14.6 16.5,19.79"/><polyline points="3.27,6.96 12,12.01 20.73,6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
+      incident: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+      code_snippet: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16,18 22,12 16,6"/><polyline points="8,6 2,12 8,18"/></svg>'
     };
-    return icons[category] || '📝';
+    return icons[category] || '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10,9 9,9 8,9"/></svg>';
   }
   
   /**
@@ -264,7 +264,7 @@ class FilterPanel extends HTMLElement {
     this.innerHTML = `
       <div class="filter-header">
         <div class="filter-title">
-          <span class="filter-icon">🔧</span>
+          <span class="filter-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22,3 2,3 10,12.46 10,19 14,21 14,12.46 22,3"/></svg></span>
           <span>Filters</span>
           ${activeCount > 0 ? `<span class="active-count">${activeCount}</span>` : ''}
         </div>
@@ -472,6 +472,14 @@ style.textContent = `
   
   .filter-icon {
     font-size: 1.125rem;
+    display: inline-flex;
+    align-items: center;
+  }
+  
+  .filter-icon svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
   }
   
   .active-count {
@@ -633,6 +641,16 @@ style.textContent = `
     font-size: 0.875rem;
     color: var(--text-primary);
     flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  
+  .option-label svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    flex-shrink: 0;
   }
   
   .no-options {
