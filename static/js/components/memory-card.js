@@ -405,7 +405,7 @@ style.textContent = `
   }
   
   .memory-meta {
-    padding: 0px !important;
+    padding: 1px !important;
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
