@@ -64,7 +64,8 @@ class EmbeddingService:
     def _preload_model(self) -> None:
         """시작 시 모델 미리 로드 및 검증"""
         logger.info(f"Preloading embedding model: {self.model_name}")
-        print(f"  📦 Loading embedding model: {self.model_name}...")
+        # MCP 서버에서는 stdout을 JSON-RPC 전용으로 사용해야 하므로 print 대신 logger 사용
+        logger.info(f"Loading embedding model: {self.model_name}...")
         
         try:
             self.model = SentenceTransformer(self.model_name)
@@ -80,11 +81,11 @@ class EmbeddingService:
             if len(test_embedding) != self.dimension:
                 raise ValueError(f"Model dimension mismatch: expected {self.dimension}, got {len(test_embedding)}")
             
-            print(f"  ✅ Model loaded successfully (dimension: {self.dimension})")
+            logger.info(f"Model loaded successfully (dimension: {self.dimension})")
             logger.info(f"Model {self.model_name} preloaded successfully (dimension: {self.dimension})")
             
         except Exception as e:
-            print(f"  ❌ Failed to load model: {e}")
+            logger.error(f"Failed to load model: {e}")
             logger.error(f"Failed to preload model {self.model_name}: {e}")
             raise
     

@@ -7,7 +7,7 @@ import re
 
 class AddParams(BaseModel):
     """메모리 추가 요청 파라미터"""
-    content: str = Field(min_length=10, max_length=10000)
+    content: str = Field(min_length=10, max_length=20000)  # 10,000 -> 20,000으로 증가
     project_id: Optional[str] = Field(default=None)
     category: str = Field(default="task")
     source: Optional[str] = Field(default=None)
@@ -84,7 +84,7 @@ class DeleteParams(BaseModel):
 
 class UpdateParams(BaseModel):
     """메모리 업데이트 요청 파라미터"""
-    content: Optional[str] = Field(default=None, min_length=10, max_length=10000)
+    content: Optional[str] = Field(default=None, min_length=10, max_length=20000)  # 10,000 -> 20,000으로 증가
     category: Optional[str] = Field(default=None)
     tags: Optional[List[str]] = Field(default=None)
     

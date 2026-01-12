@@ -79,6 +79,7 @@ class MemoryDetailPage extends HTMLElement {
    */
   setupEventListeners() {
     this.addEventListener('click', this.handleClick.bind(this));
+    this.addEventListener('change', this.handleChange.bind(this));
     this.addEventListener('memory-select', this.handleMemorySelect.bind(this));
     this.addEventListener('context-expand', this.handleContextExpand.bind(this));
     
@@ -117,6 +118,22 @@ class MemoryDetailPage extends HTMLElement {
       this.loadMemoryData();
     } else if (target.classList.contains('view-context-btn')) {
       const memoryId = target.getAttribute('data-memory-id');
+      if (memoryId && window.app && window.app.router) {
+        window.app.router.navigate(`/memory/${memoryId}`);
+      }
+    } else if (target.classList.contains('open-new-tab-btn')) {
+      event.stopPropagation(); // 부모 클릭 이벤트 방지
+      const memoryId = target.getAttribute('data-memory-id');
+      if (memoryId) {
+        const url = `${window.location.origin}/memory/${memoryId}`;
+        window.open(url, '_blank');
+      }
+    } else if (target.classList.contains('refresh-context-btn')) {
+      this.loadContextData();
+    } else if (target.closest('.context-item')) {
+      // 전체 context-item 클릭 시에도 해당 메모리로 이동
+      const contextItem = target.closest('.context-item');
+      const memoryId = contextItem.getAttribute('data-memory-id');
       if (memoryId && window.app && window.app.router) {
         window.app.router.navigate(`/memory/${memoryId}`);
       }
@@ -160,11 +177,26 @@ class MemoryDetailPage extends HTMLElement {
             this.saveMemory();
           }
           break;
+        case 'r':
+          event.preventDefault();
+          this.loadContextData();
+          break;
         case 'Escape':
           if (this.isEditing) {
             this.cancelEdit();
           }
           break;
+      }
+    }
+    
+    // 숫자 키로 관련 메모리 빠른 접근
+    if (event.key >= '1' && event.key <= '9' && !this.isEditing) {
+      const index = parseInt(event.key) - 1;
+      if (this.contextData && this.contextData[index]) {
+        const memoryId = this.contextData[index].id;
+        if (window.app && window.app.router) {
+          window.app.router.navigate(`/memory/${memoryId}`);
+        }
       }
     }
   }
@@ -482,34 +514,89 @@ class MemoryDetailPage extends HTMLElement {
       return `
         <div class="no-context">
           <p>No related memories found.</p>
+          <p class="keyboard-hint">Use Ctrl+R to refresh</p>
         </div>
       `;
     }
     
-    return this.contextData.map(memory => `
-      <div class="context-item" data-memory-id="${memory.id}">
-        <div class="context-item-header">
-          <span class="context-category">${this.getCategoryIcon(memory.category)} ${memory.category || 'unknown'}</span>
-          <span class="context-score">${Math.round((memory.similarity_score || 0) * 100)}% match</span>
-        </div>
-        <div class="context-item-content">
-          ${this.escapeHtml((memory.content || '').substring(0, 150))}${(memory.content || '').length > 150 ? '...' : ''}
-        </div>
-        <div class="context-item-footer">
-          <span class="context-date">${this.formatDate(memory.created_at)}</span>
-          <button class="view-context-btn" data-memory-id="${memory.id}">View →</button>
+    return this.contextData.map((memory, index) => `
+      <div class="context-item clickable" data-memory-id="${memory.id}" title="Click to view this memory (or press ${index + 1})">
+        <div class="context-item-number">${index + 1}</div>
+        <div class="context-item-body">
+          <div class="context-item-header">
+            <span class="context-category">${this.getCategoryIcon(memory.category)} ${memory.category || 'unknown'}</span>
+            <span class="context-score">${Math.round((memory.similarity_score || 0) * 100)}% match</span>
+          </div>
+          <div class="context-item-content">
+            ${this.escapeHtml((memory.content || '').substring(0, 150))}${(memory.content || '').length > 150 ? '...' : ''}
+          </div>
+          <div class="context-item-footer">
+            <span class="context-date">${this.formatDate(memory.created_at)}</span>
+            <div class="context-actions">
+              <button class="view-context-btn" data-memory-id="${memory.id}" title="View memory details">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 12S5 4 12 4S23 12 23 12S19 20 12 20S1 12 1 12Z" stroke="currentColor" stroke-width="2"/>
+                  <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                </svg>
+              </button>
+              <button class="open-new-tab-btn" data-memory-id="${memory.id}" title="Open in new tab">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M18 13V19C18 19.5304 17.7893 20.0391 17.4142 20.4142C17.0391 20.7893 16.5304 18 16 18H5C4.46957 18 3.96086 17.7893 3.58579 17.4142C3.21071 17.0391 3 16.5304 3 16V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M15 3H21V9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M10 14L21 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     `).join('');
   }
   
   /**
+   * Handle change events
+   */
+  handleChange(event) {
+    const target = event.target;
+    
+    if (target.classList.contains('context-sort')) {
+      this.sortContextData(target.value);
+    }
+  }
+  
+  /**
+   * Sort context data
+   */
+  sortContextData(sortBy) {
+    if (!this.contextData || this.contextData.length === 0) return;
+    
+    const sortedData = [...this.contextData];
+    
+    switch (sortBy) {
+      case 'similarity':
+        sortedData.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
+        break;
+      case 'date':
+        sortedData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        break;
+      case 'category':
+        sortedData.sort((a, b) => (a.category || '').localeCompare(b.category || ''));
+        break;
+      default:
+        return;
+    }
+    
+    this.contextData = sortedData;
+    this.updateContextDisplay();
+  }
+  
+  /**
    * Update context display
    */
   updateContextDisplay() {
-    const contextTimeline = this.querySelector('context-timeline');
-    if (contextTimeline) {
-      contextTimeline.setAttribute('context-data', JSON.stringify(this.contextData));
+    const contextList = this.querySelector('.context-list');
+    if (contextList) {
+      contextList.innerHTML = this.renderContextList();
     }
   }
   
@@ -858,7 +945,23 @@ class MemoryDetailPage extends HTMLElement {
         <div class="memory-sidebar">
           <div class="context-section">
             <div class="context-header">
-              <h3>Related Memories</h3>
+              <div class="context-title">
+                <h3>Related Memories</h3>
+                <span class="context-count">${this.contextData.length} found</span>
+              </div>
+              <div class="context-controls">
+                <button class="refresh-context-btn" title="Refresh related memories">
+                  <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M1 4V10H7M23 20V14H17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M20.49 9C19.9828 7.56678 19.1209 6.28392 17.9845 5.27493C16.8482 4.26595 15.4745 3.56905 13.9917 3.24575C12.5089 2.92246 10.9652 2.98546 9.51691 3.42597C8.06861 3.86648 6.76302 4.66921 5.64 5.76L1 10M23 14L18.36 18.24C17.237 19.3308 15.9314 20.1335 14.4831 20.574C13.0348 21.0145 11.4911 21.0775 10.0083 20.7542C8.52547 20.431 7.1518 19.7341 6.01547 18.7251C4.87913 17.7161 4.01717 16.4332 3.51 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+                <select class="context-sort" title="Sort related memories">
+                  <option value="similarity">By Similarity</option>
+                  <option value="date">By Date</option>
+                  <option value="category">By Category</option>
+                </select>
+              </div>
             </div>
             <div class="context-list">
               ${this.renderContextList()}
@@ -1204,6 +1307,15 @@ style.textContent = `
     padding: 1rem 1.5rem;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .context-title {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
   }
   
   .context-header h3 {
@@ -1211,6 +1323,58 @@ style.textContent = `
     font-size: 1rem;
     font-weight: 600;
     color: var(--text-primary);
+  }
+  
+  .context-count {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+  }
+  
+  .context-controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  
+  .refresh-context-btn {
+    padding: 0.25rem;
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+  }
+  
+  .refresh-context-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+  
+  .refresh-context-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+  
+  .context-sort {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    min-width: 100px;
+  }
+  
+  .context-sort:focus {
+    outline: none;
+    border-color: var(--primary-color);
   }
   
   .context-list {
@@ -1227,6 +1391,12 @@ style.textContent = `
     color: var(--text-muted);
   }
   
+  .keyboard-hint {
+    font-size: 0.75rem;
+    margin-top: 0.5rem;
+    opacity: 0.7;
+  }
+  
   .context-item {
     padding: 1rem;
     border: 1px solid var(--border-color);
@@ -1234,6 +1404,33 @@ style.textContent = `
     margin-bottom: 0.75rem;
     background: var(--bg-secondary);
     transition: var(--transition);
+    position: relative;
+    display: flex;
+    gap: 0.75rem;
+  }
+  
+  .context-item-number {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    background: var(--primary-color);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-top: 0.25rem;
+  }
+  
+  .context-item-body {
+    flex: 1;
+    min-width: 0;
+  }
+  
+  .context-item.clickable {
+    cursor: pointer;
   }
   
   .context-item:last-child {
@@ -1243,6 +1440,15 @@ style.textContent = `
   .context-item:hover {
     border-color: var(--primary-color);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
+  }
+  
+  .context-item.clickable:hover {
+    background: var(--bg-tertiary);
+  }
+  
+  .context-item:hover .context-item-number {
+    background: var(--primary-hover);
   }
   
   .context-item-header {
@@ -1278,13 +1484,25 @@ style.textContent = `
     align-items: center;
   }
   
+  .context-actions {
+    display: flex;
+    gap: 0.5rem;
+    opacity: 0;
+    transition: var(--transition);
+  }
+  
+  .context-item:hover .context-actions {
+    opacity: 1;
+  }
+  
   .context-date {
     font-size: 0.75rem;
     color: var(--text-muted);
   }
   
-  .view-context-btn {
-    padding: 0.25rem 0.5rem;
+  .view-context-btn,
+  .open-new-tab-btn {
+    padding: 0.25rem;
     font-size: 0.75rem;
     background: var(--primary-color);
     color: white;
@@ -1292,10 +1510,29 @@ style.textContent = `
     border-radius: var(--border-radius-sm);
     cursor: pointer;
     transition: var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+  }
+  
+  .view-context-btn svg,
+  .open-new-tab-btn svg {
+    width: 12px;
+    height: 12px;
   }
   
   .view-context-btn:hover {
     background: var(--primary-hover);
+  }
+  
+  .open-new-tab-btn {
+    background: var(--text-secondary);
+  }
+  
+  .open-new-tab-btn:hover {
+    background: var(--text-primary);
   }
   
   /* Loading State */
@@ -1357,6 +1594,11 @@ style.textContent = `
     .memory-sidebar {
       position: static;
       order: -1;
+      height: auto;
+    }
+    
+    .context-section {
+      height: 400px;
     }
   }
   
@@ -1391,6 +1633,24 @@ style.textContent = `
     
     .edit-actions {
       flex-direction: column;
+    }
+    
+    .context-header {
+      flex-direction: column;
+      gap: 0.75rem;
+      align-items: stretch;
+    }
+    
+    .context-title {
+      text-align: center;
+    }
+    
+    .context-controls {
+      justify-content: center;
+    }
+    
+    .context-actions {
+      opacity: 1; /* 모바일에서는 항상 표시 */
     }
   }
 `;

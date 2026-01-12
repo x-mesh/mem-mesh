@@ -58,12 +58,25 @@ class DirectStorageBackend(StorageBackend):
             self.db = Database(self.db_path, busy_timeout=self.busy_timeout)
             await self.db.connect()
             
-            # 임베딩 서비스 초기화 (모델 미리 로드)
+            # 임베딩 서비스 초기화 (MCP 서버에서는 preload 하지 않음)
             settings = get_settings()
             self.embedding_service = EmbeddingService(
                 model_name=settings.embedding_model,
-                preload=True
+                preload=False  # MCP 서버에서는 lazy loading 사용
             )
+            
+            # 임베딩 모델 일관성 검증
+            model_check = await self.db.check_embedding_model_consistency(
+                current_model=self.embedding_service.model_name,
+                current_dim=self.embedding_service.dimension
+            )
+            
+            if model_check["needs_migration"]:
+                logger.warning(model_check["message"])
+                logger.warning("검색 결과가 부정확할 수 있습니다. 마이그레이션을 실행하세요:")
+                logger.warning("  python scripts/migrate_embeddings.py")
+            else:
+                logger.info(model_check["message"])
             
             # 비즈니스 서비스들 초기화
             self.memory_service = MemoryService(self.db, self.embedding_service)

@@ -3,6 +3,36 @@
  * Provides user-friendly notifications for success, error, warning, and info messages
  */
 
+// Global toast instance for convenience
+let globalToastInstance = null;
+
+/**
+ * Get or create global toast instance
+ */
+function getToastInstance() {
+  if (!globalToastInstance) {
+    globalToastInstance = new ToastNotifications();
+  }
+  return globalToastInstance;
+}
+
+/**
+ * Convenience function to show toast
+ */
+export function showToast(message, type = 'info') {
+  const toast = getToastInstance();
+  switch (type) {
+    case 'success':
+      return toast.success(message);
+    case 'error':
+      return toast.error(message);
+    case 'warning':
+      return toast.warning(message);
+    default:
+      return toast.info(message);
+  }
+}
+
 export class ToastNotifications {
   constructor() {
     this.container = null;

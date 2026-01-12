@@ -34,6 +34,10 @@ from sentence_transformers import SentenceTransformer
 # 프로젝트 루트를 path에 추가
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# .env 파일 로드
+from dotenv import load_dotenv
+load_dotenv()
+
 from app.core.storage.direct import DirectStorageBackend
 from app.core.schemas.requests import AddParams
 
@@ -42,6 +46,9 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# .env에서 기본 임베딩 모델 가져오기
+DEFAULT_EMBEDDING_MODEL = os.getenv("MEM_MESH_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
 
 class ImportMode(Enum):
@@ -71,7 +78,7 @@ class KiroChatImporter:
         mode: ImportMode = ImportMode.HYBRID,
         dry_run: bool = False,
         similarity_threshold: float = 0.85,
-        embedding_model: str = "all-MiniLM-L6-v2",
+        embedding_model: Optional[str] = None,  # None이면 .env에서 읽음
         summary_model: str = "facebook/bart-large-cnn",
         verbose_level: int = 0
     ):
@@ -81,7 +88,8 @@ class KiroChatImporter:
         self.similarity_threshold = similarity_threshold
         self.storage: Optional[DirectStorageBackend] = None
         self.embedding_model: Optional[SentenceTransformer] = None
-        self.embedding_model_name = embedding_model
+        # .env에서 기본값 사용
+        self.embedding_model_name = embedding_model or DEFAULT_EMBEDDING_MODEL
         self.summary_model_name = summary_model
         self.summary_model = None
         self.verbose_level = verbose_level
@@ -96,6 +104,8 @@ class KiroChatImporter:
             "messages_skipped": 0,
             "semantic_duplicates": 0,
             "summaries_created": 0,
+            "duplicate_messages": 0,  # 중복으로 스킵된 메시지 수
+            "filtered_messages": 0,   # 필터링으로 스킵된 메시지 수 (시스템 프롬프트 등)
             "errors": 0
         }
     
@@ -118,83 +128,109 @@ class KiroChatImporter:
         
         # summary 모드일 때 요약 모델 로드
         if self.mode == ImportMode.SUMMARY:
-            try:
-                from transformers import pipeline
-                logger.info(f"Loading summarization model: {self.summary_model_name}")
-                
-                # 더 나은 요약 모델들 우선 시도 (성능 순)
-                lightweight_models = [
-                    "facebook/bart-large-cnn",        # 고품질 BART (큰 모델)
-                    "sshleifer/distilbart-cnn-12-6",  # 가벼운 BART
-                    "google/pegasus-xsum",            # Pegasus (뉴스 요약 특화)
-                    "ainize/kobart-news",             # 한국어 BART
-                    "microsoft/DialoGPT-medium",      # 대화 특화
-                    "t5-base",                        # T5 base
-                    "t5-small"                        # T5 small (폴백)
-                ]
-                
-                model_to_use = self.summary_model_name
-                if self.summary_model_name in ["facebook/bart-large-cnn", "sshleifer/distilbart-cnn-12-6"]:
-                    # 기본 모델인 경우 고품질 모델부터 시도
-                    for model in lightweight_models:
+            # qwen-cli 사용 여부 확인
+            if self.summary_model_name == "qwen-cli":
+                logger.info("qwen-cli 요약 모드로 설정됨")
+                # qwen 명령어 사용 가능 여부 확인
+                try:
+                    import subprocess
+                    result = subprocess.run(["qwen", "--help"], capture_output=True, text=True, timeout=10)
+                    if result.returncode == 0:
+                        logger.info("qwen-cli 사용 가능 확인됨")
+                        self.summary_model = "qwen-cli"  # 특별한 마커로 설정
+                    else:
+                        logger.error("qwen 명령어를 찾을 수 없습니다. qwen-cli가 설치되어 있는지 확인하세요.")
+                        self.summary_model = None
+                except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+                    logger.error(f"qwen 명령어 확인 실패: {e}")
+                    logger.error("qwen-cli가 설치되어 있고 PATH에 있는지 확인하세요.")
+                    self.summary_model = None
+                except Exception as e:
+                    logger.error(f"qwen-cli 확인 중 예외 발생: {e}")
+                    self.summary_model = None
+            else:
+                # 기존 transformers 모델 로드 로직
+                try:
+                    from transformers import pipeline
+                    logger.info(f"Loading summarization model: {self.summary_model_name}")
+                    
+                    # 더 나은 요약 모델들 우선 시도 (성능 순)
+                    lightweight_models = [
+                        "sshleifer/distilbart-cnn-12-6",  # 가벼운 BART (우선)
+                        "facebook/bart-large-cnn",        # 고품질 BART
+                        "t5-small",                       # T5 small (빠름)
+                        "google/pegasus-xsum",            # Pegasus (뉴스 요약 특화)
+                        "t5-base",                        # T5 base
+                    ]
+                    
+                    model_to_use = self.summary_model_name
+                    model_loaded = False
+                    
+                    # 사용자 지정 모델 먼저 시도
+                    if self.summary_model_name not in lightweight_models:
                         try:
-                            logger.info(f"Trying model: {model}")
+                            logger.info(f"사용자 지정 모델 시도: {self.summary_model_name}")
                             self.summary_model = pipeline(
                                 "summarization",
-                                model=model,
+                                model=self.summary_model_name,
                                 device=-1,  # CPU 사용
                                 framework="pt",
-                                return_tensors=False,  # 텐서 반환 방지
-                                clean_up_tokenization_spaces=True  # 토큰화 공백 정리
+                                return_tensors=False,
+                                clean_up_tokenization_spaces=True,
+                                trust_remote_code=False  # 보안상 원격 코드 실행 방지
                             )
-                            model_to_use = model
-                            break
+                            model_to_use = self.summary_model_name
+                            model_loaded = True
+                            logger.info(f"사용자 지정 모델 로드 성공: {model_to_use}")
                         except Exception as e:
-                            logger.warning(f"Failed to load {model}: {e}")
-                            continue
-                else:
-                    # 사용자 지정 모델 사용
-                    try:
-                        self.summary_model = pipeline(
-                            "summarization",
-                            model=self.summary_model_name,
-                            device=-1,
-                            framework="pt",
-                            return_tensors=False,
-                            clean_up_tokenization_spaces=True
-                        )
-                        model_to_use = self.summary_model_name
-                    except Exception as e:
-                        logger.warning(f"Failed to load custom model {self.summary_model_name}: {e}")
-                        # 폴백으로 고품질 모델부터 시도
-                        for model in lightweight_models:
+                            logger.warning(f"사용자 지정 모델 로드 실패 {self.summary_model_name}: {e}")
+                    
+                    # 폴백 모델들 시도
+                    if not model_loaded:
+                        models_to_try = [self.summary_model_name] if self.summary_model_name in lightweight_models else lightweight_models
+                        
+                        for model in models_to_try:
                             try:
-                                logger.info(f"Fallback to model: {model}")
+                                logger.info(f"모델 시도: {model}")
                                 self.summary_model = pipeline(
                                     "summarization",
                                     model=model,
-                                    device=-1,
+                                    device=-1,  # CPU 사용
                                     framework="pt",
                                     return_tensors=False,
-                                    clean_up_tokenization_spaces=True
+                                    clean_up_tokenization_spaces=True,
+                                    trust_remote_code=False
                                 )
                                 model_to_use = model
+                                model_loaded = True
+                                logger.info(f"모델 로드 성공: {model_to_use}")
                                 break
-                            except Exception as e2:
-                                logger.warning(f"Failed to load fallback {model}: {e2}")
+                            except Exception as e:
+                                logger.warning(f"모델 로드 실패 {model}: {e}")
                                 continue
-                
-                if self.summary_model:
-                    logger.info(f"Summarization model loaded: {model_to_use}")
-                else:
-                    logger.warning("모든 요약 모델 로드 실패, 간단한 텍스트 요약 사용")
                     
-            except ImportError:
-                logger.error("transformers 라이브러리가 필요합니다: pip install transformers torch")
-                raise
-            except Exception as e:
-                logger.warning(f"요약 모델 로드 실패, 간단한 텍스트 요약 사용: {e}")
-                self.summary_model = None
+                    if model_loaded:
+                        # 모델 테스트
+                        try:
+                            test_text = "This is a test sentence for model validation. The model should be able to process this text without errors."
+                            test_result = self.summary_model(test_text, max_length=50, min_length=10, do_sample=False)
+                            logger.info(f"모델 테스트 성공: {model_to_use}")
+                            logger.debug(f"테스트 결과: {test_result}")
+                        except Exception as e:
+                            logger.error(f"모델 테스트 실패: {e}")
+                            self.summary_model = None
+                            model_loaded = False
+                    
+                    if not model_loaded:
+                        logger.warning("모든 요약 모델 로드 실패, 간단한 텍스트 요약만 사용")
+                        self.summary_model = None
+                        
+                except ImportError:
+                    logger.error("transformers 라이브러리가 필요합니다: pip install transformers torch")
+                    raise
+                except Exception as e:
+                    logger.warning(f"요약 모델 초기화 실패, 간단한 텍스트 요약 사용: {e}")
+                    self.summary_model = None
     
     async def shutdown(self) -> None:
         """스토리지 백엔드 종료"""
@@ -271,6 +307,12 @@ class KiroChatImporter:
         if not content or len(content.strip()) < 10:
             return None
         
+        # 내용이 10000자 초과시 잘라내기 (pydantic 제한)
+        max_content_length = 9900  # 약간의 여유를 둠
+        if len(content) > max_content_length:
+            content = content[:max_content_length] + "\n\n[... truncated due to length limit ...]"
+            logger.debug(f"Content truncated from {len(message.get('content', ''))} to {len(content)} characters")
+        
         return {
             "content": content,
             "category": self.determine_category(message.get('role', ''), content),
@@ -295,9 +337,11 @@ class KiroChatImporter:
         if role == 'bot' and len(content.strip()) < 50:
             return None
         
-        # 내용이 10000자 초과시 잘라내기
-        if len(content) > 10000:
-            content = content[:9900] + "\n\n[... truncated ...]"
+        # 내용이 10000자 초과시 잘라내기 (pydantic 제한)
+        max_content_length = 9900  # 약간의 여유를 둠
+        if len(content) > max_content_length:
+            content = content[:max_content_length] + "\n\n[... truncated due to length limit ...]"
+            logger.debug(f"Content truncated from {len(message.get('content', ''))} to {len(content)} characters")
         
         return {
             "content": content,
@@ -324,9 +368,11 @@ class KiroChatImporter:
         if self.is_system_prompt(content):
             return None
         
-        # 내용이 10000자 초과시 잘라내기
-        if len(content) > 10000:
-            content = content[:9900] + "\n\n[... truncated ...]"
+        # 내용이 10000자 초과시 잘라내기 (pydantic 제한)
+        max_content_length = 9900  # 약간의 여유를 둠
+        if len(content) > max_content_length:
+            content = content[:max_content_length] + "\n\n[... truncated due to length limit ...]"
+            logger.debug(f"Content truncated from {len(message.get('content', ''))} to {len(content)} characters")
         
         return {
             "content": content,
@@ -385,9 +431,11 @@ class KiroChatImporter:
         if role == 'bot' and len(content.strip()) < 50:
             return None
         
-        # 내용이 10000자 초과시 잘라내기
-        if len(content) > 10000:
-            content = content[:9900] + "\n\n[... truncated ...]"
+        # 내용이 10000자 초과시 잘라내기 (pydantic 제한)
+        max_content_length = 9900  # 약간의 여유를 둠
+        if len(content) > max_content_length:
+            content = content[:max_content_length] + "\n\n[... truncated due to length limit ...]"
+            logger.debug(f"Content truncated from {len(message.get('content', ''))} to {len(content)} characters")
         
         # 임베딩 계산 및 중복 체크
         embedding = self.compute_embedding(content[:2000])  # 임베딩은 앞부분만
@@ -489,92 +537,297 @@ class KiroChatImporter:
         print(summary)
         print(f"{'='*80}\n")
     
+    def qwen_cli_summarize(self, text: str, max_length: int = 500) -> str:
+        """qwen-cli를 사용한 요약"""
+        try:
+            import subprocess
+            import json
+            
+            # 입력 텍스트 전처리
+            input_text = text.strip()
+            logger.debug(f"qwen-cli 입력 텍스트 길이: {len(input_text)} 문자")
+            
+            if len(input_text) < 100:
+                logger.debug("입력 텍스트가 너무 짧음 (< 100자), 원본 반환")
+                return input_text
+            
+            # 입력 길이 제한 (qwen-cli의 토큰 제한 고려)
+            max_input_length = 4000  # qwen-cli에 적합한 길이
+            if len(input_text) > max_input_length:
+                input_text = input_text[:max_input_length] + "..."
+                logger.debug(f"입력 텍스트를 {max_input_length}자로 잘라냄")
+            
+            # 요약 프롬프트 구성
+            summary_prompt = f"""다음 텍스트를 한국어로 간결하게 요약해주세요. 주요 내용과 핵심 포인트를 포함하여 {max_length//4}자 이내로 요약하세요:
+
+{input_text}
+
+요약:"""
+            
+            logger.debug("qwen-cli 명령어 실행 시작...")
+            logger.debug(f"프롬프트 길이: {len(summary_prompt)} 문자")
+            
+            # qwen 명령어 실행
+            result = subprocess.run(
+                ["qwen", "--prompt", summary_prompt],
+                capture_output=True,
+                text=True,
+                timeout=60,  # 60초 타임아웃
+                encoding='utf-8'
+            )
+            
+            logger.debug(f"qwen-cli 실행 완료. 반환 코드: {result.returncode}")
+            
+            if result.returncode == 0:
+                summary = result.stdout.strip()
+                logger.debug(f"qwen-cli 원본 출력 길이: {len(summary)} 문자")
+                
+                if summary:
+                    # 출력에서 불필요한 부분 제거 (프롬프트 반복 등)
+                    summary = self._clean_qwen_output(summary, input_text)
+                    
+                    logger.debug(f"qwen-cli 요약 성공: {len(summary)} 문자")
+                    
+                    # -vvv 옵션일 때 원문과 요약본 비교 출력
+                    if self.verbose_level >= 3:
+                        self._print_summary_comparison(input_text, summary, "qwen-cli 요약")
+                    
+                    return summary
+                else:
+                    logger.warning("qwen-cli가 빈 결과 반환")
+            else:
+                logger.error(f"qwen-cli 실행 실패. 반환 코드: {result.returncode}")
+                logger.error(f"stderr: {result.stderr}")
+            
+            # 폴백: 간단한 요약 사용
+            logger.debug("qwen-cli 요약 실패, 간단한 요약으로 폴백")
+            return self.simple_summarize(text)
+            
+        except subprocess.TimeoutExpired:
+            logger.error("qwen-cli 실행 시간 초과 (60초)")
+            return self.simple_summarize(text)
+        except FileNotFoundError:
+            logger.error("qwen 명령어를 찾을 수 없습니다. qwen-cli가 설치되어 있는지 확인하세요.")
+            return self.simple_summarize(text)
+        except Exception as e:
+            logger.error(f"qwen-cli 요약 중 예외 발생: {type(e).__name__}: {str(e)}")
+            return self.simple_summarize(text)
+    
+    def _clean_qwen_output(self, output: str, original_text: str) -> str:
+        """qwen-cli 출력에서 불필요한 부분 제거"""
+        try:
+            # 출력에서 원본 텍스트나 프롬프트 부분 제거
+            lines = output.split('\n')
+            cleaned_lines = []
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # 프롬프트 반복이나 원본 텍스트 반복 스킵
+                if "다음 텍스트를" in line or "요약해주세요" in line or "요약:" in line:
+                    continue
+                
+                # 원본 텍스트의 일부가 그대로 반복되는 경우 스킵
+                if len(line) > 50 and line in original_text:
+                    continue
+                
+                cleaned_lines.append(line)
+            
+            # 정리된 결과 조합
+            result = ' '.join(cleaned_lines)
+            
+            # 너무 길면 잘라내기
+            if len(result) > 1000:
+                result = result[:950] + "..."
+            
+            return result if result else output  # 정리 후 빈 결과면 원본 반환
+            
+        except Exception as e:
+            logger.debug(f"qwen 출력 정리 중 오류: {e}")
+            return output  # 오류 시 원본 반환
     def ai_summarize(self, text: str, max_length: int = 500) -> str:
-        """AI 모델을 사용한 요약"""
+        """AI 모델을 사용한 요약 (상세한 디버깅 포함)"""
+        # qwen-cli 사용 여부 확인
+        if self.summary_model == "qwen-cli":
+            return self.qwen_cli_summarize(text, max_length)
+        
         if self.summary_model is None:
+            logger.debug("요약 모델이 로드되지 않음, 간단한 요약 사용")
             return self.simple_summarize(text)
         
         try:
-            # 입력 텍스트 전처리
+            # 입력 텍스트 전처리 및 검증
             input_text = text.strip()
+            logger.debug(f"입력 텍스트 길이: {len(input_text)} 문자")
+            
             if len(input_text) < 100:
+                logger.debug("입력 텍스트가 너무 짧음 (< 100자), 원본 반환")
                 return input_text
             
             # 토크나이저 제한을 고려하여 입력 길이 조정
-            # BART는 보통 1024 토큰 제한이 있음
-            max_input_length = 2500  # 안전한 문자 수 제한 (약 500-600 토큰)
+            max_input_length = 2500  # 안전한 문자 수 제한
             if len(input_text) > max_input_length:
                 input_text = input_text[:max_input_length] + "..."
-                logger.debug(f"Input truncated to {max_input_length} characters")
+                logger.debug(f"입력 텍스트를 {max_input_length}자로 잘라냄")
             
-            # 요약 생성 - 모델별로 다른 파라미터 사용
-            model_name = getattr(self.summary_model.model.config, 'name_or_path', '').lower()
+            # 모델 정보 확인
+            model_name = getattr(self.summary_model.model.config, 'name_or_path', 'unknown').lower()
+            logger.debug(f"사용 중인 요약 모델: {model_name}")
             
-            # 기본 파라미터
+            # 기본 파라미터 계산
             base_max_length = min(max_length, max(50, len(input_text) // 3))
             base_min_length = min(30, max(10, len(input_text) // 10))
             
-            summarization_kwargs = {
-                "max_length": base_max_length,
-                "min_length": base_min_length,
-                "do_sample": False,
-                "truncation": True,
-                "padding": False  # padding 비활성화
-            }
+            # 모델별 최적화된 파라미터 설정
+            summarization_kwargs = self._get_model_specific_params(
+                model_name, base_max_length, base_min_length, max_length, len(input_text)
+            )
             
-            # 모델별 특화 파라미터
-            if "t5" in model_name:
-                # T5 모델의 경우
-                summarization_kwargs.update({
-                    "max_new_tokens": base_max_length,
-                    "min_new_tokens": base_min_length
-                })
-                summarization_kwargs.pop("max_length", None)
-                summarization_kwargs.pop("min_length", None)
-            elif "pegasus" in model_name:
-                # Pegasus 모델의 경우 더 긴 요약 허용
-                summarization_kwargs.update({
-                    "max_length": min(max_length, max(100, len(input_text) // 2)),
-                    "min_length": min(50, max(20, len(input_text) // 8)),
-                    "length_penalty": 2.0,  # 길이 페널티
-                    "num_beams": 4,  # 빔 서치
-                    "early_stopping": True
-                })
-            elif "bart" in model_name:
-                # BART 모델의 경우 최적화된 파라미터
-                summarization_kwargs.update({
-                    "length_penalty": 2.0,
-                    "num_beams": 4,
-                    "early_stopping": True,
-                    "no_repeat_ngram_size": 3  # 반복 방지
-                })
-            elif "kobart" in model_name:
-                # 한국어 BART의 경우
-                summarization_kwargs.update({
-                    "length_penalty": 1.5,
-                    "num_beams": 3,
-                    "early_stopping": True
-                })
+            logger.debug(f"요약 파라미터: {summarization_kwargs}")
             
-            # padding 파라미터 제거 (일부 모델에서 지원하지 않음)
-            summarization_kwargs.pop("padding", None)
-            
+            # 요약 생성 시도
+            logger.debug("AI 요약 모델 호출 시작...")
             result = self.summary_model(input_text, **summarization_kwargs)
+            logger.debug(f"AI 모델 반환 결과 타입: {type(result)}")
+            logger.debug(f"AI 모델 반환 결과 길이: {len(result) if hasattr(result, '__len__') else 'N/A'}")
             
-            if result and len(result) > 0 and 'summary_text' in result[0]:
-                summary = result[0]['summary_text'].strip()
+            # 결과 상세 분석
+            if result:
+                logger.debug(f"결과 내용 미리보기: {str(result)[:200]}...")
                 
-                # -vvv 옵션일 때 원문과 요약본 비교 출력
-                if self.verbose_level >= 3:
-                    self._print_summary_comparison(input_text, summary, "AI 요약")
-                
-                return summary if summary else self.simple_summarize(text)
+                # 안전한 결과 추출
+                summary = self._extract_summary_safely(result)
+                if summary:
+                    logger.debug(f"요약 성공: {len(summary)} 문자")
+                    
+                    # -vvv 옵션일 때 원문과 요약본 비교 출력
+                    if self.verbose_level >= 3:
+                        self._print_summary_comparison(input_text, summary, f"AI 요약 ({model_name})")
+                    
+                    return summary
+                else:
+                    logger.warning("AI 모델이 유효한 요약을 생성하지 못함")
             else:
-                return self.simple_summarize(text)
-                
-        except Exception as e:
-            logger.warning(f"AI 요약 실패 ({type(e).__name__}: {str(e)[:100]}), 간단한 요약 사용")
+                logger.warning("AI 모델이 빈 결과 반환")
+            
+            # 폴백: 간단한 요약 사용
+            logger.debug("AI 요약 실패, 간단한 요약으로 폴백")
             return self.simple_summarize(text)
+                
+        except IndexError as e:
+            logger.error(f"AI 요약 중 IndexError 발생: {str(e)}")
+            logger.error(f"모델: {getattr(self.summary_model.model.config, 'name_or_path', 'unknown')}")
+            logger.error(f"입력 길이: {len(input_text) if 'input_text' in locals() else 'unknown'}")
+            return self.simple_summarize(text)
+        except Exception as e:
+            logger.error(f"AI 요약 중 예외 발생: {type(e).__name__}: {str(e)}")
+            logger.error(f"모델: {getattr(self.summary_model.model.config, 'name_or_path', 'unknown') if self.summary_model else 'None'}")
+            return self.simple_summarize(text)
+    
+    def _get_model_specific_params(self, model_name: str, base_max_length: int, 
+                                 base_min_length: int, max_length: int, input_length: int) -> dict:
+        """모델별 최적화된 파라미터 반환"""
+        # 기본 파라미터
+        params = {
+            "max_length": base_max_length,
+            "min_length": base_min_length,
+            "do_sample": False,
+            "truncation": True
+        }
+        
+        # 모델별 특화 파라미터
+        if "t5" in model_name:
+            # T5는 max_new_tokens 사용
+            params = {
+                "max_new_tokens": base_max_length,
+                "min_new_tokens": base_min_length,
+                "do_sample": False,
+                "truncation": True
+            }
+        elif "pegasus" in model_name:
+            # Pegasus는 더 긴 요약 허용
+            params.update({
+                "max_length": min(max_length, max(100, input_length // 2)),
+                "min_length": min(50, max(20, input_length // 8)),
+                "length_penalty": 2.0,
+                "num_beams": 4,
+                "early_stopping": True
+            })
+        elif "bart" in model_name:
+            # BART 최적화
+            params.update({
+                "length_penalty": 2.0,
+                "num_beams": 4,
+                "early_stopping": True,
+                "no_repeat_ngram_size": 3
+            })
+        elif "kobart" in model_name:
+            # 한국어 BART
+            params.update({
+                "length_penalty": 1.5,
+                "num_beams": 3,
+                "early_stopping": True
+            })
+        
+        return params
+    
+    def _extract_summary_safely(self, result) -> Optional[str]:
+        """요약 결과에서 안전하게 텍스트 추출"""
+        try:
+            # 리스트 형태의 결과 처리
+            if isinstance(result, list):
+                if len(result) == 0:
+                    logger.debug("결과 리스트가 비어있음")
+                    return None
+                
+                first_item = result[0]
+                logger.debug(f"첫 번째 결과 항목 타입: {type(first_item)}")
+                
+                if isinstance(first_item, dict):
+                    # 딕셔너리에서 summary_text 추출
+                    if 'summary_text' in first_item:
+                        summary = first_item['summary_text']
+                        if isinstance(summary, str) and summary.strip():
+                            return summary.strip()
+                        else:
+                            logger.debug(f"summary_text가 비어있거나 문자열이 아님: {type(summary)}")
+                    else:
+                        logger.debug(f"summary_text 키가 없음. 사용 가능한 키: {list(first_item.keys())}")
+                elif isinstance(first_item, str):
+                    # 문자열 결과 직접 반환
+                    if first_item.strip():
+                        return first_item.strip()
+                    else:
+                        logger.debug("첫 번째 결과가 빈 문자열")
+                else:
+                    logger.debug(f"예상하지 못한 첫 번째 결과 타입: {type(first_item)}")
+            
+            # 딕셔너리 형태의 결과 처리
+            elif isinstance(result, dict):
+                if 'summary_text' in result:
+                    summary = result['summary_text']
+                    if isinstance(summary, str) and summary.strip():
+                        return summary.strip()
+                else:
+                    logger.debug(f"딕셔너리에 summary_text 키가 없음. 사용 가능한 키: {list(result.keys())}")
+            
+            # 문자열 결과 직접 처리
+            elif isinstance(result, str):
+                if result.strip():
+                    return result.strip()
+                else:
+                    logger.debug("결과가 빈 문자열")
+            
+            else:
+                logger.debug(f"예상하지 못한 결과 타입: {type(result)}")
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"요약 추출 중 오류: {type(e).__name__}: {str(e)}")
+            return None
     
     def create_session_summary(self, messages: List[Dict], file_path: Path) -> Optional[Dict]:
         """Chat 세션 전체를 분석하여 요약 생성"""
@@ -656,6 +909,12 @@ class KiroChatImporter:
             content = f"[요약]\n{summarized_content}\n\n[원본 길이: {len(content)}자]"
             self.stats["summaries_created"] += 1
         
+        # 내용이 10000자 초과시 잘라내기 (pydantic 제한) - 요약 후에도 길 수 있음
+        max_content_length = 9900  # 약간의 여유를 둠
+        if len(content) > max_content_length:
+            content = content[:max_content_length] + "\n\n[... truncated due to length limit ...]"
+            logger.debug(f"Summarized content still too long, truncated to {len(content)} characters")
+        
         return {
             "content": content,
             "category": self.determine_category(role, content),
@@ -712,9 +971,28 @@ class KiroChatImporter:
                             source=session_summary["source"],
                             tags=session_summary["tags"]
                         )
-                        await self.storage.add_memory(params)
-                        imported += 1
-                        self.stats["summaries_created"] += 1
+                        
+                        # -vvv 모드에서 저장 전 상세 정보 출력
+                        if self.verbose_level >= 3:
+                            logger.info(f"[세션 요약 저장] 프로젝트: {pid}, 카테고리: {session_summary['category']}")
+                            logger.info(f"[세션 요약 저장] 내용 길이: {len(session_summary['content'])} 문자")
+                            logger.info(f"[세션 요약 저장] 내용 미리보기: {session_summary['content'][:200]}...")
+                        
+                        result = await self.storage.add_memory(params)
+                        
+                        # 중복 검출 시 상세 로깅
+                        if hasattr(result, 'status') and result.status == "duplicate":
+                            self.stats["duplicate_messages"] += 1  # 중복 세션 요약 카운트
+                            if self.verbose_level >= 3:
+                                logger.warning(f"[중복 세션 요약] 기존 메모리 ID: {result.id}")
+                                logger.warning(f"[중복 세션 요약] 생성 시간: {result.created_at}")
+                                logger.warning(f"[중복 세션 요약] 내용: {session_summary['content'][:100]}...")
+                        else:
+                            imported += 1
+                            self.stats["summaries_created"] += 1
+                            if self.verbose_level >= 3:
+                                logger.info(f"[세션 요약 저장 성공] 새 메모리 ID: {result.id}")
+                                
                     except Exception as e:
                         logger.error(f"세션 요약 저장 실패: {e}")
                         self.stats["errors"] += 1
@@ -723,7 +1001,7 @@ class KiroChatImporter:
         for msg in messages:
             processed = self.process_message(msg, file_path)
             if not processed:
-                self.stats["messages_skipped"] += 1
+                self.stats["filtered_messages"] += 1  # 필터링으로 스킵
                 continue
             
             if self.dry_run:
@@ -739,10 +1017,35 @@ class KiroChatImporter:
                     source=processed["source"],
                     tags=processed["tags"]
                 )
-                await self.storage.add_memory(params)
-                imported += 1
+                
+                # -vvv 모드에서 저장 전 상세 정보 출력
+                if self.verbose_level >= 3:
+                    logger.info(f"[메시지 저장] 프로젝트: {pid}, 카테고리: {processed['category']}")
+                    logger.info(f"[메시지 저장] 소스: {processed['source']}, 태그: {processed['tags']}")
+                    logger.info(f"[메시지 저장] 내용 길이: {len(processed['content'])} 문자")
+                    logger.info(f"[메시지 저장] 내용 미리보기: {processed['content'][:200]}...")
+                
+                result = await self.storage.add_memory(params)
+                
+                # 중복 검출 시 상세 로깅
+                if hasattr(result, 'status') and result.status == "duplicate":
+                    self.stats["duplicate_messages"] += 1  # 중복 메시지 카운트
+                    if self.verbose_level >= 3:
+                        logger.warning(f"[중복 메시지] 기존 메모리 ID: {result.id}")
+                        logger.warning(f"[중복 메시지] 생성 시간: {result.created_at}")
+                        logger.warning(f"[중복 메시지] 카테고리: {processed['category']}, 태그: {processed['tags']}")
+                        logger.warning(f"[중복 메시지] 내용: {processed['content'][:150]}...")
+                        logger.warning(f"[중복 메시지] 파일: {file_path}")
+                else:
+                    imported += 1
+                    if self.verbose_level >= 3:
+                        logger.info(f"[메시지 저장 성공] 새 메모리 ID: {result.id}")
+                        
             except Exception as e:
                 logger.error(f"메모리 저장 실패: {e}")
+                if self.verbose_level >= 3:
+                    logger.error(f"[저장 실패 상세] 파일: {file_path}")
+                    logger.error(f"[저장 실패 상세] 내용: {processed['content'][:100]}...")
                 self.stats["errors"] += 1
         
         return imported
@@ -793,7 +1096,15 @@ class KiroChatImporter:
         print(f"{'='*60}")
         print(f"처리된 파일: {self.stats['files_processed']}")
         print(f"Import된 메시지: {self.stats['messages_imported']}")
-        print(f"스킵된 메시지: {self.stats['messages_skipped']}")
+        
+        # 스킵된 메시지 상세 분석
+        total_skipped = self.stats['filtered_messages'] + self.stats['duplicate_messages']
+        print(f"스킵된 메시지: {total_skipped}")
+        
+        if self.verbose_level >= 1:
+            print(f"  - 필터링으로 스킵: {self.stats['filtered_messages']} (시스템 프롬프트, 짧은 메시지 등)")
+            print(f"  - 중복으로 스킵: {self.stats['duplicate_messages']} (이미 존재하는 내용)")
+        
         if self.mode == ImportMode.SEMANTIC:
             print(f"의미적 중복 제거: {self.stats['semantic_duplicates']}")
         if self.mode == ImportMode.SUMMARY:
@@ -823,7 +1134,7 @@ async def main():
     parser.add_argument(
         "--similarity-threshold",
         type=float,
-        default=float(os.environ.get("KIRO_SIMILARITY_THRESHOLD", "0.85")),
+        default=float(os.environ.get("KIRO_SIMILARITY_THRESHOLD", "0.9")),
         help="semantic 모드에서 중복 판정 임계값 (기본: 0.85, 환경변수: KIRO_SIMILARITY_THRESHOLD)"
     )
     parser.add_argument(
@@ -834,7 +1145,7 @@ async def main():
     parser.add_argument(
         "--summary-model",
         default="facebook/bart-large-cnn",
-        help="요약 모델 (기본: facebook/bart-large-cnn, 고품질 모델)"
+        help="요약 모델 (기본: facebook/bart-large-cnn, 고품질 모델) 또는 'qwen-cli'로 qwen CLI 사용"
     )
     parser.add_argument(
         "--db-path",

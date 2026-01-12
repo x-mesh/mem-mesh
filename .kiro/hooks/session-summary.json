@@ -1,0 +1,13 @@
+{
+  "name": "Session Summary to mem-mesh",
+  "description": "새 세션 시작 시 이전 세션 요약을 mem-mesh에 저장합니다",
+  "enabled": true,
+  "trigger": "onNewSession",
+  "action": {
+    "type": "sendMessage",
+    "message": "새로운 세션이 시작되었습니다. 이전 세션의 주요 작업들을 요약하여 mem-mesh에 저장해주세요. 세션 요약은 'decision' 카테고리로, project_id는 'kiro-sessions'로 설정해주세요."
+  },
+  "conditions": {
+    "onlyIfPreviousSession": true
+  }
+}

@@ -19,6 +19,7 @@ from ..core.services.memory import MemoryService, MemoryNotFoundError, DatabaseE
 from ..core.services.search import SearchService
 from ..core.services.context import ContextService, ContextNotFoundError
 from ..core.services.stats import StatsService
+from ..core.services.embedding_manager import EmbeddingManagerService
 from ..core.schemas.requests import AddParams, SearchParams, ContextParams, UpdateParams, DeleteParams, StatsParams
 from ..core.schemas.responses import (
     AddResponse, SearchResponse, ContextResponse, 
@@ -34,12 +35,13 @@ memory_service: MemoryService = None
 search_service: SearchService = None
 context_service: ContextService = None
 stats_service: StatsService = None
+embedding_manager: EmbeddingManagerService = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """애플리케이션 생명주기 관리"""
-    global db, embedding_service, memory_service, search_service, context_service, stats_service
+    global db, embedding_service, memory_service, search_service, context_service, stats_service, embedding_manager
     
     logger.info("Starting mem-mesh FastAPI application...")
     
@@ -72,6 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         search_service = SearchService(db, embedding_service)
         context_service = ContextService(db, embedding_service)
         stats_service = StatsService(db)
+        embedding_manager = EmbeddingManagerService(db, embedding_service)
         
         logger.info("mem-mesh application initialized successfully")
         
@@ -136,6 +139,13 @@ def get_stats_service() -> StatsService:
     if stats_service is None:
         raise HTTPException(status_code=500, detail="Stats service not initialized")
     return stats_service
+
+
+def get_embedding_manager() -> EmbeddingManagerService:
+    """임베딩 매니저 서비스 의존성"""
+    if embedding_manager is None:
+        raise HTTPException(status_code=500, detail="Embedding manager not initialized")
+    return embedding_manager
 
 
 # API 엔드포인트들
@@ -267,8 +277,7 @@ async def search_memories(
             project_id=project_id,
             category=category,
             limit=limit,
-            recency_weight=recency_weight,
-            search_mode=search_mode
+            recency_weight=recency_weight
         )
     except Exception as e:
         logger.error(f"Search memories error: {e}")
@@ -378,6 +387,76 @@ async def delete_memory(
     except Exception as e:
         logger.error(f"Delete memory error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== Embedding Management API =====
+
+@app.get("/api/embeddings/status")
+async def get_embedding_status(
+    manager: EmbeddingManagerService = Depends(get_embedding_manager)
+):
+    """
+    임베딩 모델 상태 조회
+    
+    Returns:
+        - stored_model: DB에 저장된 모델명
+        - stored_dimension: DB에 저장된 차원
+        - current_model: 현재 설정된 모델명
+        - current_dimension: 현재 설정된 차원
+        - total_memories: 총 메모리 수
+        - vector_count: 벡터 테이블 레코드 수
+        - needs_migration: 마이그레이션 필요 여부
+        - migration_in_progress: 마이그레이션 진행 중 여부
+    """
+    try:
+        status = await manager.get_status()
+        return status
+    except Exception as e:
+        logger.error(f"Get embedding status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/embeddings/migrate")
+async def start_embedding_migration(
+    force: bool = False,
+    batch_size: int = 100,
+    manager: EmbeddingManagerService = Depends(get_embedding_manager)
+):
+    """
+    임베딩 마이그레이션 시작
+    
+    Args:
+        force: 모델이 같아도 강제 재임베딩
+        batch_size: 배치 크기 (기본: 100)
+    
+    Returns:
+        마이그레이션 결과 또는 진행 상황
+    """
+    try:
+        result = await manager.start_migration(force=force, batch_size=batch_size)
+        return result
+    except Exception as e:
+        logger.error(f"Start migration error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/embeddings/migration/progress")
+async def get_migration_progress(
+    manager: EmbeddingManagerService = Depends(get_embedding_manager)
+):
+    """마이그레이션 진행 상황 조회"""
+    try:
+        progress = manager.get_migration_progress()
+        return progress
+    except Exception as e:
+        logger.error(f"Get migration progress error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/settings")
+async def serve_settings_page():
+    """설정 페이지 서빙 (SPA 라우팅)"""
+    return FileResponse("static/index.html")
 
 
 

@@ -51,10 +51,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         db = Database(settings.database_path)
         await db.connect()
         
-        # 임베딩 서비스 초기화 (모델 미리 로드)
+        # 임베딩 서비스 초기화
         embedding_service = EmbeddingService(
-            model_name=settings.embedding_model,
-            preload=True
+            model_name=settings.embedding_model
         )
         
         # 비즈니스 서비스들 초기화

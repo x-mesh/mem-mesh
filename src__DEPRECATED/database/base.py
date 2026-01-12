@@ -337,10 +337,9 @@ class Database:
                             params.append(filters['category'])
                         
                         if filter_conditions:
-                            base_query = base_query.replace(
-                                "ORDER BY distance", 
-                                f"WHERE {' AND '.join(filter_conditions)} ORDER BY distance"
-                            )
+                            base_query += f" WHERE {' AND '.join(filter_conditions)}"
+                    
+                    base_query += " ORDER BY ve.distance"
                     
                     cursor = await self.execute(base_query, tuple(params))
                     results = cursor.fetchall()

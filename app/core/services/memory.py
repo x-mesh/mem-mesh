@@ -347,24 +347,34 @@ class MemoryService:
     async def _save_to_vector_index(self, memory_id: str, embedding_bytes: bytes) -> None:
         """벡터 인덱스에 저장"""
         try:
-            # sqlite-vec 테이블이 존재하는지 확인
+            # sqlite-vec 테이블이 존재하는지 확인 (올바른 테이블 이름 사용)
             cursor = await self.db.execute("""
                 SELECT name FROM sqlite_master 
-                WHERE type='table' AND name='memories_vec'
+                WHERE type='table' AND name='memory_embeddings'
             """)
             
             if cursor.fetchone():
-                # sqlite-vec 사용
+                # sqlite-vec 사용 - embedding을 JSON 형식으로 변환
+                import json
+                import numpy as np
+                
+                # bytes를 numpy array로 변환
+                embedding_array = np.frombuffer(embedding_bytes, dtype=np.float32)
+                # JSON 문자열로 변환
+                embedding_json = json.dumps(embedding_array.tolist())
+                
                 await self.db.execute(
-                    "INSERT INTO memories_vec (memory_id, embedding) VALUES (?, ?)",
-                    (memory_id, embedding_bytes)
+                    "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding) VALUES (?, ?)",
+                    (memory_id, embedding_json)
                 )
+                logger.debug(f"Saved to vector table: {memory_id}")
             else:
                 # fallback 테이블 사용
                 await self.db.execute(
                     "INSERT INTO memories_vec_fallback (memory_id, embedding) VALUES (?, ?)",
                     (memory_id, embedding_bytes)
                 )
+                logger.debug(f"Saved to fallback table: {memory_id}")
                 
         except Exception as e:
             logger.error(f"Failed to save to vector index: {e}")
@@ -373,24 +383,34 @@ class MemoryService:
     async def _update_vector_index(self, memory_id: str, embedding_bytes: bytes) -> None:
         """벡터 인덱스 업데이트"""
         try:
-            # sqlite-vec 테이블이 존재하는지 확인
+            # sqlite-vec 테이블이 존재하는지 확인 (올바른 테이블 이름 사용)
             cursor = await self.db.execute("""
                 SELECT name FROM sqlite_master 
-                WHERE type='table' AND name='memories_vec'
+                WHERE type='table' AND name='memory_embeddings'
             """)
             
             if cursor.fetchone():
-                # sqlite-vec 사용
+                # sqlite-vec 사용 - embedding을 JSON 형식으로 변환
+                import json
+                import numpy as np
+                
+                # bytes를 numpy array로 변환
+                embedding_array = np.frombuffer(embedding_bytes, dtype=np.float32)
+                # JSON 문자열로 변환
+                embedding_json = json.dumps(embedding_array.tolist())
+                
                 await self.db.execute(
-                    "UPDATE memories_vec SET embedding = ? WHERE memory_id = ?",
-                    (embedding_bytes, memory_id)
+                    "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding) VALUES (?, ?)",
+                    (memory_id, embedding_json)
                 )
+                logger.debug(f"Updated vector table: {memory_id}")
             else:
                 # fallback 테이블 사용
                 await self.db.execute(
                     "UPDATE memories_vec_fallback SET embedding = ? WHERE memory_id = ?",
                     (embedding_bytes, memory_id)
                 )
+                logger.debug(f"Updated fallback table: {memory_id}")
                 
         except Exception as e:
             logger.error(f"Failed to update vector index: {e}")
@@ -399,24 +419,26 @@ class MemoryService:
     async def _delete_from_vector_index(self, memory_id: str) -> None:
         """벡터 인덱스에서 삭제"""
         try:
-            # sqlite-vec 테이블이 존재하는지 확인
+            # sqlite-vec 테이블이 존재하는지 확인 (올바른 테이블 이름 사용)
             cursor = await self.db.execute("""
                 SELECT name FROM sqlite_master 
-                WHERE type='table' AND name='memories_vec'
+                WHERE type='table' AND name='memory_embeddings'
             """)
             
             if cursor.fetchone():
                 # sqlite-vec 사용
                 await self.db.execute(
-                    "DELETE FROM memories_vec WHERE memory_id = ?",
+                    "DELETE FROM memory_embeddings WHERE memory_id = ?",
                     (memory_id,)
                 )
+                logger.debug(f"Deleted from vector table: {memory_id}")
             else:
                 # fallback 테이블 사용
                 await self.db.execute(
                     "DELETE FROM memories_vec_fallback WHERE memory_id = ?",
                     (memory_id,)
                 )
+                logger.debug(f"Deleted from fallback table: {memory_id}")
                 
         except Exception as e:
             logger.error(f"Failed to delete from vector index: {e}")

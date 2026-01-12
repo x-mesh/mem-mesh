@@ -1,0 +1,11 @@
+{
+  "name": "Manual Save to mem-mesh",
+  "description": "수동으로 현재 대화를 mem-mesh에 저장하는 버튼 Hook입니다",
+  "enabled": true,
+  "trigger": "onManualTrigger",
+  "buttonText": "💾 mem-mesh에 저장",
+  "action": {
+    "type": "sendMessage",
+    "message": "현재 대화 전체를 mem-mesh에 저장해주세요. 대화의 주요 내용을 요약하고 적절한 카테고리와 태그를 추가해서 저장해주세요. project_id는 'kiro-manual-saves'로 설정해주세요."
+  }
+}

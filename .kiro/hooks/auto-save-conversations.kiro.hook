@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Auto-save Conversations to mem-mesh",
+  "description": "모든 사용자 메시지와 AI 응답을 mem-mesh에 자동으로 저장합니다",
+  "version": "1",
+  "when": {
+    "type": "promptSubmit"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "다음 대화 내용을 mem-mesh에 저장해:\n\n사용자 질문: {{userMessage}}\n\n이 내용을 적절한 카테고리(task/bug/idea/decision/incident/code_snippet)로 분류하여 mem-mesh에 저장하고, 관련 태그도 추가해줘. project_id는 'kiro-conversations'로 설정해."
+  }
+}

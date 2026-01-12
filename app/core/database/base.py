@@ -169,6 +169,15 @@ class Database:
                 )
             """)
             
+            # embedding_metadata 테이블 생성 (모델 정보 저장용)
+            self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS embedding_metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            
             # 인덱스 생성
             indexes = [
                 "CREATE INDEX IF NOT EXISTS idx_memories_project_id ON memories(project_id)",
@@ -218,6 +227,104 @@ class Database:
         except Exception as e:
             logger.error(f"Failed to initialize tables: {e}")
             raise
+    
+    # ===== Embedding Metadata Methods =====
+    
+    async def get_embedding_metadata(self, key: str) -> Optional[str]:
+        """임베딩 메타데이터 조회"""
+        try:
+            row = await self.fetchone(
+                "SELECT value FROM embedding_metadata WHERE key = ?",
+                (key,)
+            )
+            return row['value'] if row else None
+        except Exception as e:
+            logger.error(f"Failed to get embedding metadata: {e}")
+            return None
+    
+    async def set_embedding_metadata(self, key: str, value: str) -> None:
+        """임베딩 메타데이터 저장"""
+        from datetime import datetime
+        try:
+            await self.execute(
+                """
+                INSERT OR REPLACE INTO embedding_metadata (key, value, updated_at)
+                VALUES (?, ?, ?)
+                """,
+                (key, value, datetime.utcnow().isoformat() + 'Z')
+            )
+            self.connection.commit()
+            logger.info(f"Embedding metadata set: {key}={value}")
+        except Exception as e:
+            logger.error(f"Failed to set embedding metadata: {e}")
+            raise
+    
+    async def check_embedding_model_consistency(self, current_model: str, current_dim: int) -> dict:
+        """
+        현재 설정된 임베딩 모델과 DB에 저장된 모델 정보 비교
+        
+        Returns:
+            {
+                "consistent": bool,
+                "stored_model": str or None,
+                "stored_dim": int or None,
+                "current_model": str,
+                "current_dim": int,
+                "needs_migration": bool,
+                "message": str
+            }
+        """
+        stored_model = await self.get_embedding_metadata("embedding_model")
+        stored_dim_str = await self.get_embedding_metadata("embedding_dimension")
+        stored_dim = int(stored_dim_str) if stored_dim_str else None
+        
+        result = {
+            "consistent": True,
+            "stored_model": stored_model,
+            "stored_dim": stored_dim,
+            "current_model": current_model,
+            "current_dim": current_dim,
+            "needs_migration": False,
+            "message": ""
+        }
+        
+        # 첫 실행인 경우 (메타데이터 없음)
+        if stored_model is None:
+            # 기존 데이터가 있는지 확인
+            cursor = await self.execute("SELECT COUNT(*) as count FROM memories")
+            count = cursor.fetchone()['count']
+            
+            if count > 0:
+                # 기존 데이터가 있지만 메타데이터가 없음 - 마이그레이션 필요할 수 있음
+                result["message"] = f"⚠️ 기존 메모리 {count}개가 있지만 임베딩 모델 정보가 없습니다. 현재 모델({current_model})로 메타데이터를 설정합니다."
+                logger.warning(result["message"])
+                # 현재 모델로 메타데이터 설정
+                await self.set_embedding_metadata("embedding_model", current_model)
+                await self.set_embedding_metadata("embedding_dimension", str(current_dim))
+            else:
+                # 새 DB - 현재 모델로 메타데이터 설정
+                result["message"] = f"✅ 새 데이터베이스입니다. 임베딩 모델: {current_model} (dim: {current_dim})"
+                await self.set_embedding_metadata("embedding_model", current_model)
+                await self.set_embedding_metadata("embedding_dimension", str(current_dim))
+            
+            return result
+        
+        # 모델 불일치 확인
+        if stored_model != current_model:
+            result["consistent"] = False
+            result["needs_migration"] = True
+            result["message"] = f"⚠️ 임베딩 모델 불일치!\n  - DB 저장 모델: {stored_model}\n  - 현재 설정 모델: {current_model}\n  마이그레이션이 필요합니다: python scripts/migrate_embeddings.py"
+            logger.warning(result["message"])
+        elif stored_dim and stored_dim != current_dim:
+            result["consistent"] = False
+            result["needs_migration"] = True
+            result["message"] = f"⚠️ 임베딩 차원 불일치!\n  - DB 저장 차원: {stored_dim}\n  - 현재 설정 차원: {current_dim}\n  마이그레이션이 필요합니다."
+            logger.warning(result["message"])
+        else:
+            result["message"] = f"✅ 임베딩 모델 일치: {current_model} (dim: {current_dim})"
+            logger.info(result["message"])
+        
+        return result
     
     async def _migrate_embeddings_to_vector_table(self) -> None:
         """기존 메모리들의 embedding을 vector 테이블로 마이그레이션"""
@@ -353,10 +460,9 @@ class Database:
                             params.append(filters['category'])
                         
                         if filter_conditions:
-                            base_query = base_query.replace(
-                                "ORDER BY distance", 
-                                f"WHERE {' AND '.join(filter_conditions)} ORDER BY distance"
-                            )
+                            base_query += f" WHERE {' AND '.join(filter_conditions)}"
+                    
+                    base_query += " ORDER BY ve.distance"
                     
                     cursor = await self.execute(base_query, tuple(params))
                     results = cursor.fetchall()

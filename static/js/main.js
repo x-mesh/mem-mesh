@@ -37,6 +37,7 @@ import { CreateMemoryPage } from './pages/create-memory.js';
 import { EditMemoryPage } from './pages/edit-memory.js';
 import { ProjectsPage } from './pages/projects.js';
 import { AnalyticsPage } from './pages/analytics.js';
+import { SettingsPage } from './pages/settings-page.js';
 
 /**
  * Main Application Class
@@ -106,6 +107,7 @@ class App {
     this.pages.set('edit-memory', EditMemoryPage);
     this.pages.set('projects', ProjectsPage);
     this.pages.set('analytics', AnalyticsPage);
+    this.pages.set('settings', SettingsPage);
   }
   
   /**
@@ -121,6 +123,7 @@ class App {
     this.router.register('/edit/:id', (params) => this.renderPage('edit-memory', params));
     this.router.register('/projects', () => this.renderPage('projects'));
     this.router.register('/analytics', () => this.renderPage('analytics'));
+    this.router.register('/settings', () => this.renderPage('settings'));
   }
   
   /**
@@ -255,6 +258,9 @@ class App {
         case 'analytics':
           pageElement = document.createElement('analytics-page');
           break;
+        case 'settings':
+          pageElement = document.createElement('settings-page');
+          break;
         default:
           throw new Error(`Unknown page: ${pageName}`);
       }
@@ -292,7 +298,8 @@ class App {
         (route === '/dashboard' && pageName === 'dashboard') ||
         (route === '/search' && pageName === 'search') ||
         (route === '/projects' && pageName === 'projects') ||
-        (route === '/analytics' && pageName === 'analytics')
+        (route === '/analytics' && pageName === 'analytics') ||
+        (route === '/settings' && pageName === 'settings')
       ) {
         link.classList.add('active');
       }
