@@ -314,22 +314,24 @@ class MemoryCard extends HTMLElement {
         <div class="content-full ${this.isExpanded ? '' : 'hidden'}">
           ${this.formatContent(fullContent)}
         </div>
-        ${fullContent.length > 200 ? `
-          <button class="expand-btn" aria-label="${this.isExpanded ? 'Show less' : 'Show more'}">
-            ${this.isExpanded ? 'Show less' : 'Show more'}
-          </button>
-        ` : ''}
+        <div class="content-meta">
+          ${fullContent.length > 200 ? `
+            <button class="expand-btn" aria-label="${this.isExpanded ? 'Show less' : 'Show more'}">
+              ${this.isExpanded ? 'Show less' : 'Show more'}
+            </button>
+          ` : ''}
+          <div class="memory-timestamp">
+            <time datetime="${memory.created_at}" title="${new Date(memory.created_at).toLocaleString()}">
+              ${formattedDate}
+            </time>
+            ${memory.source !== 'unknown' ? `<span class="source">via ${memory.source}</span>` : ''}
+          </div>
+        </div>
       </div>
       
       <div class="memory-footer">
         <div class="memory-tags">
           ${memory.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}
-        </div>
-        <div class="memory-timestamp">
-          <time datetime="${memory.created_at}" title="${new Date(memory.created_at).toLocaleString()}">
-            ${formattedDate}
-          </time>
-          ${memory.source !== 'unknown' ? `<span class="source">via ${memory.source}</span>` : ''}
         </div>
       </div>
     `;
@@ -477,6 +479,14 @@ style.textContent = `
     text-decoration: underline;
   }
   
+  .content-meta {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 0.5rem;
+  }
+  
   .expand-btn {
     background: none;
     border: none;
@@ -493,10 +503,8 @@ style.textContent = `
   
   .memory-footer {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    gap: 1rem;
     flex-wrap: wrap;
+    gap: 0.25rem;
   }
   
   .memory-tags {
@@ -516,11 +524,10 @@ style.textContent = `
   
   .memory-timestamp {
     display: flex;
-    flex-direction: column;
-    align-items: flex-end;
+    align-items: center;
+    gap: 0.5rem;
     font-size: 0.75rem;
     color: var(--text-muted);
-    gap: 0.125rem;
   }
   
   .source {
@@ -544,16 +551,6 @@ style.textContent = `
     
     .memory-actions {
       align-self: flex-end;
-    }
-    
-    .memory-footer {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.5rem;
-    }
-    
-    .memory-timestamp {
-      align-items: flex-start;
     }
   }
 `;

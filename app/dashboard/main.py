@@ -12,15 +12,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import Settings
-from .database.base import Database
-from .embeddings.service import EmbeddingService
-from .services.memory import MemoryService, MemoryNotFoundError, DatabaseError
-from .services.search import SearchService
-from .services.context import ContextService, ContextNotFoundError
-from .services.stats import StatsService
-from .schemas.requests import AddParams, SearchParams, ContextParams, UpdateParams, DeleteParams, StatsParams
-from .schemas.responses import (
+from ..core.config import Settings
+from ..core.database.base import Database
+from ..core.embeddings.service import EmbeddingService
+from ..core.services.memory import MemoryService, MemoryNotFoundError, DatabaseError
+from ..core.services.search import SearchService
+from ..core.services.context import ContextService, ContextNotFoundError
+from ..core.services.stats import StatsService
+from ..core.schemas.requests import AddParams, SearchParams, ContextParams, UpdateParams, DeleteParams, StatsParams
+from ..core.schemas.responses import (
     AddResponse, SearchResponse, ContextResponse, 
     UpdateResponse, DeleteResponse, StatsResponse, ErrorResponse
 )
@@ -46,6 +46,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         # 설정 로드
         settings = Settings()
+        
+        # 설정 정보 출력
+        print("\n" + "="*60)
+        print("  mem-mesh Dashboard Starting")
+        print("="*60)
+        print(f"  Database Path:   {settings.database_path}")
+        print(f"  Storage Mode:    {settings.storage_mode}")
+        print(f"  API Base URL:    {settings.api_base_url}")
+        print(f"  Embedding Model: {settings.embedding_model}")
+        print("="*60 + "\n")
         
         # 데이터베이스 연결
         db = Database(settings.database_path)
@@ -239,19 +249,77 @@ async def search_memories(
     category: str = None,
     limit: int = 5,
     recency_weight: float = 0.0,
+    search_mode: str = "hybrid",
     service: SearchService = Depends(get_search_service)
 ) -> SearchResponse:
-    """메모리 검색"""
+    """
+    메모리 검색
+    
+    search_mode 옵션:
+    - hybrid: 벡터 + 텍스트 결합 검색 (기본값)
+    - exact: 정확한 텍스트 매칭만
+    - semantic: 의미 기반 벡터 검색만
+    - fuzzy: 오타 허용 퍼지 검색
+    """
     try:
         return await service.search(
             query=query,
             project_id=project_id,
             category=category,
             limit=limit,
-            recency_weight=recency_weight
+            recency_weight=recency_weight,
+            search_mode=search_mode
         )
     except Exception as e:
         logger.error(f"Search memories error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/memories/stats", response_model=StatsResponse)
+async def get_memory_stats(
+    project_id: str = None,
+    start_date: str = None,
+    end_date: str = None,
+    service: StatsService = Depends(get_stats_service)
+) -> StatsResponse:
+    """메모리 통계 조회"""
+    try:
+        stats = await service.get_overall_stats(
+            project_id=project_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        return StatsResponse(**stats)
+    except Exception as e:
+        logger.error(f"Get stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/memories/{memory_id}")
+async def get_memory(
+    memory_id: str,
+    service: MemoryService = Depends(get_memory_service)
+):
+    """개별 메모리 조회"""
+    try:
+        memory = await service.get(memory_id)
+        if memory is None:
+            raise HTTPException(status_code=404, detail="Memory not found")
+        
+        return {
+            "id": memory.id,
+            "content": memory.content,
+            "project_id": memory.project_id,
+            "category": memory.category,
+            "tags": memory.tags,
+            "source": memory.source,
+            "created_at": memory.created_at,
+            "updated_at": memory.updated_at
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get memory error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -312,25 +380,6 @@ async def delete_memory(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/memories/stats", response_model=StatsResponse)
-async def get_memory_stats(
-    project_id: str = None,
-    start_date: str = None,
-    end_date: str = None,
-    service: StatsService = Depends(get_stats_service)
-) -> StatsResponse:
-    """메모리 통계 조회"""
-    try:
-        stats = await service.get_overall_stats(
-            project_id=project_id,
-            start_date=start_date,
-            end_date=end_date
-        )
-        return StatsResponse(**stats)
-    except Exception as e:
-        logger.error(f"Get stats error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 # Catch-all route for SPA routing (must be last)
 @app.get("/{path:path}")
@@ -385,7 +434,7 @@ if __name__ == "__main__":
     
     # 개발용 서버 실행
     uvicorn.run(
-        "src.main:app",
+        "app.dashboard.main:app",
         host="0.0.0.0",
         port=8000,
         reload=True,

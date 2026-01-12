@@ -47,8 +47,11 @@ class MCPServer:
             self.db = Database(self.settings.database_path)
             await self.db.connect()
             
-            # 임베딩 서비스 초기화
-            self.embedding_service = EmbeddingService()
+            # 임베딩 서비스 초기화 (모델 미리 로드)
+            self.embedding_service = EmbeddingService(
+                model_name=self.settings.embedding_model,
+                preload=True
+            )
             
             # 비즈니스 서비스들 초기화
             self.memory_service = MemoryService(self.db, self.embedding_service)

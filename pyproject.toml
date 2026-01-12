@@ -33,6 +33,11 @@ dependencies = [
     "sqlmodel>=0.0.14",
     "python-multipart>=0.0.6",
     "python-dotenv>=1.0.0",
+    # New dependencies for FastMCP architecture
+    "fastmcp>=0.1.0",
+    "httpx>=0.25.0",
+    # SQLite with better performance and features
+    "pysqlite3>=0.5.0",
 ]
 
 [project.optional-dependencies]
@@ -50,10 +55,13 @@ dev = [
 [project.scripts]
 mem-mesh = "src.main:main"
 mem-mesh-mcp = "src.__main__:main"
+# New entry points for app/ architecture
+mem-mesh-mcp-new = "app.mcp.__main__:main"
+mem-mesh-dashboard = "app.dashboard.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*"]
+include = ["src*", "app*"]
 
 [tool.black]
 line-length = 88
@@ -77,7 +85,7 @@ extend-exclude = '''
 profile = "black"
 multi_line_output = 3
 line_length = 88
-known_first_party = ["src"]
+known_first_party = ["src", "app"]
 
 [tool.mypy]
 python_version = "3.9"
@@ -107,8 +115,8 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src"]
-omit = ["tests/*", "src/__main__.py"]
+source = ["src", "app"]
+omit = ["tests/*", "src/__main__.py", "app/mcp/__main__.py", "app/dashboard/__main__.py"]
 
 [tool.coverage.report]
 exclude_lines = [

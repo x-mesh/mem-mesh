@@ -1,4 +1,3 @@
-./data/**
 *.pyc
 *.pyo
 *.pyd
@@ -6,3 +5,9 @@
 *.egg
 *.egg-info
 __pycache__/
+.hypothesis/
+.coverage
+.coverage.*
+.cache
+imports/**
+data/**

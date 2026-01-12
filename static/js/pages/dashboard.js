@@ -671,9 +671,12 @@ class DashboardPage extends HTMLElement {
       `;
     }
     
+    // Recent Activity 표시 개수 (기본 10개)
+    const displayCount = this.getAttribute('recent-count') || 10;
+    
     return `
       <div class="recent-memories-list">
-        ${this.recentMemories.slice(0, 5).map(memory => `
+        ${this.recentMemories.slice(0, displayCount).map(memory => `
           <memory-card
             memory-id="${memory.id}"
             content="${this.escapeHtml(memory.content)}"
@@ -724,12 +727,18 @@ class DashboardPage extends HTMLElement {
   }
   
   /**
-   * Escape HTML
+   * Escape HTML for safe attribute usage
+   * Handles: < > & " ' to prevent XSS and attribute breaking
    */
   escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    if (text == null) return '';
+    const str = String(text);
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
   
   /**

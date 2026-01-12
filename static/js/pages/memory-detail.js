@@ -237,22 +237,15 @@ class MemoryDetailPage extends HTMLElement {
     try {
       console.log('Loading memory data via direct API calls...');
       
-      // 먼저 모든 메모리를 검색해서 해당 ID를 찾음
-      const searchUrl = new URL('/api/memories/search', window.location.origin);
-      searchUrl.searchParams.append('query', ' ');
-      searchUrl.searchParams.append('limit', '100');
+      // 직접 메모리 ID로 조회
+      const memoryUrl = new URL(`/api/memories/${this.memoryId}`, window.location.origin);
+      const memoryResponse = await fetch(memoryUrl);
       
-      const searchResponse = await fetch(searchUrl);
-      if (!searchResponse.ok) {
-        throw new Error(`Search failed: ${searchResponse.status}`);
+      if (!memoryResponse.ok) {
+        throw new Error(`Memory not found: ${memoryResponse.status}`);
       }
       
-      const searchResult = await searchResponse.json();
-      const memory = searchResult.results?.find(m => m.id === this.memoryId);
-      
-      if (!memory) {
-        throw new Error('Memory not found');
-      }
+      const memory = await memoryResponse.json();
       
       // 컨텍스트 데이터 로드
       const contextUrl = new URL(`/api/memories/${this.memoryId}/context`, window.location.origin);
@@ -662,6 +655,31 @@ class MemoryDetailPage extends HTMLElement {
   }
   
   /**
+   * Get tags as array (handle both string and array formats)
+   */
+  getTagsArray() {
+    if (!this.memory || !this.memory.tags) return [];
+    
+    // 이미 배열인 경우
+    if (Array.isArray(this.memory.tags)) {
+      return this.memory.tags;
+    }
+    
+    // 문자열인 경우 JSON 파싱 시도
+    if (typeof this.memory.tags === 'string') {
+      try {
+        const parsed = JSON.parse(this.memory.tags);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (error) {
+        // JSON 파싱 실패 시 쉼표로 분리 시도
+        return this.memory.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
+      }
+    }
+    
+    return [];
+  }
+  
+  /**
    * Render the component
    */
   render() {
@@ -772,9 +790,9 @@ class MemoryDetailPage extends HTMLElement {
                 ${formattedContent}
               </div>
               
-              ${this.memory.tags && this.memory.tags.length > 0 ? `
+              ${this.memory.tags && this.getTagsArray().length > 0 ? `
                 <div class="memory-tags">
-                  ${this.memory.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}
+                  ${this.getTagsArray().map(tag => `<span class="tag">#${tag}</span>`).join('')}
                 </div>
               ` : ''}
             </div>
@@ -823,7 +841,7 @@ class MemoryDetailPage extends HTMLElement {
                     type="text" 
                     id="edit-tags" 
                     class="edit-tags" 
-                    value="${(this.memory.tags || []).join(', ')}"
+                    value="${this.getTagsArray().join(', ')}"
                     placeholder="Enter tags separated by commas"
                   >
                 </div>
@@ -1161,16 +1179,25 @@ style.textContent = `
   
   .memory-sidebar {
     position: sticky;
-    top: 2rem;
-    height: fit-content;
+    top: 2rem;    
+    height: calc(100vh - 4rem);
+    display: flex;
+    flex-direction: column;
   }
   
   .context-section {
-    margin-bottom: 2rem;
+    /* 기존 margin-bottom: 2rem; 제거 또는 0으로 변경 */
+    margin-bottom: 0;
+
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
     border-radius: var(--border-radius);
     overflow: hidden;
+
+    /* 수정 2: 섹션이 사이드바 높이를 가득 채우도록 설정 */
+    height: 100%;
+    display: flex;
+    flex-direction: column;
   }
   
   .context-header {
@@ -1188,10 +1215,12 @@ style.textContent = `
   
   .context-list {
     padding: 1rem;
-    max-height: 400px;
-    overflow-y: auto;
+
+    /* 수정 3: 400px 제한을 풀고, 남은 공간을 모두 차지하도록 설정 */
+    /* max-height: 400px;  <-- 이거 지우기 */
+    flex: 1;               /* <-- 남은 공간 채우기 */
+    overflow-y: auto;      /* <-- 내용이 넘치면 이 안에서 스크롤 */
   }
-  
   .no-context {
     text-align: center;
     padding: 2rem;

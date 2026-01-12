@@ -40,8 +40,17 @@ class ChromaSearchBar extends HTMLElement {
   
   attributeChangedCallback(name, oldValue, newValue) {
     if (oldValue !== newValue && this.isConnected) {
-      this.render();
-      this.setupEventListeners();
+      if (name === 'value') {
+        // value 변경 시에는 render하지 않고 input value만 업데이트
+        const input = this.querySelector('.chroma-search-input');
+        if (input && input.value !== newValue) {
+          input.value = newValue;
+          this.updateClearButton(newValue);
+        }
+      } else {
+        this.render();
+        this.setupEventListeners();
+      }
     }
   }
   

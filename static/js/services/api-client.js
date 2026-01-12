@@ -202,15 +202,8 @@ export class APIClient {
   }
   
   async getMemory(memoryId) {
-    // 단일 메모리 조회는 현재 API에 없으므로 검색으로 대체
-    // 모든 메모리를 검색해서 해당 ID를 찾음
-    const result = await this.searchMemories(' ', { limit: 100 });
-    const memory = result.results?.find(m => m.id === memoryId);
-    if (!memory) {
-      const error = new APIError(404, 'Memory not found');
-      throw error;
-    }
-    return memory;
+    // 직접 메모리 ID로 조회
+    return this.get(`/memories/${memoryId}`);
   }
   
   async createMemory(memoryData) {

@@ -1,0 +1,201 @@
+"""
+Configuration module for mem-mesh application.
+
+This module provides configuration management using pydantic-settings
+with support for environment variables and .env file loading.
+Supports storage_mode for direct SQLite access or API mode.
+"""
+
+from typing import Literal, Optional
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    """
+    Application settings with environment variable support.
+    
+    All settings can be overridden via environment variables with MEM_MESH_ prefix.
+    Command-line arguments take precedence over environment variables.
+    
+    Requirements: 1.1, 1.4, 1.5, 7.1, 7.2, 7.3, 7.4, 7.5
+    """
+    
+    # Storage mode configuration (Requirements 1.1, 1.4, 1.5, 7.1)
+    storage_mode: Literal["direct", "api"] = Field(
+        default="direct",
+        description="Storage mode: 'direct' for SQLite direct access, 'api' for FastAPI server"
+    )
+    
+    # API settings for api mode (Requirements 7.2)
+    api_base_url: str = Field(
+        default="http://localhost:8000",
+        description="FastAPI server base URL (used when storage_mode='api')"
+    )
+    
+    # Database configuration
+    database_path: str = Field(
+        default="./data/memories.db",
+        description="Path to SQLite database file"
+    )
+    
+    # SQLite WAL settings (Requirements 7.3)
+    busy_timeout: int = Field(
+        default=5000,
+        ge=1000,
+        description="SQLite busy timeout in milliseconds"
+    )
+    
+    # Embedding configuration
+    embedding_model: str = Field(
+        default="all-MiniLM-L6-v2",
+        description="Sentence-transformers model name"
+    )
+    embedding_dim: int = Field(
+        default=384,
+        description="Embedding vector dimensions"
+    )
+    
+    # Search configuration
+    search_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum similarity score for search results"
+    )
+    
+    # Logging configuration
+    log_level: str = Field(
+        default="INFO",
+        description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
+    )
+    
+    # Server configuration
+    server_host: str = Field(
+        default="127.0.0.1",
+        description="Server host address"
+    )
+    server_port: int = Field(
+        default=8000,
+        ge=1,
+        le=65535,
+        description="Server port number"
+    )
+    
+    # Content length settings
+    max_content_length: int = Field(
+        default=10000,
+        ge=1,
+        description="Maximum content length in characters"
+    )
+    min_content_length: int = Field(
+        default=10,
+        ge=1,
+        description="Minimum content length in characters"
+    )
+    
+    # Retry configuration
+    max_embedding_retries: int = Field(
+        default=3,
+        ge=1,
+        description="Maximum retries for embedding generation"
+    )
+    embedding_retry_delay: float = Field(
+        default=0.1,
+        ge=0.0,
+        description="Base delay between embedding retries in seconds"
+    )
+    
+    # API client settings
+    api_timeout: float = Field(
+        default=30.0,
+        ge=1.0,
+        description="API request timeout in seconds"
+    )
+    api_max_retries: int = Field(
+        default=3,
+        ge=1,
+        description="Maximum retries for API requests"
+    )
+    
+    @field_validator("storage_mode")
+    @classmethod
+    def validate_storage_mode(cls, v: str) -> str:
+        """Validate storage_mode is one of the valid options (Requirement 1.5)."""
+        if v not in ("direct", "api"):
+            raise ValueError("storage_mode must be 'direct' or 'api'")
+        return v
+    
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        """Validate log level is one of the standard levels."""
+        valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        if v.upper() not in valid_levels:
+            raise ValueError(f"log_level must be one of {valid_levels}")
+        return v.upper()
+    
+    @field_validator("embedding_model")
+    @classmethod
+    def validate_embedding_model(cls, v: str) -> str:
+        """Validate embedding model name is not empty."""
+        if not v.strip():
+            raise ValueError("embedding_model cannot be empty")
+        return v.strip()
+    
+    model_config = {
+        "env_file": ".env",
+        "env_prefix": "MEM_MESH_",
+        "case_sensitive": False,
+        "validate_assignment": True,
+        "extra": "ignore"
+    }
+
+
+# Global settings instance
+_settings: Optional[Settings] = None
+
+
+def get_settings() -> Settings:
+    """
+    Get the global settings instance (lazy initialization).
+    
+    This function provides dependency injection support for FastAPI
+    and allows for easy testing with different configurations.
+    
+    Returns:
+        Settings: The global settings instance
+    """
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
+
+
+def reload_settings() -> Settings:
+    """
+    Reload settings from environment and .env file.
+    
+    This is useful for testing or when configuration changes at runtime.
+    
+    Returns:
+        Settings: New settings instance with reloaded values
+    """
+    global _settings
+    _settings = Settings()
+    return _settings
+
+
+def create_settings(**kwargs) -> Settings:
+    """
+    Create a new Settings instance with custom values.
+    
+    Useful for testing or programmatic configuration.
+    
+    Args:
+        **kwargs: Settings values to override
+        
+    Returns:
+        Settings: New settings instance with provided values
+    """
+    return Settings(**kwargs)

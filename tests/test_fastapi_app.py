@@ -8,15 +8,15 @@ import os
 import asyncio
 from fastapi.testclient import TestClient
 
-from src.main import app
-from src.config import Settings
-from src.database.base import Database
-from src.embeddings.service import EmbeddingService
-from src.services.memory import MemoryService
-from src.services.search import SearchService
-from src.services.context import ContextService
-from src.services.stats import StatsService
-import src.main as main_module
+from app.dashboard.main import app
+from app.core.config import Settings
+from app.core.database.base import Database
+from app.core.embeddings.service import EmbeddingService
+from app.core.services.memory import MemoryService
+from app.core.services.search import SearchService
+from app.core.services.context import ContextService
+from app.core.services.stats import StatsService
+import app.dashboard.main as main_module
 
 
 @pytest.fixture
@@ -86,7 +86,7 @@ def client(initialized_services):
 
 def test_root_endpoint(client):
     """루트 엔드포인트 테스트"""
-    response = client.get("/")
+    response = client.get("/api")
     assert response.status_code == 200
     
     data = response.json()
@@ -96,7 +96,7 @@ def test_root_endpoint(client):
 
 def test_health_check(client):
     """헬스 체크 테스트"""
-    response = client.get("/health")
+    response = client.get("/api/health")
     assert response.status_code == 200
 
 
@@ -110,7 +110,7 @@ def test_add_memory_endpoint(client):
         "tags": ["test", "api"]
     }
     
-    response = client.post("/memories", json=memory_data)
+    response = client.post("/api/memories", json=memory_data)
     if response.status_code != 200:
         print(f"Error response: {response.status_code}")
         print(f"Error content: {response.text}")
@@ -132,11 +132,11 @@ def test_search_memories_endpoint(client):
         "tags": ["search", "test"]
     }
     
-    add_response = client.post("/memories", json=memory_data)
+    add_response = client.post("/api/memories", json=memory_data)
     assert add_response.status_code == 200
     
     # 검색 수행
-    response = client.get("/memories/search?query=searchable&project_id=search-test")
+    response = client.get("/api/memories/search?query=searchable&project_id=search-test")
     assert response.status_code == 200
     
     data = response.json()
@@ -153,12 +153,12 @@ def test_get_memory_context_endpoint(client):
         "category": "task"
     }
     
-    add_response = client.post("/memories", json=memory_data)
+    add_response = client.post("/api/memories", json=memory_data)
     assert add_response.status_code == 200
     memory_id = add_response.json()["id"]
     
     # 맥락 조회
-    response = client.get(f"/memories/{memory_id}/context?depth=2")
+    response = client.get(f"/api/memories/{memory_id}/context?depth=2")
     assert response.status_code == 200
     
     data = response.json()
@@ -175,7 +175,7 @@ def test_update_memory_endpoint(client):
         "category": "task"
     }
     
-    add_response = client.post("/memories", json=memory_data)
+    add_response = client.post("/api/memories", json=memory_data)
     assert add_response.status_code == 200
     memory_id = add_response.json()["id"]
     
@@ -185,7 +185,7 @@ def test_update_memory_endpoint(client):
         "category": "bug"
     }
     
-    response = client.put(f"/memories/{memory_id}", json=update_data)
+    response = client.put(f"/api/memories/{memory_id}", json=update_data)
     assert response.status_code == 200
     
     data = response.json()
@@ -202,12 +202,12 @@ def test_delete_memory_endpoint(client):
         "category": "task"
     }
     
-    add_response = client.post("/memories", json=memory_data)
+    add_response = client.post("/api/memories", json=memory_data)
     assert add_response.status_code == 200
     memory_id = add_response.json()["id"]
     
     # 메모리 삭제
-    response = client.delete(f"/memories/{memory_id}")
+    response = client.delete(f"/api/memories/{memory_id}")
     assert response.status_code == 200
     
     data = response.json()
@@ -216,7 +216,7 @@ def test_delete_memory_endpoint(client):
 
 def test_nonexistent_memory_context(client):
     """존재하지 않는 메모리 맥락 조회 테스트"""
-    response = client.get("/memories/nonexistent-id/context")
+    response = client.get("/api/memories/nonexistent-id/context")
     assert response.status_code == 404
 
 
@@ -227,7 +227,7 @@ def test_invalid_memory_data(client):
         "category": "invalid-category"
     }
     
-    response = client.post("/memories", json=invalid_data)
+    response = client.post("/api/memories", json=invalid_data)
     assert response.status_code == 422  # Validation error
 
 
@@ -240,11 +240,11 @@ def test_get_memory_stats_endpoint(client):
             "project_id": "stats-test",
             "category": "task" if i % 2 == 0 else "bug"
         }
-        response = client.post("/memories", json=memory_data)
+        response = client.post("/api/memories", json=memory_data)
         assert response.status_code == 200
     
     # 전체 통계 조회
-    response = client.get("/memories/stats")
+    response = client.get("/api/memories/stats")
     assert response.status_code == 200
     
     data = response.json()
@@ -252,7 +252,7 @@ def test_get_memory_stats_endpoint(client):
     assert data["total_memories"] >= 3
     
     # 프로젝트별 통계 조회
-    response = client.get("/memories/stats?project_id=stats-test")
+    response = client.get("/api/memories/stats?project_id=stats-test")
     assert response.status_code == 200
     
     data = response.json()
