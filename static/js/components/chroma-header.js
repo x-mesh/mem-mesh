@@ -74,12 +74,14 @@ class ChromaHeader extends HTMLElement {
           <!-- User Actions -->
           <div class="header-actions">
             <!-- Search Button (Mobile) -->
+            <!--
             <button class="action-btn search-btn mobile-only" id="mobile-search-btn" title="Search">
               <svg viewBox="0 0 24 24" fill="none">
                 <circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2"/>
                 <path d="M21 21L16.65 16.65" stroke="currentColor" stroke-width="2"/>
               </svg>
             </button>
+            -->
 
             <!-- Theme Toggle -->
             <button class="action-btn theme-toggle" id="theme-toggle-btn" title="Toggle theme">
@@ -93,6 +95,7 @@ class ChromaHeader extends HTMLElement {
             </button>
 
             <!-- Profile/User Menu -->
+            <!--
             <div class="user-menu" id="user-menu">
               <button class="action-btn user-btn" id="user-menu-btn" title="User menu">
                 <svg viewBox="0 0 24 24" fill="none">
@@ -143,6 +146,7 @@ class ChromaHeader extends HTMLElement {
                 </div>
               </div>
             </div>
+            -->
 
             <!-- Mobile Menu Toggle -->
             <button class="action-btn mobile-menu-toggle mobile-only" id="mobile-menu-toggle" title="Menu">

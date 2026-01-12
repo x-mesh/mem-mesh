@@ -23,6 +23,10 @@ import { FeaturesSection } from './components/features-section.js';
 import { FeatureCard } from './components/feature-card.js';
 import ChromaHeader from './components/chroma-header.js';
 import { ChromaSearchBar } from './components/chroma-search-bar.js';
+import { DashboardPreview } from './components/dashboard-preview.js';
+
+// Import chart components
+import './components/chroma-charts.js';
 
 // Import pages
 import { DashboardPage } from './pages/dashboard.js';
