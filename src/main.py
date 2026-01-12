@@ -133,6 +133,18 @@ async def serve_web_ui():
     return FileResponse("static/index.html")
 
 
+@app.get("/about")
+async def serve_about_page():
+    """About 페이지 서빙 (SPA 라우팅)"""
+    return FileResponse("static/index.html")
+
+
+@app.get("/dashboard")
+async def serve_dashboard_page():
+    """Dashboard 페이지 서빙 (SPA 라우팅)"""
+    return FileResponse("static/index.html")
+
+
 @app.get("/search")
 async def serve_search_page():
     """검색 페이지 서빙 (SPA 라우팅)"""
@@ -148,6 +160,12 @@ async def serve_memory_page(memory_id: str):
 @app.get("/create")
 async def serve_create_page():
     """메모리 생성 페이지 서빙 (SPA 라우팅)"""
+    return FileResponse("static/index.html")
+
+
+@app.get("/edit/{memory_id}")
+async def serve_edit_page(memory_id: str):
+    """메모리 편집 페이지 서빙 (SPA 라우팅)"""
     return FileResponse("static/index.html")
 
 
@@ -309,6 +327,26 @@ async def get_memory_stats(
     except Exception as e:
         logger.error(f"Get stats error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Catch-all route for SPA routing (must be last)
+@app.get("/{path:path}")
+async def serve_spa_routes(path: str):
+    """SPA 라우팅을 위한 catch-all 라우트"""
+    # API 경로는 제외
+    if path.startswith("api"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    
+    # 정적 파일 경로는 제외 (이미 /static으로 마운트됨)
+    if path.startswith("static"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    
+    # docs 경로는 제외 (FastAPI 자동 문서)
+    if path in ["docs", "redoc", "openapi.json"]:
+        raise HTTPException(status_code=404, detail="Not Found")
+    
+    # 모든 다른 경로는 index.html로 서빙 (SPA 라우팅)
+    return FileResponse("static/index.html")
 
 
 # 에러 핸들러

@@ -1,6 +1,7 @@
 /**
- * Search Page Component
- * Advanced search interface with filters and results
+ * Chroma-Style Search Page Component
+ * Advanced search interface with filters, results, and pagination
+ * Requirements: 6.1, 6.2, 6.3, 6.4
  */
 
 class SearchPage extends HTMLElement {
@@ -9,78 +10,60 @@ class SearchPage extends HTMLElement {
     this.searchQuery = '';
     this.selectedCategory = '';
     this.selectedProject = '';
+    this.sortBy = 'relevance';
     this.searchResults = [];
     this.isLoading = false;
     this.pageSize = 20;
+    this.currentPage = 1;
+    this.totalResults = 0;
+    this.hasMore = false;
     this.isInitialized = false;
   }
   
   connectedCallback() {
-    if (this.isInitialized) {
-      console.log('Search page already initialized, skipping...');
-      return;
-    }
-    
-    console.log('Search page connectedCallback called');
+    if (this.isInitialized) return;
     this.isInitialized = true;
     this.parseUrlParams();
     this.render();
     this.setupEventListeners();
     
-    // 초기 검색을 위해 약간의 지연 후 실행
     setTimeout(() => {
-      // 쿼리가 있거나 필터가 설정된 경우에만 자동 검색
       if (this.searchQuery || this.selectedCategory || this.selectedProject) {
         this.waitForAppAndSearch();
       } else {
-        // 쿼리가 없으면 로딩 상태를 false로 설정
         this.isLoading = false;
-        this.updateLoadingState();
+        this.showInitialState();
       }
     }, 100);
   }
   
   disconnectedCallback() {
-    // Cleanup if needed
+    this.isInitialized = false;
   }
   
-  /**
-   * Wait for app initialization and then perform search
-   */
   async waitForAppAndSearch() {
     let attempts = 0;
     const maxAttempts = 50;
     
     const checkApp = () => {
-      console.log(`Checking app initialization (attempt ${attempts + 1}/${maxAttempts})...`);
-      
       if (window.app && window.app.apiClient) {
-        console.log('App is ready, performing initial search...');
         this.performSearch();
-        return true;
+        return;
       }
       
       attempts++;
       if (attempts >= maxAttempts) {
-        console.error('App initialization timeout, trying direct API call...');
-        // 앱 초기화가 실패해도 직접 API 호출 시도
         this.performDirectSearch();
-        return false;
+        return;
       }
       
       setTimeout(checkApp, 100);
-      return false;
     };
     
     checkApp();
   }
   
-  /**
-   * Perform direct search without app dependency
-   */
   async performDirectSearch() {
-    console.log('performDirectSearch called as fallback');
-    
     try {
       this.isLoading = true;
       this.updateLoadingState();
@@ -91,169 +74,130 @@ class SearchPage extends HTMLElement {
       if (this.selectedProject) url.searchParams.append('project_id', this.selectedProject);
       url.searchParams.append('limit', this.pageSize.toString());
       
-      console.log('Direct API call to:', url.toString());
-      
       const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
       const result = await response.json();
-      console.log('Direct search response:', result);
-      
       this.searchResults = result.results || [];
+      this.totalResults = result.total || this.searchResults.length;
+      this.hasMore = this.searchResults.length >= this.pageSize;
       
     } catch (error) {
-      console.error('Direct search failed:', error);
+      console.error('Search failed:', error);
       this.searchResults = [];
-      this.showError('Search failed. Please try again.');
+      this.showError('검색에 실패했습니다. 다시 시도해주세요.');
     }
     
-    // finally 블록 대신 명시적으로 처리
-    console.log('Direct search completed, setting isLoading to false');
     this.isLoading = false;
     this.updateResultsDisplay();
   }
   
-  /**
-   * Parse URL parameters
-   */
   parseUrlParams() {
     const urlParams = new URLSearchParams(window.location.search);
     this.searchQuery = urlParams.get('q') || '';
     this.selectedCategory = urlParams.get('category') || '';
     this.selectedProject = urlParams.get('project') || '';
+    this.sortBy = urlParams.get('sort') || 'relevance';
   }
   
-  /**
-   * Update URL with current search state
-   */
   updateUrl() {
     const params = new URLSearchParams();
-    
-    if (this.searchQuery) {
-      params.set('q', this.searchQuery);
-    }
-    if (this.selectedCategory) {
-      params.set('category', this.selectedCategory);
-    }
-    if (this.selectedProject) {
-      params.set('project', this.selectedProject);
-    }
+    if (this.searchQuery) params.set('q', this.searchQuery);
+    if (this.selectedCategory) params.set('category', this.selectedCategory);
+    if (this.selectedProject) params.set('project', this.selectedProject);
+    if (this.sortBy !== 'relevance') params.set('sort', this.sortBy);
     
     const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
     window.history.replaceState({}, '', newUrl);
   }
   
-  /**
-   * Setup event listeners
-   */
   setupEventListeners() {
-    // Search form submission
-    this.addEventListener('submit', (e) => {
-      e.preventDefault();
-      this.handleSearchSubmit();
+    // Search bar events
+    this.addEventListener('search-submit', (e) => {
+      this.searchQuery = e.detail.query;
+      this.currentPage = 1;
+      this.performSearch();
+    });
+    
+    this.addEventListener('search-clear', () => {
+      this.searchQuery = '';
+      this.currentPage = 1;
+      this.performSearch();
     });
     
     // Click events
     this.addEventListener('click', (e) => {
       const target = e.target;
       
-      if (target.classList.contains('search-btn')) {
-        this.handleSearchSubmit();
-      } else if (target.classList.contains('clear-btn')) {
-        this.clearSearch();
-      } else if (target.classList.contains('memory-item') || target.closest('.memory-item')) {
-        const item = target.classList.contains('memory-item') ? target : target.closest('.memory-item');
-        const memoryId = item.getAttribute('data-memory-id');
-        if (memoryId) {
-          this.navigateToMemory(memoryId);
-        }
+      // Filter chips
+      if (target.closest('.chroma-filter-chip')) {
+        const chip = target.closest('.chroma-filter-chip');
+        const filterType = chip.getAttribute('data-filter-type');
+        const filterValue = chip.getAttribute('data-filter-value');
+        this.handleFilterClick(filterType, filterValue, chip);
+      }
+      
+      // Result cards
+      if (target.closest('.chroma-result-card')) {
+        const card = target.closest('.chroma-result-card');
+        const memoryId = card.getAttribute('data-memory-id');
+        if (memoryId) this.navigateToMemory(memoryId);
+      }
+      
+      // Load more button
+      if (target.closest('.chroma-load-more-btn')) {
+        this.loadMore();
+      }
+      
+      // Sort options
+      if (target.closest('.chroma-sort-option')) {
+        const option = target.closest('.chroma-sort-option');
+        this.sortBy = option.getAttribute('data-sort');
+        this.updateSortSelection();
+        this.performSearch();
       }
     });
     
-    // Filter changes
+    // Filter select changes
     this.addEventListener('change', (e) => {
       const target = e.target;
       
-      if (target.classList.contains('category-filter')) {
+      if (target.classList.contains('chroma-category-select')) {
         this.selectedCategory = target.value;
-        console.log('Category filter changed to:', this.selectedCategory);
-        // 앱이 준비되어 있으면 일반 검색, 아니면 직접 검색
-        if (window.app && window.app.apiClient) {
-          this.performSearch();
-        } else {
-          this.performDirectSearch();
-        }
-      } else if (target.classList.contains('project-filter')) {
+        this.currentPage = 1;
+        this.performSearch();
+      }
+      
+      if (target.classList.contains('chroma-project-input')) {
         this.selectedProject = target.value;
-        console.log('Project filter changed to:', this.selectedProject);
-        // 앱이 준비되어 있으면 일반 검색, 아니면 직접 검색
-        if (window.app && window.app.apiClient) {
-          this.performSearch();
-        } else {
-          this.performDirectSearch();
-        }
       }
     });
     
-    // Enter key in search input
+    // Project input enter key
     this.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter' && e.target.classList.contains('search-input')) {
-        e.preventDefault();
-        this.handleSearchSubmit();
+      if (e.key === 'Enter' && e.target.classList.contains('chroma-project-input')) {
+        this.selectedProject = e.target.value;
+        this.currentPage = 1;
+        this.performSearch();
       }
     });
   }
   
-  /**
-   * Handle search submission
-   */
-  handleSearchSubmit() {
-    const searchInput = this.querySelector('.search-input');
-    if (searchInput) {
-      this.searchQuery = searchInput.value.trim();
+  handleFilterClick(filterType, filterValue, chip) {
+    const isActive = chip.classList.contains('active');
+    
+    if (filterType === 'category') {
+      this.selectedCategory = isActive ? '' : filterValue;
+      this.querySelectorAll('.chroma-filter-chip[data-filter-type="category"]').forEach(c => {
+        c.classList.remove('active');
+      });
+      if (!isActive) chip.classList.add('active');
     }
     
-    console.log('handleSearchSubmit called with query:', this.searchQuery);
-    
-    // 앱이 준비되어 있으면 일반 검색, 아니면 직접 검색
-    if (window.app && window.app.apiClient) {
-      this.performSearch();
-    } else {
-      this.performDirectSearch();
-    }
+    this.currentPage = 1;
+    this.performSearch();
   }
   
-  /**
-   * Clear search
-   */
-  clearSearch() {
-    this.searchQuery = '';
-    this.selectedCategory = '';
-    this.selectedProject = '';
-    
-    const searchInput = this.querySelector('.search-input');
-    const categoryFilter = this.querySelector('.category-filter');
-    const projectFilter = this.querySelector('.project-filter');
-    
-    if (searchInput) searchInput.value = '';
-    if (categoryFilter) categoryFilter.value = '';
-    if (projectFilter) projectFilter.value = '';
-    
-    console.log('Search cleared, performing new search');
-    
-    // 앱이 준비되어 있으면 일반 검색, 아니면 직접 검색
-    if (window.app && window.app.apiClient) {
-      this.performSearch();
-    } else {
-      this.performDirectSearch();
-    }
-  }
-  
-  /**
-   * Navigate to memory detail
-   */
   navigateToMemory(memoryId) {
     if (window.app && window.app.router) {
       window.app.router.navigate(`/memory/${memoryId}`);
@@ -262,27 +206,16 @@ class SearchPage extends HTMLElement {
     }
   }
   
-  /**
-   * Perform search
-   */
   async performSearch() {
-    console.log('performSearch called with:', {
-      query: this.searchQuery,
-      category: this.selectedCategory,
-      project: this.selectedProject,
-      isLoading: this.isLoading
-    });
-    
     try {
       this.isLoading = true;
       this.updateLoadingState();
       this.updateUrl();
       
       if (!window.app || !window.app.apiClient) {
-        throw new Error('API client not available');
+        await this.performDirectSearch();
+        return;
       }
-      
-      console.log('Searching with query:', this.searchQuery, 'category:', this.selectedCategory, 'project:', this.selectedProject);
       
       const response = await window.app.apiClient.searchMemories(this.searchQuery, {
         category: this.selectedCategory || undefined,
@@ -290,152 +223,291 @@ class SearchPage extends HTMLElement {
         limit: this.pageSize
       });
       
-      console.log('Search response:', response);
-      
       this.searchResults = response.results || [];
+      this.totalResults = response.total || this.searchResults.length;
+      this.hasMore = this.searchResults.length >= this.pageSize;
       
     } catch (error) {
       console.error('Search failed:', error);
       this.searchResults = [];
-      this.showError('Search failed. Please try again.');
+      this.showError('검색에 실패했습니다.');
     }
     
-    // finally 블록 대신 명시적으로 처리
-    console.log('Search completed, setting isLoading to false');
     this.isLoading = false;
     this.updateResultsDisplay();
   }
   
-  /**
-   * Show error message
-   */
+  async loadMore() {
+    if (this.isLoading || !this.hasMore) return;
+    
+    try {
+      this.isLoading = true;
+      const loadMoreBtn = this.querySelector('.chroma-load-more-btn');
+      if (loadMoreBtn) loadMoreBtn.classList.add('loading');
+      
+      this.currentPage++;
+      const offset = (this.currentPage - 1) * this.pageSize;
+      
+      const response = await window.app.apiClient.searchMemories(this.searchQuery, {
+        category: this.selectedCategory || undefined,
+        project_id: this.selectedProject || undefined,
+        limit: this.pageSize,
+        offset: offset
+      });
+      
+      const newResults = response.results || [];
+      this.searchResults = [...this.searchResults, ...newResults];
+      this.hasMore = newResults.length >= this.pageSize;
+      
+      this.appendResults(newResults);
+      
+    } catch (error) {
+      console.error('Load more failed:', error);
+      this.currentPage--;
+    }
+    
+    this.isLoading = false;
+    const loadMoreBtn = this.querySelector('.chroma-load-more-btn');
+    if (loadMoreBtn) loadMoreBtn.classList.remove('loading');
+    this.updateLoadMoreButton();
+  }
+  
   showError(message) {
-    const resultsContainer = this.querySelector('.results-container');
+    const resultsContainer = this.querySelector('.chroma-results-container');
     if (resultsContainer) {
       resultsContainer.innerHTML = `
-        <div class="error-message">
-          <p>⚠️ ${message}</p>
+        <div class="chroma-error-state">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <p>${message}</p>
+          <button class="chroma-retry-btn" onclick="this.closest('search-page').performSearch()">다시 시도</button>
         </div>
       `;
     }
   }
   
-  /**
-   * Update loading state
-   */
-  updateLoadingState() {
-    console.log('updateLoadingState called, isLoading:', this.isLoading);
-    
-    // DOM이 아직 렌더링되지 않았을 수 있으므로 다음 틱에 실행
-    setTimeout(() => {
-      const loadingElement = this.querySelector('.search-loading');
-      const resultsContainer = this.querySelector('.results-container');
-      
-      console.log('Loading element found:', !!loadingElement);
-      console.log('Results container found:', !!resultsContainer);
-      
-      if (loadingElement) {
-        loadingElement.style.display = this.isLoading ? 'flex' : 'none';
-        console.log('Loading element display set to:', loadingElement.style.display);
-      } else {
-        console.warn('Loading element not found in DOM');
-      }
-      
-      if (resultsContainer) {
-        resultsContainer.style.opacity = this.isLoading ? '0.5' : '1';
-        console.log('Results container opacity set to:', resultsContainer.style.opacity);
-      } else {
-        console.warn('Results container not found in DOM');
-      }
-    }, 0);
+  showInitialState() {
+    const resultsContainer = this.querySelector('.chroma-results-container');
+    if (resultsContainer) {
+      resultsContainer.innerHTML = `
+        <div class="chroma-initial-state">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="11" cy="11" r="8"/>
+            <path d="m21 21-4.35-4.35"/>
+          </svg>
+          <h3>메모리 검색</h3>
+          <p>검색어를 입력하거나 필터를 선택하여 메모리를 찾아보세요</p>
+          <div class="chroma-search-tips">
+            <span class="tip-item">💡 <kbd>Ctrl</kbd>+<kbd>K</kbd>로 빠른 검색</span>
+            <span class="tip-item">🏷️ 카테고리 필터로 범위 좁히기</span>
+          </div>
+        </div>
+      `;
+    }
+    this.updateResultsCount(0);
   }
   
-  /**
-   * Update results display
-   */
+  updateLoadingState() {
+    const loadingElement = this.querySelector('.chroma-search-loading');
+    const resultsContainer = this.querySelector('.chroma-results-container');
+    
+    if (loadingElement) {
+      loadingElement.style.display = this.isLoading ? 'flex' : 'none';
+    }
+    
+    if (resultsContainer && this.isLoading) {
+      resultsContainer.style.opacity = '0.5';
+      resultsContainer.style.pointerEvents = 'none';
+    }
+  }
+  
   updateResultsDisplay() {
-    console.log('updateResultsDisplay called with results:', this.searchResults.length);
+    const resultsContainer = this.querySelector('.chroma-results-container');
     
-    const resultsContainer = this.querySelector('.results-container');
-    const resultsCount = this.querySelector('.results-count');
+    if (resultsContainer) {
+      resultsContainer.style.opacity = '1';
+      resultsContainer.style.pointerEvents = 'auto';
+    }
     
-    if (resultsCount) {
-      resultsCount.textContent = `${this.searchResults.length} results found`;
-      console.log('Results count updated to:', resultsCount.textContent);
+    this.updateResultsCount(this.totalResults);
+    
+    if (this.searchResults.length === 0) {
+      this.showNoResults();
+      return;
     }
     
     if (resultsContainer) {
-      if (this.searchResults.length === 0) {
-        resultsContainer.innerHTML = `
-          <div class="no-results">
-            <p><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/><path d="M8 5v4"/><path d="M16 5v4"/><path d="M3 9h18"/></svg> No memories found</p>
-            <p>Try adjusting your search terms or filters</p>
-          </div>
-        `;
-        console.log('No results message displayed');
-      } else {
-        resultsContainer.innerHTML = this.searchResults.map(memory => this.renderMemoryItem(memory)).join('');
-        console.log('Results rendered:', this.searchResults.length, 'items');
-      }
+      resultsContainer.innerHTML = this.searchResults.map(memory => this.renderResultCard(memory)).join('');
     }
     
-    // 로딩 상태 다시 업데이트
-    this.updateLoadingState();
+    this.updateLoadMoreButton();
   }
   
-  /**
-   * Render a single memory item
-   */
-  renderMemoryItem(memory) {
+  appendResults(newResults) {
+    const resultsContainer = this.querySelector('.chroma-results-container');
+    if (resultsContainer && newResults.length > 0) {
+      const newHtml = newResults.map(memory => this.renderResultCard(memory)).join('');
+      resultsContainer.insertAdjacentHTML('beforeend', newHtml);
+    }
+  }
+  
+  showNoResults() {
+    const resultsContainer = this.querySelector('.chroma-results-container');
+    if (resultsContainer) {
+      resultsContainer.innerHTML = `
+        <div class="chroma-no-results">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/>
+            <path d="M8 5v4"/>
+            <path d="M16 5v4"/>
+            <path d="M3 9h18"/>
+          </svg>
+          <h3>검색 결과가 없습니다</h3>
+          <p>다른 검색어나 필터를 시도해보세요</p>
+          <div class="chroma-suggestions-list">
+            <button class="chroma-suggestion-btn" onclick="this.closest('search-page').clearFilters()">
+              필터 초기화
+            </button>
+          </div>
+        </div>
+      `;
+    }
+  }
+  
+  clearFilters() {
+    this.selectedCategory = '';
+    this.selectedProject = '';
+    this.querySelectorAll('.chroma-filter-chip').forEach(c => c.classList.remove('active'));
+    this.querySelector('.chroma-category-select').value = '';
+    this.querySelector('.chroma-project-input').value = '';
+    this.performSearch();
+  }
+  
+  updateResultsCount(count) {
+    const countElement = this.querySelector('.chroma-results-count');
+    if (countElement) {
+      if (count === 0 && !this.searchQuery && !this.selectedCategory) {
+        countElement.textContent = '';
+      } else {
+        countElement.textContent = `${count.toLocaleString()}개의 결과`;
+      }
+    }
+  }
+  
+  updateSortSelection() {
+    this.querySelectorAll('.chroma-sort-option').forEach(opt => {
+      opt.classList.toggle('active', opt.getAttribute('data-sort') === this.sortBy);
+    });
+  }
+  
+  updateLoadMoreButton() {
+    const loadMoreContainer = this.querySelector('.chroma-load-more-container');
+    if (loadMoreContainer) {
+      loadMoreContainer.style.display = this.hasMore ? 'flex' : 'none';
+    }
+  }
+  
+  renderResultCard(memory) {
     const categoryIcons = {
-      task: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><path d="m9 9 2 2 4-4"/></svg>',
-      bug: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="m12 20-5-6 6.5-1 3.5 7Z"/><path d="m8.5 8.5-1 1"/><path d="m16.5 8.5 1 1"/></svg>',
-      idea: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
-      decision: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="7.5,4.21 12,6.81 16.5,4.21"/><polyline points="7.5,19.79 7.5,14.6 3,12"/><polyline points="21,12 16.5,14.6 16.5,19.79"/><polyline points="3.27,6.96 12,12.01 20.73,6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
-      incident: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+      task: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m9 12 2 2 4-4"/></svg>',
+      bug: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3 3 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg>',
+      idea: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v1"/><path d="M12 21v1"/><path d="m4.93 4.93.7.7"/><path d="m18.36 18.36.7.7"/><path d="M2 12h1"/><path d="M21 12h1"/><path d="m4.93 19.07.7-.7"/><path d="m18.36 5.64.7-.7"/><circle cx="12" cy="12" r="4"/></svg>',
+      decision: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>',
+      incident: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
       code_snippet: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16,18 22,12 16,6"/><polyline points="8,6 2,12 8,18"/></svg>'
     };
     
-    const icon = categoryIcons[memory.category] || '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10,9 9,9 8,9"/></svg>';
+    const icon = categoryIcons[memory.category] || '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>';
+    
     const content = this.escapeHtml(memory.content || '');
-    const truncatedContent = content.length > 200 ? content.substring(0, 200) + '...' : content;
-    const date = this.formatDate(memory.created_at);
-    const score = memory.similarity_score ? `${Math.round(memory.similarity_score * 100)}% match` : '';
+    const highlightedContent = this.highlightSearchTerms(content, this.searchQuery);
+    const truncatedContent = highlightedContent.length > 250 
+      ? highlightedContent.substring(0, 250) + '...' 
+      : highlightedContent;
+    
+    const date = this.formatRelativeDate(memory.created_at);
+    const score = memory.similarity_score 
+      ? Math.round(memory.similarity_score * 100) 
+      : null;
     
     return `
-      <div class="memory-item" data-memory-id="${memory.id}">
-        <div class="memory-item-header">
-          <span class="memory-category">${icon} ${memory.category || 'unknown'}</span>
-          ${memory.project_id ? `<span class="memory-project">${memory.project_id}</span>` : ''}
-          ${score ? `<span class="memory-score">${score}</span>` : ''}
+      <article class="chroma-result-card" data-memory-id="${memory.id}" tabindex="0" role="button" aria-label="View memory details">
+        <div class="chroma-result-header">
+          <div class="chroma-result-meta">
+            <span class="chroma-result-category chroma-category-${memory.category || 'default'}">
+              ${icon}
+              <span>${memory.category || 'memory'}</span>
+            </span>
+            ${memory.project_id ? `<span class="chroma-result-project">${memory.project_id}</span>` : ''}
+          </div>
+          ${score !== null ? `
+            <div class="chroma-result-score" title="Relevance score">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/>
+              </svg>
+              <span>${score}%</span>
+            </div>
+          ` : ''}
         </div>
-        <div class="memory-item-content">
+        <div class="chroma-result-content">
           ${truncatedContent}
         </div>
-        <div class="memory-item-footer">
-          <span class="memory-date">${date}</span>
-          <span class="memory-source">${memory.source || 'unknown'}</span>
+        <div class="chroma-result-footer">
+          <span class="chroma-result-date">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12,6 12,12 16,14"/>
+            </svg>
+            ${date}
+          </span>
+          <span class="chroma-result-source">${memory.source || 'unknown'}</span>
         </div>
-      </div>
+      </article>
     `;
   }
   
-  /**
-   * Format date
-   */
-  formatDate(dateStr) {
+  highlightSearchTerms(text, query) {
+    if (!query || !query.trim()) return text;
+    
+    const terms = query.trim().split(/\s+/).filter(t => t.length > 1);
+    let result = text;
+    
+    terms.forEach(term => {
+      const regex = new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+      result = result.replace(regex, '<mark>$1</mark>');
+    });
+    
+    return result;
+  }
+  
+  formatRelativeDate(dateStr) {
     if (!dateStr) return '';
     try {
       const date = new Date(dateStr);
-      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const now = new Date();
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+      
+      if (diffMins < 1) return '방금 전';
+      if (diffMins < 60) return `${diffMins}분 전`;
+      if (diffHours < 24) return `${diffHours}시간 전`;
+      if (diffDays < 7) return `${diffDays}일 전`;
+      
+      return date.toLocaleDateString('ko-KR', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
     } catch {
       return dateStr;
     }
   }
   
-  /**
-   * Escape HTML
-   */
   escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
@@ -443,394 +515,105 @@ class SearchPage extends HTMLElement {
     return div.innerHTML;
   }
   
-  /**
-   * Render the component
-   */
   render() {
-    this.className = 'search-page';
+    this.className = 'search-page chroma-search-page';
     
     this.innerHTML = `
-      <div class="search-header">
-        <h1><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> Search Memories</h1>
-        <p>Find and explore your memory collection</p>
-      </div>
-      
-      <div class="search-form">
-        <div class="search-input-group">
-          <input 
-            type="text" 
-            class="search-input" 
-            placeholder="Search memories..." 
+      <div class="chroma-search-header">
+        <div class="chroma-search-title">
+          <h1>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/>
+              <path d="m21 21-4.35-4.35"/>
+            </svg>
+            메모리 검색
+          </h1>
+          <p>AI 기반 벡터 검색으로 관련 메모리를 찾아보세요</p>
+        </div>
+        
+        <div class="chroma-search-bar-wrapper">
+          <chroma-search-bar 
+            placeholder="검색어를 입력하세요..." 
             value="${this.escapeHtml(this.searchQuery)}"
-            autofocus
-          >
-          <button type="button" class="search-btn">Search</button>
-          <button type="button" class="clear-btn">Clear</button>
-        </div>
-        
-        <div class="search-filters">
-          <select class="category-filter">
-            <option value="">All Categories</option>
-            <option value="task" ${this.selectedCategory === 'task' ? 'selected' : ''}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><path d="m9 9 2 2 4-4"/></svg> Task</option>
-            <option value="bug" ${this.selectedCategory === 'bug' ? 'selected' : ''}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="m12 20-5-6 6.5-1 3.5 7Z"/><path d="m8.5 8.5-1 1"/><path d="m16.5 8.5 1 1"/></svg> Bug</option>
-            <option value="idea" ${this.selectedCategory === 'idea' ? 'selected' : ''}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> Idea</option>
-            <option value="decision" ${this.selectedCategory === 'decision' ? 'selected' : ''}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="7.5,4.21 12,6.81 16.5,4.21"/><polyline points="7.5,19.79 7.5,14.6 3,12"/><polyline points="21,12 16.5,14.6 16.5,19.79"/><polyline points="3.27,6.96 12,12.01 20.73,6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg> Decision</option>
-            <option value="incident" ${this.selectedCategory === 'incident' ? 'selected' : ''}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> Incident</option>
-            <option value="code_snippet" ${this.selectedCategory === 'code_snippet' ? 'selected' : ''}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16,18 22,12 16,6"/><polyline points="8,6 2,12 8,18"/></svg> Code Snippet</option>
-          </select>
-          
-          <input 
-            type="text" 
-            class="project-filter" 
-            placeholder="Filter by project..."
-            value="${this.escapeHtml(this.selectedProject)}"
-          >
+            variant="hero"
+          ></chroma-search-bar>
         </div>
       </div>
       
-      <div class="search-results">
-        <div class="results-header">
-          <span class="results-count">Loading...</span>
-        </div>
-        
-        <div class="search-loading" style="display: none;">
-          <div class="loading-spinner"></div>
-          <p>Searching...</p>
-        </div>
-        
-        <div class="results-container">
-          <div class="initial-message">
-            <p><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> Enter a search term or browse all memories</p>
+      <div class="chroma-search-body">
+        <aside class="chroma-search-sidebar">
+          <div class="chroma-filter-section">
+            <h3>카테고리</h3>
+            <div class="chroma-filter-chips">
+              <button class="chroma-filter-chip ${!this.selectedCategory ? 'active' : ''}" data-filter-type="category" data-filter-value="">
+                전체
+              </button>
+              <button class="chroma-filter-chip ${this.selectedCategory === 'task' ? 'active' : ''}" data-filter-type="category" data-filter-value="task">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m9 12 2 2 4-4"/></svg>
+                Task
+              </button>
+              <button class="chroma-filter-chip ${this.selectedCategory === 'bug' ? 'active' : ''}" data-filter-type="category" data-filter-value="bug">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                Bug
+              </button>
+              <button class="chroma-filter-chip ${this.selectedCategory === 'idea' ? 'active' : ''}" data-filter-type="category" data-filter-value="idea">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v1"/><path d="M12 21v1"/></svg>
+                Idea
+              </button>
+              <button class="chroma-filter-chip ${this.selectedCategory === 'decision' ? 'active' : ''}" data-filter-type="category" data-filter-value="decision">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>
+                Decision
+              </button>
+              <button class="chroma-filter-chip ${this.selectedCategory === 'code_snippet' ? 'active' : ''}" data-filter-type="category" data-filter-value="code_snippet">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16,18 22,12 16,6"/><polyline points="8,6 2,12 8,18"/></svg>
+                Code
+              </button>
+            </div>
           </div>
-        </div>
+          
+          <div class="chroma-filter-section">
+            <h3>프로젝트</h3>
+            <input 
+              type="text" 
+              class="chroma-project-input" 
+              placeholder="프로젝트 ID..."
+              value="${this.escapeHtml(this.selectedProject)}"
+            >
+          </div>
+        </aside>
+        
+        <main class="chroma-search-main">
+          <div class="chroma-results-header">
+            <span class="chroma-results-count"></span>
+            <div class="chroma-sort-options">
+              <button class="chroma-sort-option ${this.sortBy === 'relevance' ? 'active' : ''}" data-sort="relevance">관련도순</button>
+              <button class="chroma-sort-option ${this.sortBy === 'recent' ? 'active' : ''}" data-sort="recent">최신순</button>
+            </div>
+          </div>
+          
+          <div class="chroma-search-loading" style="display: none;">
+            <div class="chroma-loading-spinner"></div>
+            <p>검색 중...</p>
+          </div>
+          
+          <div class="chroma-results-container"></div>
+          
+          <div class="chroma-load-more-container" style="display: none;">
+            <button class="chroma-load-more-btn">
+              <span class="btn-text">더 보기</span>
+              <span class="btn-loading">
+                <svg class="spinner" width="16" height="16" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="32" stroke-linecap="round"/>
+                </svg>
+              </span>
+            </button>
+          </div>
+        </main>
       </div>
     `;
   }
 }
 
-// Define the custom element
 customElements.define('search-page', SearchPage);
-
-// Add component styles
-const style = document.createElement('style');
-style.textContent = `
-  .search-page {
-    padding: 2rem;
-    max-width: 1000px;
-    margin: 0 auto;
-  }
-  
-  .search-header {
-    text-align: center;
-    margin-bottom: 2rem;
-  }
-  
-  .search-header h1 {
-    margin: 0 0 0.5rem 0;
-    font-size: 2rem;
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  
-  .search-header h1 svg {
-    width: 24px;
-    height: 24px;
-    stroke: currentColor;
-  }
-  
-  .search-header p {
-    margin: 0;
-    color: var(--text-secondary);
-  }
-  
-  .search-form {
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
-    padding: 1.5rem;
-    margin-bottom: 2rem;
-  }
-  
-  .search-input-group {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-  }
-  
-  .search-input {
-    flex: 1;
-    padding: 0.75rem 1rem;
-    border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    font-size: 1rem;
-  }
-  
-  .search-input:focus {
-    outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-  }
-  
-  .search-btn {
-    padding: 0.75rem 1.5rem;
-    background: var(--primary-color);
-    color: white;
-    border: none;
-    border-radius: var(--border-radius);
-    cursor: pointer;
-    font-size: 1rem;
-    font-weight: 500;
-    transition: var(--transition);
-  }
-  
-  .search-btn:hover {
-    background: var(--primary-hover);
-  }
-  
-  .clear-btn {
-    padding: 0.75rem 1rem;
-    background: var(--bg-secondary);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
-    cursor: pointer;
-    font-size: 1rem;
-    transition: var(--transition);
-  }
-  
-  .clear-btn:hover {
-    background: var(--error-color);
-    color: white;
-    border-color: var(--error-color);
-  }
-  
-  .search-filters {
-    display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-  
-  .category-filter,
-  .project-filter {
-    padding: 0.5rem 1rem;
-    border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    font-size: 0.875rem;
-    min-width: 150px;
-  }
-  
-  .project-filter {
-    flex: 1;
-    max-width: 300px;
-  }
-  
-  .search-results {
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
-    overflow: hidden;
-  }
-  
-  .results-header {
-    padding: 1rem 1.5rem;
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border-color);
-  }
-  
-  .results-count {
-    font-weight: 500;
-    color: var(--text-primary);
-  }
-  
-  .search-loading {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 3rem;
-    color: var(--text-muted);
-  }
-  
-  .loading-spinner {
-    width: 2rem;
-    height: 2rem;
-    border: 2px solid var(--border-color);
-    border-top: 2px solid var(--primary-color);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin-bottom: 1rem;
-  }
-  
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-  
-  .results-container {
-    padding: 1rem;
-  }
-  
-  .no-results {
-    text-align: center;
-    padding: 3rem;
-    color: var(--text-muted);
-  }
-  
-  .no-results p {
-    margin: 0.5rem 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-  }
-  
-  .no-results p svg {
-    width: 24px;
-    height: 24px;
-    stroke: currentColor;
-  }
-  
-  .initial-message p {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-  }
-  
-  .initial-message p svg {
-    width: 24px;
-    height: 24px;
-    stroke: currentColor;
-  }
-  
-  .error-message {
-    text-align: center;
-    padding: 2rem;
-    color: var(--error-color);
-  }
-  
-  .memory-item {
-    padding: 1rem 1.5rem;
-    border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
-    margin-bottom: 0.75rem;
-    background: var(--bg-secondary);
-    cursor: pointer;
-    transition: var(--transition);
-  }
-  
-  .memory-item:last-child {
-    margin-bottom: 0;
-  }
-  
-  .memory-item:hover {
-    border-color: var(--primary-color);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    transform: translateY(-1px);
-  }
-  
-  .memory-item-header {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    margin-bottom: 0.75rem;
-    flex-wrap: wrap;
-  }
-  
-  .memory-category {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-    text-transform: capitalize;
-    background: var(--bg-tertiary);
-    padding: 0.25rem 0.5rem;
-    border-radius: var(--border-radius-sm);
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-  }
-  
-  .memory-category svg {
-    width: 16px;
-    height: 16px;
-    stroke: currentColor;
-    flex-shrink: 0;
-  }
-  
-  .memory-project {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: white;
-    background: var(--primary-color);
-    padding: 0.25rem 0.5rem;
-    border-radius: var(--border-radius-sm);
-  }
-  
-  .memory-score {
-    font-size: 0.75rem;
-    color: var(--success-color);
-    font-weight: 500;
-    margin-left: auto;
-  }
-  
-  .memory-item-content {
-    font-size: 0.9375rem;
-    color: var(--text-primary);
-    line-height: 1.6;
-    margin-bottom: 0.75rem;
-  }
-  
-  .memory-item-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 0.75rem;
-    color: var(--text-muted);
-  }
-  
-  /* Responsive Design */
-  @media (max-width: 768px) {
-    .search-page {
-      padding: 1rem;
-    }
-    
-    .search-input-group {
-      flex-direction: column;
-    }
-    
-    .search-btn,
-    .clear-btn {
-      width: 100%;
-    }
-    
-    .search-filters {
-      flex-direction: column;
-    }
-    
-    .category-filter,
-    .project-filter {
-      width: 100%;
-      max-width: none;
-    }
-    
-    .memory-item-header {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.5rem;
-    }
-    
-    .memory-score {
-      margin-left: 0;
-    }
-  }
-`;
-
-document.head.appendChild(style);
 
 export { SearchPage };

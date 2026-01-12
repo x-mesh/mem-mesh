@@ -871,7 +871,7 @@ customElements.define('memory-detail-page', MemoryDetailPage);
 const style = document.createElement('style');
 style.textContent = `
   .memory-detail-page {
-    padding: 2rem;
+    padding: var(--space-6) 0; /* 상하 패딩만 유지, 좌우는 main-content에서 처리 */
     max-width: 1400px;
     margin: 0 auto;
   }
@@ -1333,7 +1333,7 @@ style.textContent = `
   
   @media (max-width: 768px) {
     .memory-detail-page {
-      padding: 1rem;
+      padding: var(--space-4) 0; /* 모바일에서 상하 패딩 줄임 */
     }
     
     .header-actions {

@@ -527,7 +527,7 @@ customElements.define('projects-page', ProjectsPage);
 const style = document.createElement('style');
 style.textContent = `
   .projects-page {
-    padding: 2rem;
+    padding: var(--space-6) 0; /* 상하 패딩만 유지, 좌우는 main-content에서 처리 */
     max-width: 1200px;
     margin: 0 auto;
   }
@@ -858,7 +858,7 @@ style.textContent = `
   /* Responsive design */
   @media (max-width: 768px) {
     .projects-page {
-      padding: 1rem;
+      padding: var(--space-4) 0; /* 모바일에서 상하 패딩 줄임 */
     }
     
     .page-header {

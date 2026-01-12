@@ -18,9 +18,15 @@ import { SearchBar } from './components/search-bar.js';
 import { FilterPanel } from './components/filter-panel.js';
 import { ContextTimeline } from './components/context-timeline.js';
 import { NetworkGraph } from './components/network-graph.js';
+import { HeroSection } from './components/hero-section.js';
+import { FeaturesSection } from './components/features-section.js';
+import { FeatureCard } from './components/feature-card.js';
+import ChromaHeader from './components/chroma-header.js';
+import { ChromaSearchBar } from './components/chroma-search-bar.js';
 
 // Import pages
 import { DashboardPage } from './pages/dashboard.js';
+import { AboutPage } from './pages/about.js';
 import { SearchPage } from './pages/search.js';
 import { MemoryDetailPage } from './pages/memory-detail.js';
 import { CreateMemoryPage } from './pages/create-memory.js';
@@ -88,6 +94,7 @@ class App {
    */
   registerPages() {
     // Only register pages that actually exist
+    this.pages.set('about', AboutPage);
     this.pages.set('dashboard', DashboardPage);
     this.pages.set('search', SearchPage);
     this.pages.set('memory-detail', MemoryDetailPage);
@@ -101,7 +108,9 @@ class App {
    * Register all routes
    */
   registerRoutes() {
-    this.router.register('/', () => this.renderPage('dashboard'));
+    this.router.register('/', () => this.renderPage('about'));
+    this.router.register('/about', () => this.renderPage('about'));
+    this.router.register('/dashboard', () => this.renderPage('dashboard'));
     this.router.register('/search', () => this.renderPage('search'));
     this.router.register('/memory/:id', (params) => this.renderPage('memory-detail', params));
     this.router.register('/create', () => this.renderPage('create-memory'));
@@ -212,6 +221,9 @@ class App {
       // Create and append page element
       let pageElement;
       switch (pageName) {
+        case 'about':
+          pageElement = document.createElement('about-page');
+          break;
         case 'dashboard':
           pageElement = document.createElement('dashboard-page');
           break;
@@ -266,12 +278,14 @@ class App {
    * Update navigation active state
    */
   updateNavigation(pageName) {
-    const navLinks = document.querySelectorAll('.nav-link');
+    const navLinks = document.querySelectorAll('.nav-link, .mobile-nav-link');
     navLinks.forEach(link => {
       link.classList.remove('active');
       const route = link.getAttribute('data-route');
       if (
-        (route === '/' && pageName === 'dashboard') ||
+        (route === '/' && pageName === 'about') ||
+        (route === '/about' && pageName === 'about') ||
+        (route === '/dashboard' && pageName === 'dashboard') ||
         (route === '/search' && pageName === 'search') ||
         (route === '/projects' && pageName === 'projects') ||
         (route === '/analytics' && pageName === 'analytics')

@@ -636,7 +636,7 @@ style.textContent = `
   .create-memory-page {
     max-width: 800px;
     margin: 0 auto;
-    padding: 2rem;
+    padding: var(--space-6) 0; /* 상하 패딩만 유지, 좌우는 main-content에서 처리 */
   }
   
   .page-header {
@@ -914,7 +914,7 @@ style.textContent = `
   /* Responsive design */
   @media (max-width: 768px) {
     .create-memory-page {
-      padding: 1rem;
+      padding: var(--space-4) 0; /* 모바일에서 상하 패딩 줄임 */
     }
     
     .page-header {

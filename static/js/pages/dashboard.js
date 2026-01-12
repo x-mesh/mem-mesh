@@ -601,9 +601,17 @@ customElements.define('dashboard-page', DashboardPage);
 const style = document.createElement('style');
 style.textContent = `
   .dashboard-page {
-    padding: 2rem;
-    max-width: 1200px;
+    padding: var(--space-6) 0; /* 상하 패딩만 유지, 좌우는 main-content에서 처리 */
+    max-width: var(--container-xl);
     margin: 0 auto;
+  }
+  
+  .dashboard-page .dashboard-header {
+    margin-bottom: var(--space-8);
+  }
+  
+  .dashboard-page .dashboard-content {
+    /* No additional constraints needed */
   }
   
   .dashboard-header {
@@ -904,7 +912,7 @@ style.textContent = `
   /* Responsive Design */
   @media (max-width: 768px) {
     .dashboard-page {
-      padding: 1rem;
+      padding: var(--space-4) 0; /* 모바일에서 상하 패딩 줄임 */
     }
     
     .dashboard-header {

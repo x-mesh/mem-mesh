@@ -11,38 +11,8 @@
 </head>
 <body>
   <div id="app">
-    <!-- Header -->
-    <header class="app-header">
-      <div class="header-content">
-        <h1 class="logo">
-          <svg class="logo-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-          </svg>
-          mem-mesh
-        </h1>
-        <nav class="main-nav">
-          <a href="/" class="nav-link" data-route="/">Dashboard</a>
-          <a href="/search" class="nav-link" data-route="/search">Search</a>
-          <a href="/projects" class="nav-link" data-route="/projects">Projects</a>
-          <a href="/analytics" class="nav-link" data-route="/analytics">Analytics</a>
-        </nav>
-        <div class="header-actions">
-          <button id="theme-toggle" class="icon-button" title="Toggle theme">
-            <svg class="theme-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-            </svg>
-          </button>
-          <button id="create-memory" class="btn-primary" data-route="/create">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            New Memory
-          </button>
-        </div>
-      </div>
-    </header>
+    <!-- Chroma Header -->
+    <chroma-header></chroma-header>
     
     <!-- Main Content -->
     <main id="main-content" class="main-content">

@@ -1,1 +1,8 @@
 ./data/**
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info
+__pycache__/
