@@ -1,7 +1,7 @@
 """FastAPI Web 서버 진입점"""
 import argparse
 import uvicorn
-from ..core.config import Settings
+from app.core.config import Settings
 
 
 def main():
@@ -15,12 +15,16 @@ def main():
     settings = Settings()
     
     uvicorn.run(
-        "app.web.main:app",
+        "app.web.app:app",
         host=args.host or settings.server_host,
         port=args.port or settings.server_port,
         reload=args.reload,
         log_level=settings.log_level.lower()
     )
+
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()

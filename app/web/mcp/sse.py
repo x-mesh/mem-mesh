@@ -20,10 +20,10 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
-from ..mcp_common.tools import MCPToolHandlers
-from ..mcp_common.schemas import get_tool_schemas
-from ..core.version import SERVER_INFO, MCP_PROTOCOL_VERSION
-from ..core.storage.base import StorageBackend
+from app.mcp_common.tools import MCPToolHandlers
+from app.mcp_common.schemas import get_tool_schemas
+from app.core.version import SERVER_INFO, MCP_PROTOCOL_VERSION
+from app.core.storage.base import StorageBackend
 
 logger = logging.getLogger(__name__)
 
