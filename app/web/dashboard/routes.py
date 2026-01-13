@@ -4,6 +4,7 @@ Dashboard REST API 라우터.
 메모리 관리, 검색, 통계, 임베딩 관리 등의 API 엔드포인트를 제공합니다.
 """
 
+import json
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 
@@ -60,10 +61,23 @@ async def add_memory(
             tags=params.tags
         )
         
-        # WebSocket 실시간 알림 전송
+        # WebSocket 실시간 알림 전송 - 완전한 메모리 데이터 조회 후 전송
         try:
             from ..websocket.realtime import notifier
-            await notifier.notify_memory_created(result.model_dump())
+            # 생성된 메모리의 완전한 데이터 조회
+            memory = await service.get(result.id)
+            if memory:
+                memory_data = {
+                    "id": memory.id,
+                    "content": memory.content,
+                    "project_id": memory.project_id,
+                    "category": memory.category,
+                    "tags": json.loads(memory.tags) if memory.tags else [],
+                    "source": memory.source,
+                    "created_at": memory.created_at,
+                    "updated_at": memory.updated_at
+                }
+                await notifier.notify_memory_created(memory_data)
         except Exception as e:
             logger.warning(f"Failed to send WebSocket notification: {e}")
         
@@ -235,10 +249,23 @@ async def update_memory(
             tags=params.tags
         )
         
-        # WebSocket 실시간 알림 전송
+        # WebSocket 실시간 알림 전송 - 완전한 메모리 데이터 조회 후 전송
         try:
             from ..websocket.realtime import notifier
-            await notifier.notify_memory_updated(memory_id, result.model_dump())
+            # 업데이트된 메모리의 완전한 데이터 조회
+            memory = await service.get(memory_id)
+            if memory:
+                memory_data = {
+                    "id": memory.id,
+                    "content": memory.content,
+                    "project_id": memory.project_id,
+                    "category": memory.category,
+                    "tags": json.loads(memory.tags) if memory.tags else [],
+                    "source": memory.source,
+                    "created_at": memory.created_at,
+                    "updated_at": memory.updated_at
+                }
+                await notifier.notify_memory_updated(memory_id, memory_data)
         except Exception as e:
             logger.warning(f"Failed to send WebSocket notification: {e}")
         

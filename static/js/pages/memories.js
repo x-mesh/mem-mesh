@@ -152,8 +152,6 @@ class MemoriesPage extends HTMLElement {
       this.showConnectionStatus('error');
     });
   }
-    });
-  }
 
   /**
    * Connect WebSocket
