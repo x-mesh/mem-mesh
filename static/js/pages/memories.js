@@ -74,12 +74,14 @@ class MemoriesPage extends HTMLElement {
     console.log('MemoriesPage disconnected');
     
     // WebSocket 이벤트 리스너 제거
-    wsClient.off('memory_created', this.handleMemoryCreated);
-    wsClient.off('memory_updated', this.handleMemoryUpdated);
-    wsClient.off('memory_deleted', this.handleMemoryDeleted);
-    wsClient.off('connected', this.showConnectionStatus);
-    wsClient.off('disconnected', this.showConnectionStatus);
-    wsClient.off('error', this.showConnectionStatus);
+    if (this._boundHandlers) {
+      wsClient.off('memory_created', this._boundHandlers.memoryCreated);
+      wsClient.off('memory_updated', this._boundHandlers.memoryUpdated);
+      wsClient.off('memory_deleted', this._boundHandlers.memoryDeleted);
+      wsClient.off('connected', this._boundHandlers.connected);
+      wsClient.off('disconnected', this._boundHandlers.disconnected);
+      wsClient.off('error', this._boundHandlers.error);
+    }
     
     // 프로젝트 구독 해제
     if (this.viewParams.project_id) {
@@ -118,39 +120,38 @@ class MemoriesPage extends HTMLElement {
   setupWebSocketListeners() {
     console.log('MemoriesPage: Setting up WebSocket listeners');
     
+    // 바인딩된 핸들러를 저장 (제거할 때 사용)
+    this._boundHandlers = {
+      memoryCreated: this.handleMemoryCreated.bind(this),
+      memoryUpdated: this.handleMemoryUpdated.bind(this),
+      memoryDeleted: this.handleMemoryDeleted.bind(this),
+      connected: () => {
+        console.log('MemoriesPage: WebSocket connected');
+        this.showConnectionStatus('connected');
+      },
+      disconnected: () => {
+        console.log('MemoriesPage: WebSocket disconnected');
+        this.showConnectionStatus('disconnected');
+      },
+      error: (error) => {
+        console.error('MemoriesPage: WebSocket error:', error);
+        this.showConnectionStatus('error');
+      }
+    };
+    
     // 메모리 생성 이벤트
-    wsClient.on('memory_created', (data) => {
-      console.log('MemoriesPage: Memory created via WebSocket:', data);
-      this.handleMemoryCreated(data);
-    });
+    wsClient.on('memory_created', this._boundHandlers.memoryCreated);
     
     // 메모리 업데이트 이벤트
-    wsClient.on('memory_updated', (data) => {
-      console.log('MemoriesPage: Memory updated via WebSocket:', data);
-      this.handleMemoryUpdated(data);
-    });
+    wsClient.on('memory_updated', this._boundHandlers.memoryUpdated);
     
     // 메모리 삭제 이벤트
-    wsClient.on('memory_deleted', (data) => {
-      console.log('MemoriesPage: Memory deleted via WebSocket:', data);
-      this.handleMemoryDeleted(data);
-    });
+    wsClient.on('memory_deleted', this._boundHandlers.memoryDeleted);
     
     // 연결 상태 이벤트
-    wsClient.on('connected', () => {
-      console.log('MemoriesPage: WebSocket connected');
-      this.showConnectionStatus('connected');
-    });
-    
-    wsClient.on('disconnected', () => {
-      console.log('MemoriesPage: WebSocket disconnected');
-      this.showConnectionStatus('disconnected');
-    });
-    
-    wsClient.on('error', (error) => {
-      console.error('MemoriesPage: WebSocket error:', error);
-      this.showConnectionStatus('error');
-    });
+    wsClient.on('connected', this._boundHandlers.connected);
+    wsClient.on('disconnected', this._boundHandlers.disconnected);
+    wsClient.on('error', this._boundHandlers.error);
   }
 
   /**
@@ -189,6 +190,13 @@ class MemoriesPage extends HTMLElement {
       created_at: memory?.created_at,
       updated_at: memory?.updated_at
     });
+    
+    // 중복 체크: 이미 존재하는 메모리인지 확인
+    const existingIndex = this.memories.findIndex(m => m.id === memory.id);
+    if (existingIndex !== -1) {
+      console.log('MemoriesPage: Memory already exists, ignoring duplicate');
+      return;
+    }
     
     // 현재 필터 조건에 맞는지 확인
     if (this.shouldIncludeMemory(memory)) {
