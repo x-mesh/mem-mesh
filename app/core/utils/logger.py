@@ -1,8 +1,13 @@
 """
-Enhanced structured JSON logging module for mem-mesh server with file logging support.
+Enhanced structured logging module for mem-mesh server with file logging support.
 
-This module provides structured logging with JSON format output,
+This module provides structured logging with configurable format (JSON or text),
 configurable log levels, file logging, and performance monitoring capabilities.
+
+환경변수:
+- MCP_LOG_LEVEL: 로그 레벨 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+- MCP_LOG_FILE: 로그 파일 경로 (선택)
+- MCP_LOG_FORMAT: 로그 형식 (json 또는 text, 기본값: text)
 """
 
 import json
@@ -10,7 +15,7 @@ import logging
 import sys
 import time
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from contextlib import contextmanager
 from pathlib import Path
@@ -21,37 +26,22 @@ from ..config import Settings
 class JSONFormatter(logging.Formatter):
     """
     Custom JSON formatter for structured logging.
-    
-    Formats log records as JSON with consistent structure including
-    timestamp, level, message, and additional context fields.
     """
     
     def format(self, record: logging.LogRecord) -> str:
-        """
-        Format log record as JSON string.
-        
-        Args:
-            record: The log record to format
-            
-        Returns:
-            str: JSON formatted log message
-        """
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
         }
         
-        # Add extra fields if present
         if hasattr(record, "extra_fields"):
             log_entry.update(record.extra_fields)
         
-        # Add exception info if present
         if record.exc_info:
             log_entry["exception"] = self.formatException(record.exc_info)
         
-        # Add request context if available
         if hasattr(record, "request_id"):
             log_entry["request_id"] = record.request_id
         
@@ -67,28 +57,50 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_entry, ensure_ascii=False)
 
 
+class TextFormatter(logging.Formatter):
+    """
+    Human-readable text formatter for logging.
+    """
+    
+    def __init__(self):
+        super().__init__(
+            fmt="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+    
+    def format(self, record: logging.LogRecord) -> str:
+        # 기본 메시지 포맷
+        base_message = super().format(record)
+        
+        # extra_fields가 있으면 추가
+        if hasattr(record, "extra_fields") and record.extra_fields:
+            extras = ", ".join(f"{k}={v}" for k, v in record.extra_fields.items())
+            base_message = f"{base_message} [{extras}]"
+        
+        return base_message
+
+
+def get_formatter() -> logging.Formatter:
+    """환경변수에 따라 적절한 formatter 반환"""
+    log_format = os.getenv("MCP_LOG_FORMAT", "text").lower()
+    
+    if log_format == "json":
+        return JSONFormatter()
+    else:
+        return TextFormatter()
+
+
 class MemMeshLogger:
     """
-    Main logger class for mem-mesh with structured JSON logging and file support.
-    
-    Provides methods for logging with additional context and
-    performance monitoring capabilities.
+    Main logger class for mem-mesh with structured logging and file support.
     """
     
     def __init__(self, name: str = "mem-mesh"):
-        """
-        Initialize logger with JSON formatting.
-        
-        Args:
-            name: Logger name (default: "mem-mesh")
-        """
         self.logger = logging.getLogger(name)
         self._setup_logger()
     
     def _setup_logger(self) -> None:
-        """Setup logger with JSON formatter and appropriate handlers."""
-        settings = Settings()
-        
+        """Setup logger with appropriate formatter and handlers."""
         # Clear existing handlers
         self.logger.handlers.clear()
         
@@ -97,10 +109,13 @@ class MemMeshLogger:
         log_level = getattr(logging, log_level_str, logging.INFO)
         self.logger.setLevel(log_level)
         
-        # Create console handler with JSON formatter
+        # Get formatter based on environment
+        formatter = get_formatter()
+        
+        # Create console handler
         console_handler = logging.StreamHandler(sys.stderr)
         console_handler.setLevel(log_level)
-        console_handler.setFormatter(JSONFormatter())
+        console_handler.setFormatter(formatter)
         self.logger.addHandler(console_handler)
         
         # Add file handler if MCP_LOG_FILE environment variable is set
@@ -111,7 +126,7 @@ class MemMeshLogger:
             
             file_handler = logging.FileHandler(log_file, encoding='utf-8')
             file_handler.setLevel(log_level)
-            file_handler.setFormatter(JSONFormatter())
+            file_handler.setFormatter(formatter)
             self.logger.addHandler(file_handler)
         
         # Prevent duplicate logs from parent loggers
@@ -138,14 +153,6 @@ class MemMeshLogger:
         self._log_with_extra(logging.CRITICAL, message, kwargs)
     
     def _log_with_extra(self, level: int, message: str, extra_fields: Dict[str, Any]) -> None:
-        """
-        Log message with extra fields.
-        
-        Args:
-            level: Log level
-            message: Log message
-            extra_fields: Additional fields to include in log
-        """
         record = self.logger.makeRecord(
             self.logger.name, level, "", 0, message, (), None
         )
@@ -154,18 +161,7 @@ class MemMeshLogger:
 
     @contextmanager
     def log_duration(self, operation: str, **context):
-        """
-        Context manager to log operation duration.
-        
-        Args:
-            operation: Name of the operation being timed
-            **context: Additional context to include in logs
-            
-        Usage:
-            with logger.log_duration("embedding_generation", model="MiniLM"):
-                # operation code here
-                pass
-        """
+        """Context manager to log operation duration."""
         start_time = time.time()
         self.debug(f"Starting {operation}", operation=operation, **context)
         
@@ -191,16 +187,7 @@ class MemMeshLogger:
     
     def log_request(self, method: str, path: str, duration_ms: float, 
                    status_code: Optional[int] = None, **context) -> None:
-        """
-        Log HTTP request with timing information.
-        
-        Args:
-            method: HTTP method
-            path: Request path
-            duration_ms: Request duration in milliseconds
-            status_code: HTTP status code (optional)
-            **context: Additional context fields
-        """
+        """Log HTTP request with timing information."""
         log_data = {
             "method": method,
             "path": path,
@@ -211,30 +198,10 @@ class MemMeshLogger:
         if status_code:
             log_data["status_code"] = status_code
         
-        # Log as warning if request is slow
         if duration_ms > 200:
             self.warning("Slow request detected", **log_data)
         else:
             self.info("Request processed", **log_data)
-    
-    def log_performance_warning(self, operation: str, duration_ms: float, 
-                               threshold_ms: float, **context) -> None:
-        """
-        Log performance warning when operation exceeds threshold.
-        
-        Args:
-            operation: Operation name
-            duration_ms: Actual duration
-            threshold_ms: Expected threshold
-            **context: Additional context
-        """
-        self.warning(
-            f"{operation} exceeded performance threshold",
-            operation=operation,
-            duration_ms=round(duration_ms, 2),
-            threshold_ms=threshold_ms,
-            **context
-        )
 
 
 # Global logger instance
@@ -242,31 +209,20 @@ logger = MemMeshLogger()
 
 
 def get_logger(name: str = "mem-mesh") -> MemMeshLogger:
-    """
-    Get a logger instance.
-    
-    Args:
-        name: Logger name
-        
-    Returns:
-        MemMeshLogger: Logger instance
-    """
+    """Get a logger instance."""
     return MemMeshLogger(name)
 
 
 def setup_logging() -> None:
-    """
-    Setup global logging configuration.
-    
-    This function should be called once at application startup
-    to configure logging according to the current settings.
-    """
+    """Setup global logging configuration."""
     global logger
     logger = MemMeshLogger()
     
     log_level = os.getenv("MCP_LOG_LEVEL", "INFO")
     log_file = os.getenv("MCP_LOG_FILE", "")
+    log_format = os.getenv("MCP_LOG_FORMAT", "text")
     
     logger.info("Logging system initialized", 
                 log_level=log_level, 
+                log_format=log_format,
                 log_file=log_file if log_file else "console_only")
