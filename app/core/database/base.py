@@ -380,9 +380,26 @@ class Database:
         """데이터베이스 연결 종료"""
         async with self._lock:
             if self.connection:
-                self.connection.close()
-                self.connection = None
-                logger.info("Database connection closed")
+                try:
+                    # 진행 중인 트랜잭션 커밋
+                    self.connection.commit()
+                except Exception as e:
+                    logger.warning(f"Error committing final transaction: {e}")
+                
+                try:
+                    # WAL 체크포인트 실행 (변경사항을 메인 DB 파일에 반영)
+                    self.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except Exception as e:
+                    logger.warning(f"Error during WAL checkpoint: {e}")
+                
+                try:
+                    # 연결 종료
+                    self.connection.close()
+                    logger.info("Database connection closed")
+                except Exception as e:
+                    logger.warning(f"Error closing database connection: {e}")
+                finally:
+                    self.connection = None
     
     async def execute(self, query: str, params: Tuple = ()) -> sqlite3.Cursor:
         """쿼리 실행"""

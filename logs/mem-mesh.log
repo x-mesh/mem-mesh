@@ -260,3 +260,214 @@
 - 세션 종료 시 → 진행 상황을 Mem-Mesh에 기록
 - 검색 시 → Mem-Mesh로 관련 컨텍스트 찾고 Beads에서 작업 확인, tags=['architecture', 'context-management', 'beads', 'mem-mesh', 'hybrid-model', 'knowledge-management'], source=mcp]
 2026-01-14 00:02:20 - INFO - mcp-tools - Successfully added memory [memory_id=0bbb7a78-8afc-4666-89c3-bde7854fa8cf]
+2026-01-14 00:28:21 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:28:38 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:28:41 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:28:57 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:29:43 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:29:47 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:29:47 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:29:47 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:29:47 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:29:47 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:29:47 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:29:47 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:29:51 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:29:51 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:29:51 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 00:30:03 - DEBUG - mcp-tools - Tool add called [project_id=kiro-conversations, category=bug, content_length=351, content=mem-mesh 웹 서버 실행 오류 해결
+
+문제: python -m app.web --reload 실행 시 "[Errno 8] nodename nor servname provided, or not known" 오류 발생
+
+원인: .env 파일의 MEM_MESH_SERVER_HOST 설정에 오타가 있었음
+- 잘못된 값: "1ㅁ27.0.0.1" (한글 문자 포함)
+- 올바른 값: "127.0.0.1"
+
+해결: .env 파일에서 호스트 주소를 올바르게 수정
+
+결과: 서버가 정상적으로 시작됨
+- http://127.0.0.1:8000에서 실행 중
+- WebSocket 실시간 업데이트 기능 포함
+- MCP SSE 엔드포인트 활성화, tags=['server-error', 'dns-error', 'configuration', 'env-file', 'host-setting'], source=mcp-sse]
+2026-01-14 00:30:07 - INFO - mcp-tools - Successfully added memory [memory_id=f9e76a4d-0a0f-4d84-8835-5b42b845b38c]
+2026-01-14 00:31:14 - DEBUG - mcp-tools - Tool add called [project_id=kiro-conversations, category=task, content_length=282, content=사용자가 메모리 저장 요청
+
+사용자가 간단히 "메모리에 저장해"라고 요청했습니다. 이는 현재 작업 내용이나 대화 내용을 mem-mesh 시스템에 저장하라는 의미로 해석됩니다.
+
+현재 컨텍스트:
+- WebSocket 실시간 업데이트 시스템 구현 완료
+- 서버 실행 오류 해결 (DNS 설정 문제)
+- mem-mesh 웹 서버가 정상적으로 실행 중 (http://127.0.0.1:8000)
+- 실시간 메모리 업데이트 기능 활성화
+
+작업 상태: 완료된 기능들이 정상 작동하며 사용자가 추가 저장을 요청한 상황, tags=['memory-storage', 'user-request', 'simple-command'], source=mcp-sse]
+2026-01-14 00:31:14 - INFO - mcp-tools - Successfully added memory [memory_id=0dc70c42-4e81-4453-8757-c5fcebe9c90b]
+2026-01-14 00:32:07 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:32:10 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:32:10 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:32:10 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:32:10 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:32:10 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:32:10 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:32:10 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:32:14 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:32:14 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:32:14 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 00:37:48 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:37:51 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:37:51 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:37:51 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:37:51 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:37:51 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:37:51 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:37:51 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:37:54 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:37:54 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:37:55 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 00:37:55 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:39:00 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:39:03 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:39:03 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:39:03 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:39:03 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:39:03 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:39:03 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:39:03 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:39:07 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:39:07 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:39:07 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 00:39:12 - DEBUG - mcp-tools - Tool add called [project_id=None, category=task, content_length=19, content=Test memory via SSE, tags=None, source=mcp-sse]
+2026-01-14 00:39:16 - INFO - mcp-tools - Successfully added memory [memory_id=2dabb15e-ae6e-41bb-add0-972ca800a414]
+2026-01-14 00:39:19 - DEBUG - mcp-tools - Tool add called [project_id=None, category=task, content_length=19, content=Test memory via SSE, tags=None, source=mcp-sse]
+2026-01-14 00:39:19 - INFO - mcp-tools - Successfully added memory [memory_id=0923277b-4826-4cc7-9cf5-0e38000a9bec]
+2026-01-14 00:39:43 - DEBUG - mcp-tools - Tool add called [project_id=None, category=task, content_length=19, content=Test memory via SSE, tags=None, source=mcp-sse]
+2026-01-14 00:39:43 - INFO - mcp-tools - Successfully added memory [memory_id=1b96c424-f913-43d8-8649-f6ad13580302]
+2026-01-14 00:44:26 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:44:29 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:44:29 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:44:29 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:44:29 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:44:29 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:44:29 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:44:29 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:44:33 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:44:33 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:44:33 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 00:48:19 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:48:22 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:48:22 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:48:22 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:48:22 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:48:22 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:48:22 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:48:22 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:48:28 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:48:28 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:48:28 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 00:49:03 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:49:06 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:49:06 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:49:06 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:49:06 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:49:06 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:49:06 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:49:06 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:49:10 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:49:10 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:49:10 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 00:50:52 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:50:54 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:50:54 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:50:54 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:50:54 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:50:54 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:50:54 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:50:54 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:50:57 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:51:00 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:51:00 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:51:00 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 00:51:42 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:51:45 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:51:45 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:51:45 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:51:45 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:51:45 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:51:45 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:51:45 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:51:50 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:51:50 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:51:50 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 00:53:03 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:53:06 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:53:06 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:53:06 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:53:06 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:53:06 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:53:06 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:53:06 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:53:09 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:53:09 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:53:09 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 00:53:12 - INFO - mem-mesh-web - Shutting down mem-mesh application...
+2026-01-14 00:53:12 - DEBUG - mem-mesh-web - MCP storage shutdown complete
+2026-01-14 00:53:12 - DEBUG - mem-mesh-web - Database connection closed
+2026-01-14 00:53:12 - INFO - mem-mesh-web - Application shutdown complete
+2026-01-14 00:53:14 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:53:14 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:53:14 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:53:14 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:53:14 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:53:14 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:53:14 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:53:18 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:53:18 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:53:18 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 00:53:32 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:53:44 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:53:46 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:53:46 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:53:46 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:53:46 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:53:46 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:53:46 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:53:46 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:53:50 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:53:50 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:53:50 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 00:54:03 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:54:05 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:54:05 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:54:05 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:54:05 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:54:05 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:54:05 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:54:05 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:54:09 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:54:09 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:54:09 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 00:55:34 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:55:36 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:55:36 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:55:36 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:55:36 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:55:36 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:55:36 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:55:36 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:55:40 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:55:40 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:55:40 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 00:55:50 - INFO - mem-mesh-web - Shutting down mem-mesh application...
+2026-01-14 00:55:50 - DEBUG - mem-mesh-web - MCP storage shutdown complete
+2026-01-14 00:55:50 - DEBUG - mem-mesh-web - Database connection closed
+2026-01-14 00:55:50 - INFO - mem-mesh-web - Application shutdown complete
+2026-01-14 00:55:52 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 00:55:52 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 00:55:52 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 00:55:52 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 00:55:52 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 00:55:52 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 00:55:52 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 00:55:56 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 00:55:56 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 00:55:56 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]

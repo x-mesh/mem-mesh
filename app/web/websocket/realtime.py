@@ -177,6 +177,42 @@ class ConnectionManager:
             logger.error(f"Heartbeat error for client {client_id}: {e}")
             self.disconnect(client_id)
     
+    async def disconnect_all(self) -> None:
+        """모든 클라이언트 연결 해제 (서버 종료 시 사용)"""
+        logger.info(f"Disconnecting all WebSocket clients ({len(self.active_connections)} connections)")
+        
+        # 모든 하트비트 태스크 취소 (빠른 정리)
+        for task in list(self.heartbeat_tasks.values()):
+            if not task.done():
+                task.cancel()
+        
+        # 모든 WebSocket 연결 닫기 (타임아웃 설정)
+        close_tasks = []
+        for client_id, websocket in list(self.active_connections.items()):
+            try:
+                # 비동기로 연결 닫기
+                close_tasks.append(websocket.close(code=1001, reason="Server shutdown"))
+            except Exception as e:
+                logger.warning(f"Error preparing to close WebSocket for client {client_id}: {e}")
+        
+        # 모든 연결 닫기를 병렬로 실행 (최대 2초 대기)
+        if close_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*close_tasks, return_exceptions=True),
+                    timeout=2.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("WebSocket close operations timed out")
+        
+        # 모든 데이터 정리
+        self.active_connections.clear()
+        self.global_subscribers.clear()
+        self.project_subscribers.clear()
+        self.heartbeat_tasks.clear()
+        
+        logger.info("All WebSocket connections disconnected")
+    
     def get_stats(self) -> Dict[str, Any]:
         """연결 통계 반환"""
         return {
