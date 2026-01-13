@@ -497,21 +497,21 @@ export class SettingsPage extends HTMLElement {
                 return;
             }
             
-            if (result.success) {
-                showToast('Migration completed!', 'success');
-                await this.loadStatus();
+            // 마이그레이션이 시작되었으면 polling 시작
+            if (result.success || result.progress) {
+                btn.textContent = '⏳ Migrating...';
+                this.startProgressPolling();
+                showToast('Migration started!', 'info');
             } else if (result.error) {
                 throw new Error(result.error);
             }
-            
-            btn.disabled = false;
-            btn.textContent = '🚀 Start Migration';
             
         } catch (error) {
             console.error('Migration error:', error);
             showToast(`Migration failed: ${error.message}`, 'error');
             btn.disabled = false;
             btn.textContent = '🚀 Start Migration';
+            progressSection.classList.add('hidden');
         }
     }
 
@@ -533,21 +533,58 @@ export class SettingsPage extends HTMLElement {
             const progress = await response.json();
             this.renderProgress(progress);
             
-            if (!progress.in_progress && progress.status === 'completed') {
+            if (!progress.in_progress) {
                 clearInterval(this.migrationInterval);
                 this.migrationInterval = null;
                 
                 const btn = this.querySelector('#start-migration-btn');
+                const progressSection = this.querySelector('#migration-progress');
+                
                 if (btn) {
                     btn.disabled = false;
                     btn.textContent = '🚀 Start Migration';
                 }
                 
-                showToast('Migration completed successfully!', 'success');
-                await this.loadStatus();
+                if (progress.status === 'completed') {
+                    showToast('Migration completed successfully!', 'success');
+                    await this.loadStatus();
+                    
+                    // 3초 후 progress section 숨기기
+                    setTimeout(() => {
+                        if (progressSection) {
+                            progressSection.classList.add('hidden');
+                        }
+                    }, 3000);
+                } else if (progress.status === 'failed') {
+                    showToast(`Migration failed: ${progress.message}`, 'error');
+                    if (progressSection) {
+                        progressSection.classList.add('hidden');
+                    }
+                }
             }
         } catch (error) {
             console.error('Progress update error:', error);
+            // 연속 에러 발생 시 polling 중단
+            if (this.progressErrorCount >= 3) {
+                clearInterval(this.migrationInterval);
+                this.migrationInterval = null;
+                this.progressErrorCount = 0;
+                
+                const btn = this.querySelector('#start-migration-btn');
+                const progressSection = this.querySelector('#migration-progress');
+                
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = '🚀 Start Migration';
+                }
+                if (progressSection) {
+                    progressSection.classList.add('hidden');
+                }
+                
+                showToast('Progress monitoring failed. Please check migration status manually.', 'error');
+            } else {
+                this.progressErrorCount = (this.progressErrorCount || 0) + 1;
+            }
         }
     }
 
@@ -555,27 +592,34 @@ export class SettingsPage extends HTMLElement {
         const progressBar = this.querySelector('#progress-bar');
         const progressStats = this.querySelector('#progress-stats');
         
+        // 기본값 설정
+        const percent = progress.percent || 0;
+        const processed = progress.processed || 0;
+        const total = progress.total || 0;
+        const failed = progress.failed || 0;
+        const message = progress.message || 'Initializing...';
+        
         if (progressBar) {
-            progressBar.style.width = `${progress.percent}%`;
+            progressBar.style.width = `${percent}%`;
         }
         
         if (progressStats) {
             progressStats.innerHTML = `
                 <div class="stat">
                     <span class="label">Progress:</span>
-                    <span class="value">${progress.percent}%</span>
+                    <span class="value">${percent}%</span>
                 </div>
                 <div class="stat">
                     <span class="label">Processed:</span>
-                    <span class="value">${progress.processed.toLocaleString()} / ${progress.total.toLocaleString()}</span>
+                    <span class="value">${processed.toLocaleString()} / ${total.toLocaleString()}</span>
                 </div>
                 <div class="stat">
                     <span class="label">Failed:</span>
-                    <span class="value ${progress.failed > 0 ? 'error' : ''}">${progress.failed}</span>
+                    <span class="value ${failed > 0 ? 'error' : ''}">${failed}</span>
                 </div>
                 <div class="stat">
                     <span class="label">Status:</span>
-                    <span class="value">${progress.message}</span>
+                    <span class="value">${message}</span>
                 </div>
             `;
         }

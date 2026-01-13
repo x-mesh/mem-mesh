@@ -3,9 +3,52 @@ Embedding Service for mem-mesh
 텍스트를 벡터로 변환하는 서비스
 """
 
+import os
+import ssl
 import struct
 import logging
+import urllib3
 from typing import Optional
+
+# MEM_MESH_IGNORE_SSL 환경변수가 설정되어 있으면 SSL 검증 비활성화
+_ignore_ssl = os.getenv("MEM_MESH_IGNORE_SSL", "").lower() in ("1", "true", "yes")
+if _ignore_ssl:
+    # SSL 검증 비활성화
+    ssl._create_default_https_context = ssl._create_unverified_context
+    # urllib3 경고 비활성화
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    # 환경변수 설정
+    os.environ["CURL_CA_BUNDLE"] = ""
+    os.environ["REQUESTS_CA_BUNDLE"] = ""
+    os.environ["SSL_CERT_FILE"] = ""
+    os.environ["HF_HUB_DISABLE_SSL_VERIFICATION"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "0"
+    
+    # requests 라이브러리 SSL 검증 비활성화
+    import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.ssl_ import create_urllib3_context
+    
+    class SSLAdapter(HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            ctx = create_urllib3_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            kwargs['ssl_context'] = ctx
+            return super().init_poolmanager(*args, **kwargs)
+    
+    # 기본 세션에 SSL 어댑터 적용
+    session = requests.Session()
+    session.mount('https://', SSLAdapter())
+    session.verify = False
+    
+    # huggingface_hub의 기본 세션 패치
+    try:
+        import huggingface_hub
+        huggingface_hub.configure_http_backend(backend_factory=lambda: session)
+    except Exception:
+        pass
+
 from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
@@ -55,7 +98,8 @@ class EmbeddingService:
         if self.model_name != model_name:
             logger.info(f"Model alias resolved: {model_name} -> {self.model_name}")
         
-        self.dimension = MODEL_DIMENSIONS.get(self.model_name, 384)
+        # 기본 차원 설정 (실제 모델 로드 후 업데이트됨)
+        self.dimension: int = MODEL_DIMENSIONS.get(self.model_name, 384)
         logger.info(f"EmbeddingService initializing with model: {self.model_name} (dimension: {self.dimension})")
         
         if preload:

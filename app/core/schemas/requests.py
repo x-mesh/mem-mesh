@@ -26,7 +26,7 @@ class AddParams(BaseModel):
     @field_validator('category')
     @classmethod
     def validate_category(cls, v):
-        valid_categories = {'task', 'bug', 'idea', 'decision', 'incident', 'code_snippet'}
+        valid_categories = {'task', 'bug', 'idea', 'decision', 'incident', 'code_snippet', 'git-history'}
         if v not in valid_categories:
             raise ValueError(f"Invalid category: {v}. Must be one of {valid_categories}")
         return v
@@ -63,7 +63,7 @@ class SearchParams(BaseModel):
     @classmethod
     def validate_category(cls, v):
         if v is not None:
-            valid_categories = {'task', 'bug', 'idea', 'decision', 'incident', 'code_snippet'}
+            valid_categories = {'task', 'bug', 'idea', 'decision', 'incident', 'code_snippet', 'git-history'}
             if v not in valid_categories:
                 raise ValueError(f"Invalid category: {v}. Must be one of {valid_categories}")
         return v
@@ -101,7 +101,7 @@ class UpdateParams(BaseModel):
     @classmethod
     def validate_category(cls, v):
         if v is not None:
-            valid_categories = {'task', 'bug', 'idea', 'decision', 'incident', 'code_snippet'}
+            valid_categories = {'task', 'bug', 'idea', 'decision', 'incident', 'code_snippet', 'git-history'}
             if v not in valid_categories:
                 raise ValueError(f"Invalid category: {v}. Must be one of {valid_categories}")
         return v

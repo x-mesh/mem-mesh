@@ -193,7 +193,7 @@ class SearchService:
             # Vector 검색 수행
             raw_results = await self.db.vector_search(
                 embedding=query_embedding,
-                limit=limit,
+                limit=limit*3,
                 filters=filters
             )
             
@@ -201,40 +201,59 @@ class SearchService:
                 logger.info("No vector search results found, falling back to text search")
                 return await self._text_based_search(query, filters, limit)
             
+            # 스코어링 파이프라인 설정
+            from .scoring import ScoringPipeline, ScoringContext
+            
+            pipeline = ScoringPipeline()
+            pipeline.set_recency_weight(recency_weight)
+            
+            # 최신성 점수 계산을 위한 시간 범위
+            if recency_weight > 0.0 and raw_results:
+                oldest_time = min(r['created_at'] for r in raw_results)
+                newest_time = max(r['created_at'] for r in raw_results)
+            
             # 결과를 SearchResult 형태로 변환
             search_results = []
             for row in raw_results:
                 try:
-                    # Vector 검색에서는 distance가 제공됨 (낮을수록 유사)
-                    # distance를 similarity_score로 변환 (높을수록 유사)
-                    if 'distance' in row.keys():
-                        # distance를 0~1 범위의 similarity로 변환
-                        # distance가 0에 가까울수록 similarity는 1에 가까워짐
-                        distance = float(row['distance'])
-                        # 일반적으로 cosine distance는 0~2 범위이므로 적절히 변환
-                        similarity_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
-                    else:
-                        # distance 정보가 없으면 기본값
-                        similarity_score = 0.8
+                    content = row['content'].strip()
                     
-                    # 최신성 가중치 적용
+                    # Vector 검색에서는 distance가 제공됨 (낮을수록 유사)
+                    if 'distance' in row.keys():
+                        distance = float(row['distance'])
+                        vector_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
+                    else:
+                        vector_score = 0.8
+                    
+                    # 최신성 점수 계산
+                    recency_score = 0.5
                     if recency_weight > 0.0:
-                        # 최신성 점수 계산
                         recency_score = self._calculate_recency_score(
-                            row['created_at'], 
-                            min(r['created_at'] for r in raw_results),
-                            max(r['created_at'] for r in raw_results)
+                            row['created_at'], oldest_time, newest_time
                         )
-                        # 가중 평균으로 최종 점수 계산
-                        similarity_score = (
-                            similarity_score * (1.0 - recency_weight) + 
-                            recency_score * recency_weight
-                        )
+                    
+                    # 스코어링 컨텍스트 생성
+                    scoring_context = ScoringContext(
+                        query=query,
+                        content=content,
+                        vector_score=vector_score,
+                        category=row['category'],
+                        project_id=row['project_id'],
+                        metadata={'recency_score': recency_score}
+                    )
+                    
+                    # 스코어링 파이프라인 실행
+                    scoring_result = pipeline.calculate(scoring_context)
+                    
+                    # 제외 대상이면 건너뛰기
+                    if not scoring_result.should_include:
+                        logger.debug(f"Excluding result: {scoring_result.reason}")
+                        continue
                     
                     search_result = SearchResult(
                         id=row['id'],
                         content=row['content'],
-                        similarity_score=similarity_score,
+                        similarity_score=scoring_result.final_score,
                         created_at=row['created_at'],
                         project_id=row['project_id'],
                         category=row['category'],
@@ -245,8 +264,9 @@ class SearchService:
                     logger.warning(f"Failed to process vector search result: {e}")
                     continue
             
-            # 점수순으로 정렬
+            # 점수순으로 정렬하고 원래 요청한 개수만큼 제한
             search_results.sort(key=lambda x: x.similarity_score, reverse=True)
+            search_results = search_results[:limit]
             
             logger.info(f"Found {len(search_results)} vector search results")
             return SearchResponse(results=search_results)

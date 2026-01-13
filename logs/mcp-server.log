@@ -1,0 +1,11 @@
+{"timestamp": "2026-01-13T02:22:51.119133Z", "level": "INFO", "logger": "mem-mesh", "message": "Logging system initialized", "log_level": "DEBUG", "log_file": "/Users/jinwoo/work/project/mem-mesh/logs/mcp-server.log"}
+{"timestamp": "2026-01-13T02:22:51.120904Z", "level": "INFO", "logger": "mcp-server", "message": "Starting mem-mesh MCP server", "log_level": "DEBUG", "log_file": "/Users/jinwoo/work/project/mem-mesh/logs/mcp-server.log"}
+{"timestamp": "2026-01-13T02:22:51.137510Z", "level": "INFO", "logger": "mcp-server", "message": "Initializing storage backend", "storage_mode": "direct"}
+{"timestamp": "2026-01-13T02:22:51.137591Z", "level": "INFO", "logger": "mcp-server", "message": "Using DirectStorageBackend", "database_path": "./data/memories.db"}
+{"timestamp": "2026-01-13T02:22:51.911644Z", "level": "INFO", "logger": "mcp-server", "message": "Storage backend initialized successfully"}
+{"timestamp": "2026-01-13T02:25:18.658042Z", "level": "INFO", "logger": "mcp-server", "message": "MCP add called: project_id=kiro-conversations, category=idea, content_length=91"}
+{"timestamp": "2026-01-13T02:25:18.659067Z", "level": "DEBUG", "logger": "mcp-server", "message": "Created AddParams: content='qwen이 /Users/jinwoo/.pyenv/shims/python3 사용하면 되는데? - pyenv 환경의 Python을 사용하여 MCP 연결 문제 해결 제안' project_id='kiro-conversations' category='idea' source='mcp' tags=['qwen', 'mcp', 'pyenv', 'python', 'connection']"}
+{"timestamp": "2026-01-13T02:25:24.668808Z", "level": "INFO", "logger": "mcp-server", "message": "Successfully added memory with ID: a18ed930-a050-40eb-b110-2d4b232c355a"}
+{"timestamp": "2026-01-13T02:31:37.987609Z", "level": "INFO", "logger": "mcp-server", "message": "MCP add called: project_id=kiro-conversations, category=idea, content_length=135"}
+{"timestamp": "2026-01-13T02:31:37.989305Z", "level": "DEBUG", "logger": "mcp-server", "message": "Created AddParams: content='/Users/jinwoo/work/python_prj/upnote_client/upnote_mcp_server.py 코드를 확인해서 힌트를 얻어봐 - 정상 작동하는 MCP 서버 코드를 참조하여 mem-mesh MCP 연결 문제 해결 방법 찾기' project_id='kiro-conversations' category='idea' source='mcp' tags=['mcp', 'upnote', 'reference', 'debugging', 'connection']"}
+{"timestamp": "2026-01-13T02:31:38.335339Z", "level": "INFO", "logger": "mcp-server", "message": "Successfully added memory with ID: 64283202-3075-4c10-aa82-8c2f6a82a12e"}

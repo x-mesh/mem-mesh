@@ -126,9 +126,28 @@ class EmbeddingManagerService:
             "message": "Starting migration..."
         }
         
+        # 백그라운드에서 마이그레이션 실행
+        import asyncio
+        asyncio.create_task(self._run_migration_background(batch_size, progress_callback))
+        
+        return {
+            "success": True,
+            "message": "Migration started",
+            "progress": self._migration_progress
+        }
+    
+    async def _run_migration_background(
+        self, 
+        batch_size: int,
+        progress_callback: Optional[Callable[[Dict], None]] = None
+    ) -> None:
+        """백그라운드에서 마이그레이션 실행"""
         try:
-            result = await self._run_migration(batch_size, progress_callback)
-            return result
+            await self._run_migration(batch_size, progress_callback)
+        except Exception as e:
+            logger.error(f"Background migration error: {e}")
+            self._migration_progress["status"] = "failed"
+            self._migration_progress["message"] = f"Migration failed: {str(e)}"
         finally:
             self._migration_in_progress = False
     

@@ -343,3 +343,47 @@ class DirectStorageBackend(StorageBackend):
         except Exception as e:
             logger.error(f"Failed to get stats: {e}")
             raise RuntimeError(f"Failed to get stats: {e}")
+    
+    async def get_all_memories(self, limit: int = 1000) -> list:
+        """모든 메모리 조회 (테스트용)
+        
+        Args:
+            limit: 조회할 최대 메모리 수
+            
+        Returns:
+            list: 메모리 객체 리스트
+        """
+        if not self.db:
+            raise RuntimeError("Storage backend not initialized")
+        
+        try:
+            # 데이터베이스에서 직접 메모리 조회
+            query = """
+                SELECT id, content, category, project_id, source, tags, created_at, updated_at
+                FROM memories 
+                ORDER BY created_at DESC 
+                LIMIT ?
+            """
+            
+            rows = await self.db.fetchall(query, (limit,))
+            
+            # 간단한 메모리 객체로 변환
+            memories = []
+            for row in rows:
+                memory = type('Memory', (), {
+                    'id': row[0],
+                    'content': row[1],
+                    'category': row[2],
+                    'project_id': row[3],
+                    'source': row[4],
+                    'tags': row[5].split(',') if row[5] else [],
+                    'created_at': row[6],
+                    'updated_at': row[7]
+                })()
+                memories.append(memory)
+            
+            return memories
+            
+        except Exception as e:
+            logger.error(f"Failed to get all memories: {e}")
+            raise RuntimeError(f"Failed to get all memories: {e}")
