@@ -136,9 +136,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         
         # WebSocket 연결 정리
         try:
-            from .websocket.realtime import notifier
-            if hasattr(notifier, 'disconnect_all'):
-                await notifier.disconnect_all()
+            from .websocket.realtime import connection_manager
+            await connection_manager.disconnect_all()
         except Exception as e:
             logger.warning("Error disconnecting WebSocket connections", error=str(e))
         

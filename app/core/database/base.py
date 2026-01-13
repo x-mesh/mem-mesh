@@ -358,9 +358,13 @@ class Database:
                     # JSON 문자열로 변환
                     embedding_json = json.dumps(embedding_array.tolist())
                     
-                    # vector 테이블에 삽입
+                    # vector 테이블에 삽입 (DELETE + INSERT 패턴 사용)
                     await self.execute(
-                        "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding) VALUES (?, ?)",
+                        "DELETE FROM memory_embeddings WHERE memory_id = ?",
+                        (memory['id'],)
+                    )
+                    await self.execute(
+                        "INSERT INTO memory_embeddings (memory_id, embedding) VALUES (?, ?)",
                         (memory['id'], embedding_json)
                     )
                     migrated_count += 1

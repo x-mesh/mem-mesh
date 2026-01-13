@@ -363,8 +363,13 @@ class MemoryService:
                 # JSON 문자열로 변환
                 embedding_json = json.dumps(embedding_array.tolist())
                 
+                # vector 테이블에 저장 (DELETE + INSERT 패턴 사용)
                 await self.db.execute(
-                    "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding) VALUES (?, ?)",
+                    "DELETE FROM memory_embeddings WHERE memory_id = ?",
+                    (memory_id,)
+                )
+                await self.db.execute(
+                    "INSERT INTO memory_embeddings (memory_id, embedding) VALUES (?, ?)",
                     (memory_id, embedding_json)
                 )
                 logger.debug(f"Saved to vector table: {memory_id}")
@@ -399,8 +404,13 @@ class MemoryService:
                 # JSON 문자열로 변환
                 embedding_json = json.dumps(embedding_array.tolist())
                 
+                # vector 테이블 업데이트 (DELETE + INSERT 패턴 사용)
                 await self.db.execute(
-                    "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding) VALUES (?, ?)",
+                    "DELETE FROM memory_embeddings WHERE memory_id = ?",
+                    (memory_id,)
+                )
+                await self.db.execute(
+                    "INSERT INTO memory_embeddings (memory_id, embedding) VALUES (?, ?)",
                     (memory_id, embedding_json)
                 )
                 logger.debug(f"Updated vector table: {memory_id}")

@@ -260,30 +260,154 @@ class MemoriesPage extends HTMLElement {
     
     // 태그 필터
     if (this.viewParams.tag) {
-      const tags = memory.tags || [];
-      if (!tags.includes(this.viewParams.tag)) {
+      const memoryTags = memory.tags || [];
+      if (!memoryTags.includes(this.viewParams.tag)) {
         return false;
       }
     }
     
-    // 검색 쿼리는 실시간으로 확인하기 어려우므로 일단 포함
-    // (서버에서 검색 결과를 다시 가져와야 정확함)
+    // 검색 쿼리 필터 (간단한 텍스트 매칭)
+    if (this.searchQuery && this.searchQuery.trim()) {
+      const query = this.searchQuery.toLowerCase();
+      const content = (memory.content || '').toLowerCase();
+      const project = (memory.project_id || '').toLowerCase();
+      const tags = (memory.tags || []).join(' ').toLowerCase();
+      
+      if (!content.includes(query) && !project.includes(query) && !tags.includes(query)) {
+        return false;
+      }
+    }
     
     return true;
   }
 
   /**
-   * Update memories grid only
+   * Connect WebSocket
+   */
+  async connectWebSocket() {
+    try {
+      await wsClient.connect();
+      console.log('Memories page WebSocket connected');
+      
+      // 프로젝트별 구독 설정
+      if (this.viewParams.project_id) {
+        wsClient.subscribeToProject(this.viewParams.project_id);
+      }
+    } catch (error) {
+      console.error('Failed to connect WebSocket in memories page:', error);
+    }
+  }
+
+  /**
+   * Show connection status
+   */
+  showConnectionStatus(status) {
+    const statusEl = this.querySelector('.connection-status');
+    if (!statusEl) return;
+    
+    statusEl.className = `connection-status ${status}`;
+    
+    switch (status) {
+      case 'connected':
+        statusEl.innerHTML = '<span class="status-dot"></span> 실시간 연결됨';
+        break;
+      case 'disconnected':
+        statusEl.innerHTML = '<span class="status-dot"></span> 연결 끊김';
+        break;
+      case 'error':
+        statusEl.innerHTML = '<span class="status-dot"></span> 연결 오류';
+        break;
+    }
+  }
+
+  /**
+   * Show toast notification
+   */
+  showToast(message, type = 'info') {
+    // 간단한 토스트 구현
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    
+    // 스타일 적용
+    Object.assign(toast.style, {
+      position: 'fixed',
+      top: '20px',
+      right: '20px',
+      padding: '12px 20px',
+      borderRadius: '6px',
+      color: 'white',
+      fontSize: '14px',
+      fontWeight: '500',
+      zIndex: '10000',
+      opacity: '0',
+      transform: 'translateY(-20px)',
+      transition: 'all 0.3s ease'
+    });
+    
+    // 타입별 배경색
+    const colors = {
+      success: '#10b981',
+      info: '#3b82f6',
+      warning: '#f59e0b',
+      error: '#ef4444'
+    };
+    toast.style.backgroundColor = colors[type] || colors.info;
+    
+    document.body.appendChild(toast);
+    
+    // 애니메이션
+    requestAnimationFrame(() => {
+      toast.style.opacity = '1';
+      toast.style.transform = 'translateY(0)';
+    });
+    
+    // 3초 후 제거
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(-20px)';
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.parentNode.removeChild(toast);
+        }
+      }, 300);
+    }, 3000);
+  }
+
+  /**
+   * Update memories grid with animation
    */
   updateMemoriesGrid() {
-    const memoriesGrid = this.querySelector('.memories-grid');
-    if (memoriesGrid) {
-      memoriesGrid.innerHTML = this.createMemoriesGrid();
-    }
+    const container = this.querySelector('.memories-container');
+    if (!container) return;
+
+    // 기존 그리드 업데이트
+    this.renderMemoriesGrid();
+    
+    // 새로 추가된 메모리 카드들에 애니메이션 적용
+    const memoryCards = container.querySelectorAll('memory-card');
+    memoryCards.forEach((card, index) => {
+      // 새로 추가된 카드 (첫 번째)에 하이라이트 효과
+      if (index === 0) {
+        card.style.background = 'linear-gradient(135deg, #f0fdf4, #dcfce7)';
+        card.style.border = '2px solid #22c55e';
+        card.style.transform = 'scale(1.02)';
+        
+        // 3초 후 하이라이트 제거
+        setTimeout(() => {
+          card.style.background = '';
+          card.style.border = '';
+          card.style.transform = '';
+          card.style.transition = 'all 0.3s ease';
+        }, 3000);
+      }
+    });
     
     // 메모리 카드 이벤트 리스너 재설정
     this.setupMemoryCardListeners();
   }
+
+
 
   /**
    * Setup memory card event listeners

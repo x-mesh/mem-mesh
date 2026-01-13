@@ -126,8 +126,8 @@ class DashboardPage extends HTMLElement {
       this.recentMemories = this.recentMemories.slice(0, 10);
     }
     
-    // UI 업데이트
-    this.updateRecentMemoriesSection();
+    // UI 업데이트 - 애니메이션과 함께
+    this.updateRecentMemoriesWithAnimation('created', memory);
     
     // 통계 새로고침 (비동기)
     this.refreshStatsAsync();
@@ -146,7 +146,7 @@ class DashboardPage extends HTMLElement {
     const index = this.recentMemories.findIndex(m => m.id === memory_id);
     if (index !== -1) {
       this.recentMemories[index] = memory;
-      this.updateRecentMemoriesSection();
+      this.updateRecentMemoriesWithAnimation('updated', memory, index);
     }
     
     // 토스트 알림
@@ -160,10 +160,14 @@ class DashboardPage extends HTMLElement {
     const { memory_id } = data;
     
     // 최근 메모리 목록에서 제거
-    this.recentMemories = this.recentMemories.filter(m => m.id !== memory_id);
-    
-    // UI 업데이트
-    this.updateRecentMemoriesSection();
+    const index = this.recentMemories.findIndex(m => m.id === memory_id);
+    if (index !== -1) {
+      const deletedMemory = this.recentMemories[index];
+      this.recentMemories = this.recentMemories.filter(m => m.id !== memory_id);
+      
+      // UI 업데이트 - 애니메이션과 함께
+      this.updateRecentMemoriesWithAnimation('deleted', deletedMemory, index);
+    }
     
     // 통계 새로고침 (비동기)
     this.refreshStatsAsync();
@@ -264,6 +268,166 @@ class DashboardPage extends HTMLElement {
     const activityContent = this.querySelector('.activity-content');
     if (activityContent) {
       activityContent.innerHTML = this.createRecentMemories();
+    }
+  }
+
+  /**
+   * Update recent memories with animation
+   */
+  updateRecentMemoriesWithAnimation(action, memory, index = 0) {
+    const activityContent = this.querySelector('.activity-content');
+    if (!activityContent) return;
+
+    switch (action) {
+      case 'created':
+        this.animateMemoryCreated(activityContent, memory);
+        break;
+      case 'updated':
+        this.animateMemoryUpdated(activityContent, memory, index);
+        break;
+      case 'deleted':
+        this.animateMemoryDeleted(activityContent, memory, index);
+        break;
+      default:
+        this.updateRecentMemoriesSection();
+    }
+  }
+
+  /**
+   * Animate new memory creation
+   */
+  animateMemoryCreated(container, memory) {
+    // 새 메모리 카드 생성
+    const newMemoryHTML = `
+      <memory-card
+        memory-id="${memory.id}"
+        content="${this.escapeHtml(memory.content)}"
+        project="${memory.project_id || ''}"
+        category="${memory.category}"
+        created-at="${memory.created_at}"
+        updated-at="${memory.updated_at}"
+        tags="${this.escapeHtml(JSON.stringify(memory.tags || []))}"
+        source="${memory.source || 'unknown'}"
+        style="opacity: 0; transform: translateY(-20px); transition: all 0.3s ease;"
+      ></memory-card>
+    `;
+
+    // 기존 목록 업데이트
+    const memoryList = container.querySelector('.recent-memories-list');
+    if (memoryList) {
+      // 새 메모리를 맨 앞에 추가
+      memoryList.insertAdjacentHTML('afterbegin', newMemoryHTML);
+      
+      // 새로 추가된 카드 애니메이션
+      const newCard = memoryList.firstElementChild;
+      if (newCard) {
+        // 하이라이트 효과
+        newCard.style.background = 'linear-gradient(135deg, #f0fdf4, #dcfce7)';
+        newCard.style.border = '2px solid #22c55e';
+        
+        // 페이드인 애니메이션
+        requestAnimationFrame(() => {
+          newCard.style.opacity = '1';
+          newCard.style.transform = 'translateY(0)';
+        });
+
+        // 하이라이트 제거 (3초 후)
+        setTimeout(() => {
+          newCard.style.background = '';
+          newCard.style.border = '';
+          newCard.style.transition = 'all 0.3s ease';
+        }, 3000);
+      }
+
+      // 10개 초과 시 마지막 항목 제거
+      const cards = memoryList.querySelectorAll('memory-card');
+      if (cards.length > 10) {
+        const lastCard = cards[cards.length - 1];
+        lastCard.style.opacity = '0';
+        lastCard.style.transform = 'translateX(20px)';
+        setTimeout(() => {
+          if (lastCard.parentNode) {
+            lastCard.parentNode.removeChild(lastCard);
+          }
+        }, 300);
+      }
+    } else {
+      // 목록이 없으면 전체 재생성
+      this.updateRecentMemoriesSection();
+    }
+  }
+
+  /**
+   * Animate memory update
+   */
+  animateMemoryUpdated(container, memory, index) {
+    const memoryList = container.querySelector('.recent-memories-list');
+    if (!memoryList) {
+      this.updateRecentMemoriesSection();
+      return;
+    }
+
+    const cards = memoryList.querySelectorAll('memory-card');
+    const targetCard = cards[index];
+    
+    if (targetCard) {
+      // 업데이트 하이라이트 효과
+      targetCard.style.background = 'linear-gradient(135deg, #eff6ff, #dbeafe)';
+      targetCard.style.border = '2px solid #3b82f6';
+      targetCard.style.transform = 'scale(1.02)';
+      
+      // 속성 업데이트
+      targetCard.setAttribute('content', this.escapeHtml(memory.content));
+      targetCard.setAttribute('updated-at', memory.updated_at);
+      targetCard.setAttribute('tags', this.escapeHtml(JSON.stringify(memory.tags || [])));
+
+      // 하이라이트 제거 (2초 후)
+      setTimeout(() => {
+        targetCard.style.background = '';
+        targetCard.style.border = '';
+        targetCard.style.transform = '';
+        targetCard.style.transition = 'all 0.3s ease';
+      }, 2000);
+    } else {
+      // 카드를 찾을 수 없으면 전체 재생성
+      this.updateRecentMemoriesSection();
+    }
+  }
+
+  /**
+   * Animate memory deletion
+   */
+  animateMemoryDeleted(container, memory, index) {
+    const memoryList = container.querySelector('.recent-memories-list');
+    if (!memoryList) {
+      this.updateRecentMemoriesSection();
+      return;
+    }
+
+    const cards = memoryList.querySelectorAll('memory-card');
+    const targetCard = cards[index];
+    
+    if (targetCard) {
+      // 삭제 애니메이션
+      targetCard.style.background = 'linear-gradient(135deg, #fef2f2, #fee2e2)';
+      targetCard.style.border = '2px solid #ef4444';
+      targetCard.style.transform = 'scale(0.95)';
+      targetCard.style.opacity = '0.7';
+      
+      // 슬라이드 아웃 후 제거
+      setTimeout(() => {
+        targetCard.style.transform = 'translateX(-100%)';
+        targetCard.style.opacity = '0';
+        
+        setTimeout(() => {
+          if (targetCard.parentNode) {
+            targetCard.parentNode.removeChild(targetCard);
+          }
+        }, 300);
+      }, 500);
+    } else {
+      // 카드를 찾을 수 없으면 전체 재생성
+      this.updateRecentMemoriesSection();
     }
   }
 

@@ -52,13 +52,22 @@ async def add_memory(
 ) -> AddResponse:
     """메모리 추가"""
     try:
-        return await service.create(
+        result = await service.create(
             content=params.content,
             project_id=params.project_id,
             category=params.category,
             source=params.source or "api",
             tags=params.tags
         )
+        
+        # WebSocket 실시간 알림 전송
+        try:
+            from ..websocket.realtime import notifier
+            await notifier.notify_memory_created(result.model_dump())
+        except Exception as e:
+            logger.warning(f"Failed to send WebSocket notification: {e}")
+        
+        return result
     except Exception as e:
         logger.error(f"Add memory error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -219,12 +228,21 @@ async def update_memory(
 ) -> UpdateResponse:
     """메모리 업데이트"""
     try:
-        return await service.update(
+        result = await service.update(
             memory_id=memory_id,
             content=params.content,
             category=params.category,
             tags=params.tags
         )
+        
+        # WebSocket 실시간 알림 전송
+        try:
+            from ..websocket.realtime import notifier
+            await notifier.notify_memory_updated(memory_id, result.model_dump())
+        except Exception as e:
+            logger.warning(f"Failed to send WebSocket notification: {e}")
+        
+        return result
     except MemoryNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -239,7 +257,23 @@ async def delete_memory(
 ) -> DeleteResponse:
     """메모리 삭제"""
     try:
-        return await service.delete(memory_id)
+        # 삭제 전에 메모리 정보 조회 (프로젝트 ID 확인용)
+        try:
+            memory_info = await service.get_by_id(memory_id)
+            project_id = memory_info.project_id if memory_info else None
+        except:
+            project_id = None
+        
+        result = await service.delete(memory_id)
+        
+        # WebSocket 실시간 알림 전송
+        try:
+            from ..websocket.realtime import notifier
+            await notifier.notify_memory_deleted(memory_id, project_id)
+        except Exception as e:
+            logger.warning(f"Failed to send WebSocket notification: {e}")
+        
+        return result
     except MemoryNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
