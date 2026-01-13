@@ -21,7 +21,8 @@ from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
 from ..mcp_common.tools import MCPToolHandlers
-from ..mcp_common.schemas import get_tool_schemas, SERVER_INFO
+from ..mcp_common.schemas import get_tool_schemas
+from ..core.version import SERVER_INFO, MCP_PROTOCOL_VERSION
 from ..core.storage.base import StorageBackend
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ def create_jsonrpc_error(id: Any, code: int, message: str) -> Dict[str, Any]:
 async def handle_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
     """initialize 요청 처리"""
     return {
-        "protocolVersion": "2024-11-05",
+        "protocolVersion": MCP_PROTOCOL_VERSION,
         "capabilities": {
             "tools": {},
         },
@@ -344,7 +345,7 @@ async def mcp_info():
     return {
         "name": SERVER_INFO["name"],
         "version": SERVER_INFO["version"],
-        "protocol_version": "2024-11-05",
+        "protocol_version": MCP_PROTOCOL_VERSION,
         "transports": ["sse"],
         "endpoints": {
             "sse": "/mcp/sse",

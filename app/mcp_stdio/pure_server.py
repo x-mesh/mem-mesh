@@ -78,13 +78,9 @@ def setup_logging():
 log = setup_logging()
 
 # -------------------------
-# Server Info
+# Server Info (중앙 모듈에서 import)
 # -------------------------
-SERVER_INFO = {
-    "name": "mem-mesh",
-    "version": "1.0.0",
-    "description": "MCP server for mem-mesh memory management (stdio)",
-}
+from ..core.version import SERVER_INFO, MCP_PROTOCOL_VERSION
 
 # -------------------------
 # Global storage
@@ -122,10 +118,10 @@ def read_message() -> Optional[Dict[str, Any]]:
 def resp_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
     """Handle initialize request"""
     # protocolVersion은 클라이언트 호환성 확인용 (현재는 사용하지 않음)
-    _ = params.get("protocolVersion", "2024-11-05")
+    _ = params.get("protocolVersion", MCP_PROTOCOL_VERSION)
     
     return {
-        "protocolVersion": "2024-11-05",
+        "protocolVersion": MCP_PROTOCOL_VERSION,
         "capabilities": {
             "tools": {},
         },

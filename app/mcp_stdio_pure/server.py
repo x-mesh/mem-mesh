@@ -17,7 +17,8 @@ from pydantic import ValidationError
 from ..core.config import Settings
 from ..mcp_common.storage import StorageManager
 from ..mcp_common.tools import MCPToolHandlers
-from ..mcp_common.schemas import get_tool_schemas, SERVER_INFO
+from ..mcp_common.schemas import get_tool_schemas
+from ..core.version import SERVER_INFO, MCP_PROTOCOL_VERSION
 
 
 # -------------------------
@@ -148,7 +149,7 @@ def parse_message(line: str) -> Optional[Dict[str, Any]]:
 def resp_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
     """Handle initialize request"""
     return {
-        "protocolVersion": "2024-11-05",
+        "protocolVersion": MCP_PROTOCOL_VERSION,
         "capabilities": {"tools": {}},
         "serverInfo": {
             "name": SERVER_INFO["name"],
