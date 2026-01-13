@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Auto Save Performance Optimization to mem-mesh",
+  "description": "성능 최적화나 리팩토링 작업을 자동으로 mem-mesh에 저장합니다",
+  "version": "1",
+  "when": {
+    "type": "messageContains",
+    "patterns": ["performance", "optimization", "refactor", "성능", "최적화", "리팩토링", "개선", "속도", "메모리", "효율"]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "성능 최적화나 리팩토링과 관련된 대화가 감지되었습니다. 다음 내용을 mem-mesh에 저장해주세요:\n\n1. 최적화한 부분이나 리팩토링한 코드\n2. 최적화 전후의 성능 비교\n3. 사용한 최적화 기법이나 패턴\n4. 측정한 성능 지표 (속도, 메모리 등)\n5. 추가 개선 가능한 영역\n\n카테고리는 'code_snippet'으로, project_id는 현재 프로젝트명으로, 태그에는 'performance', 'optimization', 'refactoring'을 포함해주세요."
+  }
+}

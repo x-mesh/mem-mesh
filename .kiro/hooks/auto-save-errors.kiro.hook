@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Auto Save Errors to mem-mesh",
+  "description": "에러나 버그 관련 대화를 자동으로 mem-mesh에 저장합니다",
+  "version": "1",
+  "when": {
+    "type": "messageContains",
+    "patterns": ["error", "bug", "exception", "failed", "에러", "버그", "실패", "오류", "문제"]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "에러나 버그와 관련된 대화가 감지되었습니다. 다음 내용을 mem-mesh에 저장해주세요:\n\n1. 발생한 에러나 버그의 내용\n2. 에러 메시지나 스택 트레이스\n3. 해결 방법이나 시도한 방법들\n4. 최종 해결 상태\n\n카테고리는 'bug'로, project_id는 현재 프로젝트명으로, 태그에는 'error', 'troubleshooting'을 포함해주세요."
+  }
+}

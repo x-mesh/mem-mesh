@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Auto Save Task Completion to mem-mesh",
+  "description": "작업 완료나 구현 완료 시 자동으로 mem-mesh에 저장합니다",
+  "version": "1",
+  "when": {
+    "type": "messageContains",
+    "patterns": ["완료", "구현", "finished", "completed", "done", "implemented", "성공", "해결", "fixed", "solved"]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "작업 완료와 관련된 대화가 감지되었습니다. 다음 내용을 mem-mesh에 저장해주세요:\n\n1. 완료된 작업의 내용\n2. 구현한 기능이나 해결한 문제\n3. 사용한 기술이나 방법\n4. 결과나 성과\n5. 향후 개선점이나 참고사항\n\n카테고리는 'task'로, project_id는 현재 프로젝트명으로, 태그에는 'completed', 'implementation'을 포함해주세요."
+  }
+}

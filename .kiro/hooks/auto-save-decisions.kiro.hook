@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Auto Save Decisions to mem-mesh",
+  "description": "설계 결정이나 아키텍처 결정을 자동으로 mem-mesh에 저장합니다",
+  "version": "1",
+  "when": {
+    "type": "messageContains",
+    "patterns": ["decided", "decision", "choose", "선택", "결정", "채택", "architecture", "design", "설계", "아키텍처"]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "설계나 아키텍처 결정과 관련된 대화가 감지되었습니다. 다음 내용을 mem-mesh에 저장해주세요:\n\n1. 내린 결정의 내용\n2. 결정의 배경이나 이유\n3. 고려했던 다른 옵션들\n4. 예상되는 영향이나 결과\n\n카테고리는 'decision'으로, project_id는 현재 프로젝트명으로, 태그에는 'architecture', 'design', 'decision'을 포함해주세요."
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Show Project Statistics from mem-mesh",
+  "description": "현재 프로젝트의 mem-mesh 통계를 보여주는 버튼 Hook입니다",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "현재 프로젝트의 mem-mesh 통계를 조회하고 분석해주세요:\n\n1. 전체 메모리 수와 카테고리별 분포\n2. 최근 활동 패턴 (지난 7일, 30일)\n3. 가장 많이 사용된 태그들\n4. 프로젝트 진행 상황 요약\n5. 주요 마일스톤이나 결정사항들\n\n통계를 바탕으로 프로젝트의 현재 상태와 다음 단계에 대한 인사이트도 제공해주세요."
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Auto Save Code Changes to mem-mesh",
+  "description": "코드 파일 저장 시 변경사항을 자동으로 mem-mesh에 저장합니다",
+  "version": "1",
+  "when": {
+    "type": "fileSaved",
+    "filePattern": "**/*.{py,js,ts,jsx,tsx,java,cpp,c,go,rs,rb,php,swift,kt}"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "방금 저장된 파일의 변경사항을 분석하고 mem-mesh에 저장해주세요. 다음 정보를 포함해주세요:\n\n1. 변경된 파일명과 주요 변경사항\n2. 변경 이유나 목적\n3. 관련된 기능이나 버그 수정 내용\n\n카테고리는 'code_snippet'으로, project_id는 현재 프로젝트명으로, 태그에는 파일 확장자와 'auto-save'를 포함해주세요."
+  }
+}

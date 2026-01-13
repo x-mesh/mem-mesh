@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Auto Save Ideas to mem-mesh",
+  "description": "아이디어나 제안사항을 자동으로 mem-mesh에 저장합니다",
+  "version": "1",
+  "when": {
+    "type": "messageContains",
+    "patterns": ["idea", "suggest", "proposal", "아이디어", "제안", "생각", "방법", "개선", "could", "maybe", "what if", "어떨까"]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "아이디어나 제안과 관련된 대화가 감지되었습니다. 다음 내용을 mem-mesh에 저장해주세요:\n\n1. 제안된 아이디어의 내용\n2. 아이디어의 배경이나 동기\n3. 예상되는 장점이나 효과\n4. 구현 방법이나 접근법\n5. 고려사항이나 제약조건\n\n카테고리는 'idea'로, project_id는 현재 프로젝트명으로, 태그에는 'suggestion', 'improvement'를 포함해주세요."
+  }
+}

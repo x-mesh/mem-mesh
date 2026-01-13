@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Load Project Context from mem-mesh",
+  "description": "새 세션 시작 시 프로젝트 관련 컨텍스트를 mem-mesh에서 로드합니다",
+  "version": "1",
+  "when": {
+    "type": "sessionStart"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "새로운 세션이 시작되었습니다. mem-mesh에서 현재 프로젝트와 관련된 최근 작업들을 검색하여 컨텍스트를 제공해주세요:\n\n1. 최근 완료된 작업들 (category: task)\n2. 중요한 설계 결정들 (category: decision)\n3. 해결된 버그나 이슈들 (category: bug)\n4. 진행 중인 아이디어들 (category: idea)\n\n각 카테고리별로 최대 3개씩 검색하여 요약해주세요."
+  }
+}
