@@ -580,3 +580,60 @@
 2026-01-14 01:14:09 - INFO - mem-mesh-web - Initializing business services
 2026-01-14 01:14:09 - INFO - mem-mesh-web - Initializing MCP SSE handlers
 2026-01-14 01:14:09 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 01:33:03 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 01:33:03 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 01:33:03 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 01:33:03 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 01:33:03 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 01:33:03 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 01:33:03 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 01:33:07 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 01:33:07 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 01:33:07 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 01:34:43 - DEBUG - mcp-tools - Tool add called [project_id=kiro-conversations, category=task, content_length=93, content=API를 통한 WebSocket 실시간 메모리 업데이트는 정상 작동 확인됨. 이제 MCP를 통해서도 WebSocket 실시간 업데이트가 제대로 작동하는지 테스트 필요., tags=['websocket', 'mcp', 'realtime', 'testing', 'validation'], source=kiro]
+2026-01-14 01:34:47 - INFO - mcp-tools - Successfully added memory [memory_id=e523f78b-8671-4e80-9262-c9ba65ae798d]
+2026-01-14 01:35:18 - INFO - mem-mesh-web - Shutting down mem-mesh application...
+2026-01-14 01:35:18 - DEBUG - mem-mesh-web - MCP storage shutdown complete
+2026-01-14 01:35:18 - DEBUG - mem-mesh-web - Database connection closed
+2026-01-14 01:35:18 - INFO - mem-mesh-web - Application shutdown complete
+2026-01-14 01:35:21 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 01:35:21 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 01:35:21 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 01:35:21 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 01:35:21 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 01:35:21 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 01:35:21 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 01:35:24 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 01:35:24 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 01:35:24 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 01:35:50 - DEBUG - mcp-tools - Tool add called [project_id=mcp-websocket-test, category=task, content_length=59, content=MCP를 통한 WebSocket 실시간 업데이트 테스트 - 이 메모리가 브라우저에 실시간으로 표시되어야 함, tags=['mcp', 'websocket', 'realtime', 'test'], source=mcp-test]
+2026-01-14 01:35:53 - INFO - mcp-tools - Successfully added memory [memory_id=ecc6386e-8eba-48c9-a5e6-687bb8117bb3]
+2026-01-14 01:35:53 - WARNING - mcp-tools - Failed to send realtime notification: 'DirectStorageBackend' object has no attribute 'get_memory'
+2026-01-14 01:36:44 - INFO - mem-mesh-web - Shutting down mem-mesh application...
+2026-01-14 01:36:44 - DEBUG - mem-mesh-web - MCP storage shutdown complete
+2026-01-14 01:36:44 - DEBUG - mem-mesh-web - Database connection closed
+2026-01-14 01:36:44 - INFO - mem-mesh-web - Application shutdown complete
+2026-01-14 01:36:46 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-14 01:36:46 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-14 01:36:46 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-14 01:36:46 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-14 01:36:46 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-14 01:36:46 - INFO - mem-mesh-web - Database connected successfully
+2026-01-14 01:36:46 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-14 01:36:50 - INFO - mem-mesh-web - Initializing business services
+2026-01-14 01:36:50 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-14 01:36:50 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-14 01:37:05 - DEBUG - mcp-tools - Tool add called [project_id=mcp-final-test, category=task, content_length=60, content=MCP WebSocket 실시간 업데이트 최종 테스트 - MemoryService를 통한 완전한 데이터 전송, tags=['mcp', 'websocket', 'final-test', 'complete'], source=mcp-final]
+2026-01-14 01:37:08 - INFO - mcp-tools - Successfully added memory [memory_id=4a548991-df70-4c13-a66c-2354b7db1961]
+2026-01-14 01:38:18 - DEBUG - mcp-tools - Tool add called [project_id=kiro-conversations, category=task, content_length=73, content=사용자가 다시 메모리 저장을 요청함. WebSocket 실시간 업데이트 기능이 완전히 수정된 후 MCP를 통한 메모리 저장 테스트., tags=['memory-test', 'websocket', 'mcp', 'realtime-update', 'validation'], source=kiro]
+2026-01-14 01:38:18 - INFO - mcp-tools - Successfully added memory [memory_id=624418e5-4532-431e-895e-0e15dba8cccb]
+2026-01-14 01:39:20 - DEBUG - mcp-tools - Tool add called [project_id=kiro-conversations, category=task, content_length=311, content=사용자가 Kiro 대화 내용을 mem-mesh 시스템에 저장하도록 요청했습니다. 
+
+요청 사항:
+- 적절한 카테고리로 분류 (task/bug/idea/decision/incident/code_snippet)
+- 관련 태그 추가
+- 프로젝트 ID: kiro-conversations
+- 메시지 내용을 간단히 요약해서 저장
+
+이는 Kiro AI 어시스턴트와의 대화 내용을 체계적으로 관리하고 추후 참조할 수 있도록 하는 메타 작업입니다. mem-mesh의 MCP 도구를 활용하여 대화 컨텍스트를 구조화된 메모리로 저장하는 워크플로우를 구현하는 것으로 보입니다., tags=['kiro', 'conversation', 'memory-management', 'mcp', 'workflow', 'meta-task'], source=kiro-assistant]
+2026-01-14 01:39:20 - INFO - mcp-tools - Successfully added memory [memory_id=150e95b6-6911-4942-8e2f-460d3088cf1f]
