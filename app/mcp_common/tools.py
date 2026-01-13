@@ -77,21 +77,22 @@ class MCPToolHandlers:
             # 실시간 알림 전송 - 완전한 메모리 데이터 조회 후 전송
             if self._notifier:
                 try:
-                    # 생성된 메모리의 완전한 데이터 조회
-                    memory = await self._storage.get_memory(result.id)
-                    if memory:
-                        import json
-                        memory_data = {
-                            "id": memory.id,
-                            "content": memory.content,
-                            "project_id": memory.project_id,
-                            "category": memory.category,
-                            "tags": json.loads(memory.tags) if memory.tags else [],
-                            "source": memory.source,
-                            "created_at": memory.created_at,
-                            "updated_at": memory.updated_at
-                        }
-                        await self._notifier.notify_memory_created(memory_data)
+                    # 생성된 메모리의 완전한 데이터 조회 (MemoryService 사용)
+                    if hasattr(self._storage, 'memory_service') and self._storage.memory_service:
+                        memory = await self._storage.memory_service.get(result.id)
+                        if memory:
+                            import json
+                            memory_data = {
+                                "id": memory.id,
+                                "content": memory.content,
+                                "project_id": memory.project_id,
+                                "category": memory.category,
+                                "tags": json.loads(memory.tags) if memory.tags else [],
+                                "source": memory.source,
+                                "created_at": memory.created_at,
+                                "updated_at": memory.updated_at
+                            }
+                            await self._notifier.notify_memory_created(memory_data)
                 except Exception as e:
                     logger.warning(f"Failed to send realtime notification: {e}")
             
