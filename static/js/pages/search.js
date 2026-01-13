@@ -24,6 +24,33 @@ class SearchPage extends HTMLElement {
   connectedCallback() {
     if (this.isInitialized) return;
     this.isInitialized = true;
+    
+    // Check if we should redirect to unified memories page
+    const shouldRedirect = window.location.pathname === '/search';
+    
+    if (shouldRedirect) {
+      // Redirect to unified memories page with search parameters
+      const urlParams = new URLSearchParams(window.location.search);
+      const query = urlParams.get('query') || urlParams.get('q') || '';
+      const category = urlParams.get('category') || '';
+      const project = urlParams.get('project') || '';
+      
+      let redirectURL = '/memories?view=search';
+      if (query) redirectURL += `&query=${encodeURIComponent(query)}`;
+      if (category) redirectURL += `&category=${encodeURIComponent(category)}`;
+      if (project) redirectURL += `&project_id=${encodeURIComponent(project)}`;
+      
+      console.log('Redirecting from search page to:', redirectURL);
+      
+      if (window.app && window.app.router) {
+        window.app.router.navigate(redirectURL);
+      } else {
+        window.location.href = redirectURL;
+      }
+      return;
+    }
+    
+    // If not redirecting, continue with normal initialization
     this.parseUrlParams();
     this.render();
     this.setupEventListeners();

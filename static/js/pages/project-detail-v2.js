@@ -469,7 +469,7 @@ style.textContent = `
     margin-bottom: 0.75rem;
   }
   
-  .category-badge {
+  .category-badge {U
     background: #f8f9fa;
     color: #6c757d !important;
     padding: 0.25rem 0.6rem;

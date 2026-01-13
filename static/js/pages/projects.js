@@ -69,30 +69,21 @@ class ProjectsPage extends HTMLElement {
     try {
       this.setLoading(true);
       
-      // Get all memories and group by project
-      let searchResult;
-      
-      if (window.app && window.app.apiClient) {
-        // Use app API client if available
-        searchResult = await window.app.apiClient.searchMemories('', { 
-          limit: 1000 // Get all memories to analyze projects
-        });
-      } else {
-        // Direct API call as fallback
-        console.log('App not ready, using direct API call');
-        const response = await fetch('/api/memories/search?query=&limit=1000');
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        searchResult = await response.json();
+      // 서버에서 집계된 프로젝트 정보를 가져옴 (효율적)
+      const response = await fetch('/api/projects');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       
-      if (searchResult && searchResult.results) {
-        this.processProjectsFromMemories(searchResult.results);
+      const data = await response.json();
+      
+      if (data && data.projects) {
+        this.projects = data.projects;
+        this.sortProjects();
         this.renderProjects();
         this.updateSummary();
       } else {
-        console.warn('No results found in search response:', searchResult);
+        console.warn('No projects found in response:', data);
         this.projects = [];
         this.renderProjects();
         this.updateSummary();
@@ -253,12 +244,12 @@ class ProjectsPage extends HTMLElement {
       event.stopPropagation();
       const projectId = viewBtn.getAttribute('data-project-id');
       if (projectId) {
-        // Navigate to project detail page
+        // Navigate to unified memories page with project filter
         if (window.app && window.app.router) {
-          window.app.router.navigate(`/project/${encodeURIComponent(projectId)}`);
+          window.app.router.navigate(`/memories?view=project&project_id=${encodeURIComponent(projectId)}`);
         } else {
           // Fallback to direct navigation
-          window.location.href = `/project/${encodeURIComponent(projectId)}`;
+          window.location.href = `/memories?view=project&project_id=${encodeURIComponent(projectId)}`;
         }
       }
       return;
@@ -268,12 +259,12 @@ class ProjectsPage extends HTMLElement {
     if (projectCard) {
       const projectId = projectCard.getAttribute('data-project-id');
       if (projectId) {
-        // Navigate to project detail page
+        // Navigate to unified memories page with project filter
         if (window.app && window.app.router) {
-          window.app.router.navigate(`/project/${encodeURIComponent(projectId)}`);
+          window.app.router.navigate(`/memories?view=project&project_id=${encodeURIComponent(projectId)}`);
         } else {
           // Fallback to direct navigation
-          window.location.href = `/project/${encodeURIComponent(projectId)}`;
+          window.location.href = `/memories?view=project&project_id=${encodeURIComponent(projectId)}`;
         }
       }
     }

@@ -49,6 +49,7 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseModel):
     """검색 응답"""
     results: List[SearchResult] = Field(description="검색 결과 목록")
+    total: Optional[int] = Field(None, description="전체 결과 개수 (페이지네이션용)")
     
     model_config = {
         "json_schema_extra": {
@@ -63,7 +64,8 @@ class SearchResponse(BaseModel):
                         "category": "task",
                         "source": "cursor"
                     }
-                ]
+                ],
+                "total": 150
             }
         }
     }

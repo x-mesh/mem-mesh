@@ -267,7 +267,7 @@ class DashboardPage extends HTMLElement {
     if (window.app && window.app.router) {
       switch (section) {
         case 'memories':
-          window.app.router.navigate('/search');
+          window.app.router.navigate('/memories?view=recent');
           break;
         case 'projects':
           window.app.router.navigate('/projects');
@@ -288,14 +288,14 @@ class DashboardPage extends HTMLElement {
       
       switch (type) {
         case 'category':
-          // Navigate to search with category filter
-          window.app.router.navigate('/search?category=all');
+          // Navigate to memories with category filter
+          window.app.router.navigate('/memories?view=category');
           break;
         case 'project':
-          window.app.router.navigate('/projects');
+          window.app.router.navigate('/memories?view=project');
           break;
         default:
-          window.app.router.navigate('/search');
+          window.app.router.navigate('/memories?view=recent');
       }
     }
   }

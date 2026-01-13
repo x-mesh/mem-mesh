@@ -34,8 +34,9 @@ export class Router {
     // Listen for link clicks
     document.addEventListener('click', this.handleLinkClick);
     
-    // Handle initial route
-    this.handleRoute(window.location.pathname);
+    // Handle initial route with query parameters
+    const initialPath = window.location.pathname + window.location.search;
+    this.handleRoute(initialPath);
     
     this.isStarted = true;
   }
@@ -56,8 +57,13 @@ export class Router {
    * Navigate to a route
    */
   navigate(path, data = {}, replace = false) {
-    if (path === window.location.pathname) {
-      return; // Already on this route
+    // Extract pathname from full URL (remove query parameters for comparison)
+    const currentPathname = window.location.pathname;
+    const targetPathname = path.split('?')[0];
+    
+    // Don't prevent navigation if query parameters are different
+    if (path === window.location.pathname + window.location.search) {
+      return; // Already on this exact route with same query params
     }
     
     if (replace) {
@@ -66,7 +72,7 @@ export class Router {
       history.pushState(data, '', path);
     }
     
-    this.handleRoute(path, data);
+    this.handleRoute(targetPathname, data);
   }
   
   /**
@@ -94,7 +100,8 @@ export class Router {
    * Handle popstate event
    */
   handlePopState(event) {
-    this.handleRoute(window.location.pathname, event.state || {});
+    const fullPath = window.location.pathname + window.location.search;
+    this.handleRoute(fullPath, event.state || {});
   }
   
   /**
@@ -128,20 +135,22 @@ export class Router {
    * Handle route
    */
   handleRoute(path, data = {}) {
-    const route = this.findRoute(path);
+    // Extract pathname from full URL (remove query parameters)
+    const pathname = path.split('?')[0];
+    const route = this.findRoute(pathname);
     
     if (route) {
-      this.currentRoute = path;
+      this.currentRoute = pathname;
       this.currentParams = route.params;
       
       try {
         route.handler(route.params, data);
       } catch (error) {
         console.error('Route handler error:', error);
-        this.handleNotFound(path);
+        this.handleNotFound(pathname);
       }
     } else {
-      this.handleNotFound(path);
+      this.handleNotFound(pathname);
     }
   }
   
@@ -162,14 +171,17 @@ export class Router {
    * Match route pattern against path
    */
   matchRoute(pattern, path) {
+    // Remove query parameters from path for matching
+    const cleanPath = path.split('?')[0];
+    
     // Exact match
-    if (pattern === path) {
+    if (pattern === cleanPath) {
       return {};
     }
     
     // Parameter matching
     const patternParts = pattern.split('/');
-    const pathParts = path.split('/');
+    const pathParts = cleanPath.split('/');
     
     if (patternParts.length !== pathParts.length) {
       return null;

@@ -24,6 +24,7 @@ import { FeatureCard } from './components/feature-card.js';
 import ChromaHeader from './components/chroma-header.js';
 import { ChromaSearchBar } from './components/chroma-search-bar.js';
 import { DashboardPreview } from './components/dashboard-preview.js';
+import { SearchableCombobox } from './components/searchable-combobox.js';
 
 // Import chart components
 import './components/chroma-charts.js';
@@ -37,6 +38,7 @@ import { CreateMemoryPage } from './pages/create-memory.js';
 import { EditMemoryPage } from './pages/edit-memory.js';
 import { ProjectsPage } from './pages/projects.js';
 import { ProjectDetailPage } from './pages/project-detail-v2.js';
+import { MemoriesPage } from './pages/memories.js';
 import { AnalyticsPage } from './pages/analytics.js';
 import { SettingsPage } from './pages/settings-page.js';
 
@@ -108,6 +110,7 @@ class App {
     this.pages.set('edit-memory', EditMemoryPage);
     this.pages.set('projects', ProjectsPage);
     this.pages.set('project-detail', ProjectDetailPage);
+    this.pages.set('memories', MemoriesPage);
     this.pages.set('analytics', AnalyticsPage);
     this.pages.set('settings', SettingsPage);
   }
@@ -125,6 +128,7 @@ class App {
     this.router.register('/edit/:id', (params) => this.renderPage('edit-memory', params));
     this.router.register('/projects', () => this.renderPage('projects'));
     this.router.register('/project/:id', (params) => this.renderPage('project-detail', params));
+    this.router.register('/memories', () => this.renderPage('memories'));
     this.router.register('/analytics', () => this.renderPage('analytics'));
     this.router.register('/settings', () => this.renderPage('settings'));
   }
@@ -264,6 +268,9 @@ class App {
             pageElement.setAttribute('project-id', params.id);
           }
           break;
+        case 'memories':
+          pageElement = document.createElement('memories-page');
+          break;
         case 'analytics':
           pageElement = document.createElement('analytics-page');
           break;
@@ -307,6 +314,7 @@ class App {
         (route === '/dashboard' && pageName === 'dashboard') ||
         (route === '/search' && pageName === 'search') ||
         (route === '/projects' && pageName === 'projects') ||
+        (route === '/memories' && pageName === 'memories') ||
         (route === '/analytics' && pageName === 'analytics') ||
         (route === '/settings' && pageName === 'settings')
       ) {

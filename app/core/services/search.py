@@ -30,7 +30,12 @@ class SearchService:
         query: str,
         project_id: Optional[str] = None,
         category: Optional[str] = None,
-        limit: int = 5,
+        source: Optional[str] = None,
+        tag: Optional[str] = None,
+        limit: int = 25,
+        offset: int = 0,
+        sort_by: str = "created_at",
+        sort_direction: str = "desc",
         recency_weight: float = 0.0,
         search_mode: str = "hybrid"
     ) -> SearchResponse:
@@ -41,14 +46,19 @@ class SearchService:
             query: 검색 쿼리 (빈 문자열인 경우 모든 메모리 반환)
             project_id: 프로젝트 필터
             category: 카테고리 필터
+            source: 소스 필터
+            tag: 태그 필터
             limit: 결과 개수 제한
+            offset: 결과 시작 위치 (페이지네이션)
+            sort_by: 정렬 기준 (created_at, updated_at, category, project, size)
+            sort_direction: 정렬 방향 (asc, desc)
             recency_weight: 최신성 가중치 (0.0 ~ 1.0)
             search_mode: 검색 모드 (hybrid, exact, semantic, fuzzy)
             
         Returns:
             SearchResponse: 검색 결과
         """
-        logger.info(f"Searching for query: '{query}' with mode: {search_mode}, filters - project_id: {project_id}, category: {category}")
+        logger.info(f"Searching for query: '{query}' with mode: {search_mode}, filters - project_id: {project_id}, category: {category}, source: {source}, tag: {tag}, limit: {limit}, offset: {offset}, sort: {sort_by} {sort_direction}")
         
         try:
             # SQL 필터 조건 구성
@@ -57,17 +67,27 @@ class SearchService:
                 filters['project_id'] = project_id
             if category:
                 filters['category'] = category
+            if source:
+                filters['source'] = source
+            if tag:
+                filters['tag'] = tag
             
             # 빈 쿼리인 경우 최근 메모리 반환
             if not query.strip():
                 raw_results = await self.db.get_recent_memories(
                     limit=limit,
+                    offset=offset,
+                    sort_by=sort_by,
+                    sort_direction=sort_direction,
                     filters=filters
                 )
                 
+                # 전체 개수도 가져오기
+                total_count = await self.db.count_memories(filters=filters)
+                
                 if not raw_results:
                     logger.info("No recent memories found")
-                    return SearchResponse(results=[])
+                    return SearchResponse(results=[], total=total_count)
                 
                 # 결과를 SearchResult 형태로 변환 (최신성 기반 점수)
                 search_results = []
@@ -99,23 +119,23 @@ class SearchService:
                             logger.warning(f"Failed to process recent memory result: {e}")
                             continue
                 
-                logger.info(f"Found {len(search_results)} recent memories")
-                return SearchResponse(results=search_results)
+                logger.info(f"Found {len(search_results)} recent memories (total: {total_count})")
+                return SearchResponse(results=search_results, total=total_count)
             
             # 검색 모드에 따라 다른 검색 수행
             if search_mode == "exact":
                 logger.info("Using exact text search")
-                return await self._exact_search(query, filters, limit)
+                return await self._exact_search(query, filters, limit, offset, sort_by, sort_direction)
             elif search_mode == "semantic":
                 logger.info("Using semantic vector search only")
-                return await self._semantic_search(query, filters, limit, recency_weight)
+                return await self._semantic_search(query, filters, limit, offset, sort_by, sort_direction, recency_weight)
             elif search_mode == "fuzzy":
                 logger.info("Using fuzzy text search")
-                return await self._fuzzy_search(query, filters, limit)
+                return await self._fuzzy_search(query, filters, limit, offset, sort_by, sort_direction)
             else:
                 # hybrid (기본값)
                 logger.info("Using hybrid search with sqlite-vec")
-                return await self._vector_search(query, filters, limit, recency_weight)
+                return await self._vector_search(query, filters, limit, offset, sort_by, sort_direction, recency_weight)
             
         except Exception as e:
             logger.error(f"Search failed: {e}")

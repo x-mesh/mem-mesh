@@ -507,9 +507,12 @@ class Database:
     async def get_recent_memories(
         self,
         limit: int,
+        offset: int = 0,
+        sort_by: str = "created_at",
+        sort_direction: str = "desc",
         filters: Optional[Dict[str, Any]] = None
     ) -> List[sqlite3.Row]:
-        """최근 메모리 조회 (생성일 기준 내림차순)"""
+        """최근 메모리 조회 (페이지네이션 및 정렬 지원)"""
         if not self.connection:
             raise RuntimeError("Database not connected")
         
@@ -525,15 +528,76 @@ class Database:
                 if filters.get('category'):
                     base_query += " AND category = ?"
                     params.append(filters['category'])
+                if filters.get('source'):
+                    base_query += " AND source = ?"
+                    params.append(filters['source'])
+                if filters.get('tag'):
+                    # 태그는 JSON 배열에서 검색
+                    base_query += " AND JSON_EXTRACT(tags, '$') LIKE ?"
+                    params.append(f'%"{filters["tag"]}"%')
             
-            base_query += " ORDER BY created_at DESC LIMIT ?"
-            params.append(limit)
+            # 정렬 추가
+            valid_sort_columns = ['created_at', 'updated_at', 'category', 'project_id', 'source']
+            if sort_by not in valid_sort_columns:
+                sort_by = 'created_at'
+            
+            sort_direction = sort_direction.upper()
+            if sort_direction not in ['ASC', 'DESC']:
+                sort_direction = 'DESC'
+            
+            # size로 정렬하는 경우 content 길이 사용
+            if sort_by == 'size':
+                base_query += f" ORDER BY LENGTH(content) {sort_direction}"
+            elif sort_by == 'project':
+                base_query += f" ORDER BY project_id {sort_direction}"
+            else:
+                base_query += f" ORDER BY {sort_by} {sort_direction}"
+            
+            # 페이지네이션 추가
+            base_query += " LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
             
             cursor = await self.execute(base_query, tuple(params))
             return cursor.fetchall()
             
         except Exception as e:
             logger.error(f"Get recent memories failed: {e}")
+            raise
+    
+    async def count_memories(
+        self,
+        filters: Optional[Dict[str, Any]] = None
+    ) -> int:
+        """메모리 총 개수 조회"""
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+        
+        try:
+            base_query = "SELECT COUNT(*) as count FROM memories WHERE 1=1"
+            params = []
+            
+            # 필터 조건 추가
+            if filters:
+                if filters.get('project_id'):
+                    base_query += " AND project_id = ?"
+                    params.append(filters['project_id'])
+                if filters.get('category'):
+                    base_query += " AND category = ?"
+                    params.append(filters['category'])
+                if filters.get('source'):
+                    base_query += " AND source = ?"
+                    params.append(filters['source'])
+                if filters.get('tag'):
+                    # 태그는 JSON 배열에서 검색
+                    base_query += " AND JSON_EXTRACT(tags, '$') LIKE ?"
+                    params.append(f'%"{filters["tag"]}"%')
+            
+            cursor = await self.execute(base_query, tuple(params))
+            result = cursor.fetchone()
+            return result['count'] if result else 0
+            
+        except Exception as e:
+            logger.error(f"Count memories failed: {e}")
             raise
     
     @asynccontextmanager

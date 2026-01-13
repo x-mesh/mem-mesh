@@ -257,7 +257,12 @@ async def search_memories(
     query: str,
     project_id: str = None,
     category: str = None,
-    limit: int = 5,
+    source: str = None,
+    tag: str = None,
+    limit: int = 25,
+    offset: int = 0,
+    sort_by: str = "created_at",
+    sort_direction: str = "desc",
     recency_weight: float = 0.0,
     search_mode: str = "hybrid",
     service: SearchService = Depends(get_search_service)
@@ -270,14 +275,24 @@ async def search_memories(
     - exact: 정확한 텍스트 매칭만
     - semantic: 의미 기반 벡터 검색만
     - fuzzy: 오타 허용 퍼지 검색
+    
+    정렬 옵션:
+    - sort_by: created_at, updated_at, category, project, size
+    - sort_direction: asc, desc
     """
     try:
         return await service.search(
             query=query,
             project_id=project_id,
             category=category,
+            source=source,
+            tag=tag,
             limit=limit,
-            recency_weight=recency_weight
+            offset=offset,
+            sort_by=sort_by,
+            sort_direction=sort_direction,
+            recency_weight=recency_weight,
+            search_mode=search_mode
         )
     except Exception as e:
         logger.error(f"Search memories error: {e}")
@@ -301,6 +316,37 @@ async def get_memory_stats(
         return StatsResponse(**stats)
     except Exception as e:
         logger.error(f"Get stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects")
+async def get_projects(
+    service: StatsService = Depends(get_stats_service)
+):
+    """
+    프로젝트 목록 및 상세 통계 조회
+    
+    서버에서 SQL GROUP BY로 집계하여 반환하므로 효율적입니다.
+    모든 메모리를 다운로드하지 않고 집계된 결과만 반환합니다.
+    
+    Returns:
+        - projects: 프로젝트 상세 정보 리스트
+        - total_projects: 총 프로젝트 수
+        - total_memories: 총 메모리 수
+    """
+    try:
+        projects = await service.get_projects_detail()
+        
+        total_memories = sum(p['memory_count'] for p in projects)
+        
+        return {
+            'projects': projects,
+            'total_projects': len(projects),
+            'total_memories': total_memories,
+            'avg_per_project': total_memories // len(projects) if len(projects) > 0 else 0
+        }
+    except Exception as e:
+        logger.error(f"Get projects error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -7,7 +7,7 @@ class MemoryCard extends HTMLElement {
   static get observedAttributes() {
     return [
       'memory-id', 'content', 'project', 'category', 
-      'created-at', 'updated-at', 'similarity-score', 'tags', 'source'
+      'created-at', 'updated-at', 'similarity-score', 'tags', 'source', 'search-query'
     ];
   }
   
@@ -15,6 +15,7 @@ class MemoryCard extends HTMLElement {
     super();
     this.memory = null;
     this.isExpanded = false;
+    this.showDetailedDate = false;
   }
   
   connectedCallback() {
@@ -172,29 +173,67 @@ class MemoryCard extends HTMLElement {
   }
   
   /**
-   * Format date
+   * Format date with option for detailed view
    */
-  formatDate(dateStr) {
+  formatDate(dateStr, showDetailed = false) {
     if (!dateStr) return '';
     
     try {
       const date = new Date(dateStr);
+      
+      if (showDetailed || this.showDetailedDate) {
+        // Show detailed date and time
+        return date.toLocaleString('ko-KR', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false
+        });
+      }
+      
+      // Show relative date
       const now = new Date();
       const diffMs = now - date;
       const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffMinutes = Math.floor(diffMs / (1000 * 60));
       
-      if (diffDays === 0) {
+      if (diffMinutes < 1) {
+        return 'Just now';
+      } else if (diffMinutes < 60) {
+        return `${diffMinutes}분 전`;
+      } else if (diffHours < 24) {
+        return `${diffHours}시간 전`;
+      } else if (diffDays === 0) {
         return 'Today';
       } else if (diffDays === 1) {
         return 'Yesterday';
       } else if (diffDays < 7) {
-        return `${diffDays} days ago`;
+        return `${diffDays}일 전`;
+      } else if (diffDays < 30) {
+        const weeks = Math.floor(diffDays / 7);
+        return `${weeks}주 전`;
+      } else if (diffDays < 365) {
+        const months = Math.floor(diffDays / 30);
+        return `${months}개월 전`;
       } else {
-        return date.toLocaleDateString();
+        const years = Math.floor(diffDays / 365);
+        return `${years}년 전`;
       }
     } catch {
       return dateStr;
     }
+  }
+  
+  /**
+   * Toggle date display format
+   */
+  toggleDateFormat() {
+    this.showDetailedDate = !this.showDetailedDate;
+    this.render();
   }
   
   /**
@@ -221,6 +260,19 @@ class MemoryCard extends HTMLElement {
   }
   
   /**
+   * Highlight search query in text
+   */
+  highlightSearchQuery(text, query) {
+    if (!query || !text) return this.escapeHtml(text);
+    
+    const escapedText = this.escapeHtml(text);
+    const escapedQuery = this.escapeHtml(query);
+    const regex = new RegExp(`(${escapedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    
+    return escapedText.replace(regex, '<mark class="search-highlight">$1</mark>');
+  }
+  
+  /**
    * Get content preview
    */
   getContentPreview(content, maxLength = 200) {
@@ -232,7 +284,10 @@ class MemoryCard extends HTMLElement {
       if (qa) {
         const questionPreview = qa.question.length > 100 ? 
           qa.question.substring(0, 100) + '...' : qa.question;
-        return `Q: ${questionPreview}`;
+        const searchQuery = this.getAttribute('search-query');
+        return searchQuery ? 
+          `Q: ${this.highlightSearchQuery(questionPreview, searchQuery)}` :
+          `Q: ${this.escapeHtml(questionPreview)}`;
       }
     }
     
@@ -245,11 +300,15 @@ class MemoryCard extends HTMLElement {
       .replace(/\[(.*?)\]\(.*?\)/g, '$1') // Links
       .trim();
     
-    if (plainText.length <= maxLength) {
-      return plainText;
-    }
+    let preview = plainText.length <= maxLength ? 
+      plainText : 
+      plainText.substring(0, maxLength).trim() + '...';
     
-    return plainText.substring(0, maxLength).trim() + '...';
+    // Apply search highlighting if search query exists
+    const searchQuery = this.getAttribute('search-query');
+    return searchQuery ? 
+      this.highlightSearchQuery(preview, searchQuery) :
+      this.escapeHtml(preview);
   }
   
   /**
@@ -342,7 +401,11 @@ class MemoryCard extends HTMLElement {
             ${qaData.conversation_id ? `
               <div class="qa-meta">
                 <span class="conversation-id" title="Conversation ID">${qaData.conversation_id}</span>
-                ${qaData.timestamp ? `<span class="qa-timestamp">${this.formatDate(qaData.timestamp)}</span>` : ''}
+                ${qaData.timestamp ? `
+                  <span class="qa-timestamp timestamp-toggle" title="클릭하여 ${this.showDetailedDate ? '상대적' : '상세한'} 시간 보기">
+                    ${this.formatDate(qaData.timestamp)}
+                  </span>
+                ` : ''}
               </div>
             ` : ''}
           ` : ''}
@@ -395,7 +458,11 @@ class MemoryCard extends HTMLElement {
             </button>
           ` : ''}
           <div class="memory-timestamp">
-            <time datetime="${memory.created_at}" title="${new Date(memory.created_at).toLocaleString()}">
+            <time 
+              datetime="${memory.created_at}" 
+              title="클릭하여 ${this.showDetailedDate ? '상대적' : '상세한'} 시간 보기"
+              class="timestamp-toggle"
+            >
               ${formattedDate}
             </time>
             ${memory.source !== 'unknown' ? `<span class="source">via ${memory.source}</span>` : ''}
@@ -426,6 +493,15 @@ class MemoryCard extends HTMLElement {
     if (expandBtn) {
       expandBtn.addEventListener('click', this.toggleExpanded.bind(this));
     }
+    
+    // Timestamp toggle
+    const timestampToggles = this.querySelectorAll('.timestamp-toggle');
+    timestampToggles.forEach(toggle => {
+      toggle.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.toggleDateFormat();
+      });
+    });
   }
   
   /**
@@ -613,6 +689,18 @@ style.textContent = `
     color: var(--text-muted);
   }
   
+  .timestamp-toggle {
+    cursor: pointer;
+    padding: 0.125rem 0.25rem;
+    border-radius: 3px;
+    transition: background-color 0.2s ease;
+  }
+  
+  .timestamp-toggle:hover {
+    background-color: var(--bg-secondary);
+    color: var(--text-secondary);
+  }
+  
   .source {
     font-style: italic;
   }
@@ -678,6 +766,26 @@ style.textContent = `
   
   .qa-timestamp {
     font-style: italic;
+  }
+  
+  .qa-timestamp.timestamp-toggle {
+    cursor: pointer;
+    padding: 0.125rem 0.25rem;
+    border-radius: 3px;
+    transition: background-color 0.2s ease;
+  }
+  
+  .qa-timestamp.timestamp-toggle:hover {
+    background-color: var(--bg-secondary);
+    color: var(--text-secondary);
+  }
+  
+  .search-highlight {
+    background-color: #fef3c7;
+    color: #92400e;
+    padding: 0 0.125rem;
+    border-radius: 2px;
+    font-weight: 500;
   }
   
   /* Responsive design */

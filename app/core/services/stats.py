@@ -292,3 +292,68 @@ class StatsService:
         except Exception as e:
             logger.error(f"Failed to get date range stats: {e}")
             raise
+    
+    async def get_projects_detail(self) -> List[Dict[str, Any]]:
+        """
+        프로젝트별 상세 정보 조회 (서버에서 집계)
+        
+        Returns:
+            프로젝트별 상세 통계 리스트
+        """
+        try:
+            # 프로젝트별 기본 통계
+            query = """
+                SELECT 
+                    COALESCE(project_id, 'default') as project_id,
+                    COUNT(*) as memory_count,
+                    SUM(LENGTH(content)) as total_size,
+                    MIN(created_at) as created_at,
+                    MAX(created_at) as updated_at
+                FROM memories
+                GROUP BY project_id
+                ORDER BY memory_count DESC
+            """
+            
+            projects = await self.db.fetchall(query, ())
+            
+            # 각 프로젝트의 카테고리와 태그 집계
+            result = []
+            for project in projects:
+                pid = project['project_id']
+                
+                # 카테고리 조회
+                cat_query = """
+                    SELECT DISTINCT category 
+                    FROM memories 
+                    WHERE COALESCE(project_id, 'default') = ?
+                """
+                categories = await self.db.fetchall(cat_query, (pid,))
+                
+                # 태그 조회
+                tag_query = """
+                    SELECT DISTINCT value as tag
+                    FROM memories m, json_each(CASE 
+                        WHEN m.tags IS NULL OR m.tags = '' THEN '[]'
+                        ELSE m.tags 
+                    END) 
+                    WHERE COALESCE(m.project_id, 'default') = ?
+                """
+                tags = await self.db.fetchall(tag_query, (pid,))
+                
+                result.append({
+                    'id': pid,
+                    'name': 'Default Project' if pid == 'default' else pid,
+                    'memory_count': project['memory_count'],
+                    'total_size': project['total_size'] or 0,
+                    'avg_memory_size': (project['total_size'] or 0) // project['memory_count'] if project['memory_count'] > 0 else 0,
+                    'categories': [c['category'] for c in categories],
+                    'tags': [t['tag'] for t in tags],
+                    'created_at': project['created_at'],
+                    'updated_at': project['updated_at']
+                })
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to get projects detail: {e}")
+            raise
