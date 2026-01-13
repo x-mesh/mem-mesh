@@ -7,6 +7,7 @@
 import { APIClient } from './services/api-client.js';
 import { Router } from './services/router.js';
 import { AppState } from './services/app-state.js';
+import { wsClient } from './services/websocket-client.js';
 import { ThemeManager } from './utils/theme-manager.js';
 import { ErrorHandler } from './utils/error-handler.js';
 import { KeyboardShortcuts } from './utils/keyboard-shortcuts.js';

@@ -113,7 +113,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Initializing MCP SSE handlers")
         mcp_storage = DirectStorageBackend(settings.database_path)
         await mcp_storage.initialize()
-        sse.set_tool_handlers(MCPToolHandlers(mcp_storage))
+        
+        # WebSocket notifier 가져오기
+        from .websocket.realtime import notifier
+        
+        # MCP 도구 핸들러에 notifier 주입
+        sse.set_tool_handlers(MCPToolHandlers(mcp_storage, notifier))
         
         logger.info("mem-mesh application initialized successfully", 
                    log_file=log_file if log_file else "console_only",

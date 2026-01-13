@@ -5,10 +5,13 @@ MCP Tool Handlers - MCP 서버들이 공유하는 Tool 비즈니스 로직.
 FastMCP와 Pure MCP 모두에서 사용할 수 있습니다.
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from ..core.storage.base import StorageBackend
 from ..core.schemas.requests import AddParams, SearchParams, UpdateParams, StatsParams
 from ..core.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from ..web.websocket.realtime import RealtimeNotifier
 
 logger = get_logger("mcp-tools")
 
@@ -19,12 +22,14 @@ class MCPToolHandlers:
     Storage 백엔드를 주입받아 모든 MCP tool 로직을 처리합니다.
     """
     
-    def __init__(self, storage: StorageBackend):
+    def __init__(self, storage: StorageBackend, notifier: Optional["RealtimeNotifier"] = None):
         """
         Args:
             storage: 초기화된 StorageBackend 인스턴스
+            notifier: 실시간 알림 발송자 (선택사항)
         """
         self._storage = storage
+        self._notifier = notifier
     
     @property
     def storage(self) -> StorageBackend:
@@ -68,6 +73,14 @@ class MCPToolHandlers:
             )
             result = await self._storage.add_memory(params)
             logger.info("Successfully added memory", memory_id=result.id)
+            
+            # 실시간 알림 전송
+            if self._notifier:
+                try:
+                    await self._notifier.notify_memory_created(result.model_dump())
+                except Exception as e:
+                    logger.warning(f"Failed to send realtime notification: {e}")
+            
             return result.model_dump()
         except Exception as e:
             logger.error("Error in add", error=str(e))
@@ -179,6 +192,14 @@ class MCPToolHandlers:
             params = UpdateParams(content=content, category=category, tags=tags)
             result = await self._storage.update_memory(memory_id, params)
             logger.info("Successfully updated memory", memory_id=memory_id)
+            
+            # 실시간 알림 전송
+            if self._notifier:
+                try:
+                    await self._notifier.notify_memory_updated(memory_id, result.model_dump())
+                except Exception as e:
+                    logger.warning(f"Failed to send realtime notification: {e}")
+            
             return result.model_dump()
         except Exception as e:
             logger.error("Error in update", error=str(e))
@@ -196,8 +217,26 @@ class MCPToolHandlers:
         logger.info("Tool delete called", memory_id=memory_id)
         
         try:
+            # 삭제 전에 메모리 정보 가져오기 (프로젝트 ID 확인용)
+            project_id = None
+            if self._notifier:
+                try:
+                    # 메모리 정보 조회 (삭제 전)
+                    memory_info = await self._storage.get_memory(memory_id)
+                    project_id = memory_info.project_id if memory_info else None
+                except Exception:
+                    pass  # 조회 실패해도 삭제는 진행
+            
             result = await self._storage.delete_memory(memory_id)
             logger.info("Successfully deleted memory", memory_id=memory_id)
+            
+            # 실시간 알림 전송
+            if self._notifier:
+                try:
+                    await self._notifier.notify_memory_deleted(memory_id, project_id)
+                except Exception as e:
+                    logger.warning(f"Failed to send realtime notification: {e}")
+            
             return result.model_dump()
         except Exception as e:
             logger.error("Error in delete", error=str(e))

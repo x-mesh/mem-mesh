@@ -4,6 +4,8 @@
  * Requirements: 4.4, 4.5
  */
 
+import { wsClient } from '../services/websocket-client.js';
+
 class DashboardPage extends HTMLElement {
   constructor() {
     super();
@@ -24,10 +26,14 @@ class DashboardPage extends HTMLElement {
     this.isInitialized = true;
     this.setupEventListeners();
     this.setupIntersectionObserver();
+    this.setupWebSocketListeners();
     this.render();
     
     // 앱이 완전히 초기화될 때까지 기다린 후 데이터 로드
     this.waitForAppAndLoadData();
+    
+    // WebSocket 연결
+    this.connectWebSocket();
     
     // 자동 새로고침 설정 (5분마다)
     this.setupAutoRefresh();
@@ -36,14 +42,258 @@ class DashboardPage extends HTMLElement {
   disconnectedCallback() {
     this.removeEventListeners();
     this.clearAutoRefresh();
+    this.disconnectWebSocket();
     if (this.animationObserver) {
       this.animationObserver.disconnect();
     }
   }
   
   /**
-   * Setup intersection observer for animations
+   * Setup WebSocket listeners
    */
+  setupWebSocketListeners() {
+    // 메모리 생성 이벤트
+    wsClient.on('memory_created', (data) => {
+      console.log('Memory created via WebSocket:', data);
+      this.handleMemoryCreated(data);
+    });
+    
+    // 메모리 업데이트 이벤트
+    wsClient.on('memory_updated', (data) => {
+      console.log('Memory updated via WebSocket:', data);
+      this.handleMemoryUpdated(data);
+    });
+    
+    // 메모리 삭제 이벤트
+    wsClient.on('memory_deleted', (data) => {
+      console.log('Memory deleted via WebSocket:', data);
+      this.handleMemoryDeleted(data);
+    });
+    
+    // 통계 업데이트 이벤트
+    wsClient.on('stats_updated', (data) => {
+      console.log('Stats updated via WebSocket:', data);
+      this.handleStatsUpdated(data);
+    });
+    
+    // 연결 상태 이벤트
+    wsClient.on('connected', () => {
+      console.log('WebSocket connected');
+      this.showConnectionStatus('connected');
+    });
+    
+    wsClient.on('disconnected', () => {
+      console.log('WebSocket disconnected');
+      this.showConnectionStatus('disconnected');
+    });
+    
+    wsClient.on('error', (error) => {
+      console.error('WebSocket error:', error);
+      this.showConnectionStatus('error');
+    });
+  }
+
+  /**
+   * Connect WebSocket
+   */
+  async connectWebSocket() {
+    try {
+      await wsClient.connect();
+      console.log('Dashboard WebSocket connected');
+    } catch (error) {
+      console.error('Failed to connect WebSocket:', error);
+    }
+  }
+
+  /**
+   * Disconnect WebSocket
+   */
+  disconnectWebSocket() {
+    wsClient.disconnect();
+  }
+
+  /**
+   * Handle memory created event
+   */
+  handleMemoryCreated(data) {
+    const { memory } = data;
+    
+    // 최근 메모리 목록에 추가 (맨 앞에)
+    this.recentMemories.unshift(memory);
+    
+    // 최대 개수 제한 (10개)
+    if (this.recentMemories.length > 10) {
+      this.recentMemories = this.recentMemories.slice(0, 10);
+    }
+    
+    // UI 업데이트
+    this.updateRecentMemoriesSection();
+    
+    // 통계 새로고침 (비동기)
+    this.refreshStatsAsync();
+    
+    // 토스트 알림
+    this.showToast(`새 메모리가 생성되었습니다: ${memory.category}`, 'success');
+  }
+
+  /**
+   * Handle memory updated event
+   */
+  handleMemoryUpdated(data) {
+    const { memory_id, memory } = data;
+    
+    // 최근 메모리 목록에서 해당 메모리 업데이트
+    const index = this.recentMemories.findIndex(m => m.id === memory_id);
+    if (index !== -1) {
+      this.recentMemories[index] = memory;
+      this.updateRecentMemoriesSection();
+    }
+    
+    // 토스트 알림
+    this.showToast(`메모리가 업데이트되었습니다`, 'info');
+  }
+
+  /**
+   * Handle memory deleted event
+   */
+  handleMemoryDeleted(data) {
+    const { memory_id } = data;
+    
+    // 최근 메모리 목록에서 제거
+    this.recentMemories = this.recentMemories.filter(m => m.id !== memory_id);
+    
+    // UI 업데이트
+    this.updateRecentMemoriesSection();
+    
+    // 통계 새로고침 (비동기)
+    this.refreshStatsAsync();
+    
+    // 토스트 알림
+    this.showToast(`메모리가 삭제되었습니다`, 'warning');
+  }
+
+  /**
+   * Handle stats updated event
+   */
+  handleStatsUpdated(data) {
+    const { stats } = data;
+    this.stats = stats;
+    this.updateStatsSection();
+  }
+
+  /**
+   * Show connection status
+   */
+  showConnectionStatus(status) {
+    const statusEl = this.querySelector('.connection-status');
+    if (!statusEl) return;
+    
+    statusEl.className = `connection-status ${status}`;
+    
+    switch (status) {
+      case 'connected':
+        statusEl.innerHTML = '<span class="status-dot"></span> 실시간 연결됨';
+        break;
+      case 'disconnected':
+        statusEl.innerHTML = '<span class="status-dot"></span> 연결 끊김';
+        break;
+      case 'error':
+        statusEl.innerHTML = '<span class="status-dot"></span> 연결 오류';
+        break;
+    }
+  }
+
+  /**
+   * Show toast notification
+   */
+  showToast(message, type = 'info') {
+    // 간단한 토스트 구현
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    
+    // 스타일 적용
+    Object.assign(toast.style, {
+      position: 'fixed',
+      top: '20px',
+      right: '20px',
+      padding: '12px 20px',
+      borderRadius: '6px',
+      color: 'white',
+      fontSize: '14px',
+      fontWeight: '500',
+      zIndex: '10000',
+      opacity: '0',
+      transform: 'translateY(-20px)',
+      transition: 'all 0.3s ease'
+    });
+    
+    // 타입별 배경색
+    const colors = {
+      success: '#10b981',
+      info: '#3b82f6',
+      warning: '#f59e0b',
+      error: '#ef4444'
+    };
+    toast.style.backgroundColor = colors[type] || colors.info;
+    
+    document.body.appendChild(toast);
+    
+    // 애니메이션
+    requestAnimationFrame(() => {
+      toast.style.opacity = '1';
+      toast.style.transform = 'translateY(0)';
+    });
+    
+    // 3초 후 제거
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(-20px)';
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.parentNode.removeChild(toast);
+        }
+      }, 300);
+    }, 3000);
+  }
+
+  /**
+   * Update recent memories section only
+   */
+  updateRecentMemoriesSection() {
+    const activityContent = this.querySelector('.activity-content');
+    if (activityContent) {
+      activityContent.innerHTML = this.createRecentMemories();
+    }
+  }
+
+  /**
+   * Update stats section only
+   */
+  updateStatsSection() {
+    const statsSection = this.querySelector('.stats-section');
+    if (statsSection) {
+      const statsContent = statsSection.querySelector('.chroma-stats-grid');
+      if (statsContent) {
+        statsContent.outerHTML = this.createStatsCards();
+      }
+    }
+  }
+
+  /**
+   * Refresh stats asynchronously
+   */
+  async refreshStatsAsync() {
+    try {
+      if (window.app && window.app.apiClient) {
+        const stats = await window.app.apiClient.getStats();
+        this.stats = stats;
+        this.updateStatsSection();
+      }
+    } catch (error) {
+      console.error('Failed to refresh stats:', error);
+    }
+  }
   setupIntersectionObserver() {
     this.animationObserver = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
@@ -761,6 +1011,9 @@ class DashboardPage extends HTMLElement {
             <p class="header-subtitle">Get insights into your memory collection and activity</p>
           </div>
           <div class="header-actions">
+            <div class="connection-status disconnected">
+              <span class="status-dot"></span> 연결 중...
+            </div>
             <button class="chroma-refresh-btn" title="Refresh data">
               <svg class="refresh-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M1 4V10H7M23 20V14H17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1367,7 +1620,84 @@ style.textContent = `
     background: var(--primary-hover);
   }
   
-  /* Responsive Design */
+  /* Connection Status */
+  .connection-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--border-radius);
+    font-size: 0.875rem;
+    font-weight: 500;
+    border: 1px solid;
+    transition: var(--transition);
+  }
+  
+  .connection-status.connected {
+    background: #f0fdf4;
+    border-color: #22c55e;
+    color: #15803d;
+  }
+  
+  .connection-status.disconnected {
+    background: #fef2f2;
+    border-color: #ef4444;
+    color: #dc2626;
+  }
+  
+  .connection-status.error {
+    background: #fef3c7;
+    border-color: #f59e0b;
+    color: #d97706;
+  }
+  
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: pulse 2s infinite;
+  }
+  
+  .connection-status.connected .status-dot {
+    background: #22c55e;
+  }
+  
+  .connection-status.disconnected .status-dot {
+    background: #ef4444;
+  }
+  
+  .connection-status.error .status-dot {
+    background: #f59e0b;
+  }
+  
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  
+  /* Toast Notifications */
+  .toast {
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    backdrop-filter: blur(10px);
+  }
+  
+  .toast-success {
+    background: linear-gradient(135deg, #10b981, #059669) !important;
+  }
+  
+  .toast-info {
+    background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
+  }
+  
+  .toast-warning {
+    background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+  }
+  
+  .toast-error {
+    background: linear-gradient(135deg, #ef4444, #dc2626) !important;
+  }
   @media (max-width: 768px) {
     .dashboard-page {
       padding: var(--space-4) 0; /* 모바일에서 상하 패딩 줄임 */

@@ -13,6 +13,7 @@ from .common.middleware import setup_middleware, setup_exception_handlers
 from .dashboard import routes as dashboard_routes
 from .dashboard import pages as dashboard_pages
 from .mcp import sse as mcp_sse
+from .websocket import router as websocket_router
 
 
 def create_app() -> FastAPI:
@@ -36,7 +37,8 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory="static"), name="static")
     
     # 라우터 등록 (순서 중요!)
-    app.include_router(mcp_sse.router)          # MCP SSE (먼저 등록)
+    app.include_router(websocket_router)        # WebSocket (먼저 등록)
+    app.include_router(mcp_sse.router)          # MCP SSE
     app.include_router(dashboard_routes.router)  # Dashboard API
     app.include_router(dashboard_pages.router)  # Dashboard Pages (catch-all이 있으므로 마지막)
     

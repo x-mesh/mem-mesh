@@ -14,3 +14,4 @@ imports/**
 .idea
 .vscode
 data/**
+logs/**
