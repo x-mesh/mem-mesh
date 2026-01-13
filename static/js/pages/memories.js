@@ -3,6 +3,8 @@
  * Displays memories with different view modes based on URL parameters
  */
 
+import { wsClient } from '../services/websocket-client.js';
+
 class MemoriesPage extends HTMLElement {
   constructor() {
     super();
@@ -27,6 +29,10 @@ class MemoriesPage extends HTMLElement {
     
     this.render();
     this.setupEventListeners();
+    this.setupWebSocketListeners();
+    
+    // Connect WebSocket
+    this.connectWebSocket();
     
     // Set initial filter values from URL parameters
     setTimeout(() => {
@@ -64,6 +70,23 @@ class MemoriesPage extends HTMLElement {
     }, 100);
   }
   
+  disconnectedCallback() {
+    console.log('MemoriesPage disconnected');
+    
+    // WebSocket 이벤트 리스너 제거
+    wsClient.off('memory_created', this.handleMemoryCreated);
+    wsClient.off('memory_updated', this.handleMemoryUpdated);
+    wsClient.off('memory_deleted', this.handleMemoryDeleted);
+    wsClient.off('connected', this.showConnectionStatus);
+    wsClient.off('disconnected', this.showConnectionStatus);
+    wsClient.off('error', this.showConnectionStatus);
+    
+    // 프로젝트 구독 해제
+    if (this.viewParams.project_id) {
+      wsClient.unsubscribeFromProject(this.viewParams.project_id);
+    }
+  }
+  
   /**
    * Parse URL parameters to determine view mode
    */
@@ -89,6 +112,349 @@ class MemoriesPage extends HTMLElement {
     console.log('View mode:', this.currentView, 'Params:', this.viewParams);
   }
   
+  /**
+   * Setup WebSocket listeners
+   */
+  setupWebSocketListeners() {
+    // 메모리 생성 이벤트
+    wsClient.on('memory_created', (data) => {
+      console.log('Memory created via WebSocket:', data);
+      this.handleMemoryCreated(data);
+    });
+    
+    // 메모리 업데이트 이벤트
+    wsClient.on('memory_updated', (data) => {
+      console.log('Memory updated via WebSocket:', data);
+      this.handleMemoryUpdated(data);
+    });
+    
+    // 메모리 삭제 이벤트
+    wsClient.on('memory_deleted', (data) => {
+      console.log('Memory deleted via WebSocket:', data);
+      this.handleMemoryDeleted(data);
+    });
+    
+    // 연결 상태 이벤트
+    wsClient.on('connected', () => {
+      console.log('WebSocket connected in memories page');
+      this.showConnectionStatus('connected');
+    });
+    
+    wsClient.on('disconnected', () => {
+      console.log('WebSocket disconnected in memories page');
+      this.showConnectionStatus('disconnected');
+    });
+    
+    wsClient.on('error', (error) => {
+      console.error('WebSocket error in memories page:', error);
+      this.showConnectionStatus('error');
+    });
+  }
+
+  /**
+   * Connect WebSocket
+   */
+  async connectWebSocket() {
+    try {
+      await wsClient.connect();
+      console.log('Memories page WebSocket connected');
+      
+      // 현재 프로젝트가 있으면 구독
+      if (this.viewParams.project_id) {
+        wsClient.subscribeToProject(this.viewParams.project_id);
+      }
+    } catch (error) {
+      console.error('Failed to connect WebSocket in memories page:', error);
+    }
+  }
+
+  /**
+   * Handle memory created event
+   */
+  handleMemoryCreated(data) {
+    const { memory } = data;
+    
+    // 현재 필터 조건에 맞는지 확인
+    if (this.shouldIncludeMemory(memory)) {
+      // 메모리 목록 맨 앞에 추가
+      this.memories.unshift(memory);
+      
+      // 페이지 크기 제한 적용
+      if (this.memories.length > this.pageSize) {
+        this.memories = this.memories.slice(0, this.pageSize);
+      }
+      
+      // UI 업데이트
+      this.updateMemoriesGrid();
+      
+      // 토스트 알림
+      this.showToast(`새 메모리가 생성되었습니다: ${memory.category}`, 'success');
+    }
+  }
+
+  /**
+   * Handle memory updated event
+   */
+  handleMemoryUpdated(data) {
+    const { memory_id, memory } = data;
+    
+    // 기존 메모리 찾기
+    const index = this.memories.findIndex(m => m.id === memory_id);
+    
+    if (index !== -1) {
+      // 업데이트된 메모리가 현재 필터 조건에 맞는지 확인
+      if (this.shouldIncludeMemory(memory)) {
+        this.memories[index] = memory;
+        this.updateMemoriesGrid();
+      } else {
+        // 필터 조건에 맞지 않으면 제거
+        this.memories.splice(index, 1);
+        this.updateMemoriesGrid();
+      }
+      
+      this.showToast('메모리가 업데이트되었습니다', 'info');
+    } else if (this.shouldIncludeMemory(memory)) {
+      // 새로 필터 조건에 맞게 된 경우 추가
+      this.memories.unshift(memory);
+      if (this.memories.length > this.pageSize) {
+        this.memories = this.memories.slice(0, this.pageSize);
+      }
+      this.updateMemoriesGrid();
+      this.showToast('새 메모리가 추가되었습니다', 'info');
+    }
+  }
+
+  /**
+   * Handle memory deleted event
+   */
+  handleMemoryDeleted(data) {
+    const { memory_id } = data;
+    
+    // 메모리 목록에서 제거
+    const index = this.memories.findIndex(m => m.id === memory_id);
+    if (index !== -1) {
+      this.memories.splice(index, 1);
+      this.updateMemoriesGrid();
+      this.showToast('메모리가 삭제되었습니다', 'warning');
+    }
+  }
+
+  /**
+   * Check if memory should be included based on current filters
+   */
+  shouldIncludeMemory(memory) {
+    // 프로젝트 필터
+    if (this.viewParams.project_id && memory.project_id !== this.viewParams.project_id) {
+      return false;
+    }
+    
+    // 카테고리 필터
+    if (this.viewParams.category && memory.category !== this.viewParams.category) {
+      return false;
+    }
+    
+    // 소스 필터
+    if (this.viewParams.source && memory.source !== this.viewParams.source) {
+      return false;
+    }
+    
+    // 태그 필터
+    if (this.viewParams.tag) {
+      const tags = memory.tags || [];
+      if (!tags.includes(this.viewParams.tag)) {
+        return false;
+      }
+    }
+    
+    // 검색 쿼리는 실시간으로 확인하기 어려우므로 일단 포함
+    // (서버에서 검색 결과를 다시 가져와야 정확함)
+    
+    return true;
+  }
+
+  /**
+   * Update memories grid only
+   */
+  updateMemoriesGrid() {
+    const memoriesGrid = this.querySelector('.memories-grid');
+    if (memoriesGrid) {
+      memoriesGrid.innerHTML = this.createMemoriesGrid();
+    }
+    
+    // 메모리 카드 이벤트 리스너 재설정
+    this.setupMemoryCardListeners();
+  }
+
+  /**
+   * Setup memory card event listeners
+   */
+  setupMemoryCardListeners() {
+    // 메모리 카드 클릭 이벤트
+    const memoryCards = this.querySelectorAll('memory-card');
+    memoryCards.forEach(card => {
+      // 메모리 선택 이벤트 리스너
+      card.addEventListener('memory-select', this.handleMemorySelect.bind(this));
+      
+      // 즐겨찾기 토글 이벤트 리스너
+      card.addEventListener('memory-favorite', this.handleMemoryFavorite.bind(this));
+    });
+    
+    // 기타 메모리 관련 버튼들
+    const editButtons = this.querySelectorAll('.edit-memory-btn');
+    editButtons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const memoryId = btn.getAttribute('data-memory-id');
+        if (memoryId && window.app && window.app.router) {
+          window.app.router.navigate(`/memory/${memoryId}/edit`);
+        }
+      });
+    });
+    
+    const deleteButtons = this.querySelectorAll('.delete-memory-btn');
+    deleteButtons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const memoryId = btn.getAttribute('data-memory-id');
+        if (memoryId && confirm('정말로 이 메모리를 삭제하시겠습니까?')) {
+          this.deleteMemory(memoryId);
+        }
+      });
+    });
+  }
+
+  /**
+   * Create memories grid HTML
+   */
+  createMemoriesGrid() {
+    if (!this.memories || this.memories.length === 0) {
+      return `
+        <div class="no-memories">
+          <div class="no-memories-icon">📝</div>
+          <h3>No memories found</h3>
+          <p>No memories match your current filters.</p>
+          <button class="clear-filters-btn">Clear Filters</button>
+        </div>
+      `;
+    }
+    
+    return this.memories.map(memory => `
+      <memory-card
+        memory-id="${memory.id}"
+        content="${this.escapeAttribute(memory.content)}"
+        project="${memory.project_id || ''}"
+        category="${memory.category}"
+        created-at="${memory.created_at}"
+        updated-at="${memory.updated_at}"
+        tags="${this.escapeAttribute(JSON.stringify(memory.tags || []))}"
+        source="${memory.source || 'unknown'}"
+      ></memory-card>
+    `).join('');
+  }
+
+  /**
+   * Delete a memory
+   */
+  async deleteMemory(memoryId) {
+    try {
+      if (!window.app || !window.app.apiClient) {
+        throw new Error('API client not available');
+      }
+      
+      await window.app.apiClient.deleteMemory(memoryId);
+      
+      // 로컬 메모리 목록에서 제거
+      this.memories = this.memories.filter(m => m.id !== memoryId);
+      
+      // UI 업데이트
+      this.updateMemoriesGrid();
+      this.updateSummary();
+      
+      // 성공 토스트
+      this.showToast('메모리가 삭제되었습니다', 'success');
+      
+    } catch (error) {
+      console.error('Failed to delete memory:', error);
+      this.showToast('메모리 삭제에 실패했습니다', 'error');
+    }
+  }
+
+  /**
+   * Show connection status
+   */
+  showConnectionStatus(status) {
+    const statusEl = this.querySelector('.connection-status');
+    if (!statusEl) return;
+    
+    statusEl.className = `connection-status ${status}`;
+    
+    switch (status) {
+      case 'connected':
+        statusEl.innerHTML = '<span class="status-dot"></span> 실시간 연결됨';
+        break;
+      case 'disconnected':
+        statusEl.innerHTML = '<span class="status-dot"></span> 연결 끊김';
+        break;
+      case 'error':
+        statusEl.innerHTML = '<span class="status-dot"></span> 연결 오류';
+        break;
+    }
+  }
+
+  /**
+   * Show toast notification
+   */
+  showToast(message, type = 'info') {
+    // 간단한 토스트 구현
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    
+    // 스타일 적용
+    Object.assign(toast.style, {
+      position: 'fixed',
+      top: '20px',
+      right: '20px',
+      padding: '12px 20px',
+      borderRadius: '6px',
+      color: 'white',
+      fontSize: '14px',
+      fontWeight: '500',
+      zIndex: '10000',
+      opacity: '0',
+      transform: 'translateY(-20px)',
+      transition: 'all 0.3s ease'
+    });
+    
+    // 타입별 배경색
+    const colors = {
+      success: '#10b981',
+      info: '#3b82f6',
+      warning: '#f59e0b',
+      error: '#ef4444'
+    };
+    toast.style.backgroundColor = colors[type] || colors.info;
+    
+    document.body.appendChild(toast);
+    
+    // 애니메이션
+    requestAnimationFrame(() => {
+      toast.style.opacity = '1';
+      toast.style.transform = 'translateY(0)';
+    });
+    
+    // 3초 후 제거
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(-20px)';
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.parentNode.removeChild(toast);
+        }
+      }, 300);
+    }, 3000);
+  }
+
   /**
    * Setup event listeners
    */
@@ -815,6 +1181,9 @@ class MemoriesPage extends HTMLElement {
           <p class="page-description">${this.getViewDescription()}</p>
         </div>
         <div class="header-actions">
+          <div class="connection-status disconnected">
+            <span class="status-dot"></span> 연결 중...
+          </div>
           <button class="refresh-btn secondary-button">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="23,4 23,10 17,10"/>
