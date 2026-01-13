@@ -26,12 +26,28 @@ class DashboardPreview extends HTMLElement {
       stats: {
         totalMemories: 1247,
         totalProjects: 23,
-        totalCategories: 6,
+        totalCategories: 7, // git-history 추가로 7개
         avgLeadTime: 2.4
       },
       recentActivity: [
-        { type: 'memory', title: 'API 설계 문서 업데이트', time: '2분 전', category: 'decision' },
-        { type: 'project', title: 'mem-mesh UI 개선', time: '15분 전', category: 'task' },
+        { 
+          type: 'qa-pair', 
+          title: 'Q: MCP 서버 타임아웃 문제 해결 방법?', 
+          time: '2분 전', 
+          category: 'bug',
+          isQA: true,
+          question: 'MCP 서버 타임아웃 문제 해결 방법?',
+          answer: 'stdin 읽기 타임아웃을 해결하고 direct 모드로 변경하여 안정성 향상'
+        },
+        { 
+          type: 'qa-pair', 
+          title: 'Q: Q&A 쌍 관리 시스템 구축 방법?', 
+          time: '15분 전', 
+          category: 'idea',
+          isQA: true,
+          question: 'Q&A 쌍 관리 시스템 구축 방법?',
+          answer: 'JSON 구조로 질문-답변을 연결하고 자동 저장 Hook 구현'
+        },
         { type: 'memory', title: '버그 수정: 검색 결과 정렬', time: '1시간 전', category: 'bug' },
         { type: 'memory', title: '새로운 기능 아이디어', time: '3시간 전', category: 'idea' }
       ],
@@ -42,7 +58,8 @@ class DashboardPreview extends HTMLElement {
           idea: 28,
           decision: 15,
           code_snippet: 8,
-          incident: 3
+          incident: 3,
+          'git-history': 6
         },
         weeklyActivity: [12, 19, 15, 27, 22, 18, 24]
       }
@@ -236,20 +253,44 @@ class DashboardPreview extends HTMLElement {
           <button class="view-all-btn" data-action="view-memories">View All</button>
         </div>
         <div class="timeline-items">
-          ${recentActivity.map(activity => `
-            <div class="activity-item">
-              <div class="activity-icon">
-                ${this.getCategoryIcon(activity.category)}
-              </div>
-              <div class="activity-content">
-                <div class="activity-title">${activity.title}</div>
-                <div class="activity-meta">
-                  <span class="activity-type">${activity.type}</span>
-                  <span class="activity-time">${activity.time}</span>
+          ${recentActivity.map(activity => {
+            if (activity.isQA) {
+              return `
+                <div class="activity-item qa-activity">
+                  <div class="activity-icon qa-icon">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </div>
+                  <div class="activity-content">
+                    <div class="activity-title qa-title">${activity.question}</div>
+                    <div class="qa-answer-preview">${activity.answer}</div>
+                    <div class="activity-meta">
+                      <span class="activity-type qa-badge">Q&A</span>
+                      <span class="activity-category">${activity.category}</span>
+                      <span class="activity-time">${activity.time}</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          `).join('')}
+              `;
+            } else {
+              return `
+                <div class="activity-item">
+                  <div class="activity-icon">
+                    ${this.getCategoryIcon(activity.category)}
+                  </div>
+                  <div class="activity-content">
+                    <div class="activity-title">${activity.title}</div>
+                    <div class="activity-meta">
+                      <span class="activity-type">${activity.type}</span>
+                      <span class="activity-category">${activity.category}</span>
+                      <span class="activity-time">${activity.time}</span>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }
+          }).join('')}
         </div>
       </div>
     `;
@@ -265,7 +306,8 @@ class DashboardPreview extends HTMLElement {
       idea: '#f59e0b',
       decision: '#3b82f6',
       code_snippet: '#a855f7',
-      incident: '#ef4444'
+      incident: '#ef4444',
+      'git-history': '#6366f1'
     };
     return colors[category] || '#64748b';
   }
@@ -292,7 +334,11 @@ class DashboardPreview extends HTMLElement {
                     </svg>`,
       incident: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <path d="M12 9V13M12 17H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2"/>
-                </svg>`
+                </svg>`,
+      'git-history': `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                       <path d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2"/>
+                       <path d="M8 12L10 14L16 8" stroke="currentColor" stroke-width="1"/>
+                     </svg>`
     };
     return icons[category] || icons.task;
   }
@@ -728,6 +774,45 @@ style.textContent = `
 
   .activity-time {
     opacity: 0.8;
+  }
+
+  /* Q&A Activity Styles */
+  .activity-item.qa-activity {
+    border-left: 3px solid var(--primary-color);
+    padding-left: var(--space-3);
+  }
+
+  .activity-icon.qa-icon {
+    background: linear-gradient(135deg, var(--primary-color), var(--primary-hover));
+    color: white;
+  }
+
+  .activity-title.qa-title {
+    font-weight: var(--font-semibold);
+    color: var(--primary-color);
+  }
+
+  .qa-answer-preview {
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    margin: var(--space-1) 0;
+    line-height: 1.4;
+    font-style: italic;
+  }
+
+  .qa-badge {
+    background: var(--primary-color);
+    color: white;
+    padding: 0.125rem 0.375rem;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+  }
+
+  .activity-category {
+    text-transform: capitalize;
+    font-weight: var(--font-medium);
+    color: var(--text-muted);
   }
 
   /* Quick Actions */

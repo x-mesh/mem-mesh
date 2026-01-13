@@ -1068,7 +1068,7 @@ style.textContent = `
     border-color: var(--error-color) !important;
   }
   
-  .memory-content {
+  .memory-detail-page .memory-content {
     display: grid;
     grid-template-columns: 1fr 400px;
     gap: 2rem;

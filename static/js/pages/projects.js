@@ -248,21 +248,32 @@ class ProjectsPage extends HTMLElement {
    * Handle project card clicks
    */
   handleProjectClick(event) {
+    const viewBtn = event.target.closest('.view-btn');
+    if (viewBtn) {
+      event.stopPropagation();
+      const projectId = viewBtn.getAttribute('data-project-id');
+      if (projectId) {
+        // Navigate to project detail page
+        if (window.app && window.app.router) {
+          window.app.router.navigate(`/project/${encodeURIComponent(projectId)}`);
+        } else {
+          // Fallback to direct navigation
+          window.location.href = `/project/${encodeURIComponent(projectId)}`;
+        }
+      }
+      return;
+    }
+    
     const projectCard = event.target.closest('.project-card');
     if (projectCard) {
       const projectId = projectCard.getAttribute('data-project-id');
       if (projectId) {
-        // Navigate to project detail (search with project filter)
-        const searchParams = new URLSearchParams();
-        if (projectId !== 'default') {
-          searchParams.set('project', projectId);
-        }
-        
+        // Navigate to project detail page
         if (window.app && window.app.router) {
-          window.app.router.navigate(`/search?${searchParams.toString()}`);
+          window.app.router.navigate(`/project/${encodeURIComponent(projectId)}`);
         } else {
           // Fallback to direct navigation
-          window.location.href = `/search?${searchParams.toString()}`;
+          window.location.href = `/project/${encodeURIComponent(projectId)}`;
         }
       }
     }
@@ -412,8 +423,13 @@ class ProjectsPage extends HTMLElement {
           ` : ''}
           
           <div class="detail-row">
-            <span class="label">Size:</span>
-            <span class="value">${this.formatSize(project.total_size)}</span>
+            <span class="label">Total Size:</span>
+            <span class="value">${this.formatSize(project.total_size)} (${project.memory_count} memories)</span>
+          </div>
+          
+          <div class="detail-row">
+            <span class="label">Avg Size:</span>
+            <span class="value">${this.formatSize(project.avg_memory_size)} per memory</span>
           </div>
           
           <div class="detail-row">

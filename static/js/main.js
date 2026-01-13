@@ -36,6 +36,7 @@ import { MemoryDetailPage } from './pages/memory-detail.js';
 import { CreateMemoryPage } from './pages/create-memory.js';
 import { EditMemoryPage } from './pages/edit-memory.js';
 import { ProjectsPage } from './pages/projects.js';
+import { ProjectDetailPage } from './pages/project-detail-v2.js';
 import { AnalyticsPage } from './pages/analytics.js';
 import { SettingsPage } from './pages/settings-page.js';
 
@@ -106,6 +107,7 @@ class App {
     this.pages.set('create-memory', CreateMemoryPage);
     this.pages.set('edit-memory', EditMemoryPage);
     this.pages.set('projects', ProjectsPage);
+    this.pages.set('project-detail', ProjectDetailPage);
     this.pages.set('analytics', AnalyticsPage);
     this.pages.set('settings', SettingsPage);
   }
@@ -122,6 +124,7 @@ class App {
     this.router.register('/create', () => this.renderPage('create-memory'));
     this.router.register('/edit/:id', (params) => this.renderPage('edit-memory', params));
     this.router.register('/projects', () => this.renderPage('projects'));
+    this.router.register('/project/:id', (params) => this.renderPage('project-detail', params));
     this.router.register('/analytics', () => this.renderPage('analytics'));
     this.router.register('/settings', () => this.renderPage('settings'));
   }
@@ -254,6 +257,12 @@ class App {
           break;
         case 'projects':
           pageElement = document.createElement('projects-page');
+          break;
+        case 'project-detail':
+          pageElement = document.createElement('project-detail-page');
+          if (params.id) {
+            pageElement.setAttribute('project-id', params.id);
+          }
           break;
         case 'analytics':
           pageElement = document.createElement('analytics-page');

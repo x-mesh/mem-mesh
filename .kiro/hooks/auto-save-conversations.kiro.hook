@@ -1,13 +1,13 @@
 {
   "enabled": true,
-  "name": "Auto-save Conversations to mem-mesh",
-  "description": "모든 사용자 메시지와 AI 응답을 mem-mesh에 자동으로 저장합니다",
+  "name": "Auto-save Conversations",
+  "description": "모든 사용자 메시지를 mem-mesh에 자동 저장",
   "version": "1",
   "when": {
     "type": "promptSubmit"
   },
   "then": {
     "type": "askAgent",
-    "prompt": "다음 대화 내용을 mem-mesh에 저장해:\n\n사용자 질문: {{userMessage}}\n\n이 내용을 적절한 카테고리(task/bug/idea/decision/incident/code_snippet)로 분류하여 mem-mesh에 저장하고, 관련 태그도 추가해줘. project_id는 'kiro-conversations'로 설정해."
+    "prompt": "사용자 메시지가 전송되었습니다:\n\n{{userMessage}}\n\n이 내용을 mem-mesh에 저장해주세요:\n- 적절한 카테고리로 분류 (task/bug/idea/decision/incident/code_snippet)\n- 관련 태그 추가\n- 프로젝트 ID: kiro-conversations\n- 메시지 내용을 간단히 요약해서 저장"
   }
 }

@@ -1,13 +1,13 @@
 {
   "enabled": true,
-  "name": "Session Summary to mem-mesh",
-  "description": "새 세션 시작 시 이전 세션 요약을 mem-mesh에 저장합니다",
+  "name": "Session Summary",
+  "description": "세션 요약을 mem-mesh에 저장",
   "version": "1",
   "when": {
     "type": "userTriggered"
   },
   "then": {
     "type": "askAgent",
-    "prompt": "새로운 세션이 시작되었습니다. 이전 세션의 주요 작업들을 요약하여 mem-mesh에 저장해주세요. 세션 요약은 'decision' 카테고리로, project_id는 'kiro-sessions'로 설정해주세요."
+    "prompt": "현재 세션의 요약을 생성하고 mem-mesh에 저장해주세요:\n- 세션 중 수행한 주요 작업들\n- 해결한 문제들과 결정사항들\n- 남은 작업이나 후속 조치\n- 카테고리: decision\n- 프로젝트 ID: mem-mesh\n- 태그: [\"session-summary\", \"progress\"]"
   }
 }

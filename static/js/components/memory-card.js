@@ -142,7 +142,11 @@ class MemoryCard extends HTMLElement {
                 </svg>`,
       code_snippet: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                       <path d="M16 18L22 12L16 6M8 6L2 12L8 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>`
+                    </svg>`,
+      'git-history': `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                       <path d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2"/>
+                       <path d="M8 12L10 14L16 8" stroke="currentColor" stroke-width="1"/>
+                     </svg>`
     };
     return icons[category] || `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" stroke="currentColor" stroke-width="2"/>
@@ -161,7 +165,8 @@ class MemoryCard extends HTMLElement {
       idea: '#f59e0b',
       decision: '#8b5cf6',
       incident: '#ef4444',
-      code_snippet: '#10b981'
+      code_snippet: '#10b981',
+      'git-history': '#6366f1'
     };
     return colors[category] || '#64748b';
   }
@@ -193,10 +198,43 @@ class MemoryCard extends HTMLElement {
   }
   
   /**
+   * Check if content is a Q&A pair
+   */
+  isQAPair(content) {
+    try {
+      const parsed = JSON.parse(content);
+      return parsed.type === 'qa_pair' && parsed.question && parsed.answer;
+    } catch {
+      return false;
+    }
+  }
+  
+  /**
+   * Parse Q&A content
+   */
+  parseQAContent(content) {
+    try {
+      return JSON.parse(content);
+    } catch {
+      return null;
+    }
+  }
+  
+  /**
    * Get content preview
    */
   getContentPreview(content, maxLength = 200) {
     if (!content) return '';
+    
+    // Check if it's a Q&A pair
+    if (this.isQAPair(content)) {
+      const qa = this.parseQAContent(content);
+      if (qa) {
+        const questionPreview = qa.question.length > 100 ? 
+          qa.question.substring(0, 100) + '...' : qa.question;
+        return `Q: ${questionPreview}`;
+      }
+    }
     
     // Remove markdown formatting for preview
     const plainText = content
@@ -278,13 +316,54 @@ class MemoryCard extends HTMLElement {
     const contentPreview = this.getContentPreview(memory.content);
     const fullContent = memory.content;
     
+    // Check if this is a Q&A pair
+    const isQA = this.isQAPair(memory.content);
+    const qaData = isQA ? this.parseQAContent(memory.content) : null;
+    
     this.className = 'memory-card';
+    if (isQA) {
+      this.classList.add('qa-pair');
+    }
+    
+    // Generate content HTML based on type
+    let contentHTML = '';
+    if (isQA && qaData) {
+      contentHTML = `
+        <div class="qa-content">
+          <div class="qa-question">
+            <div class="qa-label">Q:</div>
+            <div class="qa-text">${this.escapeHtml(qaData.question)}</div>
+          </div>
+          ${this.isExpanded ? `
+            <div class="qa-answer">
+              <div class="qa-label">A:</div>
+              <div class="qa-text">${this.formatContent(qaData.answer)}</div>
+            </div>
+            ${qaData.conversation_id ? `
+              <div class="qa-meta">
+                <span class="conversation-id" title="Conversation ID">${qaData.conversation_id}</span>
+                ${qaData.timestamp ? `<span class="qa-timestamp">${this.formatDate(qaData.timestamp)}</span>` : ''}
+              </div>
+            ` : ''}
+          ` : ''}
+        </div>
+      `;
+    } else {
+      contentHTML = `
+        <div class="content-preview ${this.isExpanded ? 'hidden' : ''}">
+          ${contentPreview}
+        </div>
+        <div class="content-full ${this.isExpanded ? '' : 'hidden'}">
+          ${this.formatContent(fullContent)}
+        </div>
+      `;
+    }
     
     this.innerHTML = `
       <div class="memory-card-header">
         <div class="memory-meta">
-          <span class="category-badge">
-            ${categoryIcon} ${memory.category}
+          <span class="category-badge" style="color: ${categoryColor}">
+            ${categoryIcon} ${memory.category}${isQA ? ' (Q&A)' : ''}
           </span>
           ${memory.project_id ? `<span class="project-badge">${memory.project_id}</span>` : ''}
           ${memory.similarity_score !== null ? 
@@ -308,16 +387,11 @@ class MemoryCard extends HTMLElement {
       </div>
       
       <div class="memory-content">
-        <div class="content-preview ${this.isExpanded ? 'hidden' : ''}">
-          ${contentPreview}
-        </div>
-        <div class="content-full ${this.isExpanded ? '' : 'hidden'}">
-          ${this.formatContent(fullContent)}
-        </div>
+        ${contentHTML}
         <div class="content-meta">
-          ${fullContent.length > 200 ? `
+          ${(fullContent.length > 200 || isQA) ? `
             <button class="expand-btn" aria-label="${this.isExpanded ? 'Show less' : 'Show more'}">
-              ${this.isExpanded ? 'Show less' : 'Show more'}
+              ${this.isExpanded ? 'Show less' : (isQA ? 'Show answer' : 'Show more')}
             </button>
           ` : ''}
           <div class="memory-timestamp">
@@ -352,6 +426,15 @@ class MemoryCard extends HTMLElement {
     if (expandBtn) {
       expandBtn.addEventListener('click', this.toggleExpanded.bind(this));
     }
+  }
+  
+  /**
+   * Escape HTML to prevent XSS
+   */
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
   
   /**
@@ -536,6 +619,65 @@ style.textContent = `
   
   .hidden {
     display: none !important;
+  }
+  
+  /* Q&A Pair Styles */
+  .memory-card.qa-pair {
+    border-left: 4px solid var(--primary-color);
+  }
+  
+  .qa-content {
+    margin-bottom: 1rem;
+  }
+  
+  .qa-question,
+  .qa-answer {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  
+  .qa-answer {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+  }
+  
+  .qa-label {
+    font-weight: 600;
+    color: var(--primary-color);
+    min-width: 1.5rem;
+    flex-shrink: 0;
+  }
+  
+  .qa-text {
+    flex: 1;
+    line-height: 1.6;
+  }
+  
+  .qa-question .qa-text {
+    font-weight: 500;
+  }
+  
+  .qa-meta {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border-color);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+  
+  .conversation-id {
+    font-family: var(--font-mono);
+    background: var(--bg-secondary);
+    padding: 0.125rem 0.375rem;
+    border-radius: var(--border-radius-sm);
+  }
+  
+  .qa-timestamp {
+    font-style: italic;
   }
   
   /* Responsive design */

@@ -1,14 +1,14 @@
 {
   "enabled": true,
-  "name": "Auto Save Test Information to mem-mesh",
-  "description": "테스트 작성이나 테스트 결과를 자동으로 mem-mesh에 저장합니다",
+  "name": "Auto-save Test Activities",
+  "description": "테스트 작성/실행 내용을 mem-mesh에 자동 저장",
   "version": "1",
   "when": {
     "type": "messageContains",
-    "patterns": ["test", "testing", "테스트", "unittest", "pytest", "jest", "spec", "assert", "mock"]
+    "patterns": ["test", "testing", "테스트", "unittest", "pytest", "검증", "확인"]
   },
   "then": {
     "type": "askAgent",
-    "prompt": "테스트와 관련된 대화가 감지되었습니다. 다음 내용을 mem-mesh에 저장해주세요:\n\n1. 작성한 테스트의 목적과 내용\n2. 테스트하는 기능이나 컴포넌트\n3. 테스트 결과나 발견한 이슈\n4. 테스트 전략이나 접근법\n5. 개선이 필요한 테스트 영역\n\n카테고리는 'code_snippet'으로, project_id는 현재 프로젝트명으로, 태그에는 'testing', 'quality-assurance'를 포함해주세요."
+    "prompt": "테스트 관련 대화가 감지되었습니다.\n\n현재 대화 내용을 mem-mesh에 저장해주세요:\n- 카테고리: code_snippet\n- 프로젝트 ID: mem-mesh\n- 태그: [\"test\", \"testing\", \"verification\"]\n- 테스트 내용과 결과를 요약해서 저장해주세요."
   }
 }

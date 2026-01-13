@@ -18,17 +18,64 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from app.core.config import Settings
 from app.core.storage.direct import DirectStorageBackend
+from app.core.storage.api import APIStorageBackend
+from app.core.storage.base import StorageBackend
 from app.core.schemas.requests import AddParams, SearchParams, UpdateParams, StatsParams
 
 # -------------------------
-# Logging (stderr only)
+# Logging (stderr + optional file)
 # -------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(sys.stderr)],
-)
-log = logging.getLogger("mem-mesh-mcp-server")
+def setup_logging():
+    """환경변수 기반 로깅 설정"""
+    log_level_str = os.environ.get("MCP_LOG_LEVEL", "INFO").upper()
+    log_file = os.environ.get("MCP_LOG_FILE", "")
+    
+    # 로그 레벨 매핑
+    level_map = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+        "CRITICAL": logging.CRITICAL,
+    }
+    log_level = level_map.get(log_level_str, logging.INFO)
+    
+    # 로거 생성
+    logger = logging.getLogger("mem-mesh-mcp-server")
+    logger.setLevel(log_level)
+    
+    # 기존 핸들러 제거
+    logger.handlers.clear()
+    
+    # 포맷터 설정
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(name)s - %(message)s")
+    
+    # stderr 핸들러 추가
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(log_level)
+    stderr_handler.setFormatter(formatter)
+    logger.addHandler(stderr_handler)
+    
+    # 파일 로깅 추가
+    if log_file:
+        try:
+            # 디렉토리 생성
+            log_dir = os.path.dirname(log_file)
+            if log_dir and not os.path.exists(log_dir):
+                os.makedirs(log_dir, exist_ok=True)
+            
+            file_handler = logging.FileHandler(log_file, encoding='utf-8')
+            file_handler.setLevel(log_level)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+            logger.info(f"File logging enabled: {log_file}")
+        except Exception as e:
+            logger.warning(f"Could not create log file {log_file}: {e}")
+    
+    logger.info(f"Logging initialized: level={log_level_str}, file={log_file or 'none'}")
+    return logger
+
+log = setup_logging()
 
 # -------------------------
 # Server Info
@@ -42,7 +89,7 @@ SERVER_INFO = {
 # -------------------------
 # Global storage
 # -------------------------
-storage: Optional[DirectStorageBackend] = None
+storage: Optional[StorageBackend] = None
 
 # -------------------------
 # Transport: NDJSON only (simplified)
@@ -74,7 +121,8 @@ def read_message() -> Optional[Dict[str, Any]]:
 # -------------------------
 def resp_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
     """Handle initialize request"""
-    client_protocol = params.get("protocolVersion", "2024-11-05")
+    # protocolVersion은 클라이언트 호환성 확인용 (현재는 사용하지 않음)
+    _ = params.get("protocolVersion", "2024-11-05")
     
     return {
         "protocolVersion": "2024-11-05",
@@ -98,7 +146,12 @@ def list_tools() -> Dict[str, Any]:
                 "properties": {
                     "content": {"type": "string", "description": "Memory content (10-10000 characters)"},
                     "project_id": {"type": "string", "description": "Project identifier (optional)"},
-                    "category": {"type": "string", "description": "Memory category", "default": "task"},
+                    "category": {
+                        "type": "string", 
+                        "description": "Memory category", 
+                        "default": "task",
+                        "enum": ["task", "bug", "idea", "decision", "incident", "code_snippet", "git-history"]
+                    },
                     "source": {"type": "string", "description": "Memory source", "default": "mcp"},
                     "tags": {"type": "array", "items": {"type": "string"}, "description": "Memory tags"},
                 },
@@ -113,7 +166,11 @@ def list_tools() -> Dict[str, Any]:
                 "properties": {
                     "query": {"type": "string", "description": "Search query (min 3 characters)"},
                     "project_id": {"type": "string", "description": "Project filter"},
-                    "category": {"type": "string", "description": "Category filter"},
+                    "category": {
+                        "type": "string", 
+                        "description": "Category filter",
+                        "enum": ["task", "bug", "idea", "decision", "incident", "code_snippet", "git-history"]
+                    },
                     "limit": {"type": "integer", "description": "Maximum results (1-20)", "default": 5},
                     "recency_weight": {"type": "number", "description": "Recency weight (0.0-1.0)", "default": 0.0},
                 },
@@ -141,7 +198,11 @@ def list_tools() -> Dict[str, Any]:
                 "properties": {
                     "memory_id": {"type": "string", "description": "Memory ID to update"},
                     "content": {"type": "string", "description": "New content"},
-                    "category": {"type": "string", "description": "New category"},
+                    "category": {
+                        "type": "string", 
+                        "description": "New category",
+                        "enum": ["task", "bug", "idea", "decision", "incident", "code_snippet", "git-history"]
+                    },
                     "tags": {"type": "array", "items": {"type": "string"}, "description": "New tags"},
                 },
                 "required": ["memory_id"],
@@ -276,9 +337,13 @@ async def initialize_storage():
     if settings.storage_mode == "direct":
         storage = DirectStorageBackend(settings.database_path)
         await storage.initialize()
-        log.info("Storage initialized successfully")
+        log.info("Direct storage initialized successfully")
+    elif settings.storage_mode == "api":
+        storage = APIStorageBackend(settings.api_base_url)
+        await storage.initialize()
+        log.info("API storage initialized successfully")
     else:
-        raise ValueError("Pure MCP server only supports direct storage mode")
+        raise ValueError(f"Unsupported storage mode: {settings.storage_mode}. Use 'direct' or 'api'.")
 
 # -------------------------
 # Main loop

@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Q&A 쌍 표시 테스트</title>
+    <style>
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8fafc;
+            --bg-tertiary: #f1f5f9;
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --text-muted: #64748b;
+            --border-color: #e2e8f0;
+            --border-hover: #cbd5e1;
+            --primary-color: #3b82f6;
+            --primary-hover: #2563eb;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --radius-sm: 0.25rem;
+            --radius-md: 0.375rem;
+            --radius-lg: 0.5rem;
+            --space-1: 0.25rem;
+            --space-2: 0.5rem;
+            --space-3: 0.75rem;
+            --space-4: 1rem;
+            --space-6: 1.5rem;
+            --space-8: 2rem;
+            --text-xs: 0.75rem;
+            --text-sm: 0.875rem;
+            --text-base: 1rem;
+            --text-lg: 1.125rem;
+            --text-xl: 1.25rem;
+            --text-2xl: 1.5rem;
+            --font-medium: 500;
+            --font-semibold: 600;
+            --font-mono: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            --transition: all 0.15s ease;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 2rem;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 2rem;
+            color: var(--primary-color);
+        }
+
+        .test-section {
+            margin-bottom: 3rem;
+        }
+
+        .test-section h2 {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        /* 테스트용 메모리 카드 스타일 */
+        .test-memory-card {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .test-memory-card.qa-pair {
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .memory-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .category-badge {
+            background: var(--bg-secondary);
+            color: var(--primary-color);
+            padding: 0.25rem 0.75rem;
+            border-radius: var(--radius-md);
+            font-size: var(--text-sm);
+            font-weight: var(--font-medium);
+        }
+
+        .qa-content {
+            margin-bottom: 1rem;
+        }
+
+        .qa-question, .qa-answer {
+            display: flex;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .qa-answer {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .qa-label {
+            font-weight: 600;
+            color: var(--primary-color);
+            min-width: 1.5rem;
+            flex-shrink: 0;
+        }
+
+        .qa-text {
+            flex: 1;
+            line-height: 1.6;
+        }
+
+        .qa-question .qa-text {
+            font-weight: 500;
+        }
+
+        .qa-meta {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+            padding-top: 0.5rem;
+            border-top: 1px solid var(--border-color);
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+        }
+
+        .conversation-id {
+            font-family: var(--font-mono);
+            background: var(--bg-secondary);
+            padding: 0.125rem 0.375rem;
+            border-radius: var(--radius-sm);
+        }
+
+        .expand-btn {
+            background: none;
+            border: none;
+            color: var(--primary-color);
+            cursor: pointer;
+            font-size: var(--text-sm);
+            text-decoration: underline;
+            margin-top: 0.5rem;
+        }
+
+        .expand-btn:hover {
+            color: var(--primary-hover);
+        }
+
+        .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.25rem;
+            margin-top: 1rem;
+        }
+
+        .tag {
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            padding: 0.125rem 0.375rem;
+            border-radius: var(--radius-sm);
+            font-size: var(--text-xs);
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Q&A 쌍 표시 테스트</h1>
+
+        <div class="test-section">
+            <h2>1. 일반 메모리 카드</h2>
+            <div class="test-memory-card">
+                <div class="memory-header">
+                    <span class="category-badge">task</span>
+                    <span style="font-size: var(--text-xs); color: var(--text-muted);">2시간 전</span>
+                </div>
+                <div class="content">
+                    <p>일반적인 메모리 내용입니다. 이것은 Q&A 쌍이 아닌 일반적인 메모리 항목을 보여줍니다.</p>
+                </div>
+                <div class="tags">
+                    <span class="tag">#task</span>
+                    <span class="tag">#general</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>2. Q&A 쌍 메모리 카드 (축약 상태)</h2>
+            <div class="test-memory-card qa-pair">
+                <div class="memory-header">
+                    <span class="category-badge">bug (Q&A)</span>
+                    <span style="font-size: var(--text-xs); color: var(--text-muted);">15분 전</span>
+                </div>
+                <div class="qa-content">
+                    <div class="qa-question">
+                        <div class="qa-label">Q:</div>
+                        <div class="qa-text">MCP 서버에서 타임아웃 문제가 발생하는데 어떻게 해결할 수 있을까요?</div>
+                    </div>
+                </div>
+                <button class="expand-btn">답변 보기</button>
+                <div class="tags">
+                    <span class="tag">#qa-pair</span>
+                    <span class="tag">#mcp</span>
+                    <span class="tag">#timeout</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>3. Q&A 쌍 메모리 카드 (확장 상태)</h2>
+            <div class="test-memory-card qa-pair">
+                <div class="memory-header">
+                    <span class="category-badge">idea (Q&A)</span>
+                    <span style="font-size: var(--text-xs); color: var(--text-muted);">30분 전</span>
+                </div>
+                <div class="qa-content">
+                    <div class="qa-question">
+                        <div class="qa-label">Q:</div>
+                        <div class="qa-text">사용자 질문과 LLM 응답을 쌍으로 관리하는 방법이 있을까요?</div>
+                    </div>
+                    <div class="qa-answer">
+                        <div class="qa-label">A:</div>
+                        <div class="qa-text">
+                            JSON 구조로 질문-답변을 연결하여 저장하고, 자동 저장 Hook을 구현하면 됩니다. 
+                            이렇게 하면 대화의 맥락을 유지하면서 검색 품질도 향상시킬 수 있습니다.
+                        </div>
+                    </div>
+                    <div class="qa-meta">
+                        <span class="conversation-id">conv_20260113_141633_97a0fc94</span>
+                        <span>2026-01-13T14:16:33</span>
+                    </div>
+                </div>
+                <button class="expand-btn">접기</button>
+                <div class="tags">
+                    <span class="tag">#qa-pair</span>
+                    <span class="tag">#conversation</span>
+                    <span class="tag">#management</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
