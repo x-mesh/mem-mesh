@@ -1,6 +1,0 @@
-2026-01-13 23:09:34 - INFO - test-mcp-server - File logging enabled: ./logs/test-mcp-server.log
-2026-01-13 23:09:34 - INFO - test-mcp-server - Logging initialized: level=INFO, file=./logs/test-mcp-server.log
-2026-01-13 23:09:34 - INFO - test-mcp-server - MCP 서버 시작
-2026-01-13 23:09:34 - INFO - test-mcp-server - 도구 호출 처리 중
-2026-01-13 23:09:34 - WARNING - test-mcp-server - 느린 요청 감지
-2026-01-13 23:09:34 - INFO - test-mcp-server - MCP 서버 종료

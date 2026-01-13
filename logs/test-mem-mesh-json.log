@@ -1,4 +1,0 @@
-{"timestamp": "2026-01-13T14:09:34.171650+00:00", "level": "INFO", "logger": "mem-mesh", "message": "Logging system initialized", "log_level": "INFO", "log_format": "json", "log_file": "./logs/test-mem-mesh-json.log"}
-{"timestamp": "2026-01-13T14:09:34.171795+00:00", "level": "INFO", "logger": "test-json", "message": "JSON 형식 로깅 테스트", "format_type": "json", "structured_data": {"key": "value", "number": 42}}
-{"timestamp": "2026-01-13T14:09:34.171825+00:00", "level": "WARNING", "logger": "test-json", "message": "JSON 경고 메시지", "component": "test", "metadata": {"timestamp": "2024-01-01", "user": "test"}}
-{"timestamp": "2026-01-13T14:09:34.172376+00:00", "level": "INFO", "logger": "mem-mesh", "message": "Logging system initialized", "log_level": "INFO", "log_format": "text", "log_file": "./logs/test-web-server.log"}
