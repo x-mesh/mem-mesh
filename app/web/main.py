@@ -529,6 +529,10 @@ async def serve_spa_routes(path: str):
     if path.startswith("api"):
         raise HTTPException(status_code=404, detail="Not Found")
     
+    # MCP 경로는 제외 (MCP SSE 라우터에서 처리)
+    if path.startswith("mcp"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    
     # 정적 파일 경로는 제외 (이미 /static으로 마운트됨)
     if path.startswith("static"):
         raise HTTPException(status_code=404, detail="Not Found")
