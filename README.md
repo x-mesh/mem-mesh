@@ -1221,7 +1221,7 @@ fetch('http://localhost:8000/mcp/sse', {
 {
   "mcpServers": {
     "mem-mesh": {
-      "url": "http://localhost:8000/sse"
+      "url": "http://localhost:8000/mcp/sse"
     }
   }
 }
@@ -1253,7 +1253,7 @@ fetch('http://localhost:8000/mcp/sse', {
 {
   "mcpServers": {
     "mem-mesh": {
-      "url": "http://localhost:8000/sse",
+      "url": "http://localhost:8000/mcp/sse",
       "transport": "sse"
     }
   }
