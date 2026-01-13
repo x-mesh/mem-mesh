@@ -177,6 +177,19 @@ class MemoriesPage extends HTMLElement {
     console.log('MemoriesPage: handleMemoryCreated called with data:', data);
     const { memory } = data;
     
+    // 디버깅: 메모리 데이터 상세 로깅
+    console.log('MemoriesPage: Memory object details:', {
+      id: memory?.id,
+      content: memory?.content,
+      content_length: memory?.content?.length,
+      project_id: memory?.project_id,
+      category: memory?.category,
+      tags: memory?.tags,
+      source: memory?.source,
+      created_at: memory?.created_at,
+      updated_at: memory?.updated_at
+    });
+    
     // 현재 필터 조건에 맞는지 확인
     if (this.shouldIncludeMemory(memory)) {
       console.log('MemoriesPage: Memory matches filters, adding to list');
@@ -477,9 +490,11 @@ class MemoriesPage extends HTMLElement {
         project="${memory.project_id || ''}"
         category="${memory.category}"
         created-at="${memory.created_at}"
-        updated-at="${memory.updated_at}"
+        updated-at="${memory.updated_at || ''}"
+        similarity-score="${memory.similarity_score || ''}"
         tags="${this.escapeAttribute(JSON.stringify(memory.tags || []))}"
         source="${memory.source || 'unknown'}"
+        search-query="${this.escapeAttribute(this.searchQuery)}"
       ></memory-card>
     `).join('');
   }

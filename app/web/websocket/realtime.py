@@ -243,6 +243,9 @@ class RealtimeNotifier:
             }
         }
         
+        # 디버깅: 전송되는 메모리 데이터 로깅
+        logger.info(f"WebSocket notify_memory_created - Memory data: {memory_data}")
+        
         # 전체 브로드캐스트
         total_sent = await connection_manager.broadcast_to_all(message)
         
