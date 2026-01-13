@@ -81,6 +81,12 @@ class Settings(BaseSettings):
         le=65535,
         description="Server port number"
     )
+    server_workers: int = Field(
+        default=1,
+        ge=1,
+        le=32,
+        description="Number of uvicorn worker processes"
+    )
     
     # Content length settings
     max_content_length: int = Field(

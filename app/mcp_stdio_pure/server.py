@@ -9,7 +9,6 @@ FastMCP 대신 직접 MCP 프로토콜을 구현하여 안정성 향상.
 import sys
 import os
 import json
-import logging
 import asyncio
 from typing import Optional, Dict, Any
 from pydantic import ValidationError
@@ -19,55 +18,13 @@ from ..mcp_common.storage import StorageManager
 from ..mcp_common.tools import MCPToolHandlers
 from ..mcp_common.schemas import get_tool_schemas
 from ..core.version import SERVER_INFO, MCP_PROTOCOL_VERSION
+from ..core.utils.logger import setup_logging
 
 
 # -------------------------
-# Logging (stderr + optional file)
+# Logging setup
 # -------------------------
-def setup_logging():
-    """환경변수 기반 로깅 설정"""
-    log_level_str = os.environ.get("MCP_LOG_LEVEL", "INFO").upper()
-    log_file = os.environ.get("MCP_LOG_FILE", "")
-    
-    level_map = {
-        "DEBUG": logging.DEBUG,
-        "INFO": logging.INFO,
-        "WARNING": logging.WARNING,
-        "ERROR": logging.ERROR,
-        "CRITICAL": logging.CRITICAL,
-    }
-    log_level = level_map.get(log_level_str, logging.INFO)
-    
-    logger = logging.getLogger("mem-mesh-mcp-pure")
-    logger.setLevel(log_level)
-    logger.handlers.clear()
-    
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(name)s - %(message)s")
-    
-    stderr_handler = logging.StreamHandler(sys.stderr)
-    stderr_handler.setLevel(log_level)
-    stderr_handler.setFormatter(formatter)
-    logger.addHandler(stderr_handler)
-    
-    if log_file:
-        try:
-            log_dir = os.path.dirname(log_file)
-            if log_dir and not os.path.exists(log_dir):
-                os.makedirs(log_dir, exist_ok=True)
-            
-            file_handler = logging.FileHandler(log_file, encoding='utf-8')
-            file_handler.setLevel(log_level)
-            file_handler.setFormatter(formatter)
-            logger.addHandler(file_handler)
-            logger.info(f"File logging enabled: {log_file}")
-        except Exception as e:
-            logger.warning(f"Could not create log file {log_file}: {e}")
-    
-    logger.info(f"Logging initialized: level={log_level_str}, file={log_file or 'none'}")
-    return logger
-
-
-log = setup_logging()
+log = setup_logging("mem-mesh-mcp-pure")
 
 # -------------------------
 # Global instances

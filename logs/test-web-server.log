@@ -1,0 +1,7 @@
+2026-01-13 23:09:34 - INFO - mem-mesh-web - Starting mem-mesh Web Server...
+2026-01-13 23:09:34 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-13 23:09:34 - INFO - mem-mesh-web - Database connected successfully
+2026-01-13 23:09:34 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-13 23:09:34 - INFO - mem-mesh-web - Initializing business services
+2026-01-13 23:09:34 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-13 23:09:34 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=./logs/test-web-server.log, log_format=text]

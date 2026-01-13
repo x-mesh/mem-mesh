@@ -1,0 +1,194 @@
+2026-01-13 23:34:37 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-13 23:34:37 - INFO - test-final - ✅ 통합된 환경변수 최종 테스트
+2026-01-13 23:34:37 - DEBUG - test-final - ✅ DEBUG 메시지 (이제 보여야 함)
+2026-01-13 23:34:37 - WARNING - test-final - ✅ WARNING 메시지
+2026-01-13 23:34:58 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-13 23:34:58 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-13 23:34:58 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-13 23:34:58 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=DEBUG, log_file=./logs/mem-mesh.log, log_format=text]
+2026-01-13 23:34:58 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-13 23:34:58 - INFO - mem-mesh-web - Database connected successfully
+2026-01-13 23:34:58 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-13 23:35:02 - INFO - mem-mesh-web - Initializing business services
+2026-01-13 23:35:02 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-13 23:35:02 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=./logs/mem-mesh.log, log_format=text]
+2026-01-13 23:36:20 - DEBUG - mcp-tools - Tool add called [project_id=kiro-conversations, category=task, content_length=428, content=사용자 질문: mem-mesh에 저장해
+
+이 요청은 이전 대화 내용을 mem-mesh에 저장하라는 간단한 요청입니다. 
+
+전체 대화 맥락:
+- 파일 로깅 문제 해결 과정
+- stdout과 file 동시 출력 문제 해결을 위한 MCP_LOG_OUTPUT 환경변수 추가
+- 환경변수 명명 규칙 일관성 문제 해결 (MCP_LOG_* vs MEM_MESH_LOG_*)
+- 로깅 시스템 통합 및 하위 호환성 확보
+
+주요 성과:
+1. MCP_LOG_OUTPUT 환경변수로 로그 출력 대상 제어 (console/file/both)
+2. MCP_LOG_*와 MEM_MESH_LOG_* 두 방식 모두 지원하는 통합 로깅 시스템
+3. 우선순위: MCP 표준 → mem-mesh 전용 → 기본값
+4. .env 파일 정리 및 중복 설정 제거
+5. DEBUG 레벨 로깅까지 정상 작동 확인, tags=['logging', 'environment-variables', 'configuration', 'integration', 'file-logging'], source=mcp-sse]
+2026-01-13 23:36:23 - INFO - mcp-tools - Successfully added memory [memory_id=08f90f23-469a-4ac5-9c9f-4b49b440a96c]
+2026-01-13 23:37:08 - DEBUG - mcp-tools - Tool add called [project_id=kiro-conversations, category=incident, content_length=548, content=사용자 질문: 위에 이걸로 실패했던 이유가 뭐야?
+
+분석 대상: 이전 mcp_mem_mesh_add 호출이 "Error calling MCP tool: fetch failed" 오류로 실패한 원인
+
+가능한 실패 원인들:
+1. MCP 서버 연결 문제: mem-mesh MCP 서버가 실행되지 않았거나 연결이 끊어짐
+2. 네트워크 연결 문제: 로컬 서버와의 통신 장애
+3. 요청 데이터 크기 문제: content 필드가 너무 길어서 요청 실패 (약 1000자 이상의 긴 텍스트)
+4. 서버 과부하: 동시 요청이나 처리 지연으로 인한 timeout
+5. 데이터베이스 락: SQLite 데이터베이스가 다른 프로세스에 의해 잠겨있음
+6. 환경변수 설정 문제: MCP 서버 설정이나 로깅 설정 변경 중 발생한 일시적 문제
+
+해결 방법:
+- MCP 서버 상태 확인 및 재시작
+- 요청 데이터 크기 줄이기
+- 네트워크 연결 상태 점검
+- 데이터베이스 연결 상태 확인
+
+현재 상태: 이후 요청은 성공적으로 처리됨 (메모리 ID: 08f90f23-469a-4ac5-9c9f-4b49b440a96c), tags=['mcp-error', 'fetch-failed', 'troubleshooting', 'connection-issue'], source=mcp-sse]
+2026-01-13 23:37:08 - INFO - mcp-tools - Successfully added memory [memory_id=aac3e1f2-c357-4b75-8f5b-4a350f0c2441]
+2026-01-13 23:38:21 - DEBUG - mcp-tools - Tool add called [project_id=kiro-conversations, category=task, content_length=441, content=사용자 질문: 환경변수에 일관성이 없는데, MCP_LOG_LEVEL은 전역으로 쓰는건가?
+
+문제 분석:
+- MCP_LOG_* : MCP 프로토콜 표준 환경변수
+- MEM_MESH_LOG_* : mem-mesh 애플리케이션 전용 환경변수
+- 두 방식이 혼재하여 일관성 부족 및 우선순위 불명확
+
+해결책 구현:
+1. 로깅 시스템에서 두 방식 모두 지원하도록 수정
+2. 우선순위: MCP_LOG_* → MEM_MESH_LOG_* → 기본값
+3. .env 파일에서 중복된 MCP_LOG_LEVEL=INFO 제거
+4. 통합된 환경변수 조회 함수 추가 (_get_log_level, _get_log_file, _get_log_output)
+
+결과:
+- 환경변수 명명 규칙 통합 완료
+- 하위 호환성 유지 (두 방식 모두 지원)
+- DEBUG 레벨 로깅 정상 작동 확인
+- 일관성 있는 설정 관리 가능, tags=['environment-variables', 'logging', 'consistency', 'naming-convention', 'configuration'], source=mcp-sse]
+2026-01-13 23:38:21 - INFO - mcp-tools - Successfully added memory [memory_id=ef8ebaa9-0928-4927-91f5-855b0df55f69]
+2026-01-13 23:38:39 - DEBUG - mcp-tools - Tool add called [project_id=kiro-conversations, category=incident, content_length=338, content=사용자 질문: 다시 시도해보자. 명확한 이유를 알아야함
+
+실험 결과: 이전에 실패했던 정확히 동일한 요청을 재시도한 결과 성공적으로 처리됨
+
+확인된 사실:
+1. 요청 데이터 크기나 형식은 문제가 아님 (동일한 content로 성공)
+2. MCP 도구 자체의 문제가 아님 (현재 정상 작동)
+3. 이전 실패는 일시적인 시스템 상태 문제였음
+
+추정되는 실패 원인:
+- 로깅 시스템 수정 과정에서 MCP 서버 일시적 불안정
+- SQLite 데이터베이스 동시 접근으로 인한 락 발생
+- 웹 서버 테스트 중 리소스 경합 상황
+
+교훈: MCP 도구 실패 시 단순 재시도로 해결될 수 있는 일시적 문제일 가능성이 높음, tags=['mcp-debugging', 'fetch-failed', 'retry-success', 'root-cause-analysis'], source=mcp-sse]
+2026-01-13 23:38:39 - INFO - mcp-tools - Successfully added memory [memory_id=28630ec5-04e4-49d7-b05b-0c0185cd45e6]
+2026-01-13 23:40:36 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-13 23:40:36 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-13 23:40:36 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-13 23:40:36 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=DEBUG, log_file=./logs/mem-mesh.log, log_format=text]
+2026-01-13 23:40:36 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-13 23:40:36 - INFO - mem-mesh-web - Database connected successfully
+2026-01-13 23:40:36 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-13 23:40:40 - INFO - mem-mesh-web - Initializing business services
+2026-01-13 23:40:40 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-13 23:40:40 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=./logs/mem-mesh.log, log_format=text]
+2026-01-13 23:40:40 - DEBUG - mcp-tools - Tool add called [project_id=None, category=task, content_length=19, content=Test memory via SSE, tags=None, source=mcp-sse]
+2026-01-13 23:40:43 - INFO - mcp-tools - Successfully added memory [memory_id=d1d1840b-fcc0-4f19-9b09-ca81a0e4d26f]
+2026-01-13 23:40:49 - DEBUG - mcp-tools - Tool add called [project_id=kiro-conversations, category=task, content_length=531, content=사용자 질문: 현재 FASTAPI 서버의 uvicorn 갯수를 환경변수로 늘릴 수 있나?
+
+구현 완료:
+1. app/core/config.py에 server_workers 설정 추가 (기본값: 1, 범위: 1-32)
+2. app/web/__main__.py에서 --workers 명령행 인수 지원 추가
+3. reload 모드에서는 workers를 1로 고정 (uvicorn 제한사항)
+4. .env 및 .env.example에 MEM_MESH_SERVER_WORKERS 환경변수 추가
+5. README.md에 사용법 및 권장사항 문서화
+
+사용법:
+- 환경변수: MEM_MESH_SERVER_WORKERS=4
+- 명령행: python -m app.web --workers 4
+- 개발: python -m app.web --reload (자동으로 1 worker)
+- 프로덕션: python -m app.web --workers 4
+
+설정 우선순위: 명령행 인수 → 환경변수 → 기본값(1)
+
+결과: FastAPI 서버 성능을 환경변수로 쉽게 조절 가능, tags=['fastapi', 'uvicorn', 'workers', 'environment-variables', 'performance', 'scaling'], source=mcp-sse]
+2026-01-13 23:40:50 - INFO - mcp-tools - Successfully added memory [memory_id=371bc7dd-d2be-47be-9f6c-6b77802b966a]
+2026-01-13 23:44:18 - DEBUG - mcp-tools - Tool add called [project_id=mem-mesh, category=decision, content_length=2211, content=## mem-mesh 세션 요약: 코드베이스 구조 분석 및 문제 진단
+
+### 주요 작업
+1. **전체 코드베이스 구조 파악**
+   - 프로젝트 파일 트리 분석 (100+ 파일)
+   - 핵심 모듈 구조 이해: app/core, app/mcp_common, app/web, app/mcp_stdio_pure
+   - 레거시 코드 (src__DEPRECATED) vs 신규 구조 (app/) 분리 확인
+
+2. **아키텍처 검토**
+   - 스토리지 모드: direct (SQLite) vs api (FastAPI) 지원
+   - MCP 프로토콜 구현: Pure MCP (stdio) + FastMCP 기반 서버
+   - 웹 대시보드: FastAPI + SSE MCP 엔드포인트
+   - 임베딩: sentence-transformers (all-MiniLM-L6-v2, 384차원)
+
+3. **코드 품질 이슈 식별**
+   - app/mcp_stdio_pure/server.py: logger.exception() 메서드 없음 (MemMeshLogger에 미구현)
+   - app/core/utils/logger.py: 타입 힌트 오류 (Optional[str] vs str 불일치)
+   - src__DEPRECATED/schemas/requests.py: 정규식 패턴 문자열 끝 누락
+   - src__DEPRECATED/database/models.py: datetime.utcnow() deprecated 경고
+
+### 해결한 문제
+1. **로깅 시스템 구조 파악**
+   - 환경변수 지원: MCP_LOG_LEVEL, MEM_MESH_LOG_LEVEL, MCP_LOG_FILE 등
+   - 포맷 옵션: JSON vs Text (기본값: text)
+   - 파일 로깅 지원 (logs/ 디렉토리)
+
+2. **MCP 프로토콜 버전 관리**
+   - 중앙 집중식: app/core/version.py에서 관리
+   - 모든 서버가 동일 버전 참조 (2024-11-05)
+
+3. **스토리지 백엔드 추상화**
+   - StorageManager: 초기화/종료 관리
+   - MCPToolHandlers: 6개 도구 (add, search, context, update, delete, stats)
+   - 의존성 주입 패턴으로 구현
+
+### 결정사항
+1. **로깅 개선 필요**
+   - MemMeshLogger에 exception() 메서드 추가 필요
+   - 타입 힌트 일관성 개선
+   - 구조화된 로깅 포맷 표준화
+
+2. **코드 정리 우선순위**
+   - src__DEPRECATED 모듈 제거 또는 완전 마이그레이션
+   - 정규식 패턴 문자열 수정
+   - datetime.utcnow() → datetime.now(timezone.utc) 변경
+
+3. **테스트 커버리지**
+   - tests/ 디렉토리: 통합 테스트, 서비스 테스트 존재
+   - 웹 UI 테스트: static/js/tests/ (test-runner.js 기반)
+   - MCP 도구 테스트: test_mcp_tools.py
+
+### 남은 작업
+1. **긴급 수정**
+   - [ ] app/mcp_stdio_pure/server.py의 logger.exception() 호출 수정
+   - [ ] app/core/utils/logger.py 타입 힌트 오류 해결
+   - [ ] src__DEPRECATED/schemas/requests.py 정규식 패턴 완성
+
+2. **구조 개선**
+   - [ ] src__DEPRECATED 모듈 완전 제거 또는 마이그레이션 계획
+   - [ ] 버전 관리 자동화 (app/core/version.py 중앙화)
+   - [ ] 로깅 설정 통합 (MCP_* vs MEM_MESH_* 환경변수 정리)
+
+3. **문서화**
+   - [ ] AGENTS.md 파일들 최신화 (각 모듈별 가이드)
+   - [ ] 마이그레이션 가이드 작성 (src__DEPRECATED → app/)
+   - [ ] MCP 프로토콜 구현 문서 작성
+
+4. **테스트 강화**
+   - [ ] 웹 UI 통합 테스트 추가
+   - [ ] MCP 서버 엔드-투-엔드 테스트
+   - [ ] 스토리지 모드 전환 테스트 (direct ↔ api)
+
+### 후속 조치
+- 다음 세션: 긴급 수정 항목 처리 (logger.exception, 타입 힌트)
+- 그 다음: src__DEPRECATED 모듈 정리 및 마이그레이션
+- 최종: 통합 테스트 및 문서화 완성, tags=['session-summary', 'progress', 'architecture-review', 'code-quality'], source=mcp-sse]
+2026-01-13 23:44:19 - INFO - mcp-tools - Successfully added memory [memory_id=680024a9-a129-4262-a8fe-bffa23551142]

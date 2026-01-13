@@ -1,0 +1,5 @@
+2026-01-13 23:09:34 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_file=./logs/test-mem-mesh.log]
+2026-01-13 23:09:34 - DEBUG - test-file - 디버그 메시지 [test_type=file]
+2026-01-13 23:09:34 - INFO - test-file - 파일 로깅 테스트 [log_file=./logs/test-mem-mesh.log]
+2026-01-13 23:09:34 - WARNING - test-file - 파일에 기록됩니다 [component=test]
+2026-01-13 23:09:34 - ERROR - test-file - 에러도 파일에 기록 [error_code=404]

@@ -1,105 +1,74 @@
-# Agents & MCP Integration
+# mem-mesh: AI Memory Management System
 
-`mem-mesh` is designed to serve as a centralized, persistent memory layer for AI agents. It implements the **Model Context Protocol (MCP)** to expose its capabilities as tools that agents can invoke.
+## Project Context & Operations
 
-## Overview
+**Business Goal:** AI 에이전트를 위한 중앙 집중식 메모리 서버. 벡터 검색과 컨텍스트 조회를 통한 지능형 메모리 관리.
 
-The system operates as an **MCP Server**, allowing any MCP-compliant agent (such as Claude Desktop, IDE extensions, or custom agents) to connect and utilize the memory store.
+**Tech Stack:** Python 3.9+, FastAPI, SQLite + sqlite-vec, sentence-transformers, MCP Protocol
 
-### Connection Method
-- **Transport:** Stdio (Standard Input/Output), SSE (Server-Sent Events)
-- **Protocol Version:** 2024-11-05
-- **Commands:**
-  - FastMCP 기반: `python -m app.mcp_stdio`
-  - Pure MCP 기반: `python -m app.mcp_stdio_pure`
-  - Web Dashboard + SSE MCP: `python -m app.web --reload`
-  - SSE MCP Endpoint: `http://localhost:8000/mcp/sse`
+**Operational Commands:**
+```bash
+# Development
+python -m app.web --reload              # Web Dashboard + SSE MCP
+python -m app.mcp_stdio                 # FastMCP-based MCP Server
+python -m app.mcp_stdio_pure            # Pure MCP Implementation
 
-## Available Tools
+# Testing
+python -m pytest tests/                 # Run test suite
+python -c "from app.web.app import app" # Quick import test
 
-Agents connecting to `mem-mesh` have access to the following tools to manage and retrieve information.
+# Database Migration
+python scripts/migrate_embeddings.py --check-only
+python scripts/migrate_embeddings.py --dry-run
 
-### 1. `mem-mesh.add`
-Adds a new memory to the system. Agents should use this to store important information, decisions, tasks, or code snippets.
-
-*   **Inputs:**
-    *   `content` (string, required): The actual memory content (10-10,000 chars).
-    *   `project_id` (string, optional): Identifier for the project this memory relates to.
-    *   `category` (string, optional): One of `task`, `bug`, `idea`, `decision`, `incident`, `code_snippet`. Defaults to `task`.
-    *   `source` (string, optional): Origin of the memory (defaults to "mcp").
-    *   `tags` (array of strings, optional): Keywords for easier filtering.
-
-### 2. `mem-mesh.search`
-Performs a hybrid search (Vector + Metadata) to find relevant memories.
-
-*   **Inputs:**
-    *   `query` (string, required): The search text.
-    *   `project_id` (string, optional): Filter by project.
-    *   `category` (string, optional): Filter by category.
-    *   `limit` (integer, optional): Max results (default 5).
-    *   `recency_weight` (number, optional): 0.0 to 1.0, giving preference to newer memories.
-
-### 3. `mem-mesh.context`
-Retrieves the "context" surrounding a specific memory. This is useful for understanding the evolution of a task or related items.
-
-*   **Inputs:**
-    *   `memory_id` (string, required): The ID of the focal memory.
-    *   `depth` (integer, optional): How far to traverse the relationship graph (default 2).
-    *   `project_id` (string, optional): Restrict context to a specific project.
-
-### 4. `mem-mesh.update`
-Updates an existing memory.
-
-*   **Inputs:**
-    *   `memory_id` (string, required): ID of the memory to update.
-    *   `content` (string, optional): New content.
-    *   `category` (string, optional): New category.
-    *   `tags` (array of strings, optional): New tags.
-
-### 5. `mem-mesh.delete`
-Permanently removes a memory.
-
-*   **Inputs:**
-    *   `memory_id` (string, required): ID of the memory to delete.
-
-### 6. `mem-mesh.stats`
-Retrieves statistical data about the memory store, useful for agents to get a high-level overview.
-
-*   **Inputs:**
-    *   `project_id` (string, optional): Filter stats by project.
-    *   `start_date` / `end_date` (string, optional): Date range (YYYY-MM-DD).
-    *   `group_by` (string, optional): Grouping method (`overall`, `project`, `category`, `source`).
-
-## Agent Workflows
-
-### Storing Context
-When an agent completes a significant task or makes a design decision, it should use `mem-mesh.add` to persist this context.
-
-```json
-{
-  "name": "mem-mesh.add",
-  "arguments": {
-    "content": "Decided to use SQLite with sqlite-vec for the backend database to support vector search without external dependencies.",
-    "category": "decision",
-    "project_id": "mem-mesh-core",
-    "tags": ["architecture", "database"]
-  }
-}
+# Production
+uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 ```
 
-### Retrieving Information
-Before starting a task, an agent can search for relevant past memories to avoid duplication or regression.
+## Golden Rules
 
-```json
-{
-  "name": "mem-mesh.search",
-  "arguments": {
-    "query": "vector search implementation details",
-    "project_id": "mem-mesh-core",
-    "limit": 3
-  }
-}
-```
+**Immutable Constraints:**
+- SQLite with sqlite-vec for vector operations - NO external vector databases
+- MCP Protocol 2024-11-05 compliance mandatory
+- All embeddings use sentence-transformers models only
+- Database path: `./data/memories.db` (configurable via Settings)
 
-### Project Onboarding
-An agent can use `mem-mesh.stats` and broad searches to quickly "read up" on a project's history and current status.
+**Do's:**
+- Use `app.core.version` for all version/server info references
+- Implement proper async/await patterns for all database operations
+- Use `mcp_common` module for shared MCP tool logic
+- Apply text logging format by default (`MCP_LOG_FORMAT=text`)
+- Validate all user inputs through Pydantic schemas
+
+**Don'ts:**
+- Never use `INSERT OR REPLACE` on sqlite-vec virtual tables (use DELETE + INSERT)
+- Never hardcode version numbers or server info in multiple places
+- Never bypass the storage backend abstraction layer
+- Never use JSON logging in MCP servers without explicit configuration
+- Never create direct database connections outside of Database class
+
+## Standards & References
+
+**Code Conventions:**
+- Python: Black formatting, type hints mandatory
+- Import order: stdlib, third-party, local (absolute imports preferred)
+- Async functions: Always use proper error handling and logging
+
+**Git Strategy:**
+- Commit format: `type: description` (feat, fix, refactor, docs, test, chore)
+- Korean explanations with English technical terms
+- Use `git --no-pager` for log viewing commands
+
+**Maintenance Policy:**
+규칙과 코드 간 괴리 발견 시 즉시 업데이트를 제안하고 구현하라. 중앙 집중식 관리를 통해 일관성을 유지한다.
+
+## Context Map (Action-Based Routing)
+
+- **[Core Services & Database](./app/core/AGENTS.md)** — 데이터베이스, 임베딩, 비즈니스 로직 서비스 수정 시
+- **[MCP Protocol Implementation](./app/mcp_common/AGENTS.md)** — MCP 서버 구현, 프로토콜 호환성 작업 시
+- **[Web Dashboard & API](./app/web/AGENTS.md)** — FastAPI 웹 서버, REST API, SSE MCP 엔드포인트 작업 시
+- **[MCP Stdio Servers](./app/mcp_stdio/AGENTS.md)** — FastMCP 기반 stdio MCP 서버 작업 시
+- **[MCP Pure Implementation](./app/mcp_stdio_pure/AGENTS.md)** — 순수 MCP 프로토콜 구현 작업 시
+- **[Frontend UI Components](./static/AGENTS.md)** — 웹 UI, JavaScript 컴포넌트, CSS 스타일링 작업 시
+- **[Migration & Scripts](./scripts/AGENTS.md)** — 데이터 마이그레이션, 유틸리티 스크립트 작업 시
+- **[Testing & Quality](./tests/AGENTS.md)** — 테스트 코드 작성, 품질 보증 작업 시

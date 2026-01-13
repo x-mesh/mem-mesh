@@ -50,8 +50,9 @@ class MCPToolHandlers:
         Returns:
             dict: 생성된 메모리 정보
         """
-        logger.info(
+        logger.info_with_details(
             "Tool add called",
+            details={"content": content, "tags": tags, "source": source},
             project_id=project_id,
             category=category,
             content_length=len(content)
@@ -92,12 +93,13 @@ class MCPToolHandlers:
         Returns:
             dict: 검색 결과
         """
-        logger.info(
+        logger.info_with_details(
             "Tool search called",
-            query=query,
+            details={"query_text": query, "recency_weight": recency_weight},
             project_id=project_id,
             category=category,
-            limit=limit
+            limit=limit,
+            query_length=len(query) if query else 0
         )
         
         try:
@@ -164,11 +166,13 @@ class MCPToolHandlers:
         Returns:
             dict: 업데이트된 메모리 정보
         """
-        logger.info(
+        logger.info_with_details(
             "Tool update called",
+            details={"content": content, "tags": tags},
             memory_id=memory_id,
             has_content=content is not None,
-            category=category
+            category=category,
+            content_length=len(content) if content else 0
         )
         
         try:

@@ -62,6 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         print(f"  API Base URL:    {settings.api_base_url}")
         print(f"  Embedding Model: {settings.embedding_model}")
         print(f"  MCP SSE:         /mcp/sse")
+        print(f"  LOG_LEVEL:       {settings.log_level}")
         print("="*60 + "\n")
         
         # 데이터베이스 연결
