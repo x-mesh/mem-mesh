@@ -56,8 +56,9 @@ dev = [
 mem-mesh = "src.main:main"
 mem-mesh-mcp = "src.__main__:main"
 # New entry points for app/ architecture
-mem-mesh-mcp-new = "app.mcp.__main__:main"
-mem-mesh-dashboard = "app.dashboard.__main__:main"
+mem-mesh-mcp-stdio = "app.mcp_stdio.__main__:main"
+mem-mesh-mcp-pure = "app.mcp_stdio_pure.__main__:main"
+mem-mesh-web = "app.web.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -116,7 +117,7 @@ markers = [
 
 [tool.coverage.run]
 source = ["src", "app"]
-omit = ["tests/*", "src/__main__.py", "app/mcp/__main__.py", "app/dashboard/__main__.py"]
+omit = ["tests/*", "src/__main__.py", "app/mcp_stdio/__main__.py", "app/mcp_stdio_pure/__main__.py", "app/web/__main__.py"]
 
 [tool.coverage.report]
 exclude_lines = [

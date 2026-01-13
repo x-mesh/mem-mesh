@@ -9,7 +9,10 @@ The system operates as an **MCP Server**, allowing any MCP-compliant agent (such
 ### Connection Method
 - **Transport:** Stdio (Standard Input/Output)
 - **Protocol Version:** 2024-11-05
-- **Command:** `python -m src.mcp` (or via the installed entry point `mem-mesh-mcp`)
+- **Commands:**
+  - FastMCP 기반: `python -m app.mcp_stdio`
+  - Pure MCP 기반: `python -m app.mcp_stdio_pure`
+  - Web Dashboard: `python -m app.web --reload`
 
 ## Available Tools
 

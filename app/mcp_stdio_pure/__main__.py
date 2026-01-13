@@ -1,10 +1,4 @@
-#!/usr/bin/env python3
-"""
-Pure MCP Server Entry Point
-
-Usage: python -m app.pure_mcp
-"""
-
+"""MCP Stdio Pure 서버 진입점"""
 import asyncio
 from .server import main
 

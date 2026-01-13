@@ -1,4 +1,4 @@
-"""MCP 서버 진입점"""
+"""MCP Stdio 서버 진입점"""
 import asyncio
 import logging
 import sys
@@ -13,6 +13,7 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
 
 async def main():
     """MCP 서버 메인 함수"""
@@ -33,6 +34,7 @@ async def main():
     finally:
         # 정리
         await shutdown_storage()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
