@@ -192,3 +192,71 @@
 - 그 다음: src__DEPRECATED 모듈 정리 및 마이그레이션
 - 최종: 통합 테스트 및 문서화 완성, tags=['session-summary', 'progress', 'architecture-review', 'code-quality'], source=mcp-sse]
 2026-01-13 23:44:19 - INFO - mcp-tools - Successfully added memory [memory_id=680024a9-a129-4262-a8fe-bffa23551142]
+2026-01-13 23:52:18 - DEBUG - mcp-tools - Tool search called [project_id=mem-mesh, category=None, limit=5, query_length=36, query_text=SSE server project context filtering, recency_weight=0.0]
+2026-01-13 23:52:18 - ERROR - mcp-tools - Error in search [error='SearchResponse' object has no attribute 'memories']
+2026-01-13 23:52:32 - DEBUG - mcp-tools - Tool add called [project_id=kiro-conversations, category=decision, content_length=223, content=SSE 서버를 팀이 함께 사용할 때 프로젝트별 컨텍스트 필터링 필요성 논의. 현재 hook이 모든 프로젝트의 컨텍스트를 가져오면서 불필요한 정보가 포함될 수 있다는 문제 제기. 해결책: project_id 필터링, 최근 30일 내 작업만 포함, SSE 서버 관련 작업만 수집하도록 hook 개선. 다른 프로젝트(mem-mesh-web-ui, mem-mesh-chroma-ui 등)의 컨텍스트는 제외., tags=['SSE-server', 'project-filtering', 'context-management', 'team-collaboration', 'hook-optimization'], source=mcp-sse]
+2026-01-13 23:52:32 - INFO - mcp-tools - Successfully added memory [memory_id=c1922a0c-3b87-45e6-9d83-8dc6814fd081]
+2026-01-13 23:53:38 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-13 23:53:38 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-13 23:53:38 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-13 23:53:38 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=DEBUG, log_file=./logs/mem-mesh.log, log_format=text]
+2026-01-13 23:53:38 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-13 23:53:38 - INFO - mem-mesh-web - Database connected successfully
+2026-01-13 23:53:38 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-13 23:53:41 - INFO - mem-mesh-web - Initializing business services
+2026-01-13 23:53:41 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-13 23:53:41 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=./logs/mem-mesh.log, log_format=text]
+2026-01-13 23:54:57 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-13 23:55:00 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-13 23:55:00 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-13 23:55:00 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-13 23:55:00 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=INFO, log_file=, log_format=text]
+2026-01-13 23:55:00 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-13 23:55:00 - INFO - mem-mesh-web - Database connected successfully
+2026-01-13 23:55:00 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-13 23:55:04 - INFO - mem-mesh-web - Initializing business services
+2026-01-13 23:55:04 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-13 23:55:04 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=console_only, log_format=text]
+2026-01-13 23:56:31 - INFO - mem-mesh - Logging system initialized [log_level=DEBUG, log_format=text, log_output=file, log_file=./logs/mem-mesh.log]
+2026-01-13 23:56:31 - INFO - mem-mesh-web - Starting mem-mesh Web Server... [effective_log_level=10, level_name=10]
+2026-01-13 23:56:31 - DEBUG - mem-mesh-web - Lifespan event triggered - DEBUG logging is working!
+2026-01-13 23:56:31 - DEBUG - mem-mesh-web - Environment variables loaded [log_level=DEBUG, log_file=./logs/mem-mesh.log, log_format=text]
+2026-01-13 23:56:31 - INFO - mem-mesh-web - Initializing database connection [database_path=./data/memories.db]
+2026-01-13 23:56:31 - INFO - mem-mesh-web - Database connected successfully
+2026-01-13 23:56:31 - INFO - mem-mesh-web - Loading embedding model [model=all-MiniLM-L6-v2]
+2026-01-13 23:56:35 - INFO - mem-mesh-web - Initializing business services
+2026-01-13 23:56:35 - INFO - mem-mesh-web - Initializing MCP SSE handlers
+2026-01-13 23:56:35 - INFO - mem-mesh-web - mem-mesh application initialized successfully [log_file=./logs/mem-mesh.log, log_format=text]
+2026-01-13 23:58:05 - DEBUG - mcp-tools - Tool add called [project_id=kiro-conversations, category=idea, content_length=216, content=Hook의 프로젝트 필터링을 동적으로 처리하는 방안 논의. 현재는 hardcoded 'mem-mesh' 필터링으로 다른 프로젝트 작업 시 불편함. 해결책: 열려있는 파일 경로에서 프로젝트 이름을 자동으로 감지하고 해당 프로젝트만 필터링하도록 개선. 프로젝트 매핑 규칙 정의 (app/core, app/web → mem-mesh / static/js → mem-mesh-web-ui 등)., tags=['hook-improvement', 'dynamic-filtering', 'project-detection', 'context-management'], source=mcp-sse]
+2026-01-13 23:58:08 - INFO - mcp-tools - Successfully added memory [memory_id=6b75ab12-a218-466d-bc00-74f82a2d7c48]
+2026-01-13 23:59:33 - INFO - mcp-tools - Tool stats called [project_id=None, start_date=None, end_date=None]
+2026-01-13 23:59:33 - INFO - mcp-tools - Stats retrieved [total_memories=12562]
+2026-01-14 00:00:32 - DEBUG - mcp-tools - Tool search called [project_id=None, category=None, limit=10, query_length=32, query_text=SSE server-sent events streaming, recency_weight=0.0]
+2026-01-14 00:00:32 - INFO - mcp-tools - Search completed [result_count=10]
+2026-01-14 00:00:39 - DEBUG - mcp-tools - Tool add called [project_id=kiro-conversations, category=task, content_length=194, content=메모리에서 SSE(Server-Sent Events) 관련 내용 검색 요청. mem-mesh 시스템에서 SSE 스트리밍 기능과 WebSocket 통신 관련 메모리 조회. 검색 결과: 10개의 관련 메모리 발견 (WebSocket 재연결, 로그 스트리밍, Redis 연동 등). 향후 SSE 엔드포인트 개선 및 실시간 데이터 전송 최적화 작업 필요., tags=['sse', 'streaming', 'websocket', 'search', 'mem-mesh'], source=mcp]
+2026-01-14 00:00:39 - INFO - mcp-tools - Successfully added memory [memory_id=ccd44909-9af5-499b-b3db-07eff6dc45a5]
+2026-01-14 00:02:20 - DEBUG - mcp-tools - Tool add called [project_id=kiro-conversations, category=decision, content_length=692, content=프로젝트 컨텍스트 관리 전략: Beads + Mem-Mesh 하이브리드 모델 설계
+
+**Beads 역할 (Task Management):**
+- 구조화된 작업 추적 (open, in_progress, blocked, closed)
+- 의존성 관리 (blocks, related, parent-child)
+- 팀 협업 및 공유 (issue ID, assignee, priority)
+- 명확한 완료 기준 (acceptance criteria)
+
+**Mem-Mesh 역할 (Context & Knowledge):**
+- 대화 기록 및 결정 사항 저장
+- 벡터 검색을 통한 관련 컨텍스트 발견
+- 프로젝트별 메모리 분류 (task/bug/decision/code_snippet)
+- 세션 간 지식 연속성 유지
+
+**통합 전략:**
+1. Beads: 현재 작업 상태 (what/who/when)
+2. Mem-Mesh: 작업 배경 및 결정 이유 (why/how)
+3. 양방향 링크: Beads issue ID → Mem-Mesh memory 참조
+4. 자동 동기화: 작업 완료 시 메모리에 결과 저장
+
+**구현 패턴:**
+- Beads issue 생성 → Mem-Mesh에 decision/task 메모리 저장
+- 세션 종료 시 → 진행 상황을 Mem-Mesh에 기록
+- 검색 시 → Mem-Mesh로 관련 컨텍스트 찾고 Beads에서 작업 확인, tags=['architecture', 'context-management', 'beads', 'mem-mesh', 'hybrid-model', 'knowledge-management'], source=mcp]
+2026-01-14 00:02:20 - INFO - mcp-tools - Successfully added memory [memory_id=0bbb7a78-8afc-4666-89c3-bde7854fa8cf]

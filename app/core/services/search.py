@@ -125,17 +125,17 @@ class SearchService:
             # 검색 모드에 따라 다른 검색 수행
             if search_mode == "exact":
                 logger.info("Using exact text search")
-                return await self._exact_search(query, filters, limit, offset, sort_by, sort_direction)
+                return await self._exact_search(query, filters, limit)
             elif search_mode == "semantic":
                 logger.info("Using semantic vector search only")
-                return await self._semantic_search(query, filters, limit, offset, sort_by, sort_direction, recency_weight)
+                return await self._semantic_search(query, filters, limit, recency_weight)
             elif search_mode == "fuzzy":
                 logger.info("Using fuzzy text search")
-                return await self._fuzzy_search(query, filters, limit, offset, sort_by, sort_direction)
+                return await self._fuzzy_search(query, filters, limit)
             else:
                 # hybrid (기본값)
                 logger.info("Using hybrid search with sqlite-vec")
-                return await self._vector_search(query, filters, limit, offset, sort_by, sort_direction, recency_weight)
+                return await self._vector_search(query, filters, limit, recency_weight)
             
         except Exception as e:
             logger.error(f"Search failed: {e}")

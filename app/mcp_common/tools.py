@@ -111,7 +111,7 @@ class MCPToolHandlers:
                 recency_weight=recency_weight
             )
             result = await self._storage.search_memories(params)
-            logger.info("Search completed", result_count=len(result.memories))
+            logger.info("Search completed", result_count=len(result.results))
             return result.model_dump()
         except Exception as e:
             logger.error("Error in search", error=str(e))
@@ -142,7 +142,7 @@ class MCPToolHandlers:
         
         try:
             result = await self._storage.get_context(memory_id, depth, project_id)
-            logger.info("Context retrieved", memory_count=len(result.memories))
+            logger.info("Context retrieved", memory_count=len(result.related_memories))
             return result.model_dump()
         except Exception as e:
             logger.error("Error in context", error=str(e))
