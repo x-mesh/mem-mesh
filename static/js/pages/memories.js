@@ -116,38 +116,42 @@ class MemoriesPage extends HTMLElement {
    * Setup WebSocket listeners
    */
   setupWebSocketListeners() {
+    console.log('MemoriesPage: Setting up WebSocket listeners');
+    
     // 메모리 생성 이벤트
     wsClient.on('memory_created', (data) => {
-      console.log('Memory created via WebSocket:', data);
+      console.log('MemoriesPage: Memory created via WebSocket:', data);
       this.handleMemoryCreated(data);
     });
     
     // 메모리 업데이트 이벤트
     wsClient.on('memory_updated', (data) => {
-      console.log('Memory updated via WebSocket:', data);
+      console.log('MemoriesPage: Memory updated via WebSocket:', data);
       this.handleMemoryUpdated(data);
     });
     
     // 메모리 삭제 이벤트
     wsClient.on('memory_deleted', (data) => {
-      console.log('Memory deleted via WebSocket:', data);
+      console.log('MemoriesPage: Memory deleted via WebSocket:', data);
       this.handleMemoryDeleted(data);
     });
     
     // 연결 상태 이벤트
     wsClient.on('connected', () => {
-      console.log('WebSocket connected in memories page');
+      console.log('MemoriesPage: WebSocket connected');
       this.showConnectionStatus('connected');
     });
     
     wsClient.on('disconnected', () => {
-      console.log('WebSocket disconnected in memories page');
+      console.log('MemoriesPage: WebSocket disconnected');
       this.showConnectionStatus('disconnected');
     });
     
     wsClient.on('error', (error) => {
-      console.error('WebSocket error in memories page:', error);
+      console.error('MemoriesPage: WebSocket error:', error);
       this.showConnectionStatus('error');
+    });
+  }
     });
   }
 
@@ -172,10 +176,12 @@ class MemoriesPage extends HTMLElement {
    * Handle memory created event
    */
   handleMemoryCreated(data) {
+    console.log('MemoriesPage: handleMemoryCreated called with data:', data);
     const { memory } = data;
     
     // 현재 필터 조건에 맞는지 확인
     if (this.shouldIncludeMemory(memory)) {
+      console.log('MemoriesPage: Memory matches filters, adding to list');
       // 메모리 목록 맨 앞에 추가
       this.memories.unshift(memory);
       
@@ -189,6 +195,8 @@ class MemoriesPage extends HTMLElement {
       
       // 토스트 알림
       this.showToast(`새 메모리가 생성되었습니다: ${memory.category}`, 'success');
+    } else {
+      console.log('MemoriesPage: Memory does not match current filters, ignoring');
     }
   }
 
@@ -286,15 +294,17 @@ class MemoriesPage extends HTMLElement {
    */
   async connectWebSocket() {
     try {
+      console.log('MemoriesPage: Attempting to connect WebSocket...');
       await wsClient.connect();
-      console.log('Memories page WebSocket connected');
+      console.log('MemoriesPage: WebSocket connected successfully');
       
       // 프로젝트별 구독 설정
       if (this.viewParams.project_id) {
+        console.log(`MemoriesPage: Subscribing to project ${this.viewParams.project_id}`);
         wsClient.subscribeToProject(this.viewParams.project_id);
       }
     } catch (error) {
-      console.error('Failed to connect WebSocket in memories page:', error);
+      console.error('MemoriesPage: Failed to connect WebSocket:', error);
     }
   }
 
@@ -378,11 +388,11 @@ class MemoriesPage extends HTMLElement {
    * Update memories grid with animation
    */
   updateMemoriesGrid() {
-    const container = this.querySelector('.memories-container');
+    const container = this.querySelector('.memories-list');
     if (!container) return;
 
     // 기존 그리드 업데이트
-    this.renderMemoriesGrid();
+    this.renderMemories();
     
     // 새로 추가된 메모리 카드들에 애니메이션 적용
     const memoryCards = container.querySelectorAll('memory-card');
