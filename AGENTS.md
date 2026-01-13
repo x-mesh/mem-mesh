@@ -7,12 +7,13 @@
 The system operates as an **MCP Server**, allowing any MCP-compliant agent (such as Claude Desktop, IDE extensions, or custom agents) to connect and utilize the memory store.
 
 ### Connection Method
-- **Transport:** Stdio (Standard Input/Output)
+- **Transport:** Stdio (Standard Input/Output), SSE (Server-Sent Events)
 - **Protocol Version:** 2024-11-05
 - **Commands:**
   - FastMCP 기반: `python -m app.mcp_stdio`
   - Pure MCP 기반: `python -m app.mcp_stdio_pure`
-  - Web Dashboard: `python -m app.web --reload`
+  - Web Dashboard + SSE MCP: `python -m app.web --reload`
+  - SSE MCP Endpoint: `http://localhost:8000/mcp/sse`
 
 ## Available Tools
 

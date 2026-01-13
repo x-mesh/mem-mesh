@@ -25,6 +25,9 @@ from ..core.schemas.responses import (
     AddResponse, SearchResponse, ContextResponse, 
     UpdateResponse, DeleteResponse, StatsResponse, ErrorResponse
 )
+from ..core.storage.direct import DirectStorageBackend
+from ..mcp_common.tools import MCPToolHandlers
+from . import mcp_sse
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +39,13 @@ search_service: SearchService = None
 context_service: ContextService = None
 stats_service: StatsService = None
 embedding_manager: EmbeddingManagerService = None
+mcp_storage: DirectStorageBackend = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """애플리케이션 생명주기 관리"""
-    global db, embedding_service, memory_service, search_service, context_service, stats_service, embedding_manager
+    global db, embedding_service, memory_service, search_service, context_service, stats_service, embedding_manager, mcp_storage
     
     logger.info("Starting mem-mesh FastAPI application...")
     
@@ -51,12 +55,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         
         # 설정 정보 출력
         print("\n" + "="*60)
-        print("  mem-mesh Dashboard Starting")
+        print("  mem-mesh Web Server Starting")
         print("="*60)
         print(f"  Database Path:   {settings.database_path}")
         print(f"  Storage Mode:    {settings.storage_mode}")
         print(f"  API Base URL:    {settings.api_base_url}")
         print(f"  Embedding Model: {settings.embedding_model}")
+        print(f"  MCP SSE:         /mcp/sse")
         print("="*60 + "\n")
         
         # 데이터베이스 연결
@@ -76,6 +81,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         stats_service = StatsService(db)
         embedding_manager = EmbeddingManagerService(db, embedding_service)
         
+        # MCP SSE용 스토리지 및 핸들러 초기화
+        mcp_storage = DirectStorageBackend(settings.database_path)
+        await mcp_storage.initialize()
+        mcp_sse.set_tool_handlers(MCPToolHandlers(mcp_storage))
+        
         logger.info("mem-mesh application initialized successfully")
         
         yield
@@ -86,6 +96,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     finally:
         # 정리 작업
         logger.info("Shutting down mem-mesh application...")
+        if mcp_storage:
+            await mcp_storage.shutdown()
         if db:
             await db.close()
         logger.info("Application shutdown complete")
@@ -98,6 +110,9 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# MCP SSE 라우터 등록
+app.include_router(mcp_sse.router)
 
 # 정적 파일 서빙 설정
 app.mount("/static", StaticFiles(directory="static"), name="static")
