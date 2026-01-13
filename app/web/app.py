@@ -32,13 +32,13 @@ def create_app() -> FastAPI:
     # 예외 핸들러 설정
     setup_exception_handlers(app)
     
+    # 정적 파일 서빙 설정 (라우터보다 먼저 등록)
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+    
     # 라우터 등록
     app.include_router(dashboard_routes.router)  # Dashboard API
     app.include_router(mcp_sse.router)          # MCP SSE
     app.include_router(dashboard_pages.router)  # Dashboard Pages (마지막에 등록)
-    
-    # 정적 파일 서빙 설정
-    app.mount("/static", StaticFiles(directory="static"), name="static")
     
     return app
 
