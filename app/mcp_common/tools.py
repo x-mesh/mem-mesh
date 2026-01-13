@@ -74,10 +74,24 @@ class MCPToolHandlers:
             result = await self._storage.add_memory(params)
             logger.info("Successfully added memory", memory_id=result.id)
             
-            # 실시간 알림 전송
+            # 실시간 알림 전송 - 완전한 메모리 데이터 조회 후 전송
             if self._notifier:
                 try:
-                    await self._notifier.notify_memory_created(result.model_dump())
+                    # 생성된 메모리의 완전한 데이터 조회
+                    memory = await self._storage.get_memory(result.id)
+                    if memory:
+                        import json
+                        memory_data = {
+                            "id": memory.id,
+                            "content": memory.content,
+                            "project_id": memory.project_id,
+                            "category": memory.category,
+                            "tags": json.loads(memory.tags) if memory.tags else [],
+                            "source": memory.source,
+                            "created_at": memory.created_at,
+                            "updated_at": memory.updated_at
+                        }
+                        await self._notifier.notify_memory_created(memory_data)
                 except Exception as e:
                     logger.warning(f"Failed to send realtime notification: {e}")
             
