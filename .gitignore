@@ -13,5 +13,10 @@ imports/**
 .vscode
 .idea
 .vscode
-data/**
-logs/**
+# Directories to ignore
+data/
+data_bak/
+logs/
+**/data/
+**/data_bak/
+**/logs/
