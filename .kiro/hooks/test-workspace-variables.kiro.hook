@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "name": "Test Workspace Variables",
+  "description": "workspaceName과 projectName 변수 테스트",
+  "version": "1",
+  "when": {
+    "type": "promptSubmit"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "=== 변수 테스트 결과 ===\n\n테스트할 변수들:\n1. workspaceName: {{workspaceName}}\n2. projectName: {{projectName}}\n3. workspaceFolder: {{workspaceFolder}}\n4. workspacePath: {{workspacePath}}\n5. rootPath: {{rootPath}}\n6. filePath: {{filePath}}\n7. fileName: {{fileName}}\n8. fileExtension: {{fileExtension}}\n9. userMessage: {{userMessage}}\n\n위 변수들 중 어떤 것이 실제 값으로 치환되었고, 어떤 것이 그대로 남아있는지 확인하고 결과를 보고해주세요. 치환되지 않은 변수는 '{{변수명}}' 형태로 그대로 보일 것입니다."
+  },
+  "workspaceFolderName": "mem-mesh",
+  "shortName": "test-workspace-variables"
+}

@@ -9,6 +9,6 @@
   },
   "then": {
     "type": "askAgent",
-    "prompt": "설계/결정 관련 대화가 감지되었습니다.\n\n현재 대화 내용을 mem-mesh에 저장해주세요:\n- 카테고리: decision\n- 프로젝트 ID: mem-mesh\n- 태그: [\"architecture\", \"design\", \"decision\"]\n- 결정 사항과 이유를 요약해서 저장해주세요."
+    "prompt": "설계/결정 관련 대화가 감지되었습니다.\n\n현재 대화 내용을 mem-mesh에 저장해주세요:\n- 카테고리: decision\n- 프로젝트 ID: {{projectName}}\n- 태그: [\"architecture\", \"design\", \"decision\"]\n- 결정 사항과 이유를 요약해서 저장해주세요."
   }
 }

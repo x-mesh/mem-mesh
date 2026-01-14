@@ -9,6 +9,6 @@
   },
   "then": {
     "type": "askAgent",
-    "prompt": "파일이 저장되었습니다: {{filePath}}\n\n이 코드 변경사항을 mem-mesh에 저장해주세요:\n- 카테고리: code_snippet\n- 프로젝트 ID: mem-mesh\n- 태그: [\"code-change\", \"{{fileExtension}}\", \"save\"]\n- 변경된 파일과 주요 내용을 간단히 요약해서 저장해주세요."
+    "prompt": "파일이 저장되었습니다: {{filePath}}\n\n이 코드 변경사항을 mem-mesh에 저장해주세요:\n- 카테고리: code_snippet\n- 프로젝트 ID: {{projectName}}\n- 태그: [\"code-change\", \"{{fileExtension}}\", \"save\"]\n- 변경된 파일과 주요 내용을 간단히 요약해서 저장해주세요."
   }
 }

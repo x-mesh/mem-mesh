@@ -8,6 +8,6 @@
   },
   "then": {
     "type": "askAgent",
-    "prompt": "에이전트 실행이 완료되었습니다.\n\n질문-답변 쌍을 mem-mesh에 저장해주세요:\n- 사용자 질문: {{userMessage}}\n- AI 응답: {{agentResponse}}\n- JSON 형태로 구조화하여 저장\n- 카테고리: task\n- 프로젝트 ID: kiro-conversations\n- 태그: [\"qa-pair\", \"conversation\"]"
+    "prompt": "에이전트 실행이 완료되었습니다.\n\n질문-답변 쌍을 mem-mesh에 저장해주세요:\n- 사용자 질문: {{userMessage}}\n- AI 응답: {{agentResponse}}\n- JSON 형태로 구조화하여 저장\n- 카테고리: task\n- 프로젝트 ID: {{projectName}}\n- 태그: [\"qa-pair\", \"conversation\"]"
   }
 }

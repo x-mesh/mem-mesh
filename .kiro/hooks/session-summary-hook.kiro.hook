@@ -8,6 +8,8 @@
   },
   "then": {
     "type": "askAgent",
-    "prompt": "현재 세션의 요약을 생성하고 mem-mesh에 저장해주세요:\n- 세션 중 수행한 주요 작업들\n- 해결한 문제들과 결정사항들\n- 남은 작업이나 후속 조치\n- 카테고리: decision\n- 프로젝트 ID: mem-mesh\n- 태그: [\"session-summary\", \"progress\"]"
-  }
+    "prompt": "현재 세션의 요약을 생성하고 mem-mesh에 저장해주세요:\n- 세션 중 수행한 주요 작업들\n- 해결한 문제들과 결정사항들\n- 남은 작업이나 후속 조치\n- 카테고리: decision\n- 프로젝트 ID: {{projectName}}\n- 태그: [\"session-summary\", \"progress\"]"
+  },
+  "workspaceFolderName": "mem-mesh",
+  "shortName": "session-summary-hook"
 }

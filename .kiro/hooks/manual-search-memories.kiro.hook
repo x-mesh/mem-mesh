@@ -8,6 +8,8 @@
   },
   "then": {
     "type": "askAgent",
-    "prompt": "현재 대화 내용과 관련된 과거 메모리를 mem-mesh에서 검색해주세요:\n- 현재 대화의 주요 키워드를 추출\n- mem-mesh.search로 관련 메모리 검색\n- 찾은 메모리들을 요약해서 보여주세요\n- 프로젝트 ID: mem-mesh"
-  }
+    "prompt": "현재 대화 내용과 관련된 과거 메모리를 mem-mesh에서 검색해주세요:\n- 현재 대화의 주요 키워드를 추출\n- mem-mesh.search로 관련 메모리 검색\n- 찾은 메모리들을 요약해서 보여주세요\n- 프로젝트 ID: {{projectName}}"
+  },
+  "workspaceFolderName": "mem-mesh",
+  "shortName": "manual-search-memories"
 }
