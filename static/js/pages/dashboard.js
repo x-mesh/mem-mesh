@@ -5,6 +5,7 @@
  */
 
 import { wsClient } from '../services/websocket-client.js';
+import '../components/connection-status.js';
 
 class DashboardPage extends HTMLElement {
   constructor() {
@@ -26,13 +27,12 @@ class DashboardPage extends HTMLElement {
     this.isInitialized = true;
     this.setupEventListeners();
     this.setupIntersectionObserver();
-    this.setupWebSocketListeners();
     this.render();
     
     // 앱이 완전히 초기화될 때까지 기다린 후 데이터 로드
     this.waitForAppAndLoadData();
     
-    // WebSocket 연결
+    // WebSocket 연결 (이벤트 리스너 설정 포함)
     this.connectWebSocket();
     
     // 자동 새로고침 설정 (5분마다)
@@ -44,15 +44,12 @@ class DashboardPage extends HTMLElement {
     this.clearAutoRefresh();
     this.disconnectWebSocket();
     
-    // WebSocket 이벤트 리스너 제거
+    // WebSocket 데이터 이벤트 리스너 제거
     if (this._boundHandlers) {
       wsClient.off('memory_created', this._boundHandlers.memoryCreated);
       wsClient.off('memory_updated', this._boundHandlers.memoryUpdated);
       wsClient.off('memory_deleted', this._boundHandlers.memoryDeleted);
       wsClient.off('stats_updated', this._boundHandlers.statsUpdated);
-      wsClient.off('connected', this._boundHandlers.connected);
-      wsClient.off('disconnected', this._boundHandlers.disconnected);
-      wsClient.off('error', this._boundHandlers.error);
     }
     
     if (this.animationObserver) {
@@ -61,7 +58,8 @@ class DashboardPage extends HTMLElement {
   }
   
   /**
-   * Setup WebSocket listeners
+   * Setup WebSocket listeners - 데이터 이벤트만 처리
+   * 연결 상태는 connection-status 컴포넌트가 처리
    */
   setupWebSocketListeners() {
     // 바인딩된 핸들러를 저장 (제거할 때 사용)
@@ -69,19 +67,7 @@ class DashboardPage extends HTMLElement {
       memoryCreated: this.handleMemoryCreated.bind(this),
       memoryUpdated: this.handleMemoryUpdated.bind(this),
       memoryDeleted: this.handleMemoryDeleted.bind(this),
-      statsUpdated: this.handleStatsUpdated.bind(this),
-      connected: () => {
-        console.log('WebSocket connected');
-        this.showConnectionStatus('connected');
-      },
-      disconnected: () => {
-        console.log('WebSocket disconnected');
-        this.showConnectionStatus('disconnected');
-      },
-      error: (error) => {
-        console.error('WebSocket error:', error);
-        this.showConnectionStatus('error');
-      }
+      statsUpdated: this.handleStatsUpdated.bind(this)
     };
     
     // 메모리 생성 이벤트
@@ -95,22 +81,26 @@ class DashboardPage extends HTMLElement {
     
     // 통계 업데이트 이벤트
     wsClient.on('stats_updated', this._boundHandlers.statsUpdated);
-    
-    // 연결 상태 이벤트
-    wsClient.on('connected', this._boundHandlers.connected);
-    wsClient.on('disconnected', this._boundHandlers.disconnected);
-    wsClient.on('error', this._boundHandlers.error);
   }
 
   /**
-   * Connect WebSocket
+   * Connect WebSocket - 데이터 이벤트 리스너만 설정
+   * 연결 상태 표시는 connection-status 컴포넌트가 처리
    */
   async connectWebSocket() {
-    try {
-      await wsClient.connect();
-      console.log('Dashboard WebSocket connected');
-    } catch (error) {
-      console.error('Failed to connect WebSocket:', error);
+    // 데이터 이벤트 리스너 설정
+    this.setupWebSocketListeners();
+    
+    // 연결은 connection-status 컴포넌트가 처리하므로
+    // 이미 연결되어 있지 않으면 연결 시도
+    const status = wsClient.getConnectionStatus();
+    if (!status.isConnected) {
+      try {
+        await wsClient.connect();
+        console.log('Dashboard WebSocket connected');
+      } catch (error) {
+        console.error('Failed to connect WebSocket:', error);
+      }
     }
   }
 
@@ -199,28 +189,6 @@ class DashboardPage extends HTMLElement {
     const { stats } = data;
     this.stats = stats;
     this.updateStatsSection();
-  }
-
-  /**
-   * Show connection status
-   */
-  showConnectionStatus(status) {
-    const statusEl = this.querySelector('.connection-status');
-    if (!statusEl) return;
-    
-    statusEl.className = `connection-status ${status}`;
-    
-    switch (status) {
-      case 'connected':
-        statusEl.innerHTML = '<span class="status-dot"></span> 실시간 연결됨';
-        break;
-      case 'disconnected':
-        statusEl.innerHTML = '<span class="status-dot"></span> 연결 끊김';
-        break;
-      case 'error':
-        statusEl.innerHTML = '<span class="status-dot"></span> 연결 오류';
-        break;
-    }
   }
 
   /**
@@ -453,9 +421,18 @@ class DashboardPage extends HTMLElement {
   updateStatsSection() {
     const statsSection = this.querySelector('.stats-section');
     if (statsSection) {
-      const statsContent = statsSection.querySelector('.chroma-stats-grid');
-      if (statsContent) {
-        statsContent.outerHTML = this.createStatsCards();
+      const statsGrid = statsSection.querySelector('.chroma-stats-grid');
+      if (statsGrid) {
+        // innerHTML 사용하여 grid 내부만 업데이트
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = this.createStatsCards();
+        const newGrid = tempDiv.querySelector('.chroma-stats-grid');
+        if (newGrid) {
+          statsGrid.innerHTML = newGrid.innerHTML;
+          console.log('Stats section updated successfully');
+        }
+      } else {
+        console.warn('Stats grid not found, section may have been removed');
       }
     }
   }
@@ -1217,9 +1194,7 @@ class DashboardPage extends HTMLElement {
             <p class="header-subtitle">Get insights into your memory collection and activity</p>
           </div>
           <div class="header-actions">
-            <div class="connection-status disconnected">
-              <span class="status-dot"></span> 연결 중...
-            </div>
+            <connection-status></connection-status>
             <button class="chroma-refresh-btn" title="Refresh data">
               <svg class="refresh-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M1 4V10H7M23 20V14H17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1824,62 +1799,6 @@ style.textContent = `
   
   .create-memory-btn:hover {
     background: var(--primary-hover);
-  }
-  
-  /* Connection Status */
-  .connection-status {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
-    border-radius: var(--border-radius);
-    font-size: 0.875rem;
-    font-weight: 500;
-    border: 1px solid;
-    transition: var(--transition);
-  }
-  
-  .connection-status.connected {
-    background: #f0fdf4;
-    border-color: #22c55e;
-    color: #15803d;
-  }
-  
-  .connection-status.disconnected {
-    background: #fef2f2;
-    border-color: #ef4444;
-    color: #dc2626;
-  }
-  
-  .connection-status.error {
-    background: #fef3c7;
-    border-color: #f59e0b;
-    color: #d97706;
-  }
-  
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: currentColor;
-    animation: pulse 2s infinite;
-  }
-  
-  .connection-status.connected .status-dot {
-    background: #22c55e;
-  }
-  
-  .connection-status.disconnected .status-dot {
-    background: #ef4444;
-  }
-  
-  .connection-status.error .status-dot {
-    background: #f59e0b;
-  }
-  
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
   }
   
   /* Toast Notifications */

@@ -226,7 +226,7 @@ class PinService:
             pin_id: Pin ID
             
         Returns:
-            {"memory_id": str, "pin_deleted": bool}
+            {"memory_id": str, "pin_deleted": bool, "message": str}
         """
         pin = await self.get_pin(pin_id)
         if not pin:
@@ -235,10 +235,9 @@ class PinService:
         # Memory 생성 (MemoryService 사용)
         from app.core.services.memory import MemoryService
         from app.core.embeddings.service import EmbeddingService
-        from app.core.config import get_settings
         
-        settings = get_settings()
-        embedding_service = EmbeddingService(settings)
+        # EmbeddingService 생성 (기본 설정 사용)
+        embedding_service = EmbeddingService()
         memory_service = MemoryService(self.db, embedding_service)
         
         # Memory 생성
@@ -258,6 +257,7 @@ class PinService:
         return {
             "memory_id": memory_response.id,
             "pin_deleted": True,
+            "message": f"Pin이 Memory로 승격되었습니다 (ID: {memory_response.id})"
         }
     
     async def delete_pin(self, pin_id: str) -> bool:

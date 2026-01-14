@@ -7,7 +7,7 @@ import re
 
 class PinCreate(BaseModel):
     """Pin 생성 요청"""
-    content: str = Field(min_length=1, max_length=10000)
+    content: str = Field(min_length=10, max_length=10000, description="Pin 내용 (최소 10자)")
     project_id: str = Field(min_length=1, max_length=100)
     importance: Optional[int] = Field(default=None, ge=1, le=5)
     tags: Optional[List[str]] = Field(default=None)
@@ -23,7 +23,7 @@ class PinCreate(BaseModel):
 
 class PinUpdate(BaseModel):
     """Pin 업데이트 요청"""
-    content: Optional[str] = Field(default=None, min_length=1, max_length=10000)
+    content: Optional[str] = Field(default=None, min_length=10, max_length=10000, description="Pin 내용 (최소 10자)")
     importance: Optional[int] = Field(default=None, ge=1, le=5)
     status: Optional[str] = Field(default=None)
     tags: Optional[List[str]] = Field(default=None)

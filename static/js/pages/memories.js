@@ -4,6 +4,7 @@
  */
 
 import { wsClient } from '../services/websocket-client.js';
+import '../components/connection-status.js';
 
 class MemoriesPage extends HTMLElement {
   constructor() {
@@ -73,14 +74,11 @@ class MemoriesPage extends HTMLElement {
   disconnectedCallback() {
     console.log('MemoriesPage disconnected');
     
-    // WebSocket 이벤트 리스너 제거
+    // WebSocket 데이터 이벤트 리스너 제거
     if (this._boundHandlers) {
       wsClient.off('memory_created', this._boundHandlers.memoryCreated);
       wsClient.off('memory_updated', this._boundHandlers.memoryUpdated);
       wsClient.off('memory_deleted', this._boundHandlers.memoryDeleted);
-      wsClient.off('connected', this._boundHandlers.connected);
-      wsClient.off('disconnected', this._boundHandlers.disconnected);
-      wsClient.off('error', this._boundHandlers.error);
     }
     
     // 프로젝트 구독 해제
@@ -115,7 +113,8 @@ class MemoriesPage extends HTMLElement {
   }
   
   /**
-   * Setup WebSocket listeners
+   * Setup WebSocket listeners - 데이터 이벤트만 처리
+   * 연결 상태는 connection-status 컴포넌트가 처리
    */
   setupWebSocketListeners() {
     console.log('MemoriesPage: Setting up WebSocket listeners');
@@ -124,19 +123,7 @@ class MemoriesPage extends HTMLElement {
     this._boundHandlers = {
       memoryCreated: this.handleMemoryCreated.bind(this),
       memoryUpdated: this.handleMemoryUpdated.bind(this),
-      memoryDeleted: this.handleMemoryDeleted.bind(this),
-      connected: () => {
-        console.log('MemoriesPage: WebSocket connected');
-        this.showConnectionStatus('connected');
-      },
-      disconnected: () => {
-        console.log('MemoriesPage: WebSocket disconnected');
-        this.showConnectionStatus('disconnected');
-      },
-      error: (error) => {
-        console.error('MemoriesPage: WebSocket error:', error);
-        this.showConnectionStatus('error');
-      }
+      memoryDeleted: this.handleMemoryDeleted.bind(this)
     };
     
     // 메모리 생성 이벤트
@@ -147,11 +134,6 @@ class MemoriesPage extends HTMLElement {
     
     // 메모리 삭제 이벤트
     wsClient.on('memory_deleted', this._boundHandlers.memoryDeleted);
-    
-    // 연결 상태 이벤트
-    wsClient.on('connected', this._boundHandlers.connected);
-    wsClient.on('disconnected', this._boundHandlers.disconnected);
-    wsClient.on('error', this._boundHandlers.error);
   }
 
   /**
@@ -324,28 +306,6 @@ class MemoriesPage extends HTMLElement {
       }
     } catch (error) {
       console.error('MemoriesPage: Failed to connect WebSocket:', error);
-    }
-  }
-
-  /**
-   * Show connection status
-   */
-  showConnectionStatus(status) {
-    const statusEl = this.querySelector('.connection-status');
-    if (!statusEl) return;
-    
-    statusEl.className = `connection-status ${status}`;
-    
-    switch (status) {
-      case 'connected':
-        statusEl.innerHTML = '<span class="status-dot"></span> 실시간 연결됨';
-        break;
-      case 'disconnected':
-        statusEl.innerHTML = '<span class="status-dot"></span> 연결 끊김';
-        break;
-      case 'error':
-        statusEl.innerHTML = '<span class="status-dot"></span> 연결 오류';
-        break;
     }
   }
 
@@ -531,28 +491,6 @@ class MemoriesPage extends HTMLElement {
     } catch (error) {
       console.error('Failed to delete memory:', error);
       this.showToast('메모리 삭제에 실패했습니다', 'error');
-    }
-  }
-
-  /**
-   * Show connection status
-   */
-  showConnectionStatus(status) {
-    const statusEl = this.querySelector('.connection-status');
-    if (!statusEl) return;
-    
-    statusEl.className = `connection-status ${status}`;
-    
-    switch (status) {
-      case 'connected':
-        statusEl.innerHTML = '<span class="status-dot"></span> 실시간 연결됨';
-        break;
-      case 'disconnected':
-        statusEl.innerHTML = '<span class="status-dot"></span> 연결 끊김';
-        break;
-      case 'error':
-        statusEl.innerHTML = '<span class="status-dot"></span> 연결 오류';
-        break;
     }
   }
 
@@ -1336,9 +1274,7 @@ class MemoriesPage extends HTMLElement {
           <p class="page-description">${this.getViewDescription()}</p>
         </div>
         <div class="header-actions">
-          <div class="connection-status disconnected">
-            <span class="status-dot"></span> 연결 중...
-          </div>
+          <connection-status></connection-status>
           <button class="refresh-btn secondary-button">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="23,4 23,10 17,10"/>

@@ -219,3 +219,138 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
             },
         },
     ]
+
+
+def get_pin_tool_schemas() -> List[Dict[str, Any]]:
+    """Pin/Session 관련 MCP tools/list 응답용 스키마 반환"""
+    return [
+        {
+            "name": "pin_add",
+            "description": "Add a new pin (short-term task) to the current session. Pins are lightweight work items that can be promoted to permanent memories.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "Pin content describing the task or work item",
+                        "minLength": 1,
+                        "maxLength": 1000
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project identifier",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100
+                    },
+                    "importance": {
+                        "type": "integer",
+                        "description": "Importance score (1-5). Auto-determined if not provided.",
+                        "minimum": 1,
+                        "maximum": 5
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 50
+                        },
+                        "description": "Pin tags",
+                        "maxItems": 10
+                    },
+                },
+                "required": ["content", "project_id"],
+                "additionalProperties": False
+            },
+        },
+        {
+            "name": "pin_complete",
+            "description": "Mark a pin as completed. Returns promotion suggestion if importance >= 4.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pin_id": {
+                        "type": "string",
+                        "description": "Pin ID to complete",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100
+                    },
+                },
+                "required": ["pin_id"],
+                "additionalProperties": False
+            },
+        },
+        {
+            "name": "pin_promote",
+            "description": "Promote a completed pin to a permanent memory. Use this for important work items that should be preserved long-term.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pin_id": {
+                        "type": "string",
+                        "description": "Pin ID to promote to memory",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100
+                    },
+                },
+                "required": ["pin_id"],
+                "additionalProperties": False
+            },
+        },
+        {
+            "name": "session_resume",
+            "description": "Resume the last session for a project. Returns active pins and session context.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project identifier",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100
+                    },
+                    "expand": {
+                        "type": "boolean",
+                        "description": "If true, return full pin contents; if false, return summary only",
+                        "default": False
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of pins to return",
+                        "default": 10,
+                        "minimum": 1,
+                        "maximum": 50
+                    },
+                },
+                "required": ["project_id"],
+                "additionalProperties": False
+            },
+        },
+        {
+            "name": "session_end",
+            "description": "End the current session for a project. Optionally provide a summary.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project identifier",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "Session summary (auto-generated if not provided)",
+                        "maxLength": 500
+                    },
+                },
+                "required": ["project_id"],
+                "additionalProperties": False
+            },
+        },
+    ]
+
+
+def get_all_tool_schemas() -> List[Dict[str, Any]]:
+    """모든 MCP tool 스키마 반환 (memory + pin/session)"""
+    return get_tool_schemas() + get_pin_tool_schemas()

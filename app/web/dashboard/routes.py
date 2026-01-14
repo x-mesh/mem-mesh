@@ -550,8 +550,7 @@ async def list_sessions(
 @router.post("/work/pins")
 async def create_pin(
     pin: PinCreate,
-    pin_service: PinService = Depends(get_pin_service),
-    session_service: SessionService = Depends(get_session_service)
+    pin_service: PinService = Depends(get_pin_service)
 ):
     """
     새 Pin 생성
@@ -559,16 +558,9 @@ async def create_pin(
     세션이 없으면 자동으로 생성됩니다.
     """
     try:
-        # 활성 세션 가져오기 (없으면 생성)
-        session = await session_service.get_or_create_active_session(
-            project_id=pin.project_id,
-            user_id=pin.user_id
-        )
-        
-        # Pin 생성
+        # Pin 생성 (세션은 PinService 내부에서 자동 처리)
         created_pin = await pin_service.create_pin(
             project_id=pin.project_id,
-            session_id=session.id,
             content=pin.content,
             importance=pin.importance,
             tags=pin.tags,
@@ -687,12 +679,8 @@ async def promote_pin(
     content, tags를 복사하고 embedding을 생성합니다.
     """
     try:
-        memory = await pin_service.promote_to_memory(pin_id)
-        return {
-            "success": True,
-            "memory_id": memory.id,
-            "message": "Pin이 Memory로 승격되었습니다."
-        }
+        result = await pin_service.promote_to_memory(pin_id)
+        return result
     except PinNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

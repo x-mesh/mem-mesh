@@ -51,6 +51,7 @@ export class WebSocketClient {
       
       return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
+          this.connectionPromise = null;
           reject(new Error('WebSocket connection timeout'));
         }, 10000); // 10초 타임아웃
         
@@ -78,13 +79,21 @@ export class WebSocketClient {
         
         this.ws.onclose = (event) => {
           clearTimeout(timeout);
-          this.handleDisconnect(event);
+          this.connectionPromise = null;
+          // onclose는 onerror 후에도 호출되므로, 이미 reject된 경우 handleDisconnect만 호출
+          if (this.isConnected) {
+            // 정상 연결 상태에서 끊긴 경우
+            this.handleDisconnect(event);
+          }
         };
         
         this.ws.onerror = (error) => {
           clearTimeout(timeout);
+          this.connectionPromise = null;
           console.error('WebSocket error:', error);
           this.emit('error', error);
+          // 에러 발생 시 재연결 시도
+          this.handleDisconnect({ code: 1006, reason: 'Connection error' });
           reject(error);
         };
       });
@@ -178,11 +187,12 @@ export class WebSocketClient {
     this.isConnected = false;
     this.stopHeartbeat();
     
-    console.log('WebSocket disconnected:', event.code, event.reason);
+    console.log('WebSocket disconnected:', event.code, event.reason, 'Attempt:', this.reconnectAttempts);
     this.emit('disconnected', { code: event.code, reason: event.reason });
     
-    // 자동 재연결 시도
+    // 자동 재연결 시도 (reconnectAttempts는 scheduleReconnect에서 증가)
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.emit('reconnecting', { attempt: this.reconnectAttempts + 1, max: this.maxReconnectAttempts });
       this.scheduleReconnect();
     } else {
       console.error('Max reconnection attempts reached');
@@ -204,6 +214,7 @@ export class WebSocketClient {
         await this.connect();
       } catch (error) {
         console.error('Reconnection failed:', error);
+        // 에러 발생해도 handleDisconnect에서 다음 재연결을 스케줄링함
       }
     }, delay);
   }

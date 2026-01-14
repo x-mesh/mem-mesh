@@ -10,7 +10,7 @@ class WorkPage extends HTMLElement {
     this.sessions = [];
     this.projects = [];
     this.stats = null;
-    this.selectedProject = null;
+    this.selectedProject = null; // null = 전체, 'project-id' = 특정 프로젝트
     this.isLoading = true;
     this.currentView = 'kanban'; // kanban, list
   }
@@ -34,20 +34,39 @@ class WorkPage extends HTMLElement {
       if (pinsRes.ok) {
         const pinsData = await pinsRes.json();
         this.pins = pinsData.pins || [];
+        console.log('Loaded pins:', this.pins.length, 'pins');
       }
 
       if (projectsRes.ok) {
         const projectsData = await projectsRes.json();
         this.projects = projectsData.projects || [];
+        console.log('Loaded projects:', this.projects.length, 'projects');
       }
 
-      // 기본 프로젝트 통계 로드
-      if (this.selectedProject || this.projects.length > 0) {
-        const projectId = this.selectedProject || 'default';
+      // 프로젝트 통계 로드
+      let projectId = this.selectedProject;
+      
+      // 선택된 프로젝트가 없으면 첫 번째 프로젝트 사용
+      if (!projectId && this.projects.length > 0) {
+        projectId = this.projects[0].id;
+      }
+      
+      // 프로젝트가 없으면 pins에서 추출
+      if (!projectId && this.pins.length > 0) {
+        projectId = this.pins[0].project_id;
+      }
+      
+      // 프로젝트 ID가 있으면 통계 로드
+      if (projectId) {
         const statsRes = await fetch(`/api/work/projects/${projectId}/stats`);
         if (statsRes.ok) {
           this.stats = await statsRes.json();
+          console.log('Loaded stats for project:', projectId, this.stats);
+        } else {
+          console.error('Failed to load stats:', statsRes.status);
         }
+      } else {
+        console.warn('No project ID available for stats');
       }
 
     } catch (error) {
@@ -74,6 +93,12 @@ class WorkPage extends HTMLElement {
             <p class="page-subtitle">Pin 기반 작업 추적 및 세션 관리</p>
           </div>
           <div class="header-actions">
+            <div class="project-filter-container">
+              <label for="project-filter" class="filter-label">Project:</label>
+              <searchable-combobox id="project-filter" placeholder="All Projects">
+                ${this.renderProjectOptions()}
+              </searchable-combobox>
+            </div>
             <button class="btn btn-primary" id="new-pin-btn">
               <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
                 <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -136,12 +161,39 @@ class WorkPage extends HTMLElement {
     checkSmall: `<svg viewBox="0 0 24 24" fill="none" width="14" height="14"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
   };
 
+  renderProjectOptions() {
+    // 프로젝트 목록 추출 (pins에서 unique project_id)
+    const projectIds = [...new Set(this.pins.map(p => p.project_id))];
+    
+    return `
+      <option value="" ${!this.selectedProject ? 'selected' : ''}>All Projects</option>
+      ${projectIds.map(projectId => `
+        <option value="${projectId}" ${this.selectedProject === projectId ? 'selected' : ''}>
+          ${projectId}
+        </option>
+      `).join('')}
+    `;
+  }
+
+  getFilteredPins() {
+    if (!this.selectedProject) {
+      return this.pins; // 전체 표시
+    }
+    return this.pins.filter(p => p.project_id === this.selectedProject);
+  }
+
   renderStatsCards() {
-    const pinStats = this.stats?.pins || {};
-    const openPins = pinStats.open_pins || 0;
-    const inProgressPins = pinStats.in_progress_pins || 0;
-    const completedPins = pinStats.completed_pins || 0;
-    const avgLeadTime = pinStats.avg_lead_time_hours;
+    // 필터링된 pins로 통계 계산
+    const filteredPins = this.getFilteredPins();
+    const openPins = filteredPins.filter(p => p.status === 'open').length;
+    const inProgressPins = filteredPins.filter(p => p.status === 'in_progress').length;
+    const completedPins = filteredPins.filter(p => p.status === 'completed').length;
+    
+    // 평균 Lead Time 계산
+    const completedWithLeadTime = filteredPins.filter(p => p.status === 'completed' && p.lead_time_hours != null);
+    const avgLeadTime = completedWithLeadTime.length > 0
+      ? completedWithLeadTime.reduce((sum, p) => sum + p.lead_time_hours, 0) / completedWithLeadTime.length
+      : null;
 
     return `
       <div class="stat-card open">
@@ -176,9 +228,10 @@ class WorkPage extends HTMLElement {
   }
 
   renderKanbanBoard() {
-    const openPins = this.pins.filter(p => p.status === 'open');
-    const inProgressPins = this.pins.filter(p => p.status === 'in_progress');
-    const completedPins = this.pins.filter(p => p.status === 'completed').slice(0, 10);
+    const filteredPins = this.getFilteredPins();
+    const openPins = filteredPins.filter(p => p.status === 'open');
+    const inProgressPins = filteredPins.filter(p => p.status === 'in_progress');
+    const completedPins = filteredPins.filter(p => p.status === 'completed').slice(0, 10);
 
     return `
       <div class="kanban-board">
@@ -214,10 +267,11 @@ class WorkPage extends HTMLElement {
   }
 
   renderListView() {
+    const filteredPins = this.getFilteredPins();
     return `
       <div class="pins-list">
-        ${this.pins.map(pin => this.renderPinListItem(pin)).join('')}
-        ${this.pins.length === 0 ? '<p class="empty-message">No pins yet. Create your first pin!</p>' : ''}
+        ${filteredPins.map(pin => this.renderPinListItem(pin)).join('')}
+        ${filteredPins.length === 0 ? '<p class="empty-message">No pins yet. Create your first pin!</p>' : ''}
       </div>
     `;
   }
@@ -231,6 +285,7 @@ class WorkPage extends HTMLElement {
 
     return `
       <div class="pin-card" data-pin-id="${pin.id}" data-status="${pin.status}">
+        <div class="pin-project-badge">${this.escapeHtml(pin.project_id)}</div>
         <div class="pin-header">
           <span class="pin-importance" title="Importance: ${pin.importance}">${this.renderImportanceStars(pin.importance)}</span>
           ${pin.status !== 'completed' ? `
@@ -323,6 +378,16 @@ class WorkPage extends HTMLElement {
   }
 
   attachEventListeners() {
+    // Project filter
+    const projectFilter = this.querySelector('#project-filter');
+    if (projectFilter) {
+      projectFilter.addEventListener('change', (e) => {
+        this.selectedProject = e.detail.value || null;
+        console.log('Project filter changed:', this.selectedProject);
+        this.render();
+      });
+    }
+
     // New Pin button
     const newPinBtn = this.querySelector('#new-pin-btn');
     if (newPinBtn) {

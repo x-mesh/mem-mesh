@@ -26,6 +26,7 @@ import ChromaHeader from './components/chroma-header.js';
 import { ChromaSearchBar } from './components/chroma-search-bar.js';
 import { DashboardPreview } from './components/dashboard-preview.js';
 import { SearchableCombobox } from './components/searchable-combobox.js';
+import { ConnectionStatus } from './components/connection-status.js';
 
 // Import chart components
 import './components/chroma-charts.js';

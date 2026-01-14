@@ -21,7 +21,7 @@ from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
 from app.mcp_common.tools import MCPToolHandlers
-from app.mcp_common.schemas import get_tool_schemas
+from app.mcp_common.schemas import get_all_tool_schemas
 from app.core.version import SERVER_INFO, MCP_PROTOCOL_VERSION
 from app.core.storage.base import StorageBackend
 
@@ -91,7 +91,7 @@ async def handle_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
 
 async def handle_tools_list() -> Dict[str, Any]:
     """tools/list 요청 처리"""
-    return {"tools": get_tool_schemas()}
+    return {"tools": get_all_tool_schemas()}
 
 
 async def handle_tools_call(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -174,6 +174,59 @@ async def handle_tools_call(params: Dict[str, Any]) -> Dict[str, Any]:
                 project_id=args.get("project_id"),
                 start_date=args.get("start_date"),
                 end_date=args.get("end_date")
+            )
+        
+        # ===== Pin/Session Tools =====
+        elif name == "pin_add":
+            if "content" not in args or "project_id" not in args:
+                return {
+                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required arguments: content, project_id"})}],
+                    "isError": True,
+                }
+            result = await handlers.pin_add(
+                content=args["content"],
+                project_id=args["project_id"],
+                importance=args.get("importance"),
+                tags=args.get("tags")
+            )
+        
+        elif name == "pin_complete":
+            if "pin_id" not in args:
+                return {
+                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: pin_id"})}],
+                    "isError": True,
+                }
+            result = await handlers.pin_complete(pin_id=args["pin_id"])
+        
+        elif name == "pin_promote":
+            if "pin_id" not in args:
+                return {
+                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: pin_id"})}],
+                    "isError": True,
+                }
+            result = await handlers.pin_promote(pin_id=args["pin_id"])
+        
+        elif name == "session_resume":
+            if "project_id" not in args:
+                return {
+                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: project_id"})}],
+                    "isError": True,
+                }
+            result = await handlers.session_resume(
+                project_id=args["project_id"],
+                expand=args.get("expand", False),
+                limit=args.get("limit", 10)
+            )
+        
+        elif name == "session_end":
+            if "project_id" not in args:
+                return {
+                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: project_id"})}],
+                    "isError": True,
+                }
+            result = await handlers.session_end(
+                project_id=args["project_id"],
+                summary=args.get("summary")
             )
         
         else:
@@ -283,33 +336,23 @@ async def sse_endpoint(request: Request):
 
 
 @router.post("/message")
-async def message_endpoint(request: Request, session_id: str, auto_create: bool = False):
+async def message_endpoint(request: Request, session_id: str, auto_create: bool = True):
     """
     메시지 수신 엔드포인트.
     
     클라이언트가 JSON-RPC 요청을 POST로 전송하면,
     처리 결과를 해당 세션의 SSE 스트림으로 전송합니다.
     
-    auto_create=true 파라미터를 추가하면 세션이 없을 때 자동 생성합니다.
+    auto_create: 세션이 없을 때 자동 생성 (기본값: True)
     """
     # 세션이 없으면 짧은 대기 후 재확인 (race condition 방지)
     if session_id not in _sessions:
-        await asyncio.sleep(0.1)  # 100ms 대기
+        await asyncio.sleep(0.05)  # 50ms 대기
         
+    # 세션이 여전히 없으면 자동 생성 (서버 재시작 등의 상황 대응)
     if session_id not in _sessions:
-        if auto_create:
-            _sessions[session_id] = asyncio.Queue()
-            logger.info(f"Auto-created session: {session_id}")
-        else:
-            # 더 친절한 에러 메시지
-            raise HTTPException(
-                status_code=404, 
-                detail={
-                    "error": "HTTP_404",
-                    "message": "Session not found",
-                    "hint": "Use GET /mcp/sse to create a session first, or use POST /mcp/sse or /mcp/tools/call for stateless requests"
-                }
-            )
+        _sessions[session_id] = asyncio.Queue()
+        logger.info(f"Auto-created session (server restart recovery): {session_id}")
     
     try:
         body = await request.json()
@@ -407,7 +450,7 @@ async def mcp_info():
             "tools_call": "/mcp/tools/call",  # Stateless endpoint
             "info": "/mcp/info"
         },
-        "tools": [t["name"] for t in get_tool_schemas()],
+        "tools": [t["name"] for t in get_all_tool_schemas()],
         "notes": {
             "stateless": "Use POST /mcp/sse or /mcp/tools/call for session-less requests",
             "auto_create": "Add ?auto_create=true to /mcp/message to auto-create sessions"
