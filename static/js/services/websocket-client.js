@@ -15,6 +15,7 @@ export class WebSocketClient {
     this.subscribedProjects = new Set();
     this.heartbeatInterval = null;
     this.connectionPromise = null;
+    this.isReconnecting = false; // 재연결 중 플래그
   }
   
   /**
@@ -48,6 +49,7 @@ export class WebSocketClient {
       console.log(`Connecting to WebSocket: ${wsUrl}`);
       
       this.ws = new WebSocket(wsUrl);
+      let hasHandledError = false; // 에러 처리 플래그
       
       return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
@@ -59,6 +61,7 @@ export class WebSocketClient {
           clearTimeout(timeout);
           this.isConnected = true;
           this.reconnectAttempts = 0;
+          this.isReconnecting = false;
           this.connectionPromise = null;
           
           console.log('WebSocket connected successfully');
@@ -80,15 +83,16 @@ export class WebSocketClient {
         this.ws.onclose = (event) => {
           clearTimeout(timeout);
           this.connectionPromise = null;
-          // onclose는 onerror 후에도 호출되므로, 이미 reject된 경우 handleDisconnect만 호출
-          if (this.isConnected) {
-            // 정상 연결 상태에서 끊긴 경우
+          
+          // onerror에서 이미 처리했으면 스킵
+          if (!hasHandledError) {
             this.handleDisconnect(event);
           }
         };
         
         this.ws.onerror = (error) => {
           clearTimeout(timeout);
+          hasHandledError = true;
           this.connectionPromise = null;
           console.error('WebSocket error:', error);
           this.emit('error', error);
@@ -184,6 +188,12 @@ export class WebSocketClient {
    * 연결 해제 처리
    */
   handleDisconnect(event) {
+    // 이미 재연결 중이면 스킵 (중복 호출 방지)
+    if (this.isReconnecting) {
+      console.log('Already reconnecting, skipping duplicate handleDisconnect');
+      return;
+    }
+    
     this.isConnected = false;
     this.stopHeartbeat();
     
@@ -192,10 +202,12 @@ export class WebSocketClient {
     
     // 자동 재연결 시도 (reconnectAttempts는 scheduleReconnect에서 증가)
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.isReconnecting = true;
       this.emit('reconnecting', { attempt: this.reconnectAttempts + 1, max: this.maxReconnectAttempts });
       this.scheduleReconnect();
     } else {
       console.error('Max reconnection attempts reached');
+      this.isReconnecting = false;
       this.emit('max_reconnect_attempts_reached');
     }
   }
@@ -210,6 +222,9 @@ export class WebSocketClient {
     console.log(`Scheduling reconnection attempt ${this.reconnectAttempts} in ${delay}ms`);
     
     setTimeout(async () => {
+      // 다음 재연결 시도를 위해 플래그 리셋
+      this.isReconnecting = false;
+      
       try {
         await this.connect();
       } catch (error) {

@@ -20,37 +20,26 @@ class SearchableCombobox extends HTMLElement {
   }
   
   connectedCallback() {
-    // Render first to create the dropdown structure
+    // 1. render 전에 옵션을 먼저 파싱 (innerHTML 덮어쓰기 전)
+    const options = this.loadOptions();
+    const selectedOption = this.querySelector('option[selected]');
+    const selectedValue = selectedOption ? selectedOption.value : null;
+    const selectedText = selectedOption ? selectedOption.textContent : null;
+    
+    // 2. render (innerHTML 덮어쓰기)
     this.render();
     this.setupEventListeners();
     
-    // Wait for child elements to be fully parsed
-    // Use multiple checks to ensure options are loaded
-    let retryCount = 0;
-    const maxRetries = 10;
-    
-    const tryLoadOptions = () => {
-      const options = this.loadOptions();
-      if (options.length > 0) {
-        console.log('[SearchableCombobox] Successfully loaded', options.length, 'options');
-        this.setOptions(options);
-        
-        // Set initial value if specified
-        const selectedOption = this.querySelector('option[selected]');
-        if (selectedOption) {
-          this.setValue(selectedOption.value, selectedOption.textContent);
-        }
-      } else if (retryCount < maxRetries) {
-        retryCount++;
-        console.warn(`[SearchableCombobox] No options found, retrying... (${retryCount}/${maxRetries})`);
-        setTimeout(tryLoadOptions, 50);
-      } else {
-        console.error('[SearchableCombobox] Failed to load options after', maxRetries, 'attempts');
+    // 3. 파싱한 옵션 설정
+    if (options.length > 0) {
+      console.log('[SearchableCombobox] Loaded', options.length, 'options before render');
+      this.setOptions(options);
+      
+      // 선택된 옵션이 있으면 설정
+      if (selectedValue !== null) {
+        this.setValue(selectedValue, selectedText);
       }
-    };
-    
-    // Start with immediate check
-    setTimeout(tryLoadOptions, 0);
+    }
   }
   
   disconnectedCallback() {
