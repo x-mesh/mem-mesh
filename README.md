@@ -49,7 +49,7 @@ mem-mesh는 이제 두 가지 스토리지 모드를 지원합니다:
 
 ```bash
 # 프로젝트 클론
-git clone <repository-url>
+git clone https://github.com/JINWOO-J/mem-mesh
 cd mem-mesh
 
 # 의존성 설치 (개발 의존성 포함)
@@ -442,7 +442,7 @@ sqlite-vec available with sqlite3 but extension loading not supported
 
 ```bash
 # 저장소 클론
-git clone <repository-url>
+git clone https://github.com/JINWOO-J/mem-mesh
 cd mem-mesh
 
 # 의존성 설치 (개발 의존성 포함)

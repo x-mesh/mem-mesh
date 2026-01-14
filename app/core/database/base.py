@@ -178,12 +178,68 @@ class Database:
                 )
             """)
             
+            # ===== Work Tracking System 테이블 =====
+            
+            # projects 테이블 생성
+            self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    tech_stack TEXT,
+                    global_rules TEXT,
+                    global_context TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            
+            # sessions 테이블 생성
+            self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id),
+                    user_id TEXT NOT NULL DEFAULT 'default',
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    summary TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            
+            # pins 테이블 생성
+            self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS pins (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES sessions(id),
+                    project_id TEXT NOT NULL REFERENCES projects(id),
+                    user_id TEXT NOT NULL DEFAULT 'default',
+                    content TEXT NOT NULL,
+                    importance INTEGER NOT NULL DEFAULT 3,
+                    status TEXT NOT NULL DEFAULT 'open',
+                    tags TEXT,
+                    embedding BLOB,
+                    completed_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            
             # 인덱스 생성
             indexes = [
                 "CREATE INDEX IF NOT EXISTS idx_memories_project_id ON memories(project_id)",
                 "CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at DESC)",
                 "CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)",
-                "CREATE INDEX IF NOT EXISTS idx_memories_content_hash ON memories(content_hash)"
+                "CREATE INDEX IF NOT EXISTS idx_memories_content_hash ON memories(content_hash)",
+                # Work Tracking System 인덱스
+                "CREATE INDEX IF NOT EXISTS idx_sessions_project_status ON sessions(project_id, status)",
+                "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)",
+                "CREATE INDEX IF NOT EXISTS idx_pins_session ON pins(session_id)",
+                "CREATE INDEX IF NOT EXISTS idx_pins_project_status ON pins(project_id, status)",
+                "CREATE INDEX IF NOT EXISTS idx_pins_importance ON pins(importance DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_pins_user ON pins(user_id)"
             ]
             
             for index_sql in indexes:

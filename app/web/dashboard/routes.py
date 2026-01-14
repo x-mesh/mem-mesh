@@ -13,14 +13,20 @@ from app.core.services.search import SearchService
 from app.core.services.context import ContextService, ContextNotFoundError
 from app.core.services.stats import StatsService
 from app.core.services.embedding_manager import EmbeddingManagerService
+from app.core.services.project import ProjectService
+from app.core.services.session import SessionService, NoActiveSessionError
+from app.core.services.pin import PinService, PinNotFoundError, InvalidStatusTransitionError
 from app.core.schemas.requests import AddParams, SearchParams, UpdateParams
+from app.core.schemas.pins import PinCreate, PinUpdate
+from app.core.schemas.projects import ProjectUpdate
 from app.core.schemas.responses import (
     AddResponse, SearchResponse, ContextResponse, 
     UpdateResponse, DeleteResponse, StatsResponse
 )
 from ..common.dependencies import (
     get_memory_service, get_search_service, get_context_service,
-    get_stats_service, get_embedding_manager
+    get_stats_service, get_embedding_manager,
+    get_project_service, get_session_service, get_pin_service
 )
 
 logger = logging.getLogger(__name__)
@@ -369,4 +375,342 @@ async def get_migration_progress(
         return progress
     except Exception as e:
         logger.error(f"Get migration progress error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== Work Tracking API (Pins, Sessions, Projects) =====
+
+@router.get("/work/projects")
+async def list_work_projects(
+    service: ProjectService = Depends(get_project_service)
+):
+    """
+    Work Tracking 프로젝트 목록 조회 (통계 포함)
+    """
+    try:
+        projects = await service.list_projects_with_stats()
+        return {
+            "projects": [p.dict() for p in projects],
+            "total": len(projects)
+        }
+    except Exception as e:
+        logger.error(f"List work projects error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/work/projects/{project_id}")
+async def get_work_project(
+    project_id: str,
+    service: ProjectService = Depends(get_project_service)
+):
+    """개별 프로젝트 조회"""
+    try:
+        project = await service.get_project(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return project.dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get work project error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/work/projects/{project_id}")
+async def create_or_get_work_project(
+    project_id: str,
+    service: ProjectService = Depends(get_project_service)
+):
+    """프로젝트 생성 또는 조회"""
+    try:
+        project = await service.get_or_create_project(project_id)
+        return project.dict()
+    except Exception as e:
+        logger.error(f"Create work project error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/work/projects/{project_id}")
+async def update_work_project(
+    project_id: str,
+    update: ProjectUpdate,
+    service: ProjectService = Depends(get_project_service)
+):
+    """프로젝트 업데이트"""
+    try:
+        project = await service.update_project(project_id, update)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return project.dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update work project error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/work/projects/{project_id}/stats")
+async def get_work_project_stats(
+    project_id: str,
+    stats_service: StatsService = Depends(get_stats_service)
+):
+    """프로젝트 통계 조회 (Pin/Session 통계)"""
+    try:
+        pin_stats = await stats_service.get_pin_stats(project_id=project_id)
+        session_stats = await stats_service.get_session_stats(project_id=project_id)
+        daily_completions = await stats_service.get_daily_pin_completions(project_id=project_id)
+        
+        return {
+            "project_id": project_id,
+            "pins": pin_stats,
+            "sessions": session_stats,
+            "daily_completions": daily_completions
+        }
+    except Exception as e:
+        logger.error(f"Get work project stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== Session API =====
+
+@router.get("/work/sessions/resume/{project_id}")
+async def resume_session(
+    project_id: str,
+    expand: bool = False,
+    limit: int = 10,
+    user_id: str = None,
+    session_service: SessionService = Depends(get_session_service)
+):
+    """
+    마지막 세션 컨텍스트 로드
+    
+    Args:
+        project_id: 프로젝트 ID
+        expand: True면 전체 pin 내용 반환, False면 요약만
+        limit: 반환할 pin 개수 (기본 10개)
+        user_id: 사용자 ID (선택)
+    """
+    try:
+        context = await session_service.resume_last_session(
+            project_id=project_id,
+            user_id=user_id,
+            expand=expand,
+            limit=limit
+        )
+        return context.dict()
+    except NoActiveSessionError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Resume session error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/work/sessions/{session_id}/end")
+async def end_session(
+    session_id: str,
+    summary: str = None,
+    session_service: SessionService = Depends(get_session_service)
+):
+    """세션 종료"""
+    try:
+        session = await session_service.end_session(session_id, summary)
+        return session.dict()
+    except Exception as e:
+        logger.error(f"End session error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/work/sessions")
+async def list_sessions(
+    project_id: str = None,
+    user_id: str = None,
+    status: str = None,
+    limit: int = 20,
+    session_service: SessionService = Depends(get_session_service)
+):
+    """세션 목록 조회"""
+    try:
+        sessions = await session_service.list_sessions(
+            project_id=project_id,
+            user_id=user_id,
+            status=status,
+            limit=limit
+        )
+        return {
+            "sessions": [s.dict() for s in sessions],
+            "total": len(sessions)
+        }
+    except Exception as e:
+        logger.error(f"List sessions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== Pin API =====
+
+@router.post("/work/pins")
+async def create_pin(
+    pin: PinCreate,
+    pin_service: PinService = Depends(get_pin_service),
+    session_service: SessionService = Depends(get_session_service)
+):
+    """
+    새 Pin 생성
+    
+    세션이 없으면 자동으로 생성됩니다.
+    """
+    try:
+        # 활성 세션 가져오기 (없으면 생성)
+        session = await session_service.get_or_create_active_session(
+            project_id=pin.project_id,
+            user_id=pin.user_id
+        )
+        
+        # Pin 생성
+        created_pin = await pin_service.create_pin(
+            project_id=pin.project_id,
+            session_id=session.id,
+            content=pin.content,
+            importance=pin.importance,
+            tags=pin.tags,
+            user_id=pin.user_id
+        )
+        
+        return created_pin.dict()
+    except Exception as e:
+        logger.error(f"Create pin error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/work/pins")
+async def list_pins(
+    project_id: str = None,
+    session_id: str = None,
+    user_id: str = None,
+    status: str = None,
+    limit: int = 10,
+    order_by_importance: bool = True,
+    pin_service: PinService = Depends(get_pin_service)
+):
+    """Pin 목록 조회"""
+    try:
+        pins = await pin_service.get_pins(
+            project_id=project_id,
+            session_id=session_id,
+            user_id=user_id,
+            status=status,
+            limit=limit,
+            order_by_importance=order_by_importance
+        )
+        return {
+            "pins": [p.dict() for p in pins],
+            "total": len(pins)
+        }
+    except Exception as e:
+        logger.error(f"List pins error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/work/pins/{pin_id}")
+async def get_pin(
+    pin_id: str,
+    pin_service: PinService = Depends(get_pin_service)
+):
+    """개별 Pin 조회"""
+    try:
+        pin = await pin_service.get_pin(pin_id)
+        if pin is None:
+            raise HTTPException(status_code=404, detail="Pin not found")
+        return pin.dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get pin error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/work/pins/{pin_id}")
+async def update_pin(
+    pin_id: str,
+    update: PinUpdate,
+    pin_service: PinService = Depends(get_pin_service)
+):
+    """Pin 업데이트"""
+    try:
+        pin = await pin_service.update_pin(pin_id, update)
+        return pin.dict()
+    except PinNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except InvalidStatusTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Update pin error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/work/pins/{pin_id}/complete")
+async def complete_pin(
+    pin_id: str,
+    pin_service: PinService = Depends(get_pin_service)
+):
+    """
+    Pin 완료 처리
+    
+    importance >= 4인 경우 Memory 승격 제안을 포함합니다.
+    """
+    try:
+        pin = await pin_service.complete_pin(pin_id)
+        result = pin.dict()
+        
+        # 중요도 4 이상이면 승격 제안
+        if pin.importance >= 4:
+            result["suggest_promotion"] = True
+            result["promotion_message"] = f"이 Pin의 중요도가 {pin.importance}입니다. Memory로 승격하시겠습니까?"
+        
+        return result
+    except PinNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except InvalidStatusTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Complete pin error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/work/pins/{pin_id}/promote")
+async def promote_pin(
+    pin_id: str,
+    pin_service: PinService = Depends(get_pin_service)
+):
+    """
+    Pin을 Memory로 승격
+    
+    content, tags를 복사하고 embedding을 생성합니다.
+    """
+    try:
+        memory = await pin_service.promote_to_memory(pin_id)
+        return {
+            "success": True,
+            "memory_id": memory.id,
+            "message": "Pin이 Memory로 승격되었습니다."
+        }
+    except PinNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Promote pin error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/work/pins/{pin_id}")
+async def delete_pin(
+    pin_id: str,
+    pin_service: PinService = Depends(get_pin_service)
+):
+    """Pin 삭제"""
+    try:
+        success = await pin_service.delete_pin(pin_id)
+        return {"success": success, "deleted_id": pin_id}
+    except PinNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Delete pin error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

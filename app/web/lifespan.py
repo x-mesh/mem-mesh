@@ -20,6 +20,9 @@ from app.core.services.search import SearchService
 from app.core.services.context import ContextService
 from app.core.services.stats import StatsService
 from app.core.services.embedding_manager import EmbeddingManagerService
+from app.core.services.project import ProjectService
+from app.core.services.session import SessionService
+from app.core.services.pin import PinService
 from app.core.storage.direct import DirectStorageBackend
 from app.mcp_common.tools import MCPToolHandlers
 from app.core.utils.logger import get_logger
@@ -36,13 +39,16 @@ search_service: Optional[SearchService] = None
 context_service: Optional[ContextService] = None
 stats_service: Optional[StatsService] = None
 embedding_manager: Optional[EmbeddingManagerService] = None
+project_service: Optional[ProjectService] = None
+session_service: Optional[SessionService] = None
+pin_service: Optional[PinService] = None
 mcp_storage: Optional[DirectStorageBackend] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """애플리케이션 생명주기 관리"""
-    global db, embedding_service, memory_service, search_service, context_service, stats_service, embedding_manager, mcp_storage, logger
+    global db, embedding_service, memory_service, search_service, context_service, stats_service, embedding_manager, project_service, session_service, pin_service, mcp_storage, logger
     
     # .env 파일 로드 (최우선)
     load_dotenv()
@@ -110,6 +116,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         stats_service = StatsService(db)
         embedding_manager = EmbeddingManagerService(db, embedding_service)
         
+        # Work Tracking 서비스들 초기화
+        project_service = ProjectService(db)
+        session_service = SessionService(db)
+        pin_service = PinService(db)
+        
         # MCP SSE용 스토리지 및 핸들러 초기화
         logger.info("Initializing MCP SSE handlers")
         mcp_storage = DirectStorageBackend(settings.database_path)
@@ -165,6 +176,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         context_service = None
         stats_service = None
         embedding_manager = None
+        project_service = None
+        session_service = None
+        pin_service = None
         mcp_storage = None
         
         logger.info("Application shutdown complete")
@@ -180,5 +194,8 @@ def get_services():
         'context_service': context_service,
         'stats_service': stats_service,
         'embedding_manager': embedding_manager,
+        'project_service': project_service,
+        'session_service': session_service,
+        'pin_service': pin_service,
         'mcp_storage': mcp_storage
     }

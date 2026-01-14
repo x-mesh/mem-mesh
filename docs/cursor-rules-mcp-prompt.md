@@ -9,7 +9,7 @@ mem-mesh는 개발자를 위한 중앙 메모리 서버로, Model Context Protoc
 #### 1. mem-mesh 설치 및 실행
 ```bash
 # 프로젝트 클론 및 설치
-git clone <repository-url>
+git clone https://github.com/JINWOO-J/mem-mesh
 cd mem-mesh
 pip install -e .
 

@@ -283,15 +283,30 @@ async def sse_endpoint(request: Request):
 
 
 @router.post("/message")
-async def message_endpoint(request: Request, session_id: str):
+async def message_endpoint(request: Request, session_id: str, auto_create: bool = False):
     """
     메시지 수신 엔드포인트.
     
     클라이언트가 JSON-RPC 요청을 POST로 전송하면,
     처리 결과를 해당 세션의 SSE 스트림으로 전송합니다.
+    
+    auto_create=true 파라미터를 추가하면 세션이 없을 때 자동 생성합니다.
     """
+    # 세션이 없고 auto_create가 true면 임시 세션 생성
     if session_id not in _sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+        if auto_create:
+            _sessions[session_id] = asyncio.Queue()
+            logger.info(f"Auto-created session: {session_id}")
+        else:
+            # 더 친절한 에러 메시지
+            raise HTTPException(
+                status_code=404, 
+                detail={
+                    "error": "HTTP_404",
+                    "message": "Session not found",
+                    "hint": "Use GET /mcp/sse to create a session first, or use POST /mcp/sse or /mcp/tools/call for stateless requests"
+                }
+            )
     
     try:
         body = await request.json()
@@ -339,6 +354,42 @@ async def sse_post_endpoint(request: Request):
         return {"status": "notification received"}
 
 
+@router.post("/tools/call")
+async def stateless_tools_call(request: Request):
+    """
+    Stateless 도구 호출 엔드포인트.
+    
+    세션 없이 직접 도구를 호출할 수 있습니다.
+    SSE 연결이 불안정하거나 단발성 요청에 유용합니다.
+    
+    Request body:
+    {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "add", "arguments": {...}}
+    }
+    """
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    
+    if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
+        raise HTTPException(status_code=400, detail="Invalid JSON-RPC request")
+    
+    method = body.get("method")
+    if method != "tools/call":
+        # 다른 메서드도 지원
+        response = await process_jsonrpc_request(body)
+        if response:
+            return response
+        return {"status": "notification received"}
+    
+    response = await process_jsonrpc_request(body)
+    return response if response else {"status": "processed"}
+
+
 @router.get("/info")
 async def mcp_info():
     """MCP 서버 정보 반환"""
@@ -346,11 +397,16 @@ async def mcp_info():
         "name": SERVER_INFO["name"],
         "version": SERVER_INFO["version"],
         "protocol_version": MCP_PROTOCOL_VERSION,
-        "transports": ["sse"],
+        "transports": ["sse", "stateless"],
         "endpoints": {
             "sse": "/mcp/sse",
             "message": "/mcp/message",
+            "tools_call": "/mcp/tools/call",  # Stateless endpoint
             "info": "/mcp/info"
         },
-        "tools": [t["name"] for t in get_tool_schemas()]
+        "tools": [t["name"] for t in get_tool_schemas()],
+        "notes": {
+            "stateless": "Use POST /mcp/sse or /mcp/tools/call for session-less requests",
+            "auto_create": "Add ?auto_create=true to /mcp/message to auto-create sessions"
+        }
     }

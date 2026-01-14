@@ -11,6 +11,9 @@ from app.core.services.search import SearchService
 from app.core.services.context import ContextService
 from app.core.services.stats import StatsService
 from app.core.services.embedding_manager import EmbeddingManagerService
+from app.core.services.project import ProjectService
+from app.core.services.session import SessionService
+from app.core.services.pin import PinService
 from ..lifespan import get_services
 
 
@@ -52,3 +55,27 @@ def get_embedding_manager() -> EmbeddingManagerService:
     if services['embedding_manager'] is None:
         raise HTTPException(status_code=500, detail="Embedding manager not initialized")
     return services['embedding_manager']
+
+
+def get_project_service() -> ProjectService:
+    """프로젝트 서비스 의존성"""
+    services = get_services()
+    if services['project_service'] is None:
+        raise HTTPException(status_code=500, detail="Project service not initialized")
+    return services['project_service']
+
+
+def get_session_service() -> SessionService:
+    """세션 서비스 의존성"""
+    services = get_services()
+    if services['session_service'] is None:
+        raise HTTPException(status_code=500, detail="Session service not initialized")
+    return services['session_service']
+
+
+def get_pin_service() -> PinService:
+    """Pin 서비스 의존성"""
+    services = get_services()
+    if services['pin_service'] is None:
+        raise HTTPException(status_code=500, detail="Pin service not initialized")
+    return services['pin_service']

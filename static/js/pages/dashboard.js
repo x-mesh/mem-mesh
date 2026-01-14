@@ -749,17 +749,27 @@ class DashboardPage extends HTMLElement {
       
       console.log('Loading dashboard data...');
       
-      // Load stats and recent memories in parallel
-      const [stats, recentResponse] = await Promise.all([
+      // Load stats, recent memories, and pin stats in parallel
+      const [stats, recentResponse, pinStatsResponse] = await Promise.all([
         window.app.apiClient.getStats(),
-        window.app.apiClient.searchMemories(' ', { limit: 10 })  // 공백 문자 사용
+        window.app.apiClient.searchMemories(' ', { limit: 10 }),  // 공백 문자 사용
+        fetch('/api/work/projects/default/stats').then(r => r.ok ? r.json() : null).catch(() => null)
       ]);
       
       console.log('Stats received:', stats);
       console.log('Recent memories received:', recentResponse);
+      console.log('Pin stats received:', pinStatsResponse);
       
       this.stats = stats;
       this.recentMemories = recentResponse.results || [];
+      
+      // Pin stats에서 avg_lead_time 추가
+      if (pinStatsResponse && pinStatsResponse.pins) {
+        this.stats.average_lead_time = pinStatsResponse.pins.avg_lead_time_hours 
+          ? pinStatsResponse.pins.avg_lead_time_hours / 24  // hours to days
+          : 0;
+        this.stats.pin_stats = pinStatsResponse.pins;
+      }
       
       console.log('Dashboard data loaded successfully');
       
@@ -786,10 +796,11 @@ class DashboardPage extends HTMLElement {
     try {
       console.log('Loading dashboard data via direct API calls...');
       
-      // Load stats and recent memories using direct fetch
-      const [statsResponse, searchResponse] = await Promise.all([
+      // Load stats, recent memories, and pin stats using direct fetch
+      const [statsResponse, searchResponse, pinStatsResponse] = await Promise.all([
         fetch('/api/memories/stats'),
-        fetch('/api/memories/search?query= &limit=10')
+        fetch('/api/memories/search?query= &limit=10'),
+        fetch('/api/work/projects/default/stats').catch(() => null)
       ]);
       
       if (!statsResponse.ok) {
@@ -805,11 +816,26 @@ class DashboardPage extends HTMLElement {
         searchResponse.json()
       ]);
       
+      // Pin stats 처리 (실패해도 무시)
+      let pinStats = null;
+      if (pinStatsResponse && pinStatsResponse.ok) {
+        pinStats = await pinStatsResponse.json();
+      }
+      
       console.log('Direct API - Stats received:', stats);
       console.log('Direct API - Recent memories received:', searchResult);
+      console.log('Direct API - Pin stats received:', pinStats);
       
       this.stats = stats;
       this.recentMemories = searchResult.results || [];
+      
+      // Pin stats에서 avg_lead_time 추가
+      if (pinStats && pinStats.pins) {
+        this.stats.average_lead_time = pinStats.pins.avg_lead_time_hours 
+          ? pinStats.pins.avg_lead_time_hours / 24  // hours to days
+          : 0;
+        this.stats.pin_stats = pinStats.pins;
+      }
       
       console.log('Direct API - Dashboard data loaded successfully');
       

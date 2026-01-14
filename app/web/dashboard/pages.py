@@ -77,6 +77,12 @@ async def serve_analytics_page():
     return FileResponse("static/index.html")
 
 
+@router.get("/work")
+async def serve_work_page():
+    """Work Tracking 페이지 서빙 (SPA 라우팅)"""
+    return FileResponse("static/index.html")
+
+
 @router.get("/settings")
 async def serve_settings_page():
     """설정 페이지 서빙 (SPA 라우팅)"""
