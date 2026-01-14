@@ -221,7 +221,7 @@ class MemoriesPage extends HTMLElement {
         this.updateMemoriesGrid();
       }
       
-      this.showToast('메모리가 업데이트되었습니다', 'info');
+      this.showToast('Memory updated', 'info');
     } else if (this.shouldIncludeMemory(memory)) {
       // 새로 필터 조건에 맞게 된 경우 추가
       this.memories.unshift(memory);
@@ -229,7 +229,7 @@ class MemoriesPage extends HTMLElement {
         this.memories = this.memories.slice(0, this.pageSize);
       }
       this.updateMemoriesGrid();
-      this.showToast('새 메모리가 추가되었습니다', 'info');
+      this.showToast('New memory added', 'info');
     }
   }
 
@@ -244,7 +244,7 @@ class MemoriesPage extends HTMLElement {
     if (index !== -1) {
       this.memories.splice(index, 1);
       this.updateMemoriesGrid();
-      this.showToast('메모리가 삭제되었습니다', 'warning');
+      this.showToast('Memory deleted', 'warning');
     }
   }
 
@@ -429,7 +429,7 @@ class MemoriesPage extends HTMLElement {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
         const memoryId = btn.getAttribute('data-memory-id');
-        if (memoryId && confirm('정말로 이 메모리를 삭제하시겠습니까?')) {
+        if (memoryId && confirm('Are you sure you want to delete this memory?')) {
           this.deleteMemory(memoryId);
         }
       });
@@ -486,11 +486,11 @@ class MemoriesPage extends HTMLElement {
       this.updateSummary();
       
       // 성공 토스트
-      this.showToast('메모리가 삭제되었습니다', 'success');
+      this.showToast('Memory deleted', 'success');
       
     } catch (error) {
       console.error('Failed to delete memory:', error);
-      this.showToast('메모리 삭제에 실패했습니다', 'error');
+      this.showToast('Failed to delete memory', 'error');
     }
   }
 

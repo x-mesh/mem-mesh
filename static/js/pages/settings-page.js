@@ -472,7 +472,7 @@ export class SettingsPage extends HTMLElement {
         const btn = this.querySelector('#start-migration-btn');
         const progressSection = this.querySelector('#migration-progress');
         
-        if (!confirm('마이그레이션을 시작하시겠습니까? 이 작업은 시간이 걸릴 수 있습니다.')) {
+        if (!confirm('Are you sure you want to start the migration? This may take some time.')) {
             return;
         }
         

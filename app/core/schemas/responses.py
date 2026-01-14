@@ -30,6 +30,7 @@ class SearchResult(BaseModel):
     project_id: Optional[str] = Field(description="프로젝트 ID")
     category: str = Field(description="카테고리")
     source: str = Field(description="생성 소스")
+    tags: Optional[List[str]] = Field(default=None, description="태그 목록")
     
     model_config = {
         "json_schema_extra": {
@@ -40,7 +41,8 @@ class SearchResult(BaseModel):
                 "created_at": "2024-01-15T10:30:00Z",
                 "project_id": "my-app",
                 "category": "task",
-                "source": "cursor"
+                "source": "cursor",
+                "tags": ["authentication", "jwt", "security"]
             }
         }
     }

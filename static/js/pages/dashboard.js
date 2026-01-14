@@ -818,7 +818,7 @@ class DashboardPage extends HTMLElement {
       
     } catch (error) {
       console.error('Direct API - Failed to load dashboard data:', error);
-      this.showError('대시보드 데이터를 불러오는데 실패했습니다. 페이지를 새로고침해주세요.');
+      this.showError('Failed to load dashboard data. Please refresh the page.');
     } finally {
       this.isLoading = false;
       this.render();

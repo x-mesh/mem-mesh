@@ -7,6 +7,7 @@ class AnalyticsPage extends HTMLElement {
   constructor() {
     super();
     this.memories = [];
+    this.totalMemoriesCount = 0; // Actual total count from API
     this.analytics = {};
     this.isLoading = false;
     this.charts = new Map();
@@ -68,18 +69,18 @@ class AnalyticsPage extends HTMLElement {
     try {
       this.setLoading(true);
       
-      // Get all memories for analysis
+      // Get all memories for detailed analysis
       let searchResult;
       
       if (window.app && window.app.apiClient) {
         // Use app API client if available
         searchResult = await window.app.apiClient.searchMemories('', { 
-          limit: 1000 // Get all memories
+          limit: 10000 // Get as many as possible for analysis
         });
       } else {
         // Direct API call as fallback
         console.log('App not ready, using direct API call for analytics');
-        const response = await fetch('/api/memories/search?query=&limit=1000');
+        const response = await fetch('/api/memories/search?query=&limit=10000');
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
@@ -88,12 +89,15 @@ class AnalyticsPage extends HTMLElement {
       
       if (searchResult && searchResult.results) {
         this.memories = searchResult.results;
+        this.totalMemoriesCount = searchResult.total || this.memories.length; // Use actual total from API
+        console.log(`Loaded ${this.memories.length} of ${this.totalMemoriesCount} total memories for analytics`);
         this.processAnalytics();
         this.renderAnalytics();
         this.renderCharts();
       } else {
         console.warn('No results found in analytics search response:', searchResult);
         this.memories = [];
+        this.totalMemoriesCount = 0;
         this.processAnalytics();
         this.renderAnalytics();
         this.renderCharts();
@@ -127,7 +131,8 @@ class AnalyticsPage extends HTMLElement {
       projects: this.calculateProjects(filteredMemories),
       productivity: this.calculateProductivity(filteredMemories),
       wordFrequency: this.calculateWordFrequency(filteredMemories),
-      timeDistribution: this.calculateTimeDistribution(filteredMemories)
+      timeDistribution: this.calculateTimeDistribution(filteredMemories),
+      topTags: this.calculateTopTags(filteredMemories)
     };
   }
   
@@ -135,15 +140,34 @@ class AnalyticsPage extends HTMLElement {
    * Calculate overview statistics
    */
   calculateOverview(memories) {
-    const totalMemories = memories.length;
+    // Use actual total count from API, not filtered memories length
+    const totalMemories = this.totalMemoriesCount || memories.length;
     const totalWords = memories.reduce((sum, m) => sum + (m.content?.split(/\s+/).length || 0), 0);
     const totalCharacters = memories.reduce((sum, m) => sum + (m.content?.length || 0), 0);
     const uniqueProjects = new Set(memories.map(m => m.project_id || 'default')).size;
     const uniqueCategories = new Set(memories.map(m => m.category)).size;
-    const uniqueTags = new Set(memories.flatMap(m => m.tags || [])).size;
     
-    const avgWordsPerMemory = totalMemories > 0 ? Math.round(totalWords / totalMemories) : 0;
-    const avgCharsPerMemory = totalMemories > 0 ? Math.round(totalCharacters / totalMemories) : 0;
+    // 태그 통계 계산 (tags가 배열인 경우만)
+    const allTags = memories.flatMap(m => Array.isArray(m.tags) ? m.tags : []);
+    const uniqueTags = new Set(allTags).size;
+    
+    const avgWordsPerMemory = memories.length > 0 ? Math.round(totalWords / memories.length) : 0;
+    const avgCharsPerMemory = memories.length > 0 ? Math.round(totalCharacters / memories.length) : 0;
+    
+    // 성장률 계산 (최근 7일 vs 이전 7일)
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+    
+    const recentWeek = memories.filter(m => new Date(m.created_at) >= sevenDaysAgo).length;
+    const previousWeek = memories.filter(m => {
+      const date = new Date(m.created_at);
+      return date >= fourteenDaysAgo && date < sevenDaysAgo;
+    }).length;
+    
+    const growthRate = previousWeek > 0 
+      ? Math.round(((recentWeek - previousWeek) / previousWeek) * 100)
+      : (recentWeek > 0 ? 100 : 0);
     
     return {
       totalMemories,
@@ -153,7 +177,10 @@ class AnalyticsPage extends HTMLElement {
       uniqueCategories,
       uniqueTags,
       avgWordsPerMemory,
-      avgCharsPerMemory
+      avgCharsPerMemory,
+      growthRate,
+      recentWeekCount: recentWeek,
+      previousWeekCount: previousWeek
     };
   }
   
@@ -329,6 +356,31 @@ class AnalyticsPage extends HTMLElement {
   }
   
   /**
+   * Calculate top tags
+   */
+  calculateTopTags(memories) {
+    const tagCount = new Map();
+    
+    memories.forEach(memory => {
+      if (Array.isArray(memory.tags)) {
+        memory.tags.forEach(tag => {
+          tagCount.set(tag, (tagCount.get(tag) || 0) + 1);
+        });
+      }
+    });
+    
+    // Get top 20 tags
+    const sortedTags = Array.from(tagCount.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20);
+    
+    return {
+      tags: sortedTags.map(([tag]) => tag),
+      counts: sortedTags.map(([, count]) => count)
+    };
+  }
+  
+  /**
    * Get time range in milliseconds
    */
   getTimeRangeMs() {
@@ -446,7 +498,7 @@ class AnalyticsPage extends HTMLElement {
     const overview = this.analytics.overview;
     
     const stats = [
-      { label: 'Total Memories', value: overview.totalMemories, id: 'total-memories' },
+      { label: 'Total Memories', value: overview.totalMemories.toLocaleString(), id: 'total-memories' },
       { label: 'Total Words', value: overview.totalWords.toLocaleString(), id: 'total-words' },
       { label: 'Unique Projects', value: overview.uniqueProjects, id: 'unique-projects' },
       { label: 'Categories Used', value: overview.uniqueCategories, id: 'unique-categories' },
@@ -458,6 +510,15 @@ class AnalyticsPage extends HTMLElement {
       const element = this.querySelector(`#${stat.id}`);
       if (element) element.textContent = stat.value;
     });
+    
+    // 성장률 표시 추가
+    const growthElement = this.querySelector('#growth-rate');
+    if (growthElement && overview.growthRate !== undefined) {
+      const growthSign = overview.growthRate > 0 ? '+' : '';
+      const growthColor = overview.growthRate > 0 ? '#10b981' : (overview.growthRate < 0 ? '#ef4444' : '#6b7280');
+      growthElement.textContent = `${growthSign}${overview.growthRate}%`;
+      growthElement.style.color = growthColor;
+    }
   }
   
   /**
@@ -467,29 +528,53 @@ class AnalyticsPage extends HTMLElement {
     const productivity = this.analytics.productivity;
     const categories = this.analytics.categories;
     const projects = this.analytics.projects;
+    const overview = this.analytics.overview;
+    const topTags = this.analytics.topTags;
     
     const insights = [];
+    
+    // Growth rate insights
+    if (overview.growthRate !== undefined) {
+      const trend = overview.growthRate > 0 ? 'increased' : (overview.growthRate < 0 ? 'decreased' : 'remained stable');
+      insights.push(`Memory count ${trend} by ${Math.abs(overview.growthRate)}% in the last 7 days (${overview.recentWeekCount} vs ${overview.previousWeekCount})`);
+    }
     
     // Peak productivity insights
     insights.push(`Your most productive hour is ${productivity.peakHour}:00`);
     insights.push(`You're most active on ${productivity.peakDay}s`);
-    insights.push(`${productivity.peakMonth} is your most productive month`);
     
     // Category insights
     if (categories.labels.length > 0) {
       const topCategory = categories.labels[categories.counts.indexOf(Math.max(...categories.counts))];
-      insights.push(`Your most used category is "${topCategory}"`);
+      const topCategoryCount = Math.max(...categories.counts);
+      const topCategoryPercent = Math.round((topCategoryCount / overview.totalMemories) * 100);
+      insights.push(`"${topCategory}" category accounts for ${topCategoryPercent}% of all memories`);
     }
     
     // Project insights
     if (projects.length > 0) {
       const topProject = projects.reduce((max, p) => p.count > max.count ? p : max);
-      insights.push(`"${topProject.name}" is your most active project`);
+      insights.push(`"${topProject.name}" is your most active project (${topProject.count} memories)`);
+    }
+    
+    // Tag insights
+    if (topTags && topTags.tags.length > 0) {
+      const topTag = topTags.tags[0];
+      const topTagCount = topTags.counts[0];
+      insights.push(`"${topTag}" is your most used tag (${topTagCount} times)`);
     }
     
     // Productivity insights
-    const avgPerDay = productivity.totalDays > 0 ? Math.round(this.analytics.overview.totalMemories / productivity.totalDays) : 0;
-    insights.push(`You create an average of ${avgPerDay} memories per day`);
+    const avgPerDay = productivity.totalDays > 0 ? Math.round(overview.totalMemories / productivity.totalDays) : 0;
+    if (avgPerDay > 0) {
+      insights.push(`You create an average of ${avgPerDay} memories per day`);
+    }
+    
+    // Content insights
+    if (overview.avgWordsPerMemory > 0) {
+      const contentLevel = overview.avgWordsPerMemory > 100 ? 'detailed' : (overview.avgWordsPerMemory > 50 ? 'moderate' : 'concise');
+      insights.push(`You maintain ${contentLevel} records with an average of ${overview.avgWordsPerMemory} words per memory`);
+    }
     
     const insightsContainer = this.querySelector('.insights-list');
     if (insightsContainer) {
@@ -505,6 +590,7 @@ class AnalyticsPage extends HTMLElement {
   renderCharts() {
     this.renderTrendChart();
     this.renderCategoryChart();
+    this.renderTagsChart();
     this.renderProductivityChart();
     this.renderWordCloudChart();
   }
@@ -613,6 +699,57 @@ class AnalyticsPage extends HTMLElement {
   }
   
   /**
+   * Render tags chart (horizontal bar chart for top tags)
+   */
+  renderTagsChart() {
+    const canvas = this.querySelector('#tags-chart');
+    if (!canvas || !this.analytics.topTags) return;
+    
+    const ctx = canvas.getContext('2d');
+    const { tags, counts } = this.analytics.topTags;
+    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    if (counts.length === 0) return;
+    
+    // Show top 10 tags
+    const displayTags = tags.slice(0, 10);
+    const displayCounts = counts.slice(0, 10);
+    
+    const padding = 40;
+    const labelWidth = 120;
+    const width = canvas.width - 2 * padding - labelWidth;
+    const height = canvas.height - 2 * padding;
+    const maxCount = Math.max(...displayCounts, 1);
+    const barHeight = height / displayTags.length * 0.7;
+    const barSpacing = height / displayTags.length * 0.3;
+    
+    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#6366f1'];
+    
+    displayCounts.forEach((count, index) => {
+      const y = padding + index * (barHeight + barSpacing);
+      const barWidth = (count / maxCount) * width;
+      const x = padding + labelWidth;
+      
+      // Draw bar
+      ctx.fillStyle = colors[index % colors.length];
+      ctx.fillRect(x, y, barWidth, barHeight);
+      
+      // Draw tag label
+      ctx.fillStyle = '#374151';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(displayTags[index], x - 10, y + barHeight / 2 + 4);
+      
+      // Draw count
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(count.toString(), x + barWidth + 5, y + barHeight / 2 + 4);
+    });
+  }
+  
+  /**
    * Render productivity chart (hourly distribution)
    */
   renderProductivityChart() {
@@ -708,6 +845,10 @@ class AnalyticsPage extends HTMLElement {
             <span class="stat-value" id="total-memories">0</span>
           </div>
           <div class="stat-card">
+            <span class="stat-label">Growth Rate (7d)</span>
+            <span class="stat-value" id="growth-rate">0%</span>
+          </div>
+          <div class="stat-card">
             <span class="stat-label">Total Words</span>
             <span class="stat-value" id="total-words">0</span>
           </div>
@@ -718,10 +859,6 @@ class AnalyticsPage extends HTMLElement {
           <div class="stat-card">
             <span class="stat-label">Categories Used</span>
             <span class="stat-value" id="unique-categories">0</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">Avg Words/Memory</span>
-            <span class="stat-value" id="avg-words">0</span>
           </div>
           <div class="stat-card">
             <span class="stat-label">Total Tags</span>
@@ -738,6 +875,7 @@ class AnalyticsPage extends HTMLElement {
           <div class="tabs-header">
             <button class="tab-button active" data-tab="trends"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg> Trends</button>
             <button class="tab-button" data-tab="categories"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> Categories</button>
+            <button class="tab-button" data-tab="tags"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg> Top Tags</button>
             <button class="tab-button" data-tab="productivity"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg> Productivity</button>
             <button class="tab-button" data-tab="words"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10,9 9,9 8,9"/></svg> Word Analysis</button>
           </div>
@@ -754,6 +892,13 @@ class AnalyticsPage extends HTMLElement {
               <h3>Category Distribution</h3>
               <div class="chart-container">
                 <canvas id="category-chart" width="800" height="300"></canvas>
+              </div>
+            </div>
+            
+            <div id="tags-tab" class="tab-content" style="display: none;">
+              <h3>Most Used Tags</h3>
+              <div class="chart-container">
+                <canvas id="tags-chart" width="800" height="300"></canvas>
               </div>
             </div>
             

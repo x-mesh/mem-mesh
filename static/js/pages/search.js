@@ -114,7 +114,7 @@ class SearchPage extends HTMLElement {
     } catch (error) {
       console.error('Search failed:', error);
       this.searchResults = [];
-      this.showError('검색에 실패했습니다. 다시 시도해주세요.');
+      this.showError('Search failed. Please try again.');
     }
     
     this.isLoading = false;
@@ -271,7 +271,7 @@ class SearchPage extends HTMLElement {
     } catch (error) {
       console.error('Search failed:', error);
       this.searchResults = [];
-      this.showError('검색에 실패했습니다.');
+      this.showError('Search failed.');
     }
     
     this.isLoading = false;
@@ -550,9 +550,9 @@ class SearchPage extends HTMLElement {
       const diffHours = Math.floor(diffMs / 3600000);
       const diffDays = Math.floor(diffMs / 86400000);
       
-      if (diffMins < 1) return '방금 전';
-      if (diffMins < 60) return `${diffMins}분 전`;
-      if (diffHours < 24) return `${diffHours}시간 전`;
+      if (diffMins < 1) return 'just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
       if (diffDays < 7) return `${diffDays}일 전`;
       
       return date.toLocaleDateString('ko-KR', { 
@@ -574,10 +574,10 @@ class SearchPage extends HTMLElement {
   
   getModeDescription() {
     const descriptions = {
-      hybrid: '벡터 유사도와 텍스트 매칭을 결합하여 가장 관련성 높은 결과를 찾습니다.',
-      exact: '검색어가 정확히 포함된 메모리만 찾습니다. 특정 에러 메시지나 ID 검색에 적합합니다.',
-      semantic: '의미적으로 유사한 내용을 찾습니다. 비슷한 개념이나 아이디어를 찾을 때 유용합니다.',
-      fuzzy: '오타가 있어도 유사한 단어를 찾습니다. 정확한 철자를 모를 때 사용하세요.'
+      hybrid: 'Combines vector similarity and text matching to find the most relevant results.',
+      exact: 'Finds memories that contain the exact search term. Ideal for searching specific error messages or IDs.',
+      semantic: 'Finds semantically similar content. Useful for finding similar concepts or ideas.',
+      fuzzy: 'Finds similar words even with typos. Use when you\'re unsure of the exact spelling.'
     };
     return descriptions[this.searchMode] || descriptions.hybrid;
   }
@@ -600,7 +600,7 @@ class SearchPage extends HTMLElement {
         
         <div class="chroma-search-bar-wrapper">
           <chroma-search-bar 
-            placeholder="검색어를 입력하세요..." 
+            placeholder="Enter search query..." 
             value="${this.escapeHtml(this.searchQuery)}"
             variant="hero"
           ></chroma-search-bar>
@@ -643,29 +643,29 @@ class SearchPage extends HTMLElement {
             <input 
               type="text" 
               class="chroma-project-input" 
-              placeholder="프로젝트 ID..."
+              placeholder="Project ID..."
               value="${this.escapeHtml(this.selectedProject)}"
             >
           </div>
           
           <div class="chroma-filter-section">
-            <h3>검색 모드</h3>
+            <h3>Search Mode</h3>
             <div class="chroma-mode-chips">
-              <button class="chroma-mode-option ${this.searchMode === 'hybrid' ? 'active' : ''}" data-mode="hybrid" title="벡터 + 텍스트 결합 검색">
+              <button class="chroma-mode-option ${this.searchMode === 'hybrid' ? 'active' : ''}" data-mode="hybrid" title="Vector + Text combined search">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="m4.93 19.07 2.83-2.83"/><path d="m16.24 7.76 2.83-2.83"/></svg>
-                하이브리드
+                Hybrid
               </button>
-              <button class="chroma-mode-option ${this.searchMode === 'exact' ? 'active' : ''}" data-mode="exact" title="정확한 텍스트 매칭">
+              <button class="chroma-mode-option ${this.searchMode === 'exact' ? 'active' : ''}" data-mode="exact" title="Exact text matching">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
-                정확 매칭
+                Exact
               </button>
-              <button class="chroma-mode-option ${this.searchMode === 'semantic' ? 'active' : ''}" data-mode="semantic" title="의미 기반 유사도 검색">
+              <button class="chroma-mode-option ${this.searchMode === 'semantic' ? 'active' : ''}" data-mode="semantic" title="Semantic similarity search">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 12l8-8"/><circle cx="12" cy="12" r="2"/></svg>
-                의미 검색
+                Semantic
               </button>
-              <button class="chroma-mode-option ${this.searchMode === 'fuzzy' ? 'active' : ''}" data-mode="fuzzy" title="오타 허용 퍼지 검색">
+              <button class="chroma-mode-option ${this.searchMode === 'fuzzy' ? 'active' : ''}" data-mode="fuzzy" title="Fuzzy search with typo tolerance">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                퍼지 검색
+                Fuzzy
               </button>
             </div>
             <p class="chroma-mode-description">${this.getModeDescription()}</p>

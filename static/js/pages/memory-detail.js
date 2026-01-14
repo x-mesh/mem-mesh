@@ -304,7 +304,7 @@ class MemoryDetailPage extends HTMLElement {
       
     } catch (error) {
       console.error('Direct API - Failed to load memory:', error);
-      this.showError('메모리를 불러오는데 실패했습니다. 페이지를 새로고침해주세요.');
+      this.showError('Failed to load memory. Please refresh the page.');
     } finally {
       this.isLoading = false;
       console.log('Direct API - Rendering final state');

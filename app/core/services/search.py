@@ -3,6 +3,7 @@ Search Service for mem-mesh
 하이브리드 검색을 수행하는 서비스
 """
 
+import json
 import logging
 import re
 from typing import Optional, List
@@ -14,6 +15,29 @@ from ..embeddings.service import EmbeddingService
 from ..schemas.responses import SearchResult, SearchResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_tags(row) -> Optional[List[str]]:
+    """DB Row에서 tags 값을 파싱하여 리스트로 변환"""
+    try:
+        # Row 객체에서 tags 필드 가져오기
+        tags_value = row['tags'] if 'tags' in row.keys() else None
+        
+        if tags_value is None:
+            return None
+        if isinstance(tags_value, list):
+            return tags_value
+        if isinstance(tags_value, str):
+            if not tags_value or tags_value == '[]':
+                return None
+            try:
+                parsed = json.loads(tags_value)
+                return parsed if isinstance(parsed, list) and len(parsed) > 0 else None
+            except json.JSONDecodeError:
+                return None
+    except Exception:
+        return None
+    return None
 
 
 class SearchService:
@@ -112,8 +136,9 @@ class SearchService:
                                 created_at=row['created_at'],
                                 project_id=row['project_id'],
                                 category=row['category'],
-                                source=row['source']
-                            )
+                                source=row['source'],
+                        tags=_parse_tags(row)
+                    )
                             search_results.append(search_result)
                         except Exception as e:
                             logger.warning(f"Failed to process recent memory result: {e}")
@@ -277,7 +302,8 @@ class SearchService:
                         created_at=row['created_at'],
                         project_id=row['project_id'],
                         category=row['category'],
-                        source=row['source']
+                        source=row['source'],
+                        tags=_parse_tags(row)
                     )
                     search_results.append(search_result)
                 except Exception as e:
@@ -376,7 +402,8 @@ class SearchService:
                         created_at=row['created_at'],
                         project_id=row['project_id'],
                         category=row['category'],
-                        source=row['source']
+                        source=row['source'],
+                        tags=_parse_tags(row)
                     )
                     search_results.append(search_result)
                 except Exception as e:
@@ -460,7 +487,8 @@ class SearchService:
                         created_at=row['created_at'],
                         project_id=row['project_id'],
                         category=row['category'],
-                        source=row['source']
+                        source=row['source'],
+                        tags=_parse_tags(row)
                     )
                     search_results.append(search_result)
                 except Exception as e:
@@ -543,7 +571,8 @@ class SearchService:
                         created_at=row['created_at'],
                         project_id=row['project_id'],
                         category=row['category'],
-                        source=row['source']
+                        source=row['source'],
+                        tags=_parse_tags(row)
                     )
                     search_results.append(search_result)
                 except Exception as e:
@@ -654,8 +683,9 @@ class SearchService:
                     created_at=row['created_at'],
                     project_id=row['project_id'],
                     category=row['category'],
-                    source=row['source']
-                )
+                    source=row['source'],
+                        tags=_parse_tags(row)
+                    )
                 search_results.append(search_result)
             
             logger.info(f"Found {len(search_results)} fuzzy search results")

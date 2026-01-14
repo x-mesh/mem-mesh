@@ -66,14 +66,21 @@
 ## 세션 관리 Hooks
 
 ### 11. load-project-context.kiro.hook
-- **트리거**: 새 세션 시작 시 (`sessionStart`)
+- **트리거**: 수동 실행 (원래는 sessionStart 예정)
 - **기능**: 프로젝트 관련 최근 작업들을 자동 로드
 - **용도**: 컨텍스트 연속성 유지
 
 ### 12. session-summary-hook.kiro.hook
-- **트리거**: 수동 실행
-- **기능**: 세션 요약을 mem-mesh에 저장
+- **트리거**: 키워드 자동 감지 (`messageSent`)
+- **키워드**: "세션 요약", "세션 종료", "작업 완료", "session summary", "done for today" 등
+- **기능**: 세션 요약을 자동으로 mem-mesh에 저장
 - **카테고리**: `decision`
+- **태그**: `session-summary`, `checkpoint`
+
+### 13. manual-session-summary.kiro.hook
+- **트리거**: 수동 버튼 클릭
+- **기능**: 언제든지 수동으로 세션 요약 생성
+- **용도**: 중요한 체크포인트 생성
 
 ## 기존 Hooks
 
