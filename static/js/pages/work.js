@@ -90,7 +90,7 @@ class WorkPage extends HTMLElement {
         <div class="work-header">
           <div class="header-content">
             <h1 class="page-title">Work Tracking</h1>
-            <p class="page-subtitle">Pin 기반 작업 추적 및 세션 관리</p>
+            <p class="page-subtitle">Pin-based Task Tracking and Session Management</p>
           </div>
           <div class="header-actions">
             <div class="project-filter-container">
@@ -285,8 +285,8 @@ class WorkPage extends HTMLElement {
 
     return `
       <div class="pin-card" data-pin-id="${pin.id}" data-status="${pin.status}">
-        <div class="pin-project-badge">${this.escapeHtml(pin.project_id)}</div>
         <div class="pin-header">
+          <div class="pin-project-badge">${this.escapeHtml(pin.project_id)}</div>
           <span class="pin-importance" title="Importance: ${pin.importance}">${this.renderImportanceStars(pin.importance)}</span>
           ${pin.status !== 'completed' ? `
             <button class="pin-action-btn complete-btn" data-pin-id="${pin.id}" title="Complete">${WorkPage.icons.checkSmall}</button>
