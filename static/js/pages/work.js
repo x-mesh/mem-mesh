@@ -284,7 +284,10 @@ class WorkPage extends HTMLElement {
     const tags = pin.tags || [];
 
     return `
-      <div class="pin-card" data-pin-id="${pin.id}" data-status="${pin.status}">
+      <div class="pin-card" 
+           data-pin-id="${pin.id}" 
+           data-status="${pin.status}"
+           draggable="true">
         <div class="pin-header">
           <div class="pin-project-badge">${this.escapeHtml(pin.project_id)}</div>
           <span class="pin-importance" title="Importance: ${pin.importance}">${this.renderImportanceStars(pin.importance)}</span>
@@ -439,6 +442,9 @@ class WorkPage extends HTMLElement {
         this.promotePin(btn.dataset.pinId);
       });
     });
+
+    // Drag and Drop for Kanban
+    this.attachDragAndDropListeners();
   }
 
   showNewPinModal() {
@@ -538,6 +544,109 @@ class WorkPage extends HTMLElement {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  attachDragAndDropListeners() {
+    // Pin cards - draggable
+    const pinCards = this.querySelectorAll('.pin-card');
+    pinCards.forEach(card => {
+      card.addEventListener('dragstart', (e) => this.handleDragStart(e));
+      card.addEventListener('dragend', (e) => this.handleDragEnd(e));
+    });
+
+    // Kanban columns - drop zones
+    const columns = this.querySelectorAll('.kanban-column');
+    columns.forEach(column => {
+      column.addEventListener('dragover', (e) => this.handleDragOver(e));
+      column.addEventListener('drop', (e) => this.handleDrop(e));
+      column.addEventListener('dragleave', (e) => this.handleDragLeave(e));
+      column.addEventListener('dragenter', (e) => this.handleDragEnter(e));
+    });
+  }
+
+  handleDragStart(e) {
+    const card = e.target.closest('.pin-card');
+    if (!card) return;
+
+    card.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', card.dataset.pinId);
+  }
+
+  handleDragEnd(e) {
+    const card = e.target.closest('.pin-card');
+    if (!card) return;
+
+    card.classList.remove('dragging');
+    
+    // Remove all drag-over classes
+    this.querySelectorAll('.kanban-column').forEach(col => {
+      col.classList.remove('drag-over');
+    });
+  }
+
+  handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }
+
+  handleDragEnter(e) {
+    const column = e.target.closest('.kanban-column');
+    if (column) {
+      column.classList.add('drag-over');
+    }
+  }
+
+  handleDragLeave(e) {
+    const column = e.target.closest('.kanban-column');
+    if (column && !column.contains(e.relatedTarget)) {
+      column.classList.remove('drag-over');
+    }
+  }
+
+  async handleDrop(e) {
+    e.preventDefault();
+    
+    const column = e.target.closest('.kanban-column');
+    if (!column) return;
+
+    column.classList.remove('drag-over');
+
+    const pinId = e.dataTransfer.getData('text/plain');
+    const newStatus = column.dataset.status;
+
+    if (!pinId || !newStatus) return;
+
+    // Find the pin
+    const pin = this.pins.find(p => p.id === pinId);
+    if (!pin) return;
+
+    // Don't update if status is the same
+    if (pin.status === newStatus) return;
+
+    // Update pin status
+    await this.updatePinStatus(pinId, newStatus);
+  }
+
+  async updatePinStatus(pinId, newStatus) {
+    try {
+      const response = await fetch(`/api/work/pins/${pinId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+
+      if (response.ok) {
+        // Reload data to reflect changes
+        await this.loadData();
+      } else {
+        const error = await response.json();
+        alert(`Failed to update pin: ${error.detail}`);
+      }
+    } catch (error) {
+      console.error('Failed to update pin status:', error);
+      alert('Failed to update pin status');
+    }
   }
 }
 

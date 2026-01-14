@@ -28,11 +28,11 @@ class PinAlreadyCompletedError(Exception):
     pass
 
 
-# 유효한 상태 전이 정의
+# 유효한 상태 전이 정의 (Kanban 드래그 앤 드롭을 위해 모든 전이 허용)
 VALID_TRANSITIONS = {
-    "open": {"open", "in_progress"},
-    "in_progress": {"in_progress", "completed"},
-    "completed": {"completed"},
+    "open": {"open", "in_progress", "completed"},
+    "in_progress": {"open", "in_progress", "completed"},
+    "completed": {"open", "in_progress", "completed"},
 }
 
 

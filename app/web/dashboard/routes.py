@@ -639,6 +639,25 @@ async def update_pin(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.patch("/work/pins/{pin_id}")
+async def patch_pin(
+    pin_id: str,
+    update: PinUpdate,
+    pin_service: PinService = Depends(get_pin_service)
+):
+    """Pin 부분 업데이트 (드래그 앤 드롭용)"""
+    try:
+        pin = await pin_service.update_pin(pin_id, update)
+        return pin.dict()
+    except PinNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except InvalidStatusTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Patch pin error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.put("/work/pins/{pin_id}/complete")
 async def complete_pin(
     pin_id: str,
