@@ -5331,32 +5331,100 @@ h3 svg {
   margin: 0.5rem 0 0;
 }
 
-/* Work Stats Grid */
+/* Work Stats Grid - charts-grid 스타일 통일 */
 .work-stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 1rem;
+  gap: var(--space-6, 1.5rem);
   margin-bottom: 2rem;
 }
 
 .work-stats-grid .stat-card {
-  background: var(--surface-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 12px;
-  padding: 1.25rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg, 12px);
+  padding: var(--space-6, 1.5rem);
   display: flex;
   align-items: center;
   gap: 1rem;
-  transition: all 0.2s ease;
+  transition: all 200ms ease;
+  position: relative;
+  overflow: hidden;
 }
 
 .work-stats-grid .stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-color: var(--border-hover);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="dark"] .work-stats-grid .stat-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .work-stats-grid .stat-icon {
-  font-size: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md, 8px);
+  color: var(--text-secondary);
+}
+
+.work-stats-grid .stat-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* 모노톤 아이콘 - 모든 상태에서 동일한 색상 */
+.work-stats-grid .stat-card .stat-icon {
+  color: var(--text-secondary);
+}
+
+.work-stats-grid .stat-card:hover .stat-icon {
+  color: var(--text-primary);
+}
+
+/* Pin importance - 모노톤 */
+.pin-importance {
+  display: flex;
+  gap: 1px;
+  color: var(--text-tertiary);
+}
+
+.pin-importance svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* Pin action buttons - 모노톤 */
+.pin-action-btn,
+.btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.pin-action-btn:hover,
+.btn-icon:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.pin-action-btn svg,
+.btn-icon svg {
+  width: 14px;
+  height: 14px;
 }
 
 .work-stats-grid .stat-number {

@@ -292,7 +292,10 @@ async def message_endpoint(request: Request, session_id: str, auto_create: bool 
     
     auto_create=true 파라미터를 추가하면 세션이 없을 때 자동 생성합니다.
     """
-    # 세션이 없고 auto_create가 true면 임시 세션 생성
+    # 세션이 없으면 짧은 대기 후 재확인 (race condition 방지)
+    if session_id not in _sessions:
+        await asyncio.sleep(0.1)  # 100ms 대기
+        
     if session_id not in _sessions:
         if auto_create:
             _sessions[session_id] = asyncio.Queue()

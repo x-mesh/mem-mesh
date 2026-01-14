@@ -124,6 +124,18 @@ class WorkPage extends HTMLElement {
     `;
   }
 
+  // SVG Icons (모노톤)
+  static icons = {
+    pin: `<svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M12 2L12 8M12 8L8 12V14H10L12 22L14 14H16V12L12 8Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    progress: `<svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M12 2V6M12 18V22M4.93 4.93L7.76 7.76M16.24 16.24L19.07 19.07M2 12H6M18 12H22M4.93 19.07L7.76 16.24M16.24 7.76L19.07 4.93" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+    check: `<svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    clock: `<svg viewBox="0 0 24 24" fill="none" width="20" height="20"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/><path d="M12 7V12L15 15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+    star: `<svg viewBox="0 0 24 24" fill="none" width="12" height="12"><path d="M12 2L14.09 8.26L21 9.27L16 14.14L17.18 21.02L12 17.77L6.82 21.02L8 14.14L3 9.27L9.91 8.26L12 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+    starFilled: `<svg viewBox="0 0 24 24" fill="currentColor" width="12" height="12"><path d="M12 2L14.09 8.26L21 9.27L16 14.14L17.18 21.02L12 17.77L6.82 21.02L8 14.14L3 9.27L9.91 8.26L12 2Z"/></svg>`,
+    upload: `<svg viewBox="0 0 24 24" fill="none" width="14" height="14"><path d="M12 15V3M12 3L8 7M12 3L16 7M4 17V19C4 20.1 4.9 21 6 21H18C19.1 21 20 20.1 20 19V17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    checkSmall: `<svg viewBox="0 0 24 24" fill="none" width="14" height="14"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+  };
+
   renderStatsCards() {
     const pinStats = this.stats?.pins || {};
     const openPins = pinStats.open_pins || 0;
@@ -133,28 +145,28 @@ class WorkPage extends HTMLElement {
 
     return `
       <div class="stat-card open">
-        <div class="stat-icon">📌</div>
+        <div class="stat-icon">${WorkPage.icons.pin}</div>
         <div class="stat-info">
           <div class="stat-number">${openPins}</div>
           <div class="stat-label">Open</div>
         </div>
       </div>
       <div class="stat-card in-progress">
-        <div class="stat-icon">🔄</div>
+        <div class="stat-icon">${WorkPage.icons.progress}</div>
         <div class="stat-info">
           <div class="stat-number">${inProgressPins}</div>
           <div class="stat-label">In Progress</div>
         </div>
       </div>
       <div class="stat-card completed">
-        <div class="stat-icon">✅</div>
+        <div class="stat-icon">${WorkPage.icons.check}</div>
         <div class="stat-info">
           <div class="stat-number">${completedPins}</div>
           <div class="stat-label">Completed</div>
         </div>
       </div>
       <div class="stat-card lead-time">
-        <div class="stat-icon">⏱️</div>
+        <div class="stat-icon">${WorkPage.icons.clock}</div>
         <div class="stat-info">
           <div class="stat-number">${avgLeadTime ? avgLeadTime.toFixed(1) + 'h' : '-'}</div>
           <div class="stat-label">Avg Lead Time</div>
@@ -210,16 +222,19 @@ class WorkPage extends HTMLElement {
     `;
   }
 
+  renderImportanceStars(importance) {
+    return Array(importance).fill(WorkPage.icons.starFilled).join('');
+  }
+
   renderPinCard(pin) {
-    const importanceStars = '⭐'.repeat(pin.importance);
     const tags = pin.tags || [];
 
     return `
       <div class="pin-card" data-pin-id="${pin.id}" data-status="${pin.status}">
         <div class="pin-header">
-          <span class="pin-importance" title="Importance: ${pin.importance}">${importanceStars}</span>
+          <span class="pin-importance" title="Importance: ${pin.importance}">${this.renderImportanceStars(pin.importance)}</span>
           ${pin.status !== 'completed' ? `
-            <button class="pin-action-btn complete-btn" data-pin-id="${pin.id}" title="Complete">✓</button>
+            <button class="pin-action-btn complete-btn" data-pin-id="${pin.id}" title="Complete">${WorkPage.icons.checkSmall}</button>
           ` : ''}
         </div>
         <div class="pin-content">${this.escapeHtml(pin.content)}</div>
@@ -231,7 +246,7 @@ class WorkPage extends HTMLElement {
         <div class="pin-footer">
           <span class="pin-time">${this.formatTime(pin.created_at)}</span>
           ${pin.importance >= 4 && pin.status === 'completed' ? `
-            <button class="pin-action-btn promote-btn" data-pin-id="${pin.id}" title="Promote to Memory">📤</button>
+            <button class="pin-action-btn promote-btn" data-pin-id="${pin.id}" title="Promote to Memory">${WorkPage.icons.upload}</button>
           ` : ''}
         </div>
       </div>
@@ -239,7 +254,6 @@ class WorkPage extends HTMLElement {
   }
 
   renderPinListItem(pin) {
-    const importanceStars = '⭐'.repeat(pin.importance);
     const statusClass = pin.status.replace('_', '-');
 
     return `
@@ -248,17 +262,17 @@ class WorkPage extends HTMLElement {
         <div class="pin-main">
           <div class="pin-content">${this.escapeHtml(pin.content)}</div>
           <div class="pin-meta">
-            <span class="pin-importance">${importanceStars}</span>
+            <span class="pin-importance">${this.renderImportanceStars(pin.importance)}</span>
             <span class="pin-project">${pin.project_id}</span>
             <span class="pin-time">${this.formatTime(pin.created_at)}</span>
           </div>
         </div>
         <div class="pin-actions">
           ${pin.status !== 'completed' ? `
-            <button class="btn-icon complete-btn" data-pin-id="${pin.id}">✓</button>
+            <button class="btn-icon complete-btn" data-pin-id="${pin.id}">${WorkPage.icons.checkSmall}</button>
           ` : ''}
           ${pin.importance >= 4 && pin.status === 'completed' ? `
-            <button class="btn-icon promote-btn" data-pin-id="${pin.id}">📤</button>
+            <button class="btn-icon promote-btn" data-pin-id="${pin.id}">${WorkPage.icons.upload}</button>
           ` : ''}
         </div>
       </div>
@@ -286,11 +300,11 @@ class WorkPage extends HTMLElement {
               <div class="form-group">
                 <label for="pin-importance">Importance</label>
                 <select id="pin-importance">
-                  <option value="1">⭐ Low</option>
-                  <option value="2">⭐⭐</option>
-                  <option value="3" selected>⭐⭐⭐ Medium</option>
-                  <option value="4">⭐⭐⭐⭐</option>
-                  <option value="5">⭐⭐⭐⭐⭐ High</option>
+                  <option value="1">● Low</option>
+                  <option value="2">●●</option>
+                  <option value="3" selected>●●● Medium</option>
+                  <option value="4">●●●●</option>
+                  <option value="5">●●●●● High</option>
                 </select>
               </div>
             </div>
