@@ -78,6 +78,8 @@ class RelatedMemory(BaseModel):
     similarity_score: float = Field(description="유사도 점수")
     relationship: str = Field(description="관계 유형 ('before', 'after', 'similar')")
     created_at: str = Field(description="생성 시간")
+    category: Optional[str] = Field(None, description="카테고리")
+    project_id: Optional[str] = Field(None, description="프로젝트 ID")
     
     model_config = {
         "json_schema_extra": {
@@ -86,7 +88,9 @@ class RelatedMemory(BaseModel):
                 "content": "Started working on authentication system",
                 "similarity_score": 0.75,
                 "relationship": "before",
-                "created_at": "2024-01-14T15:20:00Z"
+                "created_at": "2024-01-14T15:20:00Z",
+                "category": "task",
+                "project_id": "my-app"
             }
         }
     }

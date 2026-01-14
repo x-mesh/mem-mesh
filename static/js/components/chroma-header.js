@@ -21,7 +21,7 @@ class ChromaHeader extends HTMLElement {
         <div class="header-container">
           <!-- Logo Section -->
           <div class="header-logo">
-            <a href="/" class="logo-link" data-route="/">
+            <a href="/about" class="logo-link" data-route="/about">
               <svg class="logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M16 4L4 10L16 16L28 10L16 4Z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
                 <path d="M4 22L16 28L28 22" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
@@ -34,12 +34,6 @@ class ChromaHeader extends HTMLElement {
           <!-- Navigation Menu -->
           <nav class="header-nav" id="header-nav">
             <div class="nav-links">
-              <a href="/" class="nav-link" data-route="/" data-nav="about">
-                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
-                  <path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <span>About</span>
-              </a>
               <a href="/dashboard" class="nav-link" data-route="/dashboard" data-nav="dashboard">
                 <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
                   <path d="M3 9L12 2L21 9V20C21 20.5304 20.7893 21.0391 20.4142 21.4142C20.0391 21.7893 19.5304 22 19 22H5C4.46957 22 3.96086 21.7893 3.58579 21.4142C3.21071 21.0391 3 20.5304 3 20V9Z" stroke="currentColor" stroke-width="2"/>
@@ -186,12 +180,6 @@ class ChromaHeader extends HTMLElement {
         <div class="mobile-nav-overlay" id="mobile-nav-overlay">
           <nav class="mobile-nav" id="mobile-nav">
             <div class="mobile-nav-links">
-              <a href="/" class="mobile-nav-link" data-route="/" data-nav="about">
-                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
-                  <path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <span>About</span>
-              </a>
               <a href="/dashboard" class="mobile-nav-link" data-route="/dashboard" data-nav="dashboard">
                 <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
                   <path d="M3 9L12 2L21 9V20C21 20.5304 20.7893 21.0391 20.4142 21.4142C20.0391 21.7893 19.5304 22 19 22H5C4.46957 22 3.96086 21.7893 3.58579 21.4142C3.21071 21.0391 3 20.5304 3 20V9Z" stroke="currentColor" stroke-width="2"/>
@@ -417,10 +405,10 @@ class ChromaHeader extends HTMLElement {
       }
     };
 
-    // Smooth scroll to top when clicking logo
+    // Smooth scroll to top when clicking logo on about page
     const logoLink = this.querySelector('.logo-link');
     logoLink?.addEventListener('click', (e) => {
-      if (window.location.pathname === '/') {
+      if (window.location.pathname === '/about') {
         e.preventDefault();
         window.scrollTo({
           top: 0,

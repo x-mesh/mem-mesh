@@ -176,7 +176,9 @@ class ContextService:
                     content=row[1],
                     similarity_score=similarity_score,
                     relationship=relationship,
-                    created_at=row[2]
+                    created_at=row[2],
+                    category=row[4],
+                    project_id=row[3]
                 )
                 related_memories.append(related_memory)
             
@@ -251,7 +253,9 @@ class ContextService:
                     content=row[1],
                     similarity_score=similarity_score,
                     relationship=relationship,
-                    created_at=row[2]
+                    created_at=row[2],
+                    category=row[4],
+                    project_id=row[3]
                 )
                 related_memories.append(related_memory)
             
@@ -418,7 +422,9 @@ class ContextService:
                     content=row[1],
                     similarity_score=similarity_score,
                     relationship=relationship,
-                    created_at=row[2]
+                    created_at=row[2],
+                    category=row[4],
+                    project_id=row[3]
                 )
                 additional_memories.append(expanded_memory)
             
@@ -489,7 +495,9 @@ class ContextService:
                     content=row[1],
                     similarity_score=similarity_score,
                     relationship=relationship,
-                    created_at=row[2]
+                    created_at=row[2],
+                    category=row[4],
+                    project_id=row[3]
                 )
                 additional_memories.append(expanded_memory)
             

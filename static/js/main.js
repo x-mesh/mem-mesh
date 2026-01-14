@@ -123,9 +123,9 @@ class App {
    * Register all routes
    */
   registerRoutes() {
-    this.router.register('/', () => this.renderPage('about'));
-    this.router.register('/about', () => this.renderPage('about'));
+    this.router.register('/', () => this.renderPage('dashboard'));
     this.router.register('/dashboard', () => this.renderPage('dashboard'));
+    this.router.register('/about', () => this.renderPage('about'));
     this.router.register('/search', () => this.renderPage('search'));
     this.router.register('/memory/:id', (params) => this.renderPage('memory-detail', params));
     this.router.register('/create', () => this.renderPage('create-memory'));
@@ -317,9 +317,9 @@ class App {
       link.classList.remove('active');
       const route = link.getAttribute('data-route');
       if (
-        (route === '/' && pageName === 'about') ||
-        (route === '/about' && pageName === 'about') ||
+        (route === '/' && pageName === 'dashboard') ||
         (route === '/dashboard' && pageName === 'dashboard') ||
+        (route === '/about' && pageName === 'about') ||
         (route === '/search' && pageName === 'search') ||
         (route === '/projects' && pageName === 'projects') ||
         (route === '/memories' && pageName === 'memories') ||

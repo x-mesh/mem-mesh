@@ -709,21 +709,47 @@ class MemoryDetailPage extends HTMLElement {
     if (!content) return '';
     
     try {
-      // 안전한 HTML 이스케이프 먼저 수행
-      let formatted = this.escapeHtml(content);
+      // 코드 블록 처리 (```language ... ```)
+      const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+      const codeBlocks = [];
+      let formatted = content;
       
-      // 간단한 마크다운 변환 (안전하게)
+      // 코드 블록을 임시로 저장하고 플레이스홀더로 교체
+      formatted = formatted.replace(codeBlockRegex, (match, language, code) => {
+        const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
+        const lang = language || 'plaintext';
+        const escapedCode = this.escapeHtml(code.trim());
+        codeBlocks.push(`<pre class="line-numbers"><code class="language-${lang}">${escapedCode}</code></pre>`);
+        return placeholder;
+      });
+      
+      // 인라인 코드 처리 전에 나머지 HTML 이스케이프
+      formatted = this.escapeHtml(formatted);
+      
+      // 간단한 마크다운 변환
       formatted = formatted
         .replace(/\n/g, '<br>')
         .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
         .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-        .replace(/`([^`]+)`/g, '<code>$1</code>');
+        .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
       
-      // URL 링크 변환 (더 안전한 패턴)
+      // URL 링크 변환
       formatted = formatted.replace(
         /\[([^\]]+)\]\(([^)]+)\)/g, 
         '<a href="$2" target="_blank" rel="noopener">$1</a>'
       );
+      
+      // 코드 블록 플레이스홀더를 실제 코드로 교체
+      codeBlocks.forEach((block, index) => {
+        formatted = formatted.replace(`__CODE_BLOCK_${index}__`, block);
+      });
+      
+      // Prism.js로 문법 강조 적용 (다음 틱에서 실행)
+      setTimeout(() => {
+        if (window.Prism) {
+          window.Prism.highlightAll();
+        }
+      }, 0);
       
       return formatted;
     } catch (error) {
@@ -1459,10 +1485,19 @@ style.textContent = `
   }
   
   .context-category {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
     font-size: 0.75rem;
     font-weight: 500;
     color: var(--text-secondary);
     text-transform: capitalize;
+  }
+  
+  .context-category svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
   }
   
   .context-score {
