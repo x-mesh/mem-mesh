@@ -74,6 +74,31 @@ class WorkPage extends HTMLElement {
     } finally {
       this.isLoading = false;
       this.render();
+      
+      // 최초 로딩 시에만 프로젝트 필터 업데이트
+      this.updateProjectFilter();
+    }
+  }
+
+  updateProjectFilter() {
+    const projectFilter = this.querySelector('#project-filter');
+    if (projectFilter && projectFilter.setOptions) {
+      // 프로젝트 목록 생성
+      let projectOptions = [{ value: '', text: 'All Projects' }];
+      
+      if (this.projects && this.projects.length > 0) {
+        projectOptions = projectOptions.concat(
+          this.projects.map(p => ({ value: p.id, text: p.id }))
+        );
+      } else if (this.pins && this.pins.length > 0) {
+        const projectIds = [...new Set(this.pins.map(p => p.project_id))];
+        projectOptions = projectOptions.concat(
+          projectIds.map(id => ({ value: id, text: id }))
+        );
+      }
+      
+      projectFilter.setOptions(projectOptions);
+      console.log('Updated project filter with', projectOptions.length, 'options');
     }
   }
 
@@ -162,8 +187,16 @@ class WorkPage extends HTMLElement {
   };
 
   renderProjectOptions() {
-    // 프로젝트 목록 추출 (pins에서 unique project_id)
-    const projectIds = [...new Set(this.pins.map(p => p.project_id))];
+    // 프로젝트 목록: API에서 로드한 projects 우선, 없으면 pins에서 추출
+    let projectIds = [];
+    
+    if (this.projects && this.projects.length > 0) {
+      // API에서 로드한 프로젝트 목록 사용
+      projectIds = this.projects.map(p => p.id);
+    } else {
+      // fallback: pins에서 unique project_id 추출
+      projectIds = [...new Set(this.pins.map(p => p.project_id))];
+    }
     
     return `
       <option value="" ${!this.selectedProject ? 'selected' : ''}>All Projects</option>
@@ -380,6 +413,54 @@ class WorkPage extends HTMLElement {
     `;
   }
 
+  /**
+   * 프로젝트 필터를 제외한 콘텐츠만 업데이트
+   */
+  updateContent() {
+    const workContent = this.querySelector('.work-content');
+    if (workContent) {
+      workContent.innerHTML = this.isLoading ? this.renderLoading() : this.renderContent();
+      
+      // 콘텐츠 영역의 이벤트 리스너만 다시 연결
+      this.attachContentEventListeners();
+    }
+  }
+
+  /**
+   * 콘텐츠 영역의 이벤트 리스너만 연결
+   */
+  attachContentEventListeners() {
+    // View toggle
+    const viewBtns = this.querySelectorAll('.view-btn');
+    viewBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.currentView = btn.dataset.view;
+        this.updateContent();
+      });
+    });
+
+    // Complete buttons
+    const completeBtns = this.querySelectorAll('.complete-btn');
+    completeBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.completePin(btn.dataset.pinId);
+      });
+    });
+
+    // Promote buttons
+    const promoteBtns = this.querySelectorAll('.promote-btn');
+    promoteBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.promotePin(btn.dataset.pinId);
+      });
+    });
+
+    // Drag and Drop for Kanban
+    this.attachDragAndDropListeners();
+  }
+
   attachEventListeners() {
     // Project filter
     const projectFilter = this.querySelector('#project-filter');
@@ -387,7 +468,8 @@ class WorkPage extends HTMLElement {
       projectFilter.addEventListener('change', (e) => {
         this.selectedProject = e.detail.value || null;
         console.log('Project filter changed:', this.selectedProject);
-        this.render();
+        // render() 대신 필요한 부분만 업데이트
+        this.updateContent();
       });
     }
 
@@ -416,35 +498,8 @@ class WorkPage extends HTMLElement {
       form.addEventListener('submit', (e) => this.handleNewPin(e));
     }
 
-    // View toggle
-    const viewBtns = this.querySelectorAll('.view-btn');
-    viewBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
-        this.currentView = btn.dataset.view;
-        this.render();
-      });
-    });
-
-    // Complete buttons
-    const completeBtns = this.querySelectorAll('.complete-btn');
-    completeBtns.forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.completePin(btn.dataset.pinId);
-      });
-    });
-
-    // Promote buttons
-    const promoteBtns = this.querySelectorAll('.promote-btn');
-    promoteBtns.forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.promotePin(btn.dataset.pinId);
-      });
-    });
-
-    // Drag and Drop for Kanban
-    this.attachDragAndDropListeners();
+    // 콘텐츠 영역 이벤트 리스너 연결
+    this.attachContentEventListeners();
   }
 
   showNewPinModal() {
