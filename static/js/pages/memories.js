@@ -1265,15 +1265,15 @@ class MemoriesPage extends HTMLElement {
    * Render the component
    */
   render() {
-    this.className = 'memories-page';
+    this.className = 'memories-page page-container';
     
     this.innerHTML = `
       <div class="page-header">
-        <div class="page-title-section">
-          <h1>${this.getPageTitle()}</h1>
-          <p class="page-description">${this.getViewDescription()}</p>
+        <div class="page-header-main">
+          <h1 class="page-title">${this.getPageTitle()}</h1>
+          <p class="page-subtitle">${this.getViewDescription()}</p>
         </div>
-        <div class="header-actions">
+        <div class="page-header-actions">
           <connection-status></connection-status>
           <button class="refresh-btn secondary-button">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1393,37 +1393,7 @@ export { MemoriesPage };
 const style = document.createElement('style');
 style.textContent = `
   .memories-page {
-    padding: var(--space-6) 0;
-    max-width: 1200px;
-    margin: 0 auto;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  }
-  
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 2rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid var(--border-color);
-  }
-  
-  .page-title-section h1 {
-    margin: 0 0 0.5rem 0;
-    color: var(--text-primary);
-    font-size: 1.75rem;
-  }
-  
-  .page-description {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-    line-height: 1.4;
-  }
-  
-  .header-actions {
-    display: flex;
-    gap: 1rem;
   }
   
   .secondary-button {
@@ -1726,16 +1696,6 @@ style.textContent = `
   @media (max-width: 768px) {
     .memories-page {
       padding: var(--space-4) 0;
-    }
-    
-    .page-header {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 1rem;
-    }
-    
-    .header-actions {
-      align-self: stretch;
     }
     
     .view-tabs {

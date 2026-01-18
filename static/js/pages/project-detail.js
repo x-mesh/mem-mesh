@@ -594,14 +594,16 @@ class ProjectDetailPage extends HTMLElement {
     
     this.innerHTML = `
       <div class="page-header">
-        <button class="back-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M19 12H5M12 19L5 12L12 5"/>
-          </svg>
-          Back to Projects
-        </button>
+        <div class="page-header-main">
+          <button class="back-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 12H5M12 19L5 12L12 5"/>
+            </svg>
+            Back to Projects
+          </button>
+        </div>
         
-        <div class="header-actions">
+        <div class="page-header-actions">
           <button class="refresh-btn secondary-button">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="23,4 23,10 17,10"/>
@@ -676,15 +678,6 @@ style.textContent = `
     margin: 0 auto;
   }
   
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid var(--border-color);
-  }
-  
   .back-btn {
     display: flex;
     align-items: center;
@@ -705,11 +698,6 @@ style.textContent = `
   
   .back-btn svg {
     stroke: currentColor;
-  }
-  
-  .header-actions {
-    display: flex;
-    gap: 1rem;
   }
   
   .secondary-button {
@@ -1073,16 +1061,6 @@ style.textContent = `
   @media (max-width: 768px) {
     .project-detail-page {
       padding: var(--space-4) 0;
-    }
-    
-    .page-header {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 1rem;
-    }
-    
-    .header-actions {
-      align-self: stretch;
     }
     
     .project-header {

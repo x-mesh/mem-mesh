@@ -814,12 +814,14 @@ class AnalyticsPage extends HTMLElement {
    * Render the component
    */
   render() {
-    this.className = 'analytics-page';
+    this.className = 'analytics-page page-container';
     
     this.innerHTML = `
       <div class="page-header">
-        <h1>Analytics</h1>
-        <div class="header-controls">
+        <div class="page-header-main">
+          <h1 class="page-title">Analytics</h1>
+        </div>
+        <div class="page-header-actions">
           <select class="time-range-select">
             <option value="7d">Last 7 days</option>
             <option value="30d" selected>Last 30 days</option>
@@ -932,32 +934,6 @@ customElements.define('analytics-page', AnalyticsPage);
 // Add component styles
 const style = document.createElement('style');
 style.textContent = `
-  .analytics-page {
-    padding: var(--space-6) 0; /* 상하 패딩만 유지, 좌우는 main-content에서 처리 */
-    max-width: 1200px;
-    margin: 0 auto;
-  }
-  
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid var(--border-color);
-  }
-  
-  .page-header h1 {
-    margin: 0;
-    color: var(--text-primary);
-  }
-  
-  .header-controls {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
-  
   .time-range-select {
     padding: 0.5rem;
     border: 1px solid var(--border-color);
@@ -1224,17 +1200,6 @@ style.textContent = `
   @media (max-width: 768px) {
     .analytics-page {
       padding: var(--space-4) 0; /* 모바일에서 상하 패딩 줄임 */
-    }
-    
-    .page-header {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 1rem;
-    }
-    
-    .header-controls {
-      align-self: stretch;
-      justify-content: space-between;
     }
     
     .overview-stats {

@@ -202,6 +202,55 @@ p {
   color: var(--text-secondary);
 }
 
+/* Unified Page Header */
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-6);
+  margin: var(--space-6) 0 var(--space-6);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.page-header-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1;
+}
+
+.page-title {
+  margin: 0;
+  font-size: var(--text-4xl);
+  color: var(--text-primary);
+}
+
+.page-subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-lg);
+}
+
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+@media (max-width: 768px) {
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-4);
+  }
+
+  .page-header-actions {
+    align-self: stretch;
+    flex-wrap: wrap;
+  }
+}
+
 .text-xs { font-size: var(--text-xs); }
 .text-sm { font-size: var(--text-sm); }
 .text-base { font-size: var(--text-base); }
@@ -927,6 +976,12 @@ p {
 .main-content {
   width: 100%;
   padding: 0 40px; /* 좌우 15px 여백 추가 */
+}
+
+.page-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-6) 0;
 }
 
 /* About 페이지는 전체 너비 사용 (hero section 때문에) */
@@ -4266,9 +4321,9 @@ h3 svg {
 
 /* Dashboard Content */
 .chroma-dashboard-content {
-  max-width: var(--container-xl);
-  margin: 0 auto;
-  padding: var(--space-8) var(--space-6);
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .chroma-dashboard-section {
@@ -4697,7 +4752,7 @@ h3 svg {
   }
   
   .chroma-dashboard-content {
-    padding: var(--space-6) var(--space-4);
+    padding: 0;
   }
   
   .chroma-dashboard-section {
@@ -4747,7 +4802,7 @@ h3 svg {
   }
   
   .chroma-dashboard-content {
-    padding: var(--space-4) var(--space-3);
+    padding: 0;
   }
   
   .chroma-refresh-btn .btn-text {
@@ -5386,37 +5441,6 @@ connection-status {
 
 
 /* ===== Work Page Styles ===== */
-.work-page {
-  padding: 2rem;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.work-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 2rem;
-}
-
-.work-header .page-title {
-  font-size: 2rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin: 0;
-}
-
-.work-header .page-subtitle {
-  color: var(--text-secondary);
-  margin: 0.5rem 0 0;
-}
-
-.work-header .header-actions {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
 .project-filter-container {
   display: flex;
   align-items: center;

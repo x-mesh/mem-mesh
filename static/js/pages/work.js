@@ -111,13 +111,13 @@ class WorkPage extends HTMLElement {
 
   render() {
     this.innerHTML = `
-      <div class="work-page chroma-page">
-        <div class="work-header">
-          <div class="header-content">
+      <div class="work-page chroma-page page-container">
+        <div class="page-header">
+          <div class="page-header-main">
             <h1 class="page-title">Work Tracking</h1>
             <p class="page-subtitle">Pin-based Task Tracking and Session Management</p>
           </div>
-          <div class="header-actions">
+          <div class="page-header-actions">
             <div class="project-filter-container">
               <label for="project-filter" class="filter-label">Project:</label>
               <searchable-combobox id="project-filter" placeholder="All Projects">

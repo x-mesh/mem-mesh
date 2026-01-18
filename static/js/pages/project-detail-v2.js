@@ -311,9 +311,11 @@ class ProjectDetailPage extends HTMLElement {
     
     this.innerHTML = `
       <div class="page-header">
-        <button class="back-btn">
-          ← Back to Projects
-        </button>
+        <div class="page-header-main">
+          <button class="back-btn">
+            ← Back to Projects
+          </button>
+        </div>
       </div>
       
       <div class="error-message" style="display: none; background: #fee; color: #c00; padding: 1rem; margin: 1rem 0; border-radius: 4px;"></div>

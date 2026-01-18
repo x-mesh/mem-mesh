@@ -445,12 +445,14 @@ class ProjectsPage extends HTMLElement {
    * Render the component
    */
   render() {
-    this.className = 'projects-page';
+    this.className = 'projects-page page-container';
     
     this.innerHTML = `
       <div class="page-header">
-        <h1>Projects</h1>
-        <div class="header-actions">
+        <div class="page-header-main">
+          <h1 class="page-title">Projects</h1>
+        </div>
+        <div class="page-header-actions">
           <button class="refresh-btn secondary-button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg> Refresh</button>
           <button class="export-btn secondary-button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export</button>
         </div>
@@ -533,31 +535,6 @@ customElements.define('projects-page', ProjectsPage);
 // Add component styles
 const style = document.createElement('style');
 style.textContent = `
-  .projects-page {
-    padding: var(--space-6) 0; /* 상하 패딩만 유지, 좌우는 main-content에서 처리 */
-    max-width: 1200px;
-    margin: 0 auto;
-  }
-  
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid var(--border-color);
-  }
-  
-  .page-header h1 {
-    margin: 0;
-    color: var(--text-primary);
-  }
-  
-  .header-actions {
-    display: flex;
-    gap: 1rem;
-  }
-  
   .error-message {
     background: var(--error-bg);
     color: var(--error-text);
@@ -866,17 +843,6 @@ style.textContent = `
   @media (max-width: 768px) {
     .projects-page {
       padding: var(--space-4) 0; /* 모바일에서 상하 패딩 줄임 */
-    }
-    
-    .page-header {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 1rem;
-    }
-    
-    .header-actions {
-      align-self: stretch;
-      justify-content: space-between;
     }
     
     .projects-controls {

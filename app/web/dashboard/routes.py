@@ -6,6 +6,7 @@ Dashboard REST API 라우터.
 
 import json
 import logging
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends
 
 from app.core.services.memory import MemoryService, MemoryNotFoundError
@@ -16,7 +17,7 @@ from app.core.services.embedding_manager import EmbeddingManagerService
 from app.core.services.project import ProjectService
 from app.core.services.session import SessionService, NoActiveSessionError
 from app.core.services.pin import PinService, PinNotFoundError, InvalidStatusTransitionError
-from app.core.schemas.requests import AddParams, SearchParams, UpdateParams
+from app.core.schemas.requests import AddParams, SearchParams, UpdateParams, RuleUpdateParams
 from app.core.schemas.pins import PinCreate, PinUpdate
 from app.core.schemas.projects import ProjectUpdate
 from app.core.schemas.responses import (
@@ -35,6 +36,40 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Dashboard API"])
 
 
+def _rules_root() -> Path:
+    return Path(__file__).resolve().parents[3] / "docs" / "rules"
+
+
+def _rules_index_path() -> Path:
+    return _rules_root() / "index.json"
+
+
+def _load_rules_index() -> dict:
+    index_path = _rules_index_path()
+    if not index_path.exists():
+        raise FileNotFoundError("rules index.json not found")
+    return json.loads(index_path.read_text(encoding="utf-8"))
+
+
+def _get_rule_entry(rule_id: str) -> dict:
+    index_data = _load_rules_index()
+    for rule in index_data.get("rules", []):
+        if rule.get("id") == rule_id:
+            return rule
+    raise KeyError(f"Rule not found: {rule_id}")
+
+
+def _resolve_rule_path(rule_entry: dict) -> Path:
+    rule_path = rule_entry.get("path")
+    if not rule_path:
+        raise ValueError("Invalid rule entry: missing path")
+    base = _rules_root().resolve()
+    candidate = (Path(__file__).resolve().parents[3] / rule_path).resolve()
+    if not str(candidate).startswith(str(base)):
+        raise ValueError("Invalid rule path")
+    return candidate
+
+
 @router.get("/")
 async def api_root():
     """API 루트 엔드포인트"""
@@ -50,6 +85,67 @@ async def api_root():
 async def health_check():
     """헬스 체크 엔드포인트"""
     return {"status": "healthy", "timestamp": "2026-01-11T12:30:00Z"}
+
+
+@router.get("/rules")
+async def list_rules():
+    """Rules 목록 조회"""
+    try:
+        index_data = _load_rules_index()
+        rules = index_data.get("rules", [])
+        return {
+            "version": index_data.get("version", 1),
+            "rules": [
+                {
+                    "id": rule.get("id"),
+                    "title": rule.get("title"),
+                    "kind": rule.get("kind"),
+                    "tags": rule.get("tags", [])
+                }
+                for rule in rules
+            ]
+        }
+    except Exception as e:
+        logger.error(f"List rules error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/rules/{rule_id}")
+async def get_rule(rule_id: str):
+    """Rules 단건 조회"""
+    try:
+        entry = _get_rule_entry(rule_id)
+        rule_path = _resolve_rule_path(entry)
+        if not rule_path.exists():
+            raise HTTPException(status_code=404, detail="Rule file not found")
+        content = rule_path.read_text(encoding="utf-8")
+        return {"rule": entry, "content": content}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get rule error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/rules/{rule_id}")
+async def update_rule(rule_id: str, params: RuleUpdateParams):
+    """Rules 수정"""
+    try:
+        entry = _get_rule_entry(rule_id)
+        rule_path = _resolve_rule_path(entry)
+        if not rule_path.exists():
+            raise HTTPException(status_code=404, detail="Rule file not found")
+        rule_path.write_text(params.content, encoding="utf-8")
+        return {"status": "updated", "rule_id": rule_id, "bytes": len(params.content)}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update rule error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/memories", response_model=AddResponse)

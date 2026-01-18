@@ -17,10 +17,12 @@ class SettingsPage {
         this.container = container;
         
         container.innerHTML = `
-            <div class="settings-page">
+            <div class="settings-page page-container">
                 <header class="page-header">
-                    <h1>⚙️ Settings</h1>
-                    <p class="subtitle">Embedding Model Management</p>
+                    <div class="page-header-main">
+                        <h1 class="page-title">Settings</h1>
+                        <p class="page-subtitle">Embedding Model Management</p>
+                    </div>
                 </header>
                 
                 <div class="settings-content">

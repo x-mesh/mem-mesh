@@ -10,11 +10,14 @@ export class SettingsPage extends HTMLElement {
         super();
         this.statusData = null;
         this.migrationInterval = null;
+        this.rulesIndex = null;
+        this.rulesCache = new Map();
     }
 
     connectedCallback() {
         this.render();
         this.loadStatus();
+        this.loadRulesIndex();
     }
 
     disconnectedCallback() {
@@ -28,23 +31,25 @@ export class SettingsPage extends HTMLElement {
         this.innerHTML = `
             <div class="settings-page page-container">
                 <header class="page-header">
-                    <h1>⚙️ Settings</h1>
-                    <p class="page-subtitle">Embedding Model Management</p>
+                    <div class="page-header-main">
+                        <h1 class="page-title">설정</h1>
+                        <p class="page-subtitle">임베딩 모델과 규칙을 관리합니다</p>
+                    </div>
                 </header>
                 
                 <div class="settings-content">
                     <!-- Embedding Status Card -->
                     <div class="card">
                         <div class="card-header">
-                            <h2>📊 Embedding Model Status</h2>
+                            <h2>임베딩 상태</h2>
                             <button id="refresh-status-btn" class="btn btn-secondary btn-sm">
-                                🔄 Refresh
+                                새로고침
                             </button>
                         </div>
                         <div class="card-body" id="embedding-status">
                             <div class="loading-state">
                                 <div class="spinner"></div>
-                                <p>Loading status...</p>
+                                <p>상태 불러오는 중...</p>
                             </div>
                         </div>
                     </div>
@@ -52,7 +57,7 @@ export class SettingsPage extends HTMLElement {
                     <!-- Migration Card -->
                     <div class="card">
                         <div class="card-header">
-                            <h2>🔄 Embedding Migration</h2>
+                            <h2>임베딩 마이그레이션</h2>
                         </div>
                         <div class="card-body" id="migration-section">
                             <p class="description">
@@ -70,7 +75,7 @@ export class SettingsPage extends HTMLElement {
                                     <input type="number" id="batch-size" class="form-input" value="100" min="10" max="500" style="width: 100px;">
                                 </div>
                                 <button id="start-migration-btn" class="btn btn-primary">
-                                    🚀 Start Migration
+                                    마이그레이션 시작
                                 </button>
                             </div>
                             <div id="migration-progress" class="migration-progress hidden">
@@ -81,25 +86,77 @@ export class SettingsPage extends HTMLElement {
                             </div>
                         </div>
                     </div>
+
+                    <!-- Rules Manager Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Rules 관리자</h2>
+                            <button id="refresh-rules-btn" class="btn btn-secondary btn-sm">
+                                새로고침
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <p class="description">
+                                필요한 rules를 선택해 병합하고, 복사하거나 저장할 수 있습니다.
+                            </p>
+                            <div class="rules-layout">
+                                <div class="rules-panel">
+                                    <div class="rules-list" id="rules-list">
+                                        <div class="loading-state">
+                                            <div class="spinner"></div>
+                                            <p>rules 불러오는 중...</p>
+                                        </div>
+                                    </div>
+                                    <div class="rules-actions">
+                                        <button id="merge-rules-btn" class="btn btn-primary btn-sm">
+                                            선택 병합
+                                        </button>
+                                        <button id="copy-rules-btn" class="btn btn-secondary btn-sm">
+                                            복사
+                                        </button>
+                                        <button id="download-rules-btn" class="btn btn-secondary btn-sm">
+                                            다운로드
+                                        </button>
+                                    </div>
+                                    <div class="rules-save">
+                                        <label for="rules-target-select">저장 대상</label>
+                                        <div class="rules-save-row">
+                                            <select id="rules-target-select" class="form-input"></select>
+                                            <button id="save-rules-btn" class="btn btn-primary btn-sm">
+                                                저장
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="rules-panel">
+                                    <label for="rules-output">병합 결과</label>
+                                    <textarea id="rules-output" class="rules-textarea" rows="16" placeholder="rules를 선택한 뒤 병합하면 여기에 표시됩니다."></textarea>
+                                    <div class="rules-hint">
+                                        rules는 외부 툴에 복붙해서 사용하세요. 저장 시 선택한 대상 파일이 덮어써집니다.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     
                     <!-- Info Card -->
                     <div class="card">
                         <div class="card-header">
-                            <h2>ℹ️ Information</h2>
+                            <h2>정보</h2>
                         </div>
                         <div class="card-body info-content">
-                            <h3>Embedding Model</h3>
+                            <h3>임베딩 모델</h3>
                             <p>현재 시스템은 <code>sentence-transformers</code> 라이브러리를 사용하여 텍스트를 벡터로 변환합니다.</p>
                             <ul>
                                 <li><strong>all-MiniLM-L6-v2</strong>: 빠르고 가벼운 영어 모델 (384 dimensions)</li>
                                 <li><strong>intfloat/multilingual-e5-small</strong>: 다국어 지원 모델 (384 dimensions)</li>
                             </ul>
                             
-                            <h3>Migration</h3>
+                            <h3>마이그레이션</h3>
                             <p>모델을 변경하면 기존 메모리들의 임베딩을 새 모델로 재생성해야 합니다. 
                             마이그레이션은 배치 단위로 처리되며, 진행 상황을 실시간으로 확인할 수 있습니다.</p>
                             
-                            <h3>Configuration</h3>
+                            <h3>설정</h3>
                             <p>모델 설정은 <code>.env</code> 파일의 <code>MEM_MESH_EMBEDDING_MODEL</code> 환경변수로 변경할 수 있습니다.</p>
                         </div>
                     </div>
@@ -108,23 +165,7 @@ export class SettingsPage extends HTMLElement {
             
             <style>
                 .settings-page {
-                    max-width: 900px;
-                    margin: 0 auto;
-                    padding: 2rem;
-                }
-                
-                .page-header {
-                    margin-bottom: 2rem;
-                }
-                
-                .page-header h1 {
-                    font-size: 2rem;
-                    margin-bottom: 0.5rem;
-                }
-                
-                .page-subtitle {
-                    color: var(--text-secondary, #666);
-                    font-size: 1.1rem;
+                    width: 100%;
                 }
                 
                 .settings-content {
@@ -379,6 +420,71 @@ export class SettingsPage extends HTMLElement {
                     color: var(--text-secondary, #666);
                     margin-bottom: 1rem;
                 }
+
+                .rules-layout {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+                    gap: 1rem;
+                }
+
+                .rules-panel {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.75rem;
+                }
+
+                .rules-list {
+                    border: 1px solid var(--border-color, #e0e0e0);
+                    border-radius: 8px;
+                    padding: 0.75rem;
+                    max-height: 320px;
+                    overflow: auto;
+                    background: var(--card-bg, #fff);
+                }
+
+                .rules-item {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    padding: 0.35rem 0.25rem;
+                }
+
+                .rules-item small {
+                    color: var(--text-secondary, #666);
+                }
+
+                .rules-actions {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 0.5rem;
+                }
+
+                .rules-save {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.35rem;
+                }
+
+                .rules-save-row {
+                    display: flex;
+                    gap: 0.5rem;
+                }
+
+                .rules-textarea {
+                    width: 100%;
+                    min-height: 260px;
+                    padding: 0.75rem;
+                    border: 1px solid var(--border-color, #e0e0e0);
+                    border-radius: 8px;
+                    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+                    font-size: 0.9rem;
+                    line-height: 1.4;
+                }
+
+                .rules-hint {
+                    font-size: 0.85rem;
+                    color: var(--text-secondary, #666);
+                }
             </style>
         `;
         
@@ -388,18 +494,197 @@ export class SettingsPage extends HTMLElement {
     bindEvents() {
         this.querySelector('#refresh-status-btn')?.addEventListener('click', () => this.loadStatus());
         this.querySelector('#start-migration-btn')?.addEventListener('click', () => this.startMigration());
+        this.querySelector('#refresh-rules-btn')?.addEventListener('click', () => this.loadRulesIndex());
+        this.querySelector('#merge-rules-btn')?.addEventListener('click', () => this.mergeSelectedRules());
+        this.querySelector('#copy-rules-btn')?.addEventListener('click', () => this.copyMergedRules());
+        this.querySelector('#download-rules-btn')?.addEventListener('click', () => this.downloadMergedRules());
+        this.querySelector('#save-rules-btn')?.addEventListener('click', () => this.saveMergedRules());
+    }
+
+    async loadRulesIndex() {
+        const listContainer = this.querySelector('#rules-list');
+        if (!listContainer) return;
+
+        listContainer.innerHTML = `
+            <div class="loading-state">
+                <div class="spinner"></div>
+                <p>Loading rules...</p>
+            </div>
+        `;
+
+        try {
+            const response = await fetch('/api/rules');
+            if (!response.ok) throw new Error('Failed to fetch rules index');
+            const data = await response.json();
+            this.rulesIndex = data.rules || [];
+            this.renderRulesList();
+            this.renderRulesTargets();
+        } catch (error) {
+            console.error('Failed to load rules index:', error);
+            listContainer.innerHTML = `
+                <div class="error-message">
+                    rules를 불러오지 못했습니다: ${error.message}
+                </div>
+            `;
+        }
+    }
+
+    renderRulesList() {
+        const listContainer = this.querySelector('#rules-list');
+        if (!listContainer) return;
+
+        if (!this.rulesIndex || this.rulesIndex.length === 0) {
+            listContainer.innerHTML = '<p class="description">사용 가능한 rules가 없습니다.</p>';
+            return;
+        }
+
+        listContainer.innerHTML = '';
+        this.rulesIndex.forEach((rule) => {
+            const item = document.createElement('label');
+            item.className = 'rules-item';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = rule.id;
+            if (rule.id === 'core') {
+                checkbox.checked = true;
+                checkbox.disabled = true;
+            }
+            const text = document.createElement('span');
+            text.textContent = `${rule.title} (${rule.id})`;
+            const meta = document.createElement('small');
+            meta.textContent = rule.kind ? ` ${rule.kind}` : '';
+            item.appendChild(checkbox);
+            item.appendChild(text);
+            item.appendChild(meta);
+            listContainer.appendChild(item);
+        });
+    }
+
+    renderRulesTargets() {
+        const select = this.querySelector('#rules-target-select');
+        if (!select) return;
+
+        select.innerHTML = '';
+        (this.rulesIndex || []).forEach((rule) => {
+            const option = document.createElement('option');
+            option.value = rule.id;
+            option.textContent = `${rule.title} (${rule.id})`;
+            select.appendChild(option);
+        });
+    }
+
+    getSelectedRuleIds() {
+        const checkboxes = this.querySelectorAll('#rules-list input[type="checkbox"]');
+        const selected = Array.from(checkboxes)
+            .filter((checkbox) => checkbox.checked)
+            .map((checkbox) => checkbox.value);
+        if (!selected.includes('core')) {
+            selected.unshift('core');
+        }
+        return selected;
+    }
+
+    async fetchRuleContent(ruleId) {
+        if (this.rulesCache.has(ruleId)) {
+            return this.rulesCache.get(ruleId);
+        }
+        const response = await fetch(`/api/rules/${encodeURIComponent(ruleId)}`);
+        if (!response.ok) throw new Error(`Failed to fetch rule: ${ruleId}`);
+        const data = await response.json();
+        const content = data.content || '';
+        this.rulesCache.set(ruleId, content);
+        return content;
+    }
+
+    async mergeSelectedRules() {
+        const ruleIds = this.getSelectedRuleIds();
+        if (ruleIds.length === 0) {
+            showToast('최소 1개 이상의 rule을 선택하세요.', 'warning');
+            return;
+        }
+
+        try {
+            const contents = [];
+            for (const ruleId of ruleIds) {
+                const content = await this.fetchRuleContent(ruleId);
+                contents.push(content.trim());
+            }
+            const merged = `${contents.join('\n\n---\n\n')}\n`;
+            const output = this.querySelector('#rules-output');
+            if (output) {
+                output.value = merged;
+            }
+            showToast('rules 병합 완료.', 'success');
+        } catch (error) {
+            console.error('Failed to merge rules:', error);
+            showToast(`병합 실패: ${error.message}`, 'error');
+        }
+    }
+
+    async copyMergedRules() {
+        const output = this.querySelector('#rules-output');
+        if (!output || !output.value.trim()) {
+            showToast('복사할 병합 결과가 없습니다.', 'warning');
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(output.value);
+            showToast('클립보드에 복사했습니다.', 'success');
+        } catch (error) {
+            console.error('Copy failed:', error);
+            showToast('복사에 실패했습니다.', 'error');
+        }
+    }
+
+    downloadMergedRules() {
+        const output = this.querySelector('#rules-output');
+        if (!output || !output.value.trim()) {
+            showToast('다운로드할 병합 결과가 없습니다.', 'warning');
+            return;
+        }
+        const blob = new Blob([output.value], { type: 'text/markdown' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'rules-bundle.md';
+        link.click();
+        URL.revokeObjectURL(link.href);
+    }
+
+    async saveMergedRules() {
+        const output = this.querySelector('#rules-output');
+        const select = this.querySelector('#rules-target-select');
+        if (!output || !select) return;
+        const content = output.value.trim();
+        if (!content) {
+            showToast('저장할 병합 결과가 없습니다.', 'warning');
+            return;
+        }
+        const ruleId = select.value;
+        try {
+            const response = await fetch(`/api/rules/${encodeURIComponent(ruleId)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content })
+            });
+            if (!response.ok) throw new Error('Failed to save rule');
+            showToast('rules를 저장했습니다.', 'success');
+            this.rulesCache.set(ruleId, content);
+        } catch (error) {
+            console.error('Save failed:', error);
+            showToast(`저장 실패: ${error.message}`, 'error');
+        }
     }
 
     async loadStatus() {
         const statusContainer = this.querySelector('#embedding-status');
         if (!statusContainer) return;
         
-        statusContainer.innerHTML = `
-            <div class="loading-state">
-                <div class="spinner"></div>
-                <p>Loading status...</p>
-            </div>
-        `;
+            statusContainer.innerHTML = `
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    <p>상태 불러오는 중...</p>
+                </div>
+            `;
         
         try {
             const response = await fetch('/api/embeddings/status');
@@ -415,7 +700,7 @@ export class SettingsPage extends HTMLElement {
             console.error('Failed to load embedding status:', error);
             statusContainer.innerHTML = `
                 <div class="error-message">
-                    ❌ Failed to load status: ${error.message}
+                    상태를 불러오지 못했습니다: ${error.message}
                 </div>
             `;
         }
@@ -424,7 +709,7 @@ export class SettingsPage extends HTMLElement {
     renderStatus(container) {
         const data = this.statusData;
         const statusClass = data.needs_migration ? 'status-warning' : 'status-ok';
-        const statusIcon = data.needs_migration ? '⚠️' : '✅';
+        const statusLabel = data.needs_migration ? '마이그레이션 필요' : '정상';
         
         container.innerHTML = `
             <div class="status-grid">
@@ -459,7 +744,7 @@ export class SettingsPage extends HTMLElement {
                 <div class="status-item full-width">
                     <label>Status</label>
                     <span class="value ${statusClass}">
-                        ${statusIcon} ${data.needs_migration ? 'Migration Required - Model Mismatch' : 'Models Match - No Migration Needed'}
+                        ${statusLabel}
                     </span>
                 </div>
             </div>
@@ -477,7 +762,7 @@ export class SettingsPage extends HTMLElement {
         }
         
         btn.disabled = true;
-        btn.textContent = '⏳ Starting...';
+        btn.textContent = '시작 중...';
         progressSection.classList.remove('hidden');
         
         try {
@@ -492,7 +777,7 @@ export class SettingsPage extends HTMLElement {
             if (result.skipped) {
                 showToast(result.message, 'info');
                 btn.disabled = false;
-                btn.textContent = '🚀 Start Migration';
+                btn.textContent = '마이그레이션 시작';
                 progressSection.classList.add('hidden');
                 return;
             }
@@ -501,7 +786,7 @@ export class SettingsPage extends HTMLElement {
             if (result.success || result.progress) {
                 btn.textContent = '⏳ Migrating...';
                 this.startProgressPolling();
-                showToast('Migration started!', 'info');
+                showToast('마이그레이션을 시작했습니다.', 'info');
             } else if (result.error) {
                 throw new Error(result.error);
             }
@@ -510,7 +795,7 @@ export class SettingsPage extends HTMLElement {
             console.error('Migration error:', error);
             showToast(`Migration failed: ${error.message}`, 'error');
             btn.disabled = false;
-            btn.textContent = '🚀 Start Migration';
+            btn.textContent = '마이그레이션 시작';
             progressSection.classList.add('hidden');
         }
     }
@@ -542,11 +827,11 @@ export class SettingsPage extends HTMLElement {
                 
                 if (btn) {
                     btn.disabled = false;
-                    btn.textContent = '🚀 Start Migration';
+                    btn.textContent = '마이그레이션 시작';
                 }
                 
                 if (progress.status === 'completed') {
-                    showToast('Migration completed successfully!', 'success');
+                    showToast('마이그레이션이 완료되었습니다.', 'success');
                     await this.loadStatus();
                     
                     // 3초 후 progress section 숨기기
@@ -575,7 +860,7 @@ export class SettingsPage extends HTMLElement {
                 
                 if (btn) {
                     btn.disabled = false;
-                    btn.textContent = '🚀 Start Migration';
+                    btn.textContent = '마이그레이션 시작';
                 }
                 if (progressSection) {
                     progressSection.classList.add('hidden');

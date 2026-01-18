@@ -107,6 +107,11 @@ class UpdateParams(BaseModel):
         return v
 
 
+class RuleUpdateParams(BaseModel):
+    """Rules 파일 업데이트 요청 파라미터"""
+    content: str = Field(min_length=1, max_length=200000)
+
+
 class StatsParams(BaseModel):
     """통계 조회 요청 파라미터"""
     project_id: Optional[str] = Field(default=None, description="특정 프로젝트로 필터링")

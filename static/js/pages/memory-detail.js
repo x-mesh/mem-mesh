@@ -796,7 +796,7 @@ class MemoryDetailPage extends HTMLElement {
    * Render the component
    */
   render() {
-    this.className = 'memory-detail-page';
+    this.className = 'memory-detail-page page-container';
     
     console.log('=== RENDER START ===');
     console.log('isLoading:', this.isLoading);
@@ -1019,8 +1019,7 @@ const style = document.createElement('style');
 style.textContent = `
   .memory-detail-page {
     padding: var(--space-6) 0; /* 상하 패딩만 유지, 좌우는 main-content에서 처리 */
-    max-width: 1400px;
-    margin: 0 auto;
+    width: 100%;
   }
   
   .memory-header {
@@ -1628,7 +1627,6 @@ style.textContent = `
     
     .memory-sidebar {
       position: static;
-      order: -1;
       height: auto;
     }
     

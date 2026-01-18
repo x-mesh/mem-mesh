@@ -546,8 +546,10 @@ class CreateMemoryPage extends HTMLElement {
     
     this.innerHTML = `
       <div class="page-header">
-        <h1>Create New Memory</h1>
-        <div class="header-actions">
+        <div class="page-header-main">
+          <h1 class="page-title">Create New Memory</h1>
+        </div>
+        <div class="page-header-actions">
           <div class="save-status"></div>
           <button class="save-draft-btn secondary-button">Save Draft</button>
           <button class="clear-draft-btn secondary-button">Clear Draft</button>
@@ -637,26 +639,6 @@ style.textContent = `
     max-width: 800px;
     margin: 0 auto;
     padding: var(--space-6) 0; /* 상하 패딩만 유지, 좌우는 main-content에서 처리 */
-  }
-  
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid var(--border-color);
-  }
-  
-  .page-header h1 {
-    margin: 0;
-    color: var(--text-primary);
-  }
-  
-  .header-actions {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
   }
   
   .save-status {
@@ -915,17 +897,6 @@ style.textContent = `
   @media (max-width: 768px) {
     .create-memory-page {
       padding: var(--space-4) 0; /* 모바일에서 상하 패딩 줄임 */
-    }
-    
-    .page-header {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 1rem;
-    }
-    
-    .header-actions {
-      align-self: stretch;
-      justify-content: space-between;
     }
     
     .form-row {

@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "all-tools-full",
+      "title": "All Tools Full Rules",
+      "path": "docs/rules/all-tools-full.md",
+      "kind": "full",
+      "tags": ["all", "full", "rules"]
+    },
+    {
+      "id": "core",
+      "title": "Core Rules",
+      "path": "docs/rules/modules/core.md",
+      "kind": "module",
+      "tags": ["core", "basics"]
+    },
+    {
+      "id": "memory-log",
+      "title": "Memory Logging Rules",
+      "path": "docs/rules/modules/memory-log.md",
+      "kind": "module",
+      "tags": ["memory", "logging"]
+    },
+    {
+      "id": "search",
+      "title": "Search Rules",
+      "path": "docs/rules/modules/search.md",
+      "kind": "module",
+      "tags": ["search", "retrieval"]
+    },
+    {
+      "id": "pins",
+      "title": "Session Pins Rules",
+      "path": "docs/rules/modules/pins.md",
+      "kind": "module",
+      "tags": ["pins", "session"]
+    },
+    {
+      "id": "security",
+      "title": "Security Rules",
+      "path": "docs/rules/modules/security.md",
+      "kind": "module",
+      "tags": ["security", "privacy"]
+    },
+    {
+      "id": "api-usage",
+      "title": "API Usage Rules",
+      "path": "docs/rules/modules/api-usage.md",
+      "kind": "module",
+      "tags": ["api", "integration"]
+    },
+    {
+      "id": "team-context",
+      "title": "Team Context Rules",
+      "path": "docs/rules/modules/team-context.md",
+      "kind": "module",
+      "tags": ["team", "collaboration"]
+    },
+    {
+      "id": "mcp-helper",
+      "title": "MCP Helper Prompt",
+      "path": "docs/rules/modules/mcp-helper.md",
+      "kind": "module",
+      "tags": ["mcp", "helper", "api"]
+    }
+  ]
+}
