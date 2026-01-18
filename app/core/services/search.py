@@ -13,6 +13,12 @@ from difflib import SequenceMatcher
 from ..database.base import Database
 from ..embeddings.service import EmbeddingService
 from ..schemas.responses import SearchResult, SearchResponse
+try:
+    from .query_expander import get_query_expander
+except ImportError:
+    # QueryExpander가 없으면 None
+    get_query_expander = None
+from .cache_manager import get_cache_manager
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +48,13 @@ def _parse_tags(row) -> Optional[List[str]]:
 
 class SearchService:
     """하이브리드 검색 서비스"""
-    
+
     def __init__(self, db: Database, embedding_service: EmbeddingService):
         self.db = db
         self.embedding_service = embedding_service
         self.similarity_threshold = 0.5
-        logger.info("SearchService initialized")
+        self.cache_manager = get_cache_manager()  # 캐시 매니저 초기화
+        logger.info("SearchService initialized with smart caching")
     
     async def search(
         self,
@@ -82,9 +89,32 @@ class SearchService:
         Returns:
             SearchResponse: 검색 결과
         """
-        logger.info(f"Searching for query: '{query}' with mode: {search_mode}, filters - project_id: {project_id}, category: {category}, source: {source}, tag: {tag}, limit: {limit}, offset: {offset}, sort: {sort_by} {sort_direction}")
-        
+        # Query Expansion for Korean/English (if available)
+        original_query = query
+        if query and get_query_expander and search_mode != 'exact':
+            try:
+                expander = get_query_expander()
+                expanded_query = expander.expand_query(query)
+                if expanded_query != query:
+                    logger.info(f"Query expanded: '{query}' → '{expanded_query[:100]}...'")
+                    query = expanded_query
+            except Exception as e:
+                logger.warning(f"Query expansion failed: {e}, using original query")
+
+        logger.info(f"Searching for query: '{original_query}' (expanded: {len(query.split()) if query else 0} terms) with mode: {search_mode}, filters - project_id: {project_id}, category: {category}, source: {source}, tag: {tag}, limit: {limit}, offset: {offset}, sort: {sort_by} {sort_direction}")
+
         try:
+            # 캐시에서 먼저 확인 (offset=0인 경우만)
+            if offset == 0:  # 첫 페이지만 캐싱
+                cached_results = await self.cache_manager.get_cached_search(
+                    query=query,
+                    project_id=project_id,
+                    category=category,
+                    limit=limit
+                )
+                if cached_results:
+                    logger.info(f"[Cache HIT] Returning cached results for query: '{query}'")
+                    return cached_results
             # SQL 필터 조건 구성
             filters = {}
             if project_id:
@@ -148,19 +178,33 @@ class SearchService:
                 return SearchResponse(results=search_results, total=total_count)
             
             # 검색 모드에 따라 다른 검색 수행
+            result = None
             if search_mode == "exact":
                 logger.info("Using exact text search")
-                return await self._exact_search(query, filters, limit)
+                result = await self._exact_search(query, filters, limit)
             elif search_mode == "semantic":
                 logger.info("Using semantic vector search only")
-                return await self._semantic_search(query, filters, limit, recency_weight)
+                result = await self._semantic_search(query, filters, limit, recency_weight)
             elif search_mode == "fuzzy":
                 logger.info("Using fuzzy text search")
-                return await self._fuzzy_search(query, filters, limit)
+                result = await self._fuzzy_search(query, filters, limit)
             else:
                 # hybrid (기본값)
                 logger.info("Using hybrid search with sqlite-vec")
-                return await self._vector_search(query, filters, limit, recency_weight)
+                result = await self._vector_search(query, filters, limit, recency_weight)
+
+            # 결과를 캐시에 저장 (offset=0인 경우만)
+            if offset == 0 and result and query.strip():  # 빈 쿼리는 캐싱하지 않음
+                await self.cache_manager.cache_search_results(
+                    query=query,
+                    results=result,
+                    project_id=project_id,
+                    category=category,
+                    limit=limit
+                )
+                logger.info(f"[Cache] Cached search results for query: '{query[:50]}...'")
+
+            return result
             
         except Exception as e:
             logger.error(f"Search failed: {e}")
@@ -231,8 +275,15 @@ class SearchService:
             SearchResponse: 검색 결과
         """
         try:
-            # 쿼리를 embedding으로 변환
-            query_embedding_list = self.embedding_service.embed(query)
+            # 캐시에서 임베딩 확인 또는 생성
+            query_embedding_list = await self.cache_manager.get_cached_embedding(query)
+            if query_embedding_list is None:
+                # 캐시에 없으면 새로 생성
+                query_embedding_list = self.embedding_service.embed(query)
+                # 캐시에 저장
+                await self.cache_manager.cache_embedding(query, query_embedding_list)
+                logger.info(f"[Cache MISS] Generated new embedding for query: '{query[:50]}...'")
+
             query_embedding = self.embedding_service.to_bytes(query_embedding_list)
             
             # Vector 검색 수행
@@ -526,8 +577,15 @@ class SearchService:
             SearchResponse: 검색 결과
         """
         try:
-            # 쿼리를 embedding으로 변환
-            query_embedding_list = self.embedding_service.embed(query)
+            # 캐시에서 임베딩 확인 또는 생성
+            query_embedding_list = await self.cache_manager.get_cached_embedding(query)
+            if query_embedding_list is None:
+                # 캐시에 없으면 새로 생성
+                query_embedding_list = self.embedding_service.embed(query)
+                # 캐시에 저장
+                await self.cache_manager.cache_embedding(query, query_embedding_list)
+                logger.info(f"[Cache MISS] Generated new embedding for query: '{query[:50]}...'")
+
             query_embedding = self.embedding_service.to_bytes(query_embedding_list)
             
             # Vector 검색 수행

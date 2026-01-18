@@ -1,0 +1,217 @@
+{
+  "토큰": {
+    "expected": "mem-mesh-optimization",
+    "accuracy": 0.0,
+    "correct_count": 0,
+    "total": 5,
+    "top_results": [
+      {
+        "content": "현재 active 노드의 마지막 failover 시간을 조회하도록 수정하겠습니다:",
+        "project": "kiro-0c52350b",
+        "score": 0.16761707067489623,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "이제 make help 안정성 가이드에 따라 awk 구문에서 `$` 이스케이프 문제를 수정하겠습니다:",
+        "project": "kiro-12a478e0",
+        "score": 0.13793520927429198,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "이제 main.py에서 설정 로깅도 업데이트하겠습니다:",
+        "project": "kiro-0b1128d5",
+        "score": 0.11610764265060425,
+        "category": "task",
+        "is_correct": false
+      },
+      {
+        "content": "이제 `_process_ops_command` 메서드를 수정하여 사용자 정보를 수집하고 전달하도록 하겠습니다:",
+        "project": "kiro-0b1128d5",
+        "score": 0.08502178192138672,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "cloud-init 파일들도 절대 경로를 사용하도록 수정하겠습니다:",
+        "project": "kiro-56506455",
+        "score": 0.07332830429077149,
+        "category": "bug",
+        "is_correct": false
+      }
+    ]
+  },
+  "토큰 최적화": {
+    "expected": "mem-mesh-optimization",
+    "accuracy": 0.0,
+    "correct_count": 0,
+    "total": 5,
+    "top_results": [
+      {
+        "content": "현재 active 노드의 마지막 failover 시간을 조회하도록 수정하겠습니다:",
+        "project": "kiro-0c52350b",
+        "score": 0.129803466796875,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "이제 make help 안정성 가이드에 따라 awk 구문에서 `$` 이스케이프 문제를 수정하겠습니다:",
+        "project": "kiro-12a478e0",
+        "score": 0.12531231641769408,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "이제 main.py에서 설정 로깅도 업데이트하겠습니다:",
+        "project": "kiro-0b1128d5",
+        "score": 0.07405209541320801,
+        "category": "task",
+        "is_correct": false
+      },
+      {
+        "content": "이제 `_process_ops_command` 메서드를 수정하여 사용자 정보를 수집하고 전달하도록 하겠습니다:",
+        "project": "kiro-0b1128d5",
+        "score": 0.051696944236755374,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "cloud-init 파일들도 절대 경로를 사용하도록 수정하겠습니다:",
+        "project": "kiro-56506455",
+        "score": 0.05126135349273682,
+        "category": "bug",
+        "is_correct": false
+      }
+    ]
+  },
+  "검색 품질": {
+    "expected": "mem-mesh-search-quality",
+    "accuracy": 0.0,
+    "correct_count": 0,
+    "total": 5,
+    "top_results": [
+      {
+        "content": "현재 active 노드의 마지막 failover 시간을 조회하도록 수정하겠습니다:",
+        "project": "kiro-0c52350b",
+        "score": 0.11242501735687256,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "이제 make help 안정성 가이드에 따라 awk 구문에서 `$` 이스케이프 문제를 수정하겠습니다:",
+        "project": "kiro-12a478e0",
+        "score": 0.11016182899475098,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "이제 main.py에서 설정 로깅도 업데이트하겠습니다:",
+        "project": "kiro-0b1128d5",
+        "score": 0.06652647256851196,
+        "category": "task",
+        "is_correct": false
+      },
+      {
+        "content": "cloud-init 파일들도 절대 경로를 사용하도록 수정하겠습니다:",
+        "project": "kiro-56506455",
+        "score": 0.06478642225265503,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "이제 `_process_ops_command` 메서드를 수정하여 사용자 정보를 수집하고 전달하도록 하겠습니다:",
+        "project": "kiro-0b1128d5",
+        "score": 0.05,
+        "category": "bug",
+        "is_correct": false
+      }
+    ]
+  },
+  "캐싱": {
+    "expected": "mem-mesh-optimization",
+    "accuracy": 0.0,
+    "correct_count": 0,
+    "total": 5,
+    "top_results": [
+      {
+        "content": "현재 active 노드의 마지막 failover 시간을 조회하도록 수정하겠습니다:",
+        "project": "kiro-0c52350b",
+        "score": 0.187877881526947,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "이제 make help 안정성 가이드에 따라 awk 구문에서 `$` 이스케이프 문제를 수정하겠습니다:",
+        "project": "kiro-12a478e0",
+        "score": 0.14537374973297118,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "이제 main.py에서 설정 로깅도 업데이트하겠습니다:",
+        "project": "kiro-0b1128d5",
+        "score": 0.14452791213989258,
+        "category": "task",
+        "is_correct": false
+      },
+      {
+        "content": "이제 `_process_ops_command` 메서드를 수정하여 사용자 정보를 수집하고 전달하도록 하겠습니다:",
+        "project": "kiro-0b1128d5",
+        "score": 0.10432319641113282,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "cloud-init 파일들도 절대 경로를 사용하도록 수정하겠습니다:",
+        "project": "kiro-56506455",
+        "score": 0.09603153467178345,
+        "category": "bug",
+        "is_correct": false
+      }
+    ]
+  },
+  "임베딩": {
+    "expected": "mem-mesh-search-quality",
+    "accuracy": 0.0,
+    "correct_count": 0,
+    "total": 5,
+    "top_results": [
+      {
+        "content": "현재 active 노드의 마지막 failover 시간을 조회하도록 수정하겠습니다:",
+        "project": "kiro-0c52350b",
+        "score": 0.1647039532661438,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "이제 make help 안정성 가이드에 따라 awk 구문에서 `$` 이스케이프 문제를 수정하겠습니다:",
+        "project": "kiro-12a478e0",
+        "score": 0.1436792492866516,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "이제 main.py에서 설정 로깅도 업데이트하겠습니다:",
+        "project": "kiro-0b1128d5",
+        "score": 0.09677070379257202,
+        "category": "task",
+        "is_correct": false
+      },
+      {
+        "content": "cloud-init 파일들도 절대 경로를 사용하도록 수정하겠습니다:",
+        "project": "kiro-56506455",
+        "score": 0.08766840696334839,
+        "category": "bug",
+        "is_correct": false
+      },
+      {
+        "content": "[builder  7/21] -> 이게 프로그레스바인가? 그럼 색을 강조할 수 없어? 안보여",
+        "project": "kiro-cf04d7bd",
+        "score": 0.06395268440246582,
+        "category": "task",
+        "is_correct": false
+      }
+    ]
+  }
+}

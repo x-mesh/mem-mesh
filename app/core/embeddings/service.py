@@ -83,16 +83,23 @@ MODEL_ALIASES = {
 class EmbeddingService:
     """임베딩 생성 서비스"""
     
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2", preload: bool = True):
+    def __init__(self, model_name: Optional[str] = None, preload: bool = True):
         """
         임베딩 서비스 초기화
-        
+
         Args:
-            model_name: 사용할 sentence-transformers 모델 이름
+            model_name: 사용할 sentence-transformers 모델 이름 (None이면 설정에서 읽음)
             preload: True면 초기화 시 모델을 미리 로드 (기본값: True)
         """
         self.model: Optional[SentenceTransformer] = None
-        
+
+        # 설정에서 모델 이름 가져오기
+        if model_name is None:
+            from ..config import Settings
+            settings = Settings()
+            model_name = settings.embedding_model
+            logger.info(f"Loading model from settings: {model_name}")
+
         # 모델 별칭 처리 (짧은 이름 -> 전체 이름)
         self.model_name = MODEL_ALIASES.get(model_name, model_name)
         if self.model_name != model_name:

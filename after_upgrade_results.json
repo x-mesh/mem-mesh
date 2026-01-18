@@ -1,0 +1,22 @@
+{
+  "토큰": {
+    "accuracy": 0.0,
+    "correct_count": 0
+  },
+  "토큰 최적화": {
+    "accuracy": 60.0,
+    "correct_count": 3
+  },
+  "검색 품질": {
+    "accuracy": 60.0,
+    "correct_count": 3
+  },
+  "캐싱": {
+    "accuracy": 0.0,
+    "correct_count": 0
+  },
+  "임베딩": {
+    "accuracy": 0.0,
+    "correct_count": 0
+  }
+}

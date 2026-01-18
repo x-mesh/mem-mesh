@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python test_cache_performance.py:*)",
+      "Bash(python:*)",
+      "Bash(source .env)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

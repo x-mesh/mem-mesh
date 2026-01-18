@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     
     # Embedding configuration
     embedding_model: str = Field(
-        default="all-MiniLM-L6-v2",
+        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         description="Sentence-transformers model name"
     )
     embedding_dim: int = Field(

@@ -42,11 +42,11 @@ class MemoryService:
         logger.info("MemoryService initialized")
     
     async def create(
-        self, 
-        content: str, 
+        self,
+        content: str,
         project_id: Optional[str] = None,
-        category: str = "task", 
-        source: str = "unknown", 
+        category: str = "task",
+        source: str = "unknown",
         tags: Optional[List[str]] = None
     ) -> AddResponse:
         """
@@ -134,7 +134,87 @@ class MemoryService:
         except Exception as e:
             logger.error(f"Failed to save memory: {e}")
             raise DatabaseError(f"Failed to save memory: {e}")
-    
+
+    async def create_with_embedding(
+        self,
+        content: str,
+        embedding: List[float],
+        project_id: Optional[str] = None,
+        category: str = "task",
+        source: str = "unknown",
+        tags: Optional[List[str]] = None
+    ) -> AddResponse:
+        """
+        미리 계산된 임베딩과 함께 새 메모리 생성 (배치 작업용)
+
+        Args:
+            content: 메모리 내용
+            embedding: 미리 계산된 임베딩 벡터
+            project_id: 프로젝트 식별자
+            category: 메모리 카테고리
+            source: 메모리 생성 소스
+            tags: 태그 목록
+
+        Returns:
+            AddResponse: 생성 결과
+
+        Raises:
+            ValueError: 입력 검증 실패
+            DatabaseError: 데이터베이스 작업 실패
+        """
+        logger.info(f"Creating memory with pre-computed embedding, content length: {len(content)}")
+
+        # 1. content_hash 계산
+        content_hash = Memory.compute_hash(content)
+
+        # 2. 중복 체크
+        existing_memory = await self._find_duplicate(content_hash, project_id)
+        if existing_memory:
+            logger.info(f"Duplicate memory found: {existing_memory['id']}")
+            return AddResponse(
+                id=existing_memory['id'],
+                status="duplicate",
+                created_at=existing_memory['created_at']
+            )
+
+        # 3. 임베딩 바이트 변환 (미리 계산된 것 사용)
+        embedding_bytes = self.embedding_service.to_bytes(embedding)
+
+        # 4. Memory 객체 생성
+        memory = Memory(
+            content=content,
+            content_hash=content_hash,
+            project_id=project_id,
+            category=category,
+            source=source,
+            tags=json.dumps(tags) if tags else None,
+            embedding=embedding_bytes
+        )
+
+        try:
+            # 5. 데이터베이스에 저장
+            await self.db.add_memory(memory.model_dump())
+            logger.info(f"Memory saved to database: {memory.id}")
+
+            # 6. 벡터 인덱스에 저장
+            await self._save_to_vector_index(memory.id, embedding_bytes)
+            logger.info(f"Memory saved to vector index: {memory.id}")
+
+            return AddResponse(
+                id=memory.id,
+                status="saved",
+                created_at=memory.created_at
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to save memory with embedding: {e}")
+            raise DatabaseError(f"Failed to save memory: {e}")
+
+    # Alias for backward compatibility
+    async def add_with_embedding(self, *args, **kwargs) -> AddResponse:
+        """Alias for create_with_embedding for backward compatibility"""
+        return await self.create_with_embedding(*args, **kwargs)
+
     async def get(self, memory_id: str) -> Optional[Memory]:
         """
         ID로 메모리 조회
