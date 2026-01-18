@@ -1095,10 +1095,16 @@ style.textContent = `
   
   .memory-detail-page .memory-content {
     display: grid;
-    grid-template-columns: 1fr 400px;
     gap: 2rem;
   }
-  
+
+  /* 데스크톱: 2컬럼 레이아웃 */
+  @media (min-width: 1025px) {
+    .memory-detail-page .memory-content {
+      grid-template-columns: 1fr 400px;
+    }
+  }
+
   .memory-main {
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
@@ -1306,26 +1312,34 @@ style.textContent = `
   }
   
   .memory-sidebar {
-    position: sticky;
-    top: 2rem;    
-    height: calc(100vh - 4rem);
     display: flex;
     flex-direction: column;
   }
-  
-  .context-section {
-    /* 기존 margin-bottom: 2rem; 제거 또는 0으로 변경 */
-    margin-bottom: 0;
 
+  /* 데스크톱: sticky 사이드바 */
+  @media (min-width: 1025px) {
+    .memory-sidebar {
+      position: sticky;
+      top: 2rem;
+      height: calc(100vh - 4rem);
+    }
+  }
+
+  .context-section {
+    margin-bottom: 0;
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
     border-radius: var(--border-radius);
     overflow: hidden;
-
-    /* 수정 2: 섹션이 사이드바 높이를 가득 채우도록 설정 */
-    height: 100%;
     display: flex;
     flex-direction: column;
+  }
+
+  /* 데스크톱: 사이드바 높이 가득 채우기 */
+  @media (min-width: 1025px) {
+    .context-section {
+      height: 100%;
+    }
   }
   
   .context-header {
@@ -1620,24 +1634,30 @@ style.textContent = `
   
   /* Responsive Design */
   @media (max-width: 1024px) {
-    .memory-content {
+    .memory-detail-page .memory-content {
       grid-template-columns: 1fr;
       gap: 1rem;
     }
-    
-    .memory-sidebar {
+
+    .memory-detail-page .memory-sidebar {
       position: static;
       height: auto;
     }
-    
-    .context-section {
-      height: 400px;
+
+    .memory-detail-page .context-section {
+      max-height: 250px;
+      height: auto;
     }
   }
-  
+
   @media (max-width: 768px) {
     .memory-detail-page {
       padding: var(--space-4) 0; /* 모바일에서 상하 패딩 줄임 */
+    }
+
+    .memory-detail-page .context-section {
+      max-height: 200px; /* 모바일에서 더 작게 */
+      height: auto;
     }
     
     .header-actions {
