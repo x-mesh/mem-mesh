@@ -191,8 +191,14 @@ class MemoriesPage extends HTMLElement {
         this.memories = this.memories.slice(0, this.pageSize);
       }
       
-      // UI 업데이트
-      this.updateMemoriesGrid();
+      // 전체 카운트 증가
+      this.totalMemories++;
+      
+      // UI 전체 업데이트 (메모리 목록 + 요약 + 페이지네이션)
+      console.log('MemoriesPage: Updating UI with new memory');
+      this.renderMemories();
+      this.renderPagination();
+      this.updateSummary();
       
       // 토스트 알림
       this.showToast(`새 메모리가 생성되었습니다: ${memory.category}`, 'success');
