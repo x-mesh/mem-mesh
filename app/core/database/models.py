@@ -114,3 +114,4 @@ class Alert(BaseModel):
     threshold_value: float
     status: str = "active"  # 'active', 'resolved'
     resolved_at: Optional[str] = None
+    resolved_by: Optional[str] = None

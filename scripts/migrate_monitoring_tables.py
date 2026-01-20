@@ -117,7 +117,8 @@ async def create_monitoring_tables():
                 metric_value REAL NOT NULL,
                 threshold_value REAL NOT NULL,
                 status TEXT NOT NULL DEFAULT 'active',
-                resolved_at DATETIME
+                resolved_at DATETIME,
+                resolved_by TEXT
             )
         """)
         
