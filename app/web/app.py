@@ -6,6 +6,7 @@ FastAPI 애플리케이션 생성 및 설정.
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from app.core.version import __VERSION__
 from .lifespan import lifespan
@@ -15,6 +16,10 @@ from .dashboard import pages as dashboard_pages
 from .mcp import sse as mcp_sse
 from .websocket import router as websocket_router
 from .monitoring import router as monitoring_router
+
+
+# Jinja2 템플릿 설정
+templates = Jinja2Templates(directory="templates")
 
 
 def create_app() -> FastAPI:
