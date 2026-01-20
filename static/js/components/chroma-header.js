@@ -69,6 +69,13 @@ class ChromaHeader extends HTMLElement {
                 </svg>
                 <span>Analytics</span>
               </a>
+              <a href="/monitoring" class="nav-link" data-route="/monitoring" data-nav="monitoring">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                  <path d="M3 3V21H21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M7 16L12 11L16 15L21 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>Monitoring</span>
+              </a>
               <a href="/settings" class="nav-link" data-route="/settings" data-nav="settings">
                 <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
                   <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
