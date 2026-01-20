@@ -45,6 +45,7 @@ import { AnalyticsPage } from './pages/analytics.js';
 import { SettingsPage } from './pages/settings-page.js';
 import { WorkPage } from './pages/work.js';
 import { MonitoringPage } from './pages/monitoring.js';
+import { ProjectAnalyticsPage } from './pages/project-analytics.js';
 
 /**
  * Main Application Class
@@ -119,6 +120,7 @@ class App {
     this.pages.set('settings', SettingsPage);
     this.pages.set('work', WorkPage);
     this.pages.set('monitoring', MonitoringPage);
+    this.pages.set('project-analytics', ProjectAnalyticsPage);
   }
   
   /**
@@ -139,6 +141,7 @@ class App {
     this.router.register('/analytics', () => this.renderPage('analytics'));
     this.router.register('/settings', () => this.renderPage('settings'));
     this.router.register('/monitoring', () => this.renderPage('monitoring'));
+    this.router.register('/project-analytics', () => this.renderPage('project-analytics'));
   }
   
   /**
@@ -290,6 +293,9 @@ class App {
           break;
         case 'monitoring':
           pageElement = document.createElement('monitoring-page');
+          break;
+        case 'project-analytics':
+          pageElement = document.createElement('project-analytics-page');
           break;
         default:
           throw new Error(`Unknown page: ${pageName}`);

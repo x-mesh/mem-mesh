@@ -79,6 +79,7 @@ export class MonitoringPage extends HTMLElement {
         <!-- Tab Navigation -->
         <nav class="tab-nav">
           <button class="tab-btn active" data-tab="overview">개요</button>
+          <button class="tab-btn" data-tab="quality">검색 품질</button>
           <button class="tab-btn" data-tab="queries">쿼리 분석</button>
           <button class="tab-btn" data-tab="embedding">임베딩 성능</button>
         </nav>
@@ -103,6 +104,83 @@ export class MonitoringPage extends HTMLElement {
               <div class="chart-container">
                 <h3>결과없음 비율 추이</h3>
                 <canvas id="no-results-chart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Search Quality Tab (NEW) -->
+          <div id="tab-quality" class="tab-panel hidden">
+            <div class="quality-grid">
+              <!-- Quality Summary Cards -->
+              <div class="quality-summary">
+                <div class="summary-card small">
+                  <span class="card-value" id="quality-total-searches">-</span>
+                  <span class="card-label">총 검색</span>
+                </div>
+                <div class="summary-card small">
+                  <span class="card-value" id="quality-avg-results">-</span>
+                  <span class="card-label">평균 결과 수</span>
+                </div>
+                <div class="summary-card small">
+                  <span class="card-value" id="quality-avg-score">-</span>
+                  <span class="card-label">평균 점수</span>
+                </div>
+                <div class="summary-card small">
+                  <span class="card-value" id="quality-zero-rate">-</span>
+                  <span class="card-label">Zero-Result 비율</span>
+                </div>
+                <div class="summary-card small">
+                  <span class="card-value" id="quality-low-score-rate">-</span>
+                  <span class="card-label">낮은 점수 비율</span>
+                </div>
+              </div>
+
+              <!-- Source Performance -->
+              <div class="chart-container wide">
+                <h3>📊 검색 소스별 성능</h3>
+                <div id="source-stats-table"></div>
+              </div>
+
+              <!-- Hourly Trend -->
+              <div class="chart-container wide">
+                <h3>📈 시간대별 검색 트렌드</h3>
+                <canvas id="quality-trend-chart"></canvas>
+              </div>
+
+              <!-- Project Stats -->
+              <div class="chart-container wide">
+                <h3>🗂️ 프로젝트별 검색 통계</h3>
+                <div id="project-stats-table"></div>
+              </div>
+
+              <!-- Cache Performance -->
+              <div class="chart-container">
+                <h3>💾 캐시 성능</h3>
+                <div id="cache-stats">
+                  <div class="cache-metric">
+                    <span class="metric-label">총 작업</span>
+                    <span class="metric-value" id="cache-total-ops">-</span>
+                  </div>
+                  <div class="cache-metric">
+                    <span class="metric-label">캐시 히트</span>
+                    <span class="metric-value" id="cache-hits">-</span>
+                  </div>
+                  <div class="cache-metric">
+                    <span class="metric-label">히트율</span>
+                    <span class="metric-value" id="cache-hit-rate-detail">-</span>
+                  </div>
+                  <div class="cache-metric">
+                    <span class="metric-label">평균 시간</span>
+                    <span class="metric-value" id="cache-avg-time">-</span>
+                  </div>
+                </div>
+                <canvas id="cache-performance-chart"></canvas>
+              </div>
+
+              <!-- Popular Queries -->
+              <div class="chart-container">
+                <h3>🔥 인기 검색어 (최근 24시간)</h3>
+                <div id="quality-popular-queries" class="queries-list"></div>
               </div>
             </div>
           </div>
@@ -239,11 +317,14 @@ export class MonitoringPage extends HTMLElement {
       const range = this.getDateRange();
       
       // Load all data in parallel
-      const [searchMetrics, queryAnalysis, embeddingMetrics, recentSearches] = await Promise.all([
+      const [searchMetrics, queryAnalysis, embeddingMetrics, recentSearches, qualityStats, projectStats, cacheStats] = await Promise.all([
         this.fetchSearchMetrics(range),
         this.fetchQueryAnalysis(),
         this.fetchEmbeddingMetrics(range),
-        this.fetchRecentSearches()
+        this.fetchRecentSearches(),
+        this.fetchSearchQualityStats(),
+        this.fetchProjectSearchStats(),
+        this.fetchCachePerformanceStats()
       ]);
 
       this.updateSummaryCards(searchMetrics);
@@ -251,6 +332,7 @@ export class MonitoringPage extends HTMLElement {
       this.updateQueryAnalysis(queryAnalysis);
       this.updateEmbeddingStats(embeddingMetrics);
       this.updateRecentSearches(recentSearches);
+      this.updateSearchQualityTab(qualityStats, projectStats, cacheStats);
 
     } catch (error) {
       console.error('Failed to load monitoring data:', error);
@@ -289,6 +371,33 @@ export class MonitoringPage extends HTMLElement {
   async fetchRecentSearches() {
     const response = await fetch('/api/monitoring/search/recent?limit=20');
     if (!response.ok) throw new Error('Failed to fetch recent searches');
+    return response.json();
+  }
+
+  async fetchSearchQualityStats() {
+    const hours = this.dateRange === 'last_1h' ? 1 : 
+                  this.dateRange === 'last_24h' ? 24 : 
+                  this.dateRange === 'last_7d' ? 168 : 24;
+    const response = await fetch(`/api/monitoring/search/quality-stats?hours=${hours}`);
+    if (!response.ok) throw new Error('Failed to fetch search quality stats');
+    return response.json();
+  }
+
+  async fetchProjectSearchStats() {
+    const hours = this.dateRange === 'last_1h' ? 1 : 
+                  this.dateRange === 'last_24h' ? 24 : 
+                  this.dateRange === 'last_7d' ? 168 : 24;
+    const response = await fetch(`/api/monitoring/search/project-stats?hours=${hours}`);
+    if (!response.ok) throw new Error('Failed to fetch project search stats');
+    return response.json();
+  }
+
+  async fetchCachePerformanceStats() {
+    const hours = this.dateRange === 'last_1h' ? 1 : 
+                  this.dateRange === 'last_24h' ? 24 : 
+                  this.dateRange === 'last_7d' ? 168 : 24;
+    const response = await fetch(`/api/monitoring/cache/performance-stats?hours=${hours}`);
+    if (!response.ok) throw new Error('Failed to fetch cache performance stats');
     return response.json();
   }
 
@@ -581,6 +690,193 @@ export class MonitoringPage extends HTMLElement {
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
       this.refreshInterval = null;
+    }
+  }
+
+  updateSearchQualityTab(qualityStats, projectStats, cacheStats) {
+    // Update quality summary cards
+    const summary = qualityStats.summary;
+    this.querySelector('#quality-total-searches').textContent = summary.total_searches.toLocaleString();
+    this.querySelector('#quality-avg-results').textContent = summary.avg_results_per_search.toFixed(2);
+    this.querySelector('#quality-avg-score').textContent = (summary.avg_similarity_score * 100).toFixed(1) + '%';
+    this.querySelector('#quality-zero-rate').textContent = summary.zero_result_rate.toFixed(1) + '%';
+    this.querySelector('#quality-low-score-rate').textContent = summary.low_score_rate.toFixed(1) + '%';
+
+    // Update source stats table
+    const sourceTable = this.querySelector('#source-stats-table');
+    if (qualityStats.by_source.length > 0) {
+      sourceTable.innerHTML = `
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>소스</th>
+              <th>검색 수</th>
+              <th>평균 결과</th>
+              <th>평균 응답시간</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${qualityStats.by_source.map(s => `
+              <tr>
+                <td><span class="badge">${s.source}</span></td>
+                <td>${s.count.toLocaleString()}</td>
+                <td>${s.avg_results.toFixed(2)}</td>
+                <td>${s.avg_response_time_ms.toFixed(0)}ms</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    } else {
+      sourceTable.innerHTML = '<p class="empty">데이터 없음</p>';
+    }
+
+    // Update quality trend chart
+    if (qualityStats.trend.length > 0) {
+      const trendLabels = qualityStats.trend.map(t => this.formatTime(t.hour)).reverse();
+      this.createOrUpdateChart('quality-trend-chart', {
+        type: 'line',
+        data: {
+          labels: trendLabels,
+          datasets: [
+            {
+              label: '검색 수',
+              data: qualityStats.trend.map(t => t.search_count).reverse(),
+              borderColor: '#3b82f6',
+              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              yAxisID: 'y',
+              tension: 0.4
+            },
+            {
+              label: '평균 점수',
+              data: qualityStats.trend.map(t => (t.avg_score * 100).toFixed(1)).reverse(),
+              borderColor: '#10b981',
+              backgroundColor: 'rgba(16, 185, 129, 0.1)',
+              yAxisID: 'y1',
+              tension: 0.4
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: { legend: { position: 'top' } },
+          scales: {
+            y: {
+              type: 'linear',
+              display: true,
+              position: 'left',
+              title: { display: true, text: '검색 수' }
+            },
+            y1: {
+              type: 'linear',
+              display: true,
+              position: 'right',
+              title: { display: true, text: '평균 점수 (%)' },
+              grid: { drawOnChartArea: false }
+            }
+          }
+        }
+      });
+    }
+
+    // Update project stats table
+    const projectTable = this.querySelector('#project-stats-table');
+    if (projectStats.length > 0) {
+      projectTable.innerHTML = `
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>프로젝트</th>
+              <th>검색 수</th>
+              <th>평균 결과</th>
+              <th>평균 점수</th>
+              <th>평균 응답시간</th>
+              <th>Zero-Result 비율</th>
+              <th>액션</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${projectStats.map(p => `
+              <tr>
+                <td><strong>${this.escapeHtml(p.project_id)}</strong></td>
+                <td>${p.search_count.toLocaleString()}</td>
+                <td>${p.avg_results.toFixed(2)}</td>
+                <td>${(p.avg_score * 100).toFixed(1)}%</td>
+                <td>${p.avg_response_time_ms.toFixed(0)}ms</td>
+                <td class="${p.zero_result_rate > 20 ? 'text-warning' : ''}">${p.zero_result_rate.toFixed(1)}%</td>
+                <td>
+                  <button class="btn-link view-project-btn" data-project="${this.escapeHtml(p.project_id)}">
+                    상세보기 →
+                  </button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+      
+      // Add click handlers for view buttons
+      this.querySelectorAll('.view-project-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const projectId = e.target.dataset.project;
+          window.location.hash = `#/project-analytics?project=${encodeURIComponent(projectId)}`;
+        });
+      });
+    } else {
+      projectTable.innerHTML = '<p class="empty">프로젝트별 데이터 없음</p>';
+    }
+
+    // Update cache stats
+    const cache = cacheStats.embedding_cache;
+    this.querySelector('#cache-total-ops').textContent = cache.total_operations.toLocaleString();
+    this.querySelector('#cache-hits').textContent = cache.cache_hits.toLocaleString();
+    this.querySelector('#cache-hit-rate-detail').textContent = cache.hit_rate.toFixed(1) + '%';
+    this.querySelector('#cache-avg-time').textContent = cache.avg_time_ms.toFixed(1) + 'ms';
+
+    // Cache performance chart
+    this.createOrUpdateChart('cache-performance-chart', {
+      type: 'doughnut',
+      data: {
+        labels: ['캐시 히트', '캐시 미스'],
+        datasets: [{
+          data: [cache.cache_hits, cache.cache_misses],
+          backgroundColor: ['#10b981', '#ef4444']
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                const label = context.label || '';
+                const value = context.parsed || 0;
+                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                const percentage = ((value / total) * 100).toFixed(1);
+                return `${label}: ${value.toLocaleString()} (${percentage}%)`;
+              }
+            }
+          }
+        }
+      }
+    });
+
+    // Update popular queries
+    const popularQueriesEl = this.querySelector('#quality-popular-queries');
+    if (qualityStats.popular_queries.length > 0) {
+      popularQueriesEl.innerHTML = qualityStats.popular_queries.map((q, i) => `
+        <div class="query-item">
+          <span class="rank">${i + 1}</span>
+          <span class="query">${this.escapeHtml(q.query)}</span>
+          <span class="count">${q.count}회 (평균 ${q.avg_results.toFixed(1)}개 결과)</span>
+        </div>
+      `).join('');
+    } else {
+      popularQueriesEl.innerHTML = '<p class="empty">인기 검색어 데이터 없음 (쿼리 해싱 활성화됨)</p>';
     }
   }
 

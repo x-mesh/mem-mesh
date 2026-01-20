@@ -64,6 +64,57 @@ class Settings(BaseSettings):
         description="Minimum similarity score for search results"
     )
     
+    # UnifiedSearchService feature flags
+    use_unified_search: bool = Field(
+        default=True,
+        description="Use UnifiedSearchService instead of legacy SearchService"
+    )
+    enable_quality_features: bool = Field(
+        default=True,
+        description="Enable quality features (intent analysis, scoring, noise filter)"
+    )
+    enable_korean_optimization: bool = Field(
+        default=True,
+        description="Enable Korean language optimization (translation dict, query expansion)"
+    )
+    enable_noise_filter: bool = Field(
+        default=True,
+        description="Enable noise filtering for search queries"
+    )
+    enable_search_cache: bool = Field(
+        default=True,
+        description="Enable caching for embeddings and search results"
+    )
+    enable_score_normalization: bool = Field(
+        default=True,
+        description="Enable score normalization for better score distribution"
+    )
+    score_normalization_method: str = Field(
+        default="sigmoid",
+        description="Score normalization method (sigmoid/minmax/zscore/percentile)"
+    )
+    enable_search_warmup: bool = Field(
+        default=True,
+        description="Enable search warmup on server startup"
+    )
+    
+    # Cache TTL settings (in seconds)
+    cache_embedding_ttl: int = Field(
+        default=86400,
+        ge=60,
+        description="Embedding cache TTL in seconds (default: 24 hours)"
+    )
+    cache_search_ttl: int = Field(
+        default=3600,
+        ge=60,
+        description="Search results cache TTL in seconds (default: 1 hour)"
+    )
+    cache_context_ttl: int = Field(
+        default=1800,
+        ge=60,
+        description="Context cache TTL in seconds (default: 30 minutes)"
+    )
+    
     # Logging configuration
     log_level: str = Field(
         default="INFO",

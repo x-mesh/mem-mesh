@@ -23,6 +23,7 @@ from app.core.services.embedding_manager import EmbeddingManagerService
 from app.core.services.project import ProjectService
 from app.core.services.session import SessionService
 from app.core.services.pin import PinService
+from app.core.services.metrics_collector import MetricsCollector
 from app.core.storage.direct import DirectStorageBackend
 from app.mcp_common.tools import MCPToolHandlers
 from app.core.utils.logger import get_logger
@@ -42,13 +43,14 @@ embedding_manager: Optional[EmbeddingManagerService] = None
 project_service: Optional[ProjectService] = None
 session_service: Optional[SessionService] = None
 pin_service: Optional[PinService] = None
+metrics_collector: Optional[MetricsCollector] = None
 mcp_storage: Optional[DirectStorageBackend] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """애플리케이션 생명주기 관리"""
-    global db, embedding_service, memory_service, search_service, context_service, stats_service, embedding_manager, project_service, session_service, pin_service, mcp_storage, logger
+    global db, embedding_service, memory_service, search_service, context_service, stats_service, embedding_manager, project_service, session_service, pin_service, metrics_collector, mcp_storage, logger
     
     # .env 파일 로드 (최우선)
     load_dotenv()
@@ -110,8 +112,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         
         # 비즈니스 서비스들 초기화
         logger.info("Initializing business services")
+        
+        # MetricsCollector 초기화 (SearchService보다 먼저)
+        metrics_collector = MetricsCollector(database=db)
+        await metrics_collector.start()  # 백그라운드 플러시 태스크 시작
+        
         memory_service = MemoryService(db, embedding_service)
-        search_service = SearchService(db, embedding_service)
+        search_service = SearchService(db, embedding_service, metrics_collector)
         context_service = ContextService(db, embedding_service)
         stats_service = StatsService(db)
         embedding_manager = EmbeddingManagerService(db, embedding_service)
@@ -144,6 +151,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     finally:
         # 정리 작업 (순서 중요!)
         logger.info("Shutting down mem-mesh application...")
+        
+        # MetricsCollector 정리 (버퍼 플러시 및 백그라운드 태스크 중지)
+        if metrics_collector:
+            try:
+                await metrics_collector.stop()
+                logger.debug("MetricsCollector stopped and flushed")
+            except Exception as e:
+                logger.warning("Error stopping MetricsCollector", error=str(e))
         
         # WebSocket 연결 정리
         try:
@@ -179,6 +194,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         project_service = None
         session_service = None
         pin_service = None
+        metrics_collector = None
         mcp_storage = None
         
         logger.info("Application shutdown complete")
@@ -197,5 +213,6 @@ def get_services():
         'project_service': project_service,
         'session_service': session_service,
         'pin_service': pin_service,
+        'metrics_collector': metrics_collector,
         'mcp_storage': mcp_storage
     }

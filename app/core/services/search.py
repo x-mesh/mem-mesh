@@ -827,7 +827,10 @@ class SearchService:
             search_time_ms: 검색 시간 (ms)
         """
         if self.metrics_collector is None:
+            logger.warning("MetricsCollector is None - metrics will not be collected")
             return
+        
+        logger.info(f"[METRICS] Collecting search metric for query: '{query[:50]}...' (results: {len(result.results)})")
         
         try:
             # 총 응답 시간 계산
@@ -854,6 +857,7 @@ class SearchService:
                 search_time_ms=search_time_ms,
                 source="search_service"
             )
+            logger.info(f"[METRICS] Successfully collected search metric (response_time: {response_time_ms}ms, results: {len(result.results)})")
         except Exception as e:
             # 메트릭 수집 실패는 검색 결과에 영향을 주지 않음
-            logger.warning(f"Failed to collect search metric: {e}")
+            logger.error(f"[METRICS] Failed to collect search metric: {e}", exc_info=True)

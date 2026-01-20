@@ -16,6 +16,38 @@ mem-mesh는 개발자들이 작업 중 생성되는 다양한 메모리(작업, 
 - **중복 감지**: content hash를 통한 자동 중복 감지
 - **이중 아키텍처**: Direct SQLite 접근과 API 모드 지원
 - **동시성 지원**: SQLite WAL 모드를 통한 안전한 동시 접근
+- **🆕 검색 품질 개선**: UnifiedSearchService를 통한 지능형 검색 (의도 분석, 노이즈 필터, 한국어 최적화)
+
+### 🔍 검색 품질 개선 (v2.1)
+
+mem-mesh는 이제 향상된 검색 품질을 제공하는 **UnifiedSearchService**를 지원합니다:
+
+**주요 개선사항:**
+- **의도 분석**: 쿼리의 의도를 자동으로 파악하여 검색 모드 선택
+- **노이즈 필터**: "ok", "yes", "no" 등 의미 없는 쿼리 자동 필터링
+- **한국어 최적화**: 한영 번역 사전과 Query Expander를 통한 한국어 검색 개선
+- **품질 스코어링**: 다층 스코어링 파이프라인으로 검색 결과 정확도 향상
+- **캐싱 지원**: 임베딩과 검색 결과 캐싱으로 성능 개선
+- **다양한 검색 모드**: smart/hybrid/exact/semantic/fuzzy 모드 지원
+
+**활성화 방법:**
+```bash
+# .env 파일에 추가
+MEM_MESH_USE_UNIFIED_SEARCH=true
+MEM_MESH_ENABLE_QUALITY_FEATURES=true
+MEM_MESH_ENABLE_KOREAN_OPTIMIZATION=true
+MEM_MESH_ENABLE_NOISE_FILTER=true
+MEM_MESH_ENABLE_SEARCH_CACHE=true
+```
+
+**Feature Flags:**
+- `USE_UNIFIED_SEARCH`: UnifiedSearchService 활성화 (기본값: false)
+- `ENABLE_QUALITY_FEATURES`: 품질 기능 활성화 (기본값: true)
+- `ENABLE_KOREAN_OPTIMIZATION`: 한국어 최적화 활성화 (기본값: true)
+- `ENABLE_NOISE_FILTER`: 노이즈 필터 활성화 (기본값: true)
+- `ENABLE_SEARCH_CACHE`: 캐싱 활성화 (기본값: true)
+
+자세한 내용은 [검색 품질 개선 가이드](docs/search-quality-improvements.md)와 [마이그레이션 가이드](docs/unified-search-migration-guide.md)를 참조하세요.
 
 ## 🚀 새로운 아키텍처 (v2.0)
 

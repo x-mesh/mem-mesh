@@ -118,7 +118,8 @@ class MCPToolHandlers:
         category: Optional[str] = None,
         limit: int = 5,
         recency_weight: float = 0.0,
-        response_format: str = "standard"
+        response_format: str = "standard",
+        enable_noise_filter: bool = True
     ) -> Dict[str, Any]:
         """Search memories using hybrid search (vector + metadata)
         
@@ -129,13 +130,14 @@ class MCPToolHandlers:
             limit: Maximum results (1-20)
             recency_weight: Recency weight (0.0-1.0)
             response_format: Response format (minimal/compact/standard/full)
+            enable_noise_filter: Enable noise filtering (default: True)
             
         Returns:
             dict: 검색 결과 (압축 가능)
         """
         logger.info_with_details(
             "Tool search called",
-            details={"query_text": query, "recency_weight": recency_weight, "format": response_format},
+            details={"query_text": query, "recency_weight": recency_weight, "format": response_format, "noise_filter": enable_noise_filter},
             project_id=project_id,
             category=category,
             limit=limit,
@@ -147,11 +149,23 @@ class MCPToolHandlers:
                 query=query,
                 project_id=project_id,
                 category=category,
-                limit=limit,
+                limit=limit * 2 if enable_noise_filter else limit,  # 필터링 고려하여 더 많이 가져옴
                 recency_weight=recency_weight
             )
             result = await self._storage.search_memories(params)
-            logger.info("Search completed", result_count=len(result.results))
+            
+            # 노이즈 필터 적용
+            if enable_noise_filter and result.results:
+                from ..core.services.noise_filter import SmartSearchFilter
+                filter_service = SmartSearchFilter()
+                context = {
+                    'project': project_id,
+                    'max_results': limit,
+                    'aggressive_filter': False
+                }
+                result = filter_service.apply(result, query, context)
+            
+            logger.info("Search completed", result_count=len(result.results), filtered=enable_noise_filter)
             
             # 응답 압축 (활성화된 경우)
             if self._enable_compression and self._optimizer and response_format != "full":

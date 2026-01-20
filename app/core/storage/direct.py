@@ -8,6 +8,8 @@ from ..database.base import Database
 from ..embeddings.service import EmbeddingService
 from ..services.memory import MemoryService
 from ..services.search import SearchService
+from ..services.unified_search import UnifiedSearchService
+from ..services.search_warmup import get_warmup_service
 from ..services.context import ContextService
 from ..services.stats import StatsService
 from ..schemas.requests import AddParams, SearchParams, UpdateParams, StatsParams
@@ -43,6 +45,7 @@ class DirectStorageBackend(StorageBackend):
         self.embedding_service: Optional[EmbeddingService] = None
         self.memory_service: Optional[MemoryService] = None
         self.search_service: Optional[SearchService] = None
+        self.unified_search_service: Optional[UnifiedSearchService] = None
         self.context_service: Optional[ContextService] = None
         self.stats_service: Optional[StatsService] = None
         
@@ -81,8 +84,39 @@ class DirectStorageBackend(StorageBackend):
             # 비즈니스 서비스들 초기화
             self.memory_service = MemoryService(self.db, self.embedding_service)
             self.search_service = SearchService(self.db, self.embedding_service)
+            
+            # UnifiedSearchService 초기화 (feature flag에 따라)
+            if settings.use_unified_search:
+                logger.info("Initializing UnifiedSearchService (unified search enabled)")
+                self.unified_search_service = UnifiedSearchService(
+                    db=self.db,
+                    embedding_service=self.embedding_service,
+                    enable_quality_features=settings.enable_quality_features,
+                    enable_korean_optimization=settings.enable_korean_optimization,
+                    enable_noise_filter=settings.enable_noise_filter,
+                    enable_score_normalization=settings.enable_score_normalization,
+                    score_normalization_method=settings.score_normalization_method,
+                    cache_embedding_ttl=settings.cache_embedding_ttl,
+                    cache_search_ttl=settings.cache_search_ttl,
+                    cache_context_ttl=settings.cache_context_ttl
+                )
+            else:
+                logger.info("Using legacy SearchService (unified search disabled)")
+                self.unified_search_service = None
+            
             self.context_service = ContextService(self.db, self.embedding_service)
             self.stats_service = StatsService(self.db)
+            
+            # 검색 워밍업 (활성화 시)
+            if settings.enable_search_warmup:
+                logger.info("Starting search warmup...")
+                warmup_service = get_warmup_service()
+                warmup_result = await warmup_service.warmup(
+                    embedding_service=self.embedding_service,
+                    db=self.db,
+                    cache_manager=self.search_service.cache_manager if self.search_service else None
+                )
+                logger.info(f"Search warmup completed: {warmup_result}")
             
             logger.info("DirectStorageBackend initialized successfully")
             
@@ -104,6 +138,7 @@ class DirectStorageBackend(StorageBackend):
             self.embedding_service = None
             self.memory_service = None
             self.search_service = None
+            self.unified_search_service = None
             self.context_service = None
             self.stats_service = None
             
@@ -163,11 +198,48 @@ class DirectStorageBackend(StorageBackend):
             ValueError: 잘못된 파라미터
             RuntimeError: 스토리지 오류
         """
+        settings = get_settings()
+        
+        # UnifiedSearchService 사용 여부 결정
+        if settings.use_unified_search and self.unified_search_service:
+            return await self._search_with_unified_service(params)
+        else:
+            return await self._search_with_legacy_service(params)
+    
+    async def _search_with_unified_service(self, params: SearchParams) -> SearchResponse:
+        """UnifiedSearchService를 사용한 검색"""
+        if not self.unified_search_service:
+            raise RuntimeError("UnifiedSearchService not initialized")
+        
+        try:
+            logger.debug(f"[UnifiedSearch] Searching with query: '{params.query}'")
+            
+            result = await self.unified_search_service.search(
+                query=params.query,
+                project_id=params.project_id,
+                category=params.category,
+                limit=params.limit,
+                recency_weight=params.recency_weight,
+                search_mode="smart"  # 기본값으로 smart 모드 사용
+            )
+            
+            logger.info(f"[UnifiedSearch] Search completed, found {len(result.results)} results")
+            return result
+            
+        except ValueError as e:
+            logger.warning(f"[UnifiedSearch] Invalid parameters: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"[UnifiedSearch] Search failed: {e}")
+            raise RuntimeError(f"Failed to search memories: {e}")
+    
+    async def _search_with_legacy_service(self, params: SearchParams) -> SearchResponse:
+        """Legacy SearchService를 사용한 검색"""
         if not self.search_service:
             raise RuntimeError("Storage backend not initialized")
         
         try:
-            logger.debug(f"Searching memories with query: '{params.query}'")
+            logger.debug(f"[LegacySearch] Searching memories with query: '{params.query}'")
             
             result = await self.search_service.search(
                 query=params.query,
@@ -177,14 +249,14 @@ class DirectStorageBackend(StorageBackend):
                 recency_weight=params.recency_weight
             )
             
-            logger.info(f"Search completed, found {len(result.results)} results")
+            logger.info(f"[LegacySearch] Search completed, found {len(result.results)} results")
             return result
             
         except ValueError as e:
-            logger.warning(f"Invalid parameters for search_memories: {e}")
+            logger.warning(f"[LegacySearch] Invalid parameters: {e}")
             raise
         except Exception as e:
-            logger.error(f"Failed to search memories: {e}")
+            logger.error(f"[LegacySearch] Search failed: {e}")
             raise RuntimeError(f"Failed to search memories: {e}")
     
     async def get_context(

@@ -32,6 +32,9 @@ class NoiseFilter:
             r'I am providing you',  # 반복되는 프롬프트
             r'^\s*$',              # 빈 콘텐츠
             r'^test\s+test',       # 테스트 데이터
+            r'^ok$',               # 단순 응답
+            r'^yes$',              # 단순 응답
+            r'^no$',               # 단순 응답
         ]
 
         # 유용한 프로젝트 (우선순위 높임)

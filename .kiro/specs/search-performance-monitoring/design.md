@@ -406,7 +406,77 @@ class AlertPanel {
 }
 ```
 
-### 4.3 실시간 업데이트
+### 4.3 프로젝트 상세 분석 페이지
+
+#### ProjectAnalyticsPage (static/js/pages/project-analytics.js)
+
+```javascript
+class ProjectAnalyticsPage extends HTMLElement {
+    constructor() {
+        super();
+        this.projectId = null;
+        this.dateRange = 'last_7d';
+        this.currentTab = 'overview';
+        this.charts = {};
+    }
+    
+    async init(projectId) {
+        this.projectId = projectId;
+        await this.loadProjectData();
+        this.setupTabs();
+        this.renderOverviewTab();
+    }
+    
+    async loadProjectData() {
+        // 프로젝트 요약 데이터 로드
+        const response = await fetch(
+            `/api/monitoring/search/project-stats?project_id=${this.projectId}&date_range=${this.dateRange}`
+        );
+        this.projectData = await response.json();
+    }
+    
+    renderOverviewTab() {
+        // 5개 탭: 개요, 쿼리 분석, 트렌드, 비교, 알림 설정
+        // Summary cards: 총 검색, 평균 결과, 평균 점수, 응답시간, Zero-result 비율
+        // 검색 활동 추이 차트
+        // 품질 분포 차트
+        // 응답 시간 분포 차트
+    }
+    
+    renderQueriesTab() {
+        // 인기 검색어 Top 20
+        // Zero-result 쿼리 목록
+        // 낮은 점수 쿼리 목록
+        // 느린 쿼리 목록
+    }
+    
+    renderTrendsTab() {
+        // 시간대별 검색 패턴
+        // 요일별 검색 패턴
+        // 품질 트렌드
+        // 응답시간 트렌드
+    }
+    
+    renderComparisonTab() {
+        // 프로젝트 간 비교 (최대 3개)
+        // 검색 수, 품질, 응답시간 비교 차트
+    }
+    
+    renderAlertsTab() {
+        // 프로젝트별 알림 임계값 설정
+        // Zero-result 비율 임계값
+        // 응답 시간 임계값
+        // 평균 점수 임계값
+        // 검색 수 급감 임계값
+    }
+    
+    async exportData(format) {
+        // CSV 또는 JSON 형식으로 데이터 내보내기
+    }
+}
+```
+
+### 4.4 실시간 업데이트
 
 **SSE (Server-Sent Events) 사용**:
 

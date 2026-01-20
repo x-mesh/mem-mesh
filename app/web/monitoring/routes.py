@@ -393,3 +393,106 @@ async def trigger_threshold_check(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# Search Quality Metrics Endpoints
+class SearchQualityStatsResponse(BaseModel):
+    """검색 품질 통계 응답"""
+    period: dict
+    summary: dict
+    by_source: list[dict]
+    trend: list[dict]
+    popular_queries: list[dict]
+
+
+class ProjectSearchStatsResponse(BaseModel):
+    """프로젝트별 검색 통계 응답"""
+    project_id: str
+    search_count: int
+    avg_results: float
+    avg_score: float
+    avg_response_time_ms: float
+    zero_result_rate: float
+
+
+class CachePerformanceStatsResponse(BaseModel):
+    """캐시 성능 통계 응답"""
+    period: dict
+    embedding_cache: dict
+
+
+def get_metrics_collector(db: Database = Depends(get_database)):
+    """MetricsCollector 의존성"""
+    from app.core.services.metrics_collector import MetricsCollector
+    return MetricsCollector(database=db)
+
+
+@router.get("/search/quality-stats", response_model=SearchQualityStatsResponse)
+async def get_search_quality_stats(
+    hours: int = Query(24, ge=1, le=168, description="조회 기간 (시간, 최대 7일)"),
+    project_id: Optional[str] = Query(None, description="프로젝트 ID 필터"),
+    collector = Depends(get_metrics_collector)
+):
+    """
+    검색 품질 통계 조회
+    
+    실시간 검색 품질 메트릭을 조회합니다:
+    - 전체 검색 통계 (검색 수, 평균 결과 수, 평균 점수)
+    - Zero-result 쿼리 비율
+    - 낮은 점수 결과 비율 (< 0.3)
+    - 검색 소스별 통계
+    - 시간대별 트렌드
+    - 인기 검색어 Top 10
+    """
+    try:
+        stats = await collector.get_search_quality_stats(
+            hours=hours,
+            project_id=project_id
+        )
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/search/project-stats", response_model=list[ProjectSearchStatsResponse])
+async def get_project_search_stats(
+    hours: int = Query(24, ge=1, le=168, description="조회 기간 (시간, 최대 7일)"),
+    collector = Depends(get_metrics_collector)
+):
+    """
+    프로젝트별 검색 통계 조회
+    
+    프로젝트별로 검색 패턴과 품질을 분석합니다:
+    - 검색 빈도
+    - 평균 결과 수
+    - 평균 유사도 점수
+    - 평균 응답 시간
+    - Zero-result 비율
+    """
+    try:
+        stats = await collector.get_project_search_stats(hours=hours)
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/cache/performance-stats", response_model=CachePerformanceStatsResponse)
+async def get_cache_performance_stats(
+    hours: int = Query(24, ge=1, le=168, description="조회 기간 (시간, 최대 7일)"),
+    collector = Depends(get_metrics_collector)
+):
+    """
+    캐시 성능 통계 조회
+    
+    임베딩 캐시 성능 메트릭을 조회합니다:
+    - 총 작업 수
+    - 캐시 히트/미스 수
+    - 캐시 히트율
+    - 평균 처리 시간
+    """
+    try:
+        stats = await collector.get_cache_performance_stats(hours=hours)
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -282,3 +282,225 @@ class MetricsCollector:
                 "buffer_capacity": self.buffer_size,
                 "flush_interval": self.flush_interval
             }
+
+    async def get_search_quality_stats(
+        self,
+        hours: int = 24,
+        project_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        검색 품질 통계 조회
+        
+        Args:
+            hours: 조회 기간 (시간)
+            project_id: 프로젝트 필터 (선택)
+        
+        Returns:
+            검색 품질 통계
+        """
+        from datetime import datetime, timedelta
+        
+        # 시작 시간 계산
+        start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + 'Z'
+        
+        # 기본 쿼리
+        where_clause = "WHERE timestamp >= ?"
+        params = [start_time]
+        
+        if project_id:
+            where_clause += " AND project_id = ?"
+            params.append(project_id)
+        
+        # 전체 통계
+        total_stats = await self.database.fetchone(f"""
+            SELECT 
+                COUNT(*) as total_searches,
+                AVG(result_count) as avg_results,
+                AVG(avg_similarity_score) as avg_score,
+                AVG(top_similarity_score) as avg_top_score,
+                AVG(response_time_ms) as avg_response_time,
+                SUM(CASE WHEN result_count = 0 THEN 1 ELSE 0 END) as zero_result_count,
+                SUM(CASE WHEN avg_similarity_score < 0.3 THEN 1 ELSE 0 END) as low_score_count
+            FROM search_metrics
+            {where_clause}
+        """, tuple(params))
+        
+        # 검색 모드별 통계 (source 기반)
+        mode_stats = await self.database.fetchall(f"""
+            SELECT 
+                source,
+                COUNT(*) as count,
+                AVG(result_count) as avg_results,
+                AVG(response_time_ms) as avg_response_time
+            FROM search_metrics
+            {where_clause}
+            GROUP BY source
+            ORDER BY count DESC
+        """, tuple(params))
+        
+        # 시간대별 검색 트렌드 (시간별)
+        trend_stats = await self.database.fetchall(f"""
+            SELECT 
+                strftime('%Y-%m-%d %H:00:00', timestamp) as hour,
+                COUNT(*) as search_count,
+                AVG(result_count) as avg_results,
+                AVG(avg_similarity_score) as avg_score
+            FROM search_metrics
+            {where_clause}
+            GROUP BY hour
+            ORDER BY hour DESC
+            LIMIT 24
+        """, tuple(params))
+        
+        # 인기 검색어 Top 10 (해시되지 않은 경우만)
+        if not self.hash_queries:
+            popular_queries = await self.database.fetchall(f"""
+                SELECT 
+                    query,
+                    COUNT(*) as count,
+                    AVG(result_count) as avg_results
+                FROM search_metrics
+                {where_clause}
+                GROUP BY query
+                ORDER BY count DESC
+                LIMIT 10
+            """, tuple(params))
+        else:
+            popular_queries = []
+        
+        # 품질 지표 계산
+        total = total_stats['total_searches'] if total_stats else 0
+        zero_result_rate = (total_stats['zero_result_count'] / total * 100) if total_stats and total > 0 else 0
+        low_score_rate = (total_stats['low_score_count'] / total * 100) if total_stats and total > 0 else 0
+        
+        return {
+            "period": {
+                "hours": hours,
+                "start_time": start_time,
+                "end_time": datetime.utcnow().isoformat() + 'Z'
+            },
+            "summary": {
+                "total_searches": total,
+                "avg_results_per_search": round(total_stats['avg_results'], 2) if total_stats and total_stats['avg_results'] else 0,
+                "avg_similarity_score": round(total_stats['avg_score'], 3) if total_stats and total_stats['avg_score'] else 0,
+                "avg_top_score": round(total_stats['avg_top_score'], 3) if total_stats and total_stats['avg_top_score'] else 0,
+                "avg_response_time_ms": round(total_stats['avg_response_time'], 1) if total_stats and total_stats['avg_response_time'] else 0,
+                "zero_result_rate": round(zero_result_rate, 2),
+                "low_score_rate": round(low_score_rate, 2)
+            },
+            "by_source": [
+                {
+                    "source": row['source'],
+                    "count": row['count'],
+                    "avg_results": round(row['avg_results'], 2),
+                    "avg_response_time_ms": round(row['avg_response_time'], 1)
+                }
+                for row in mode_stats
+            ],
+            "trend": [
+                {
+                    "hour": row['hour'],
+                    "search_count": row['search_count'],
+                    "avg_results": round(row['avg_results'], 2),
+                    "avg_score": round(row['avg_score'], 3) if row['avg_score'] else 0
+                }
+                for row in trend_stats
+            ],
+            "popular_queries": [
+                {
+                    "query": row['query'],
+                    "count": row['count'],
+                    "avg_results": round(row['avg_results'], 2)
+                }
+                for row in popular_queries
+            ] if not self.hash_queries else []
+        }
+    
+    async def get_project_search_stats(
+        self,
+        hours: int = 24
+    ) -> List[Dict[str, Any]]:
+        """
+        프로젝트별 검색 통계 조회
+        
+        Args:
+            hours: 조회 기간 (시간)
+        
+        Returns:
+            프로젝트별 검색 통계 리스트
+        """
+        from datetime import datetime, timedelta
+        
+        start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + 'Z'
+        
+        stats = await self.database.fetchall("""
+            SELECT 
+                project_id,
+                COUNT(*) as search_count,
+                AVG(result_count) as avg_results,
+                AVG(avg_similarity_score) as avg_score,
+                AVG(response_time_ms) as avg_response_time,
+                SUM(CASE WHEN result_count = 0 THEN 1 ELSE 0 END) as zero_result_count
+            FROM search_metrics
+            WHERE timestamp >= ? AND project_id IS NOT NULL
+            GROUP BY project_id
+            ORDER BY search_count DESC
+        """, (start_time,))
+        
+        return [
+            {
+                "project_id": row['project_id'],
+                "search_count": row['search_count'],
+                "avg_results": round(row['avg_results'], 2),
+                "avg_score": round(row['avg_score'], 3) if row['avg_score'] else 0,
+                "avg_response_time_ms": round(row['avg_response_time'], 1),
+                "zero_result_rate": round(row['zero_result_count'] / row['search_count'] * 100, 2) if row['search_count'] > 0 else 0
+            }
+            for row in stats
+        ]
+    
+    async def get_cache_performance_stats(
+        self,
+        hours: int = 24
+    ) -> Dict[str, Any]:
+        """
+        캐시 성능 통계 조회
+        
+        Args:
+            hours: 조회 기간 (시간)
+        
+        Returns:
+            캐시 성능 통계
+        """
+        from datetime import datetime, timedelta
+        
+        start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + 'Z'
+        
+        # 임베딩 캐시 통계
+        embedding_stats = await self.database.fetchone("""
+            SELECT 
+                COUNT(*) as total_operations,
+                SUM(CASE WHEN cache_hit = 1 THEN 1 ELSE 0 END) as cache_hits,
+                AVG(total_time_ms) as avg_time_ms
+            FROM embedding_metrics
+            WHERE timestamp >= ?
+        """, (start_time,))
+        
+        total_ops = embedding_stats['total_operations'] if embedding_stats else 0
+        cache_hits = embedding_stats['cache_hits'] if embedding_stats else 0
+        hit_rate = (cache_hits / total_ops * 100) if total_ops > 0 else 0
+        
+        return {
+            "period": {
+                "hours": hours,
+                "start_time": start_time,
+                "end_time": datetime.utcnow().isoformat() + 'Z'
+            },
+            "embedding_cache": {
+                "total_operations": total_ops,
+                "cache_hits": cache_hits,
+                "cache_misses": total_ops - cache_hits,
+                "hit_rate": round(hit_rate, 2),
+                "avg_time_ms": round(embedding_stats['avg_time_ms'], 1) if embedding_stats and embedding_stats['avg_time_ms'] else 0
+            }
+        }

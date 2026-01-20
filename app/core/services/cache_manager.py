@@ -84,9 +84,9 @@ class SmartCacheManager:
 
     def __init__(
         self,
-        embedding_ttl: int = 300,      # 5 minutes for embeddings
-        search_ttl: int = 600,         # 10 minutes for search results
-        context_ttl: int = 1800,        # 30 minutes for context
+        embedding_ttl: int = 86400,    # 24 hours for embeddings (stable data)
+        search_ttl: int = 3600,        # 1 hour for search results (frequently changing)
+        context_ttl: int = 1800,       # 30 minutes for context (dynamic data)
         similarity_threshold: float = 0.95  # Threshold for semantic similarity
     ):
         """
@@ -327,12 +327,28 @@ class SmartCacheManager:
 _cache_instance: Optional[SmartCacheManager] = None
 
 
-def get_cache_manager() -> SmartCacheManager:
-    """Get or create global cache manager instance"""
+def get_cache_manager(
+    embedding_ttl: Optional[int] = None,
+    search_ttl: Optional[int] = None,
+    context_ttl: Optional[int] = None
+) -> SmartCacheManager:
+    """
+    Get or create global cache manager instance
+    
+    Args:
+        embedding_ttl: Override embedding cache TTL (seconds)
+        search_ttl: Override search cache TTL (seconds)
+        context_ttl: Override context cache TTL (seconds)
+    """
     global _cache_instance
     if _cache_instance is None:
-        _cache_instance = SmartCacheManager()
-        print("[Cache] Smart cache manager initialized")
+        # Use provided TTLs or defaults
+        _cache_instance = SmartCacheManager(
+            embedding_ttl=embedding_ttl or 86400,  # 24 hours
+            search_ttl=search_ttl or 3600,         # 1 hour
+            context_ttl=context_ttl or 1800        # 30 minutes
+        )
+        print(f"[Cache] Smart cache manager initialized (embedding_ttl={embedding_ttl or 86400}s, search_ttl={search_ttl or 3600}s, context_ttl={context_ttl or 1800}s)")
     return _cache_instance
 
 
