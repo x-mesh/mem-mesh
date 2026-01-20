@@ -277,6 +277,75 @@ class Database:
             """)
             logger.info("Created fallback vector table")
             
+            # ===== Monitoring System 테이블 =====
+            
+            # search_metrics 테이블 생성
+            self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS search_metrics (
+                    id TEXT PRIMARY KEY,
+                    timestamp DATETIME NOT NULL,
+                    query TEXT NOT NULL,
+                    query_length INTEGER NOT NULL,
+                    project_id TEXT,
+                    category TEXT,
+                    result_count INTEGER NOT NULL,
+                    avg_similarity_score REAL,
+                    top_similarity_score REAL,
+                    response_time_ms INTEGER NOT NULL,
+                    embedding_time_ms INTEGER,
+                    search_time_ms INTEGER,
+                    response_format TEXT,
+                    original_size_bytes INTEGER,
+                    compressed_size_bytes INTEGER,
+                    user_agent TEXT,
+                    source TEXT NOT NULL
+                )
+            """)
+            
+            # embedding_metrics 테이블 생성
+            self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS embedding_metrics (
+                    id TEXT PRIMARY KEY,
+                    timestamp DATETIME NOT NULL,
+                    operation TEXT NOT NULL,
+                    count INTEGER NOT NULL,
+                    total_time_ms INTEGER NOT NULL,
+                    avg_time_per_embedding_ms REAL NOT NULL,
+                    cache_hit BOOLEAN NOT NULL,
+                    memory_usage_mb REAL,
+                    model_name TEXT NOT NULL
+                )
+            """)
+            
+            # alerts 테이블 생성
+            self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS alerts (
+                    id TEXT PRIMARY KEY,
+                    timestamp DATETIME NOT NULL,
+                    alert_type TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    metric_value REAL NOT NULL,
+                    threshold_value REAL NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    resolved_at DATETIME
+                )
+            """)
+            
+            # Monitoring 인덱스 추가
+            monitoring_indexes = [
+                "CREATE INDEX IF NOT EXISTS idx_search_metrics_timestamp ON search_metrics(timestamp)",
+                "CREATE INDEX IF NOT EXISTS idx_search_metrics_project ON search_metrics(project_id)",
+                "CREATE INDEX IF NOT EXISTS idx_search_metrics_query ON search_metrics(query)",
+                "CREATE INDEX IF NOT EXISTS idx_embedding_metrics_timestamp ON embedding_metrics(timestamp)",
+                "CREATE INDEX IF NOT EXISTS idx_alerts_status_timestamp ON alerts(status, timestamp)"
+            ]
+            
+            for index_sql in monitoring_indexes:
+                self.connection.execute(index_sql)
+            
+            logger.info("Monitoring tables and indexes initialized")
+            
             self.connection.commit()
             logger.info("Database tables and indexes initialized")
             
