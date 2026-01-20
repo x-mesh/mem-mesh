@@ -6,6 +6,7 @@ FastAPI 의존성 함수들.
 
 from fastapi import HTTPException
 
+from app.core.database.base import Database
 from app.core.services.memory import MemoryService
 from app.core.services.search import SearchService
 from app.core.services.context import ContextService
@@ -15,6 +16,14 @@ from app.core.services.project import ProjectService
 from app.core.services.session import SessionService
 from app.core.services.pin import PinService
 from ..lifespan import get_services
+
+
+def get_database() -> Database:
+    """데이터베이스 의존성"""
+    services = get_services()
+    if services['db'] is None:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    return services['db']
 
 
 def get_memory_service() -> MemoryService:

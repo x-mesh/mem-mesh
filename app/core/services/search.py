@@ -6,7 +6,8 @@ Search Service for mem-mesh
 import json
 import logging
 import re
-from typing import Optional, List
+import time
+from typing import Optional, List, TYPE_CHECKING
 from datetime import datetime
 from difflib import SequenceMatcher
 
@@ -19,6 +20,9 @@ except ImportError:
     # QueryExpander가 없으면 None
     get_query_expander = None
 from .cache_manager import get_cache_manager
+
+if TYPE_CHECKING:
+    from .metrics_collector import MetricsCollector
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +53,15 @@ def _parse_tags(row) -> Optional[List[str]]:
 class SearchService:
     """하이브리드 검색 서비스"""
 
-    def __init__(self, db: Database, embedding_service: EmbeddingService):
+    def __init__(
+        self, 
+        db: Database, 
+        embedding_service: EmbeddingService,
+        metrics_collector: Optional["MetricsCollector"] = None
+    ):
         self.db = db
         self.embedding_service = embedding_service
+        self.metrics_collector = metrics_collector
         self.similarity_threshold = 0.5
         self.cache_manager = get_cache_manager()  # 캐시 매니저 초기화
         logger.info("SearchService initialized with smart caching")
@@ -89,6 +99,11 @@ class SearchService:
         Returns:
             SearchResponse: 검색 결과
         """
+        # 메트릭 수집을 위한 시간 측정 시작
+        start_time = time.perf_counter()
+        embedding_time_ms = None
+        search_time_ms = None
+        
         # Query Expansion for Korean/English (if available)
         original_query = query
         if query and get_query_expander and search_mode != 'exact':
@@ -114,6 +129,16 @@ class SearchService:
                 )
                 if cached_results:
                     logger.info(f"[Cache HIT] Returning cached results for query: '{query}'")
+                    # 캐시 히트 시에도 메트릭 수집
+                    await self._collect_search_metric(
+                        query=original_query,
+                        result=cached_results,
+                        start_time=start_time,
+                        project_id=project_id,
+                        category=category,
+                        embedding_time_ms=0,
+                        search_time_ms=0
+                    )
                     return cached_results
             # SQL 필터 조건 구성
             filters = {}
@@ -175,7 +200,16 @@ class SearchService:
                             continue
                 
                 logger.info(f"Found {len(search_results)} recent memories (total: {total_count})")
-                return SearchResponse(results=search_results, total=total_count)
+                result = SearchResponse(results=search_results, total=total_count)
+                # 메트릭 수집 (빈 쿼리 검색)
+                await self._collect_search_metric(
+                    query=original_query,
+                    result=result,
+                    start_time=start_time,
+                    project_id=project_id,
+                    category=category
+                )
+                return result
             
             # 검색 모드에 따라 다른 검색 수행
             result = None
@@ -204,12 +238,29 @@ class SearchService:
                 )
                 logger.info(f"[Cache] Cached search results for query: '{query[:50]}...'")
 
+            # 메트릭 수집
+            await self._collect_search_metric(
+                query=original_query,
+                result=result,
+                start_time=start_time,
+                project_id=project_id,
+                category=category
+            )
+
             return result
             
         except Exception as e:
             logger.error(f"Search failed: {e}")
-            # 검색 실패 시 빈 결과 반환
-            return SearchResponse(results=[])
+            # 검색 실패 시에도 메트릭 수집
+            result = SearchResponse(results=[])
+            await self._collect_search_metric(
+                query=original_query,
+                result=result,
+                start_time=start_time,
+                project_id=project_id,
+                category=category
+            )
+            return result
     
     def _calculate_recency_score(
         self, 
@@ -752,3 +803,57 @@ class SearchService:
         except Exception as e:
             logger.error(f"Fuzzy search failed: {e}")
             return SearchResponse(results=[])
+
+    async def _collect_search_metric(
+        self,
+        query: str,
+        result: SearchResponse,
+        start_time: float,
+        project_id: Optional[str] = None,
+        category: Optional[str] = None,
+        embedding_time_ms: Optional[int] = None,
+        search_time_ms: Optional[int] = None
+    ) -> None:
+        """
+        검색 메트릭 수집 헬퍼 메서드
+        
+        Args:
+            query: 검색 쿼리
+            result: 검색 결과
+            start_time: 검색 시작 시간 (time.perf_counter())
+            project_id: 프로젝트 ID
+            category: 카테고리
+            embedding_time_ms: 임베딩 생성 시간 (ms)
+            search_time_ms: 검색 시간 (ms)
+        """
+        if self.metrics_collector is None:
+            return
+        
+        try:
+            # 총 응답 시간 계산
+            response_time_ms = int((time.perf_counter() - start_time) * 1000)
+            
+            # 유사도 점수 계산
+            avg_similarity = None
+            top_similarity = None
+            if result.results:
+                scores = [r.similarity_score for r in result.results if r.similarity_score is not None]
+                if scores:
+                    avg_similarity = sum(scores) / len(scores)
+                    top_similarity = max(scores)
+            
+            await self.metrics_collector.collect_search_metric(
+                query=query,
+                result_count=len(result.results),
+                response_time_ms=response_time_ms,
+                avg_similarity=avg_similarity,
+                top_similarity=top_similarity,
+                project_id=project_id,
+                category=category,
+                embedding_time_ms=embedding_time_ms,
+                search_time_ms=search_time_ms,
+                source="search_service"
+            )
+        except Exception as e:
+            # 메트릭 수집 실패는 검색 결과에 영향을 주지 않음
+            logger.warning(f"Failed to collect search metric: {e}")

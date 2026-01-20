@@ -102,6 +102,12 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "minimum": 0.0,
                         "maximum": 1.0
                     },
+                    "response_format": {
+                        "type": "string",
+                        "description": "Response format: minimal (IDs only), compact (summaries), standard (full), full (complete)",
+                        "default": "standard",
+                        "enum": ["minimal", "compact", "standard", "full"]
+                    },
                 },
                 "required": ["query"],
                 "additionalProperties": False
@@ -131,6 +137,12 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "description": "Project filter",
                         "pattern": "^[a-zA-Z0-9_-]+$",
                         "maxLength": 100
+                    },
+                    "response_format": {
+                        "type": "string",
+                        "description": "Response format: compact (summaries), standard (full)",
+                        "default": "standard",
+                        "enum": ["compact", "standard", "full"]
                     },
                 },
                 "required": ["memory_id"],
@@ -352,5 +364,80 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
 
 
 def get_all_tool_schemas() -> List[Dict[str, Any]]:
-    """모든 MCP tool 스키마 반환 (memory + pin/session)"""
-    return get_tool_schemas() + get_pin_tool_schemas()
+    """모든 MCP tool 스키마 반환 (memory + pin/session + batch)"""
+    return get_tool_schemas() + get_pin_tool_schemas() + get_batch_tool_schemas()
+
+
+def get_batch_tool_schemas() -> List[Dict[str, Any]]:
+    """Batch operations MCP tools/list 응답용 스키마 반환"""
+    return [
+        {
+            "name": "batch_operations",
+            "description": "Execute multiple mixed operations in batch for maximum efficiency. Reduces token usage by 30-50% through batch processing.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "operations": {
+                        "type": "array",
+                        "description": "List of operation dictionaries with 'type' and parameters",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "description": "Operation type",
+                                    "enum": ["add", "search"]
+                                },
+                                "content": {
+                                    "type": "string",
+                                    "description": "Memory content (for 'add' operations)",
+                                    "minLength": 10,
+                                    "maxLength": 10000
+                                },
+                                "query": {
+                                    "type": "string",
+                                    "description": "Search query (for 'search' operations)",
+                                    "minLength": 3,
+                                    "maxLength": 500
+                                },
+                                "project_id": {
+                                    "type": "string",
+                                    "description": "Project identifier",
+                                    "pattern": "^[a-zA-Z0-9_-]+$",
+                                    "maxLength": 100
+                                },
+                                "category": {
+                                    "type": "string",
+                                    "description": "Category",
+                                    "enum": VALID_CATEGORIES
+                                },
+                                "tags": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 50
+                                    },
+                                    "description": "Tags",
+                                    "maxItems": 20
+                                },
+                                "limit": {
+                                    "type": "integer",
+                                    "description": "Maximum results (for 'search' operations)",
+                                    "default": 5,
+                                    "minimum": 1,
+                                    "maximum": 20
+                                },
+                            },
+                            "required": ["type"],
+                            "additionalProperties": False
+                        },
+                        "minItems": 1,
+                        "maxItems": 50
+                    },
+                },
+                "required": ["operations"],
+                "additionalProperties": False
+            },
+        },
+    ]

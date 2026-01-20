@@ -9,6 +9,7 @@ from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from ..core.storage.base import StorageBackend
 from ..core.schemas.requests import AddParams, SearchParams, UpdateParams, StatsParams
 from ..core.utils.logger import get_logger
+from .prompt_optimizer import PromptOptimizer
 
 if TYPE_CHECKING:
     from ..web.websocket.realtime import RealtimeNotifier
@@ -23,14 +24,22 @@ class MCPToolHandlers:
     Storage 백엔드를 주입받아 모든 MCP tool 로직을 처리합니다.
     """
     
-    def __init__(self, storage: StorageBackend, notifier: Optional["RealtimeNotifier"] = None):
+    def __init__(
+        self, 
+        storage: StorageBackend, 
+        notifier: Optional["RealtimeNotifier"] = None,
+        enable_compression: bool = True
+    ):
         """
         Args:
             storage: 초기화된 StorageBackend 인스턴스
             notifier: 실시간 알림 발송자 (선택사항)
+            enable_compression: 응답 압축 활성화 (기본값: True)
         """
         self._storage = storage
         self._notifier = notifier
+        self._enable_compression = enable_compression
+        self._optimizer = PromptOptimizer() if enable_compression else None
     
     @property
     def storage(self) -> StorageBackend:
@@ -108,7 +117,8 @@ class MCPToolHandlers:
         project_id: Optional[str] = None,
         category: Optional[str] = None,
         limit: int = 5,
-        recency_weight: float = 0.0
+        recency_weight: float = 0.0,
+        response_format: str = "standard"
     ) -> Dict[str, Any]:
         """Search memories using hybrid search (vector + metadata)
         
@@ -118,13 +128,14 @@ class MCPToolHandlers:
             category: Category filter
             limit: Maximum results (1-20)
             recency_weight: Recency weight (0.0-1.0)
+            response_format: Response format (minimal/compact/standard/full)
             
         Returns:
-            dict: 검색 결과
+            dict: 검색 결과 (압축 가능)
         """
         logger.info_with_details(
             "Tool search called",
-            details={"query_text": query, "recency_weight": recency_weight},
+            details={"query_text": query, "recency_weight": recency_weight, "format": response_format},
             project_id=project_id,
             category=category,
             limit=limit,
@@ -141,16 +152,69 @@ class MCPToolHandlers:
             )
             result = await self._storage.search_memories(params)
             logger.info("Search completed", result_count=len(result.results))
+            
+            # 응답 압축 (활성화된 경우)
+            if self._enable_compression and self._optimizer and response_format != "full":
+                return self._compress_search_response(result, response_format)
+            
             return result.model_dump()
         except Exception as e:
             logger.error("Error in search", error=str(e))
             raise
     
+    def _compress_search_response(
+        self, 
+        result: Any, 
+        format: str = "standard"
+    ) -> Dict[str, Any]:
+        """검색 결과 압축"""
+        results_list = [
+            {
+                "id": r.id,
+                "content": r.content,
+                "category": r.category,
+                "similarity_score": r.similarity_score,
+                "created_at": r.created_at,
+                "project_id": r.project_id,
+                "tags": r.tags
+            }
+            for r in result.results
+        ]
+        
+        if format == "minimal":
+            # 극도 압축: ID와 점수만
+            compressed_results = [
+                {"id": r["id"][:8], "score": round(r["similarity_score"], 2)}
+                for r in results_list
+            ]
+        elif format == "compact":
+            # 압축: ID, 카테고리, 요약
+            compressed_results = [
+                {
+                    "id": r["id"][:8],
+                    "category": r["category"],
+                    "summary": r["content"][:80] + "..." if len(r["content"]) > 80 else r["content"],
+                    "score": round(r["similarity_score"], 2)
+                }
+                for r in results_list
+            ]
+        else:  # standard
+            # 표준: 전체 내용 포함하되 구조화
+            compressed_results = results_list
+        
+        return {
+            "results": compressed_results,
+            "total": len(compressed_results),
+            "format": format,
+            "compressed": True
+        }
+    
     async def context(
         self,
         memory_id: str,
         depth: int = 2,
-        project_id: Optional[str] = None
+        project_id: Optional[str] = None,
+        response_format: str = "standard"
     ) -> Dict[str, Any]:
         """Get context around a specific memory
         
@@ -158,24 +222,57 @@ class MCPToolHandlers:
             memory_id: Memory ID to get context for
             depth: Search depth (1-5)
             project_id: Project filter
+            response_format: Response format (compact/standard/full)
             
         Returns:
-            dict: 컨텍스트 정보
+            dict: 컨텍스트 정보 (압축 가능)
         """
         logger.info(
             "Tool context called",
             memory_id=memory_id,
             depth=depth,
-            project_id=project_id
+            project_id=project_id,
+            format=response_format
         )
         
         try:
             result = await self._storage.get_context(memory_id, depth, project_id)
             logger.info("Context retrieved", memory_count=len(result.related_memories))
+            
+            # 응답 압축 (활성화된 경우)
+            if self._enable_compression and self._optimizer and response_format == "compact":
+                return self._compress_context_response(result)
+            
             return result.model_dump()
         except Exception as e:
             logger.error("Error in context", error=str(e))
             raise
+    
+    def _compress_context_response(self, result: Any) -> Dict[str, Any]:
+        """컨텍스트 응답 압축"""
+        primary = result.memory if hasattr(result, 'memory') else {}
+        related = result.related_memories if hasattr(result, 'related_memories') else []
+        
+        compressed = {
+            "primary": {
+                "id": primary.id[:8] if hasattr(primary, 'id') else "",
+                "category": primary.category if hasattr(primary, 'category') else "",
+                "summary": (primary.content[:100] + "...") if hasattr(primary, 'content') and len(primary.content) > 100 else (primary.content if hasattr(primary, 'content') else "")
+            },
+            "related_count": len(related),
+            "related": [
+                {
+                    "id": r.id[:8] if hasattr(r, 'id') else "",
+                    "cat": r.category[:4] if hasattr(r, 'category') else "",
+                    "score": round(r.similarity_score, 2) if hasattr(r, 'similarity_score') else 0,
+                    "hint": (r.content[:40] + "...") if hasattr(r, 'content') and len(r.content) > 40 else (r.content if hasattr(r, 'content') else "")
+                }
+                for r in related[:5]  # 최대 5개만
+            ],
+            "compressed": True
+        }
+        
+        return compressed
     
     async def update(
         self,

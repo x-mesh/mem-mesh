@@ -7,8 +7,12 @@ import os
 import ssl
 import struct
 import logging
+import time
 import urllib3
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..services.metrics_collector import MetricsCollector
 
 # MEM_MESH_IGNORE_SSL 환경변수가 설정되어 있으면 SSL 검증 비활성화
 _ignore_ssl = os.getenv("MEM_MESH_IGNORE_SSL", "").lower() in ("1", "true", "yes")
@@ -83,15 +87,22 @@ MODEL_ALIASES = {
 class EmbeddingService:
     """임베딩 생성 서비스"""
     
-    def __init__(self, model_name: Optional[str] = None, preload: bool = True):
+    def __init__(
+        self, 
+        model_name: Optional[str] = None, 
+        preload: bool = True,
+        metrics_collector: Optional["MetricsCollector"] = None
+    ):
         """
         임베딩 서비스 초기화
 
         Args:
             model_name: 사용할 sentence-transformers 모델 이름 (None이면 설정에서 읽음)
             preload: True면 초기화 시 모델을 미리 로드 (기본값: True)
+            metrics_collector: 메트릭 수집기 (선택적)
         """
         self.model: Optional[SentenceTransformer] = None
+        self.metrics_collector = metrics_collector
 
         # 설정에서 모델 이름 가져오기
         if model_name is None:
@@ -152,10 +163,23 @@ class EmbeddingService:
         
         assert self.model is not None, "Model should be loaded"
         
+        start_time = time.perf_counter()
+        cache_hit = False  # 이 레벨에서는 캐시 히트 여부를 알 수 없음
+        
         try:
             # sentence-transformers는 numpy array를 반환하므로 list로 변환
             embedding = self.model.encode(text, convert_to_tensor=False)
-            return embedding.tolist()
+            result = embedding.tolist()
+            
+            # 메트릭 수집
+            self._collect_embedding_metric(
+                operation="generate",
+                count=1,
+                start_time=start_time,
+                cache_hit=cache_hit
+            )
+            
+            return result
         except Exception as e:
             logger.error(f"Failed to generate embedding for text: {e}")
             raise
@@ -167,9 +191,22 @@ class EmbeddingService:
         
         assert self.model is not None, "Model should be loaded"
         
+        start_time = time.perf_counter()
+        cache_hit = False
+        
         try:
             embeddings = self.model.encode(texts, convert_to_tensor=False)
-            return [embedding.tolist() for embedding in embeddings]
+            result = [embedding.tolist() for embedding in embeddings]
+            
+            # 메트릭 수집
+            self._collect_embedding_metric(
+                operation="batch_generate",
+                count=len(texts),
+                start_time=start_time,
+                cache_hit=cache_hit
+            )
+            
+            return result
         except Exception as e:
             logger.error(f"Failed to generate batch embeddings: {e}")
             raise
@@ -195,3 +232,55 @@ class EmbeddingService:
             "dimension": self.dimension,
             "loaded": self.model is not None
         }
+    
+    def _collect_embedding_metric(
+        self,
+        operation: str,
+        count: int,
+        start_time: float,
+        cache_hit: bool
+    ) -> None:
+        """
+        임베딩 메트릭 수집 헬퍼 메서드
+        
+        Args:
+            operation: 작업 유형 ('generate', 'batch_generate')
+            count: 생성된 임베딩 수
+            start_time: 시작 시간 (time.perf_counter())
+            cache_hit: 캐시 히트 여부
+        """
+        if self.metrics_collector is None:
+            return
+        
+        try:
+            import asyncio
+            
+            total_time_ms = int((time.perf_counter() - start_time) * 1000)
+            
+            # 비동기 메서드를 동기 컨텍스트에서 호출
+            try:
+                loop = asyncio.get_running_loop()
+                # 이미 이벤트 루프가 실행 중이면 태스크로 스케줄링
+                asyncio.create_task(
+                    self.metrics_collector.collect_embedding_metric(
+                        operation=operation,
+                        count=count,
+                        total_time_ms=total_time_ms,
+                        cache_hit=cache_hit,
+                        model_name=self.model_name
+                    )
+                )
+            except RuntimeError:
+                # 이벤트 루프가 없으면 새로 생성하여 실행
+                asyncio.run(
+                    self.metrics_collector.collect_embedding_metric(
+                        operation=operation,
+                        count=count,
+                        total_time_ms=total_time_ms,
+                        cache_hit=cache_hit,
+                        model_name=self.model_name
+                    )
+                )
+        except Exception as e:
+            # 메트릭 수집 실패는 임베딩 생성에 영향을 주지 않음
+            logger.warning(f"Failed to collect embedding metric: {e}")

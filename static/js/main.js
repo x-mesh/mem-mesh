@@ -44,6 +44,7 @@ import { MemoriesPage } from './pages/memories.js';
 import { AnalyticsPage } from './pages/analytics.js';
 import { SettingsPage } from './pages/settings-page.js';
 import { WorkPage } from './pages/work.js';
+import { MonitoringPage } from './pages/monitoring.js';
 
 /**
  * Main Application Class
@@ -117,6 +118,7 @@ class App {
     this.pages.set('analytics', AnalyticsPage);
     this.pages.set('settings', SettingsPage);
     this.pages.set('work', WorkPage);
+    this.pages.set('monitoring', MonitoringPage);
   }
   
   /**
@@ -136,6 +138,7 @@ class App {
     this.router.register('/work', () => this.renderPage('work'));
     this.router.register('/analytics', () => this.renderPage('analytics'));
     this.router.register('/settings', () => this.renderPage('settings'));
+    this.router.register('/monitoring', () => this.renderPage('monitoring'));
   }
   
   /**
@@ -285,6 +288,9 @@ class App {
         case 'work':
           pageElement = document.createElement('work-page');
           break;
+        case 'monitoring':
+          pageElement = document.createElement('monitoring-page');
+          break;
         default:
           throw new Error(`Unknown page: ${pageName}`);
       }
@@ -325,7 +331,8 @@ class App {
         (route === '/memories' && pageName === 'memories') ||
         (route === '/analytics' && pageName === 'analytics') ||
         (route === '/settings' && pageName === 'settings') ||
-        (route === '/work' && pageName === 'work')
+        (route === '/work' && pageName === 'work') ||
+        (route === '/monitoring' && pageName === 'monitoring')
       ) {
         link.classList.add('active');
       }

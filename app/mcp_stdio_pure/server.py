@@ -31,6 +31,7 @@ log = setup_logging("mem-mesh-mcp-pure")
 # -------------------------
 storage_manager = StorageManager()
 tool_handlers: Optional[MCPToolHandlers] = None
+batch_handler: Optional["BatchOperationHandler"] = None
 
 # Global stdin reader for reuse
 _stdin_reader: Optional[asyncio.StreamReader] = None
@@ -117,7 +118,8 @@ def resp_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
 
 def list_tools() -> Dict[str, Any]:
     """List available tools"""
-    return {"tools": get_tool_schemas()}
+    from ..mcp_common.schemas import get_all_tool_schemas
+    return {"tools": get_all_tool_schemas()}
 
 
 async def call_tool(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -167,7 +169,8 @@ async def call_tool(params: Dict[str, Any]) -> Dict[str, Any]:
                 project_id=args.get("project_id"),
                 category=args.get("category"),
                 limit=args.get("limit", 5),
-                recency_weight=args.get("recency_weight", 0.0)
+                recency_weight=args.get("recency_weight", 0.0),
+                response_format=args.get("response_format", "standard")
             )
         
         elif name == "context":
@@ -179,7 +182,8 @@ async def call_tool(params: Dict[str, Any]) -> Dict[str, Any]:
             result = await tool_handlers.context(
                 memory_id=args["memory_id"],
                 depth=args.get("depth", 2),
-                project_id=args.get("project_id")
+                project_id=args.get("project_id"),
+                response_format=args.get("response_format", "standard")
             )
         
         elif name == "update":
@@ -210,6 +214,75 @@ async def call_tool(params: Dict[str, Any]) -> Dict[str, Any]:
                 end_date=args.get("end_date")
             )
         
+        # Work Tracking Tools
+        elif name == "pin_add":
+            if "content" not in args or "project_id" not in args:
+                return {
+                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required arguments: content, project_id"})}],
+                    "isError": True,
+                }
+            result = await tool_handlers.pin_add(
+                content=args["content"],
+                project_id=args["project_id"],
+                importance=args.get("importance"),
+                tags=args.get("tags")
+            )
+        
+        elif name == "pin_complete":
+            if "pin_id" not in args:
+                return {
+                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: pin_id"})}],
+                    "isError": True,
+                }
+            result = await tool_handlers.pin_complete(pin_id=args["pin_id"])
+        
+        elif name == "pin_promote":
+            if "pin_id" not in args:
+                return {
+                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: pin_id"})}],
+                    "isError": True,
+                }
+            result = await tool_handlers.pin_promote(pin_id=args["pin_id"])
+        
+        elif name == "session_resume":
+            if "project_id" not in args:
+                return {
+                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: project_id"})}],
+                    "isError": True,
+                }
+            result = await tool_handlers.session_resume(
+                project_id=args["project_id"],
+                expand=args.get("expand", False),
+                limit=args.get("limit", 10)
+            )
+        
+        elif name == "session_end":
+            if "project_id" not in args:
+                return {
+                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: project_id"})}],
+                    "isError": True,
+                }
+            result = await tool_handlers.session_end(
+                project_id=args["project_id"],
+                summary=args.get("summary")
+            )
+        
+        # Batch Operations
+        elif name == "batch_operations":
+            if "operations" not in args:
+                return {
+                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: operations"})}],
+                    "isError": True,
+                }
+            
+            if batch_handler is None:
+                return {
+                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Batch handler not initialized"})}],
+                    "isError": True,
+                }
+            
+            result = await batch_handler.batch_operations(operations=args["operations"])
+        
         else:
             log.warning(f"Unknown tool: {name}")
             return {
@@ -238,11 +311,31 @@ async def call_tool(params: Dict[str, Any]) -> Dict[str, Any]:
 # -------------------------
 async def initialize_storage():
     """Initialize storage backend"""
-    global tool_handlers
+    global tool_handlers, batch_handler
     
     storage = await storage_manager.initialize()
     tool_handlers = MCPToolHandlers(storage)
-    log.info("Tool handlers initialized")
+    
+    # 배치 핸들러 초기화
+    from ..core.database.base import Database
+    from ..core.embeddings.service import EmbeddingService
+    from ..core.services.memory import MemoryService
+    from ..core.services.search import SearchService
+    from ..mcp_common.batch_tools import BatchOperationHandler
+    
+    db = Database()
+    embedding_service = EmbeddingService(preload=False)
+    memory_service = MemoryService(db, embedding_service)
+    search_service = SearchService(db, embedding_service)
+    
+    batch_handler = BatchOperationHandler(
+        memory_service=memory_service,
+        search_service=search_service,
+        embedding_service=embedding_service,
+        db=db
+    )
+    
+    log.info("Tool handlers and batch handler initialized")
 
 
 # -------------------------

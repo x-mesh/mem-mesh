@@ -101,7 +101,8 @@ async def search(
     project_id: Optional[str] = None,
     category: Optional[str] = None,
     limit: int = 5,
-    recency_weight: float = 0.0
+    recency_weight: float = 0.0,
+    response_format: str = "standard"
 ) -> dict:
     """Search memories using hybrid search (vector + metadata)
     
@@ -111,15 +112,17 @@ async def search(
         category: Category filter
         limit: Maximum results (1-20)
         recency_weight: Recency weight (0.0-1.0)
+        response_format: Response format (minimal/compact/standard/full)
     """
-    return await _get_handlers().search(query, project_id, category, limit, recency_weight)
+    return await _get_handlers().search(query, project_id, category, limit, recency_weight, response_format)
 
 
 @mcp.tool()
 async def context(
     memory_id: str,
     depth: int = 2,
-    project_id: Optional[str] = None
+    project_id: Optional[str] = None,
+    response_format: str = "standard"
 ) -> dict:
     """Get context around a specific memory
     
@@ -127,8 +130,9 @@ async def context(
         memory_id: Memory ID to get context for
         depth: Search depth (1-5)
         project_id: Project filter
+        response_format: Response format (compact/standard/full)
     """
-    return await _get_handlers().context(memory_id, depth, project_id)
+    return await _get_handlers().context(memory_id, depth, project_id, response_format)
 
 
 @mcp.tool()
