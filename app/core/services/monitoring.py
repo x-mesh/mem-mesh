@@ -45,8 +45,12 @@ class MonitoringService:
             date_format = "%Y-%m-%d"
             group_by = "strftime('%Y-%m-%d', timestamp)"
         
-        # 기본 조건
-        conditions = ["timestamp >= ? AND timestamp <= ?"]
+        # 기본 조건 (빈 쿼리 제외)
+        conditions = [
+            "timestamp >= ? AND timestamp <= ?",
+            "query IS NOT NULL",
+            "query != ''"
+        ]
         params: List[Any] = [start_date.isoformat(), end_date.isoformat()]
         
         if project_id:
@@ -155,6 +159,9 @@ class MonitoringService:
             "time": "avg_response_time DESC"  # 느린 응답 우선
         }.get(sort_by, "search_count DESC")
         
+        # 빈 쿼리 제외 조건
+        non_empty_query = "query IS NOT NULL AND query != ''"
+        
         # 쿼리별 통계
         query_stats = await self.database.fetchall(f"""
             SELECT 
@@ -165,27 +172,27 @@ class MonitoringService:
                 AVG(result_count) as avg_result_count,
                 SUM(CASE WHEN result_count = 0 THEN 1 ELSE 0 END) as no_results_count
             FROM search_metrics
-            WHERE timestamp >= ?
+            WHERE timestamp >= ? AND {non_empty_query}
             GROUP BY query
             ORDER BY {order_by}
             LIMIT ?
         """, (cutoff_date, limit))
         
         # Top 10 빈도 쿼리
-        top_queries = await self.database.fetchall("""
+        top_queries = await self.database.fetchall(f"""
             SELECT query, COUNT(*) as count
             FROM search_metrics
-            WHERE timestamp >= ?
+            WHERE timestamp >= ? AND {non_empty_query}
             GROUP BY query
             ORDER BY count DESC
             LIMIT 10
         """, (cutoff_date,))
         
         # 낮은 유사도 쿼리 Top 10
-        low_similarity_queries = await self.database.fetchall("""
+        low_similarity_queries = await self.database.fetchall(f"""
             SELECT query, AVG(avg_similarity_score) as avg_similarity, COUNT(*) as count
             FROM search_metrics
-            WHERE timestamp >= ? AND avg_similarity_score IS NOT NULL
+            WHERE timestamp >= ? AND avg_similarity_score IS NOT NULL AND {non_empty_query}
             GROUP BY query
             HAVING count >= 2
             ORDER BY avg_similarity ASC
@@ -193,17 +200,17 @@ class MonitoringService:
         """, (cutoff_date,))
         
         # 결과 없음 쿼리
-        no_results_queries = await self.database.fetchall("""
+        no_results_queries = await self.database.fetchall(f"""
             SELECT query, COUNT(*) as count
             FROM search_metrics
-            WHERE timestamp >= ? AND result_count = 0
+            WHERE timestamp >= ? AND result_count = 0 AND {non_empty_query}
             GROUP BY query
             ORDER BY count DESC
             LIMIT 20
         """, (cutoff_date,))
         
         # 쿼리 길이 분포
-        length_distribution = await self.database.fetchall("""
+        length_distribution = await self.database.fetchall(f"""
             SELECT 
                 CASE 
                     WHEN query_length <= 20 THEN 'short'
@@ -213,7 +220,7 @@ class MonitoringService:
                 COUNT(*) as count,
                 AVG(avg_similarity_score) as avg_similarity
             FROM search_metrics
-            WHERE timestamp >= ?
+            WHERE timestamp >= ? AND {non_empty_query}
             GROUP BY length_category
         """, (cutoff_date,))
         
@@ -367,13 +374,17 @@ class MonitoringService:
         if project_id:
             rows = await self.database.fetchall("""
                 SELECT * FROM search_metrics
-                WHERE project_id = ?
+                WHERE project_id = ? 
+                  AND query IS NOT NULL 
+                  AND query != ''
                 ORDER BY timestamp DESC
                 LIMIT ?
             """, (project_id, limit))
         else:
             rows = await self.database.fetchall("""
                 SELECT * FROM search_metrics
+                WHERE query IS NOT NULL 
+                  AND query != ''
                 ORDER BY timestamp DESC
                 LIMIT ?
             """, (limit,))

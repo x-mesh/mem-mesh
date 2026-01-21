@@ -28,7 +28,7 @@ export class MonitoringPage extends HTMLElement {
       <div class="monitoring-page">
         <header class="monitoring-header">
           <div class="header-content">
-            <h1>📊 Performance Monitoring</h1>
+            <h1>Performance Monitoring</h1>
             <p class="subtitle">검색 품질 및 성능 실시간 모니터링</p>
           </div>
           <div class="header-actions">
@@ -39,7 +39,7 @@ export class MonitoringPage extends HTMLElement {
               <option value="last_30d">최근 30일</option>
             </select>
             <button id="refresh-btn" class="refresh-btn" title="새로고침">
-              🔄 새로고침
+              새로고침
             </button>
           </div>
         </header>
@@ -47,28 +47,48 @@ export class MonitoringPage extends HTMLElement {
         <!-- Summary Cards -->
         <section class="summary-cards">
           <div class="summary-card" id="card-searches">
-            <div class="card-icon">🔍</div>
+            <div class="card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/>
+                <path d="m21 21-4.35-4.35"/>
+              </svg>
+            </div>
             <div class="card-content">
               <span class="card-value" id="total-searches">-</span>
               <span class="card-label">총 검색</span>
             </div>
           </div>
           <div class="summary-card" id="card-similarity">
-            <div class="card-icon">📈</div>
+            <div class="card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/>
+              </svg>
+            </div>
             <div class="card-content">
               <span class="card-value" id="avg-similarity">-</span>
               <span class="card-label">평균 유사도</span>
             </div>
           </div>
           <div class="summary-card" id="card-response">
-            <div class="card-icon">⚡</div>
+            <div class="card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23,6 13.5,15.5 8.5,10.5 1,18"/>
+                <polyline points="17,6 23,6 23,12"/>
+              </svg>
+            </div>
             <div class="card-content">
               <span class="card-value" id="avg-response">-</span>
               <span class="card-label">평균 응답시간</span>
             </div>
           </div>
           <div class="summary-card" id="card-no-results">
-            <div class="card-icon">⚠️</div>
+            <div class="card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="15" y1="9" x2="9" y2="15"/>
+                <line x1="9" y1="9" x2="15" y2="15"/>
+              </svg>
+            </div>
             <div class="card-content">
               <span class="card-value" id="no-results-rate">-</span>
               <span class="card-label">결과없음 비율</span>
@@ -137,25 +157,25 @@ export class MonitoringPage extends HTMLElement {
 
               <!-- Source Performance -->
               <div class="chart-container wide">
-                <h3>📊 검색 소스별 성능</h3>
+                <h3>검색 소스별 성능</h3>
                 <div id="source-stats-table"></div>
               </div>
 
               <!-- Hourly Trend -->
               <div class="chart-container wide">
-                <h3>📈 시간대별 검색 트렌드</h3>
+                <h3>시간대별 검색 트렌드</h3>
                 <canvas id="quality-trend-chart"></canvas>
               </div>
 
               <!-- Project Stats -->
               <div class="chart-container wide">
-                <h3>🗂️ 프로젝트별 검색 통계</h3>
+                <h3>프로젝트별 검색 통계</h3>
                 <div id="project-stats-table"></div>
               </div>
 
               <!-- Cache Performance -->
               <div class="chart-container">
-                <h3>💾 캐시 성능</h3>
+                <h3>캐시 성능</h3>
                 <div id="cache-stats">
                   <div class="cache-metric">
                     <span class="metric-label">총 작업</span>
@@ -179,7 +199,7 @@ export class MonitoringPage extends HTMLElement {
 
               <!-- Popular Queries -->
               <div class="chart-container">
-                <h3>🔥 인기 검색어 (최근 24시간)</h3>
+                <h3>인기 검색어 (최근 24시간)</h3>
                 <div id="quality-popular-queries" class="queries-list"></div>
               </div>
             </div>
@@ -189,19 +209,19 @@ export class MonitoringPage extends HTMLElement {
           <div id="tab-queries" class="tab-panel hidden">
             <div class="queries-grid">
               <div class="queries-section">
-                <h3>🔥 인기 검색어 Top 10</h3>
+                <h3>인기 검색어 Top 10</h3>
                 <div id="top-queries" class="queries-list"></div>
               </div>
               <div class="queries-section">
-                <h3>⚠️ 개선 필요 쿼리 (낮은 유사도)</h3>
+                <h3>개선 필요 쿼리 (낮은 유사도)</h3>
                 <div id="low-similarity-queries" class="queries-list"></div>
               </div>
               <div class="queries-section">
-                <h3>❌ 결과없음 쿼리</h3>
+                <h3>결과없음 쿼리</h3>
                 <div id="no-results-queries" class="queries-list"></div>
               </div>
               <div class="queries-section">
-                <h3>📏 쿼리 길이 분포</h3>
+                <h3>쿼리 길이 분포</h3>
                 <canvas id="query-length-chart"></canvas>
               </div>
             </div>
@@ -238,7 +258,7 @@ export class MonitoringPage extends HTMLElement {
 
         <!-- Recent Searches -->
         <section class="recent-searches">
-          <h3>📋 최근 검색</h3>
+          <h3>최근 검색</h3>
           <div id="recent-searches-list" class="searches-table"></div>
         </section>
       </div>

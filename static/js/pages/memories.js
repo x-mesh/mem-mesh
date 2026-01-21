@@ -558,11 +558,26 @@ class MemoriesPage extends HTMLElement {
    * Setup event listeners
    */
   setupEventListeners() {
-    // Search input
+    // Search input - 엔터키로만 검색
     const searchInput = this.querySelector('.search-input');
     if (searchInput) {
-      searchInput.addEventListener('input', this.handleSearch.bind(this));
+      searchInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          this.handleSearch(e);
+        }
+      });
       searchInput.value = this.searchQuery;
+    }
+    
+    // Search button
+    const searchBtn = this.querySelector('.search-btn');
+    if (searchBtn) {
+      searchBtn.addEventListener('click', () => {
+        const input = this.querySelector('.search-input');
+        if (input) {
+          this.handleSearch({ target: input });
+        }
+      });
     }
     
     // Sort controls
@@ -644,13 +659,15 @@ class MemoriesPage extends HTMLElement {
     this.searchQuery = event.target.value;
     this.currentPage = 1;
     this.updateSearchModeVisibility();
-    this.debounceSearch();
+    // debounceSearch 제거 - 즉시 검색 실행
+    this.loadMemories();
   }
   
   /**
-   * Debounced search
+   * Debounced search - DEPRECATED (실시간 검색 방지)
    */
   debounceSearch() {
+    // 더 이상 사용하지 않음 - 검색 버튼/엔터키로만 검색
     clearTimeout(this.searchTimeout);
     this.searchTimeout = setTimeout(() => {
       this.loadMemories();
@@ -1330,6 +1347,13 @@ class MemoriesPage extends HTMLElement {
               placeholder="Search memories..."
               value="${this.searchQuery}"
             />
+            <button class="search-btn" title="Search (or press Enter)">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M7 12C9.76142 12 12 9.76142 12 7C12 4.23858 9.76142 2 7 2C4.23858 2 2 4.23858 2 7C2 9.76142 4.23858 12 7 12Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M14 14L10.5 10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Search
+            </button>
             <select class="search-mode-select" ${!this.shouldShowSearchMode() ? 'style="display: none;"' : ''}>
               <option value="hybrid" ${this.searchMode === 'hybrid' ? 'selected' : ''}>Hybrid</option>
               <option value="vector" ${this.searchMode === 'vector' ? 'selected' : ''}>Vector</option>
@@ -1507,6 +1531,38 @@ style.textContent = `
     outline: none;
     border-color: var(--primary-color);
     box-shadow: 0 0 0 3px var(--primary-color-alpha);
+  }
+  
+  .search-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    min-width: 100px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+  }
+  
+  .search-btn:hover {
+    background: var(--bg-secondary);
+    border-color: var(--border-hover);
+  }
+  
+  .search-btn:active {
+    transform: translateY(0);
+  }
+  
+  .search-btn svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
   }
   
   .search-mode-select {

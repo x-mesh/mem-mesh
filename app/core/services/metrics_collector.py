@@ -121,6 +121,11 @@ class MetricsCollector:
         Returns:
             메트릭 ID
         """
+        # 빈 쿼리는 모니터링에서 제외 (입력 중 상태, 의미 없는 검색)
+        if not query or not query.strip():
+            logger.debug("Skipping metric collection for empty query")
+            return "skipped-empty-query"
+        
         metric = SearchMetric(
             query=self._sanitize_query(query),
             query_length=len(query),
@@ -303,8 +308,8 @@ class MetricsCollector:
         # 시작 시간 계산
         start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + 'Z'
         
-        # 기본 쿼리
-        where_clause = "WHERE timestamp >= ?"
+        # 기본 쿼리 (빈 쿼리 제외)
+        where_clause = "WHERE timestamp >= ? AND query IS NOT NULL AND query != ''"
         params = [start_time]
         
         if project_id:
@@ -442,7 +447,10 @@ class MetricsCollector:
                 AVG(response_time_ms) as avg_response_time,
                 SUM(CASE WHEN result_count = 0 THEN 1 ELSE 0 END) as zero_result_count
             FROM search_metrics
-            WHERE timestamp >= ? AND project_id IS NOT NULL
+            WHERE timestamp >= ? 
+              AND project_id IS NOT NULL
+              AND query IS NOT NULL 
+              AND query != ''
             GROUP BY project_id
             ORDER BY search_count DESC
         """, (start_time,))
@@ -476,18 +484,28 @@ class MetricsCollector:
         
         start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + 'Z'
         
-        # 임베딩 캐시 통계
-        embedding_stats = await self.database.fetchone("""
-            SELECT 
-                COUNT(*) as total_operations,
-                SUM(CASE WHEN cache_hit = 1 THEN 1 ELSE 0 END) as cache_hits,
-                AVG(total_time_ms) as avg_time_ms
-            FROM embedding_metrics
-            WHERE timestamp >= ?
-        """, (start_time,))
+        try:
+            # 임베딩 캐시 통계
+            embedding_stats = await self.database.fetchone("""
+                SELECT 
+                    COUNT(*) as total_operations,
+                    SUM(CASE WHEN cache_hit = 1 THEN 1 ELSE 0 END) as cache_hits,
+                    AVG(total_time_ms) as avg_time_ms
+                FROM embedding_metrics
+                WHERE timestamp >= ?
+            """, (start_time,))
+            
+            total_ops = embedding_stats['total_operations'] if embedding_stats and embedding_stats['total_operations'] else 0
+            cache_hits = embedding_stats['cache_hits'] if embedding_stats and embedding_stats['cache_hits'] else 0
+            avg_time = embedding_stats['avg_time_ms'] if embedding_stats and embedding_stats['avg_time_ms'] else 0
+            
+        except Exception as e:
+            # 테이블이 없거나 에러 발생 시 기본값 반환
+            logger.warning(f"Failed to fetch embedding metrics: {e}")
+            total_ops = 0
+            cache_hits = 0
+            avg_time = 0
         
-        total_ops = embedding_stats['total_operations'] if embedding_stats else 0
-        cache_hits = embedding_stats['cache_hits'] if embedding_stats else 0
         hit_rate = (cache_hits / total_ops * 100) if total_ops > 0 else 0
         
         return {
@@ -501,6 +519,6 @@ class MetricsCollector:
                 "cache_hits": cache_hits,
                 "cache_misses": total_ops - cache_hits,
                 "hit_rate": round(hit_rate, 2),
-                "avg_time_ms": round(embedding_stats['avg_time_ms'], 1) if embedding_stats and embedding_stats['avg_time_ms'] else 0
+                "avg_time_ms": round(avg_time, 1) if avg_time else 0
             }
         }

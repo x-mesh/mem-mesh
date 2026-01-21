@@ -464,12 +464,19 @@ class MCPToolHandlers:
         logger.info("Tool pin_complete called", pin_id=pin_id)
         
         try:
-            from ..core.services.pin import PinService
+            from ..core.services.pin import PinService, PinAlreadyCompletedError
             
             db = self._get_database()
             pin_service = PinService(db)
             
-            result = await pin_service.complete_pin(pin_id)
+            try:
+                result = await pin_service.complete_pin(pin_id)
+            except PinAlreadyCompletedError:
+                # 이미 완료된 Pin - 현재 상태 반환
+                logger.info("Pin already completed, returning current state", pin_id=pin_id)
+                result = await pin_service.get_pin(pin_id)
+                if not result:
+                    raise ValueError(f"Pin not found: {pin_id}")
             
             # 승격 제안 여부 확인
             suggest_promotion = pin_service.should_suggest_promotion(result)
