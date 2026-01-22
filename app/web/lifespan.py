@@ -72,9 +72,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings = Settings()
         
         # 로깅 설정 정보 출력 (.env 파일 로드 후)
-        log_level = os.getenv("MCP_LOG_LEVEL", "INFO")
-        log_file = os.getenv("MCP_LOG_FILE", "")
-        log_format = os.getenv("MCP_LOG_FORMAT", "text")
+        log_level = os.getenv("MEM_MESH_LOG_LEVEL", os.getenv("MCP_LOG_LEVEL", "INFO"))
+        log_file = os.getenv("MEM_MESH_LOG_FILE", os.getenv("MCP_LOG_FILE", ""))
+        log_format = os.getenv("MEM_MESH_LOG_FORMAT", os.getenv("MCP_LOG_FORMAT", "text"))
+        log_output = os.getenv("MEM_MESH_LOG_OUTPUT", os.getenv("MCP_LOG_OUTPUT", "console"))
         
         logger.debug("Environment variables loaded", 
                     log_level=log_level,

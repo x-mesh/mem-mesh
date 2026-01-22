@@ -120,6 +120,18 @@ class Settings(BaseSettings):
         default="INFO",
         description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
     )
+    log_file: Optional[str] = Field(
+        default=None,
+        description="Log file path (None for console only)"
+    )
+    log_format: str = Field(
+        default="text",
+        description="Log format (text or json)"
+    )
+    log_output: str = Field(
+        default="console",
+        description="Log output destination (console, file, or both)"
+    )
     
     # Server configuration
     server_host: str = Field(
