@@ -1,0 +1,51 @@
+# mem-mesh Development Docker Image
+# Optimized for development with hot-reload and debugging
+
+FROM python:3.11-slim
+
+# Install development dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    make \
+    curl \
+    git \
+    vim \
+    libsqlite3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd -m -u 1000 -s /bin/bash memmesh
+
+# Set working directory
+WORKDIR /app
+
+# Copy dependency files
+COPY requirements.txt pyproject.toml ./
+
+# Install Python dependencies with dev extras
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir \
+        pytest>=7.4.0 \
+        pytest-asyncio>=0.21.0 \
+        hypothesis>=6.88.0 \
+        black>=23.0.0 \
+        isort>=5.12.0 \
+        ipython>=8.0.0 \
+        ipdb>=0.13.0
+
+# Copy application code
+COPY --chown=memmesh:memmesh . .
+
+# Create data directory
+RUN mkdir -p /app/data && chown -R memmesh:memmesh /app/data
+
+# Switch to non-root user
+USER memmesh
+
+# Expose ports
+EXPOSE 8000 8001
+
+# Default command: Run web server with reload
+CMD ["python", "-m", "app.web", "--reload"]

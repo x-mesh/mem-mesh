@@ -77,7 +77,90 @@ mem-mesh는 이제 두 가지 스토리지 모드를 지원합니다:
 
 ## 🚀 실행 가이드
 
-### 1. 기본 설정
+### 🐳 Docker로 실행 (권장)
+
+Docker를 사용하면 의존성 설치 없이 바로 실행할 수 있습니다.
+
+#### 빠른 시작
+
+```bash
+# 개발 환경 빌드 및 실행
+make build-dev
+make up-dev
+
+# 또는 한 번에
+make quickstart
+
+# 브라우저에서 접속: http://localhost:8000
+```
+
+#### 주요 명령어
+
+```bash
+# 빌드
+make build          # 프로덕션 이미지 빌드
+make build-dev      # 개발 이미지 빌드
+
+# 실행
+make up             # 프로덕션 컨테이너 시작
+make up-dev         # 개발 컨테이너 시작 (hot-reload)
+
+# 로그 확인
+make logs           # 모든 컨테이너 로그
+make logs-dev       # 개발 컨테이너 로그만
+
+# 컨테이너 접속
+make bash           # 프로덕션 컨테이너 bash
+make bash-dev       # 개발 컨테이너 bash
+
+# 테스트 실행
+make test           # 전체 테스트
+make test-unit      # 유닛 테스트만
+make test-integration  # 통합 테스트만
+
+# 상태 확인
+make health         # 컨테이너 상태 및 헬스체크
+
+# 정리
+make down           # 컨테이너 중지
+make clean          # 컨테이너 및 이미지 삭제
+make prune          # Docker 시스템 정리
+```
+
+#### Docker Compose 직접 사용
+
+```bash
+# 개발 환경
+docker-compose up -d mem-mesh-dev
+docker-compose logs -f mem-mesh-dev
+
+# 프로덕션 환경
+docker-compose up -d mem-mesh
+docker-compose logs -f mem-mesh
+
+# 컨테이너 중지
+docker-compose down
+```
+
+#### 디버깅
+
+```bash
+# 개발 컨테이너에서 bash 실행
+make bash-dev
+
+# 컨테이너 내부에서
+python -m app.web --reload        # 웹 서버 재시작
+python -m pytest tests/ -v        # 테스트 실행
+python -c "from app.web.app import app"  # 임포트 테스트
+```
+
+#### 데이터 영속성
+
+Docker 볼륨을 통해 데이터가 호스트에 저장됩니다:
+- `./data` - SQLite 데이터베이스
+- `./logs` - 로그 파일
+
+### 1. 로컬 설치 (Python)
 
 ```bash
 # 프로젝트 클론

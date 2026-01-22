@@ -1,0 +1,53 @@
+services:
+  # Production service
+  mem-mesh:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mem-mesh:latest
+    container_name: mem-mesh-prod
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - DATABASE_PATH=/app/data/memories.db
+      - LOG_LEVEL=INFO
+      - MCP_LOG_FORMAT=text
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Development service
+  mem-mesh-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: mem-mesh:dev
+    container_name: mem-mesh-dev
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    volumes:
+      - .:/app
+      - /app/__pycache__
+      - /app/.pytest_cache
+      - /app/.hypothesis
+    environment:
+      - DATABASE_PATH=/app/data/memories.db
+      - LOG_LEVEL=DEBUG
+      - MCP_LOG_FORMAT=text
+      - PYTHONUNBUFFERED=1
+    stdin_open: true
+    tty: true
+    command: python -m app.web --reload
+
+networks:
+  default:
+    name: mem-mesh-network
