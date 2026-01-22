@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 from sse_starlette.sse import EventSourceResponse
 
 from app.mcp_common.tools import MCPToolHandlers
@@ -236,6 +237,27 @@ async def handle_tools_call(params: Dict[str, Any]) -> Dict[str, Any]:
             }
         
         return {"content": [{"type": "text", "text": json.dumps(result)}]}
+    
+    except ValidationError as e:
+        # Pydantic 검증 오류를 사용자 친화적인 메시지로 변환
+        errors = e.errors()
+        error_messages = []
+        for error in errors:
+            field = ".".join(str(loc) for loc in error["loc"])
+            msg = error["msg"]
+            error_messages.append(f"{field}: {msg}")
+        
+        error_text = "; ".join(error_messages)
+        logger.warning(f"Validation error in tool {name}: {error_text}")
+        
+        return {
+            "content": [{"type": "text", "text": json.dumps({
+                "success": False, 
+                "error": f"Validation error: {error_text}",
+                "details": errors
+            })}],
+            "isError": True,
+        }
     
     except Exception as e:
         logger.exception(f"Error in tool {name}")
