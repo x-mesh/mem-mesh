@@ -1,0 +1,49 @@
+"""
+Dashboard 전용 FastAPI 애플리케이션.
+
+MCP SSE 엔드포인트를 제외한 웹 UI와 REST API만 제공합니다.
+"""
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from app.core.version import __VERSION__
+from app.web.lifespan import lifespan
+from app.web.common.middleware import setup_middleware, setup_exception_handlers
+from app.web.dashboard import routes as dashboard_routes
+from app.web.dashboard import pages as dashboard_pages
+from app.web.websocket import router as websocket_router
+from app.web.monitoring import router as monitoring_router
+
+
+templates = Jinja2Templates(directory="templates")
+
+
+def create_dashboard_app() -> FastAPI:
+    """Dashboard 전용 FastAPI 애플리케이션 생성"""
+    
+    app = FastAPI(
+        title="mem-mesh Dashboard",
+        description="Web Dashboard for mem-mesh memory management",
+        version=__VERSION__,
+        lifespan=lifespan
+    )
+    
+    setup_middleware(app)
+    setup_exception_handlers(app)
+    
+    # 정적 파일 서빙
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+    
+    # 라우터 등록 (MCP 제외)
+    app.include_router(websocket_router)
+    app.include_router(monitoring_router)
+    app.include_router(dashboard_routes.router)
+    app.include_router(dashboard_pages.router)
+    
+    return app
+
+
+# 앱 인스턴스
+app = create_dashboard_app()
