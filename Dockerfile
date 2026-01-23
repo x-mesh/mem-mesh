@@ -2,7 +2,7 @@
 # Multi-stage build for optimized production image
 
 # Stage 1: Builder
-FROM python:3.11-slim as builder
+FROM python:3.13-slim as builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -28,7 +28,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
 # Stage 2: Runtime
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
@@ -52,7 +52,7 @@ COPY --chown=memmesh:memmesh . .
 RUN mkdir -p /app/data && chown -R memmesh:memmesh /app/data
 
 # Switch to non-root user
-USER memmesh
+# USER memmesh
 
 # Expose ports
 # 8000: Web Dashboard + REST API
