@@ -1,7 +1,7 @@
 # mem-mesh Development Docker Image
 # Optimized for development with hot-reload and debugging
 
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 # Install development dependencies
 RUN apt-get update && apt-get install -y \
@@ -41,8 +41,6 @@ COPY --chown=memmesh:memmesh . .
 # Create data directory
 RUN mkdir -p /app/data && chown -R memmesh:memmesh /app/data
 
-# Switch to non-root user
-USER memmesh
 
 # Expose ports
 EXPOSE 8000 8001
