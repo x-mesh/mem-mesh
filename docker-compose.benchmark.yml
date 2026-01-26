@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with pgvector extension
+  postgres-pgvector:
+    image: ankane/pgvector:latest
+    container_name: mem-mesh-postgres
+    environment:
+      POSTGRES_USER: memesh
+      POSTGRES_PASSWORD: memesh_password
+      POSTGRES_DB: memesh
+      # PostgreSQL 성능 튜닝
+      POSTGRES_SHARED_BUFFERS: 256MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 1GB
+      POSTGRES_MAINTENANCE_WORK_MEM: 128MB
+      POSTGRES_WORK_MEM: 16MB
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memesh"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mem-mesh-benchmark
+
+  # Qdrant vector database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: mem-mesh-qdrant
+    ports:
+      - "6333:6333"  # HTTP API
+      - "6334:6334"  # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      # Qdrant 설정
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      # 성능 튜닝
+      QDRANT__STORAGE__PERFORMANCE__MAX_SEARCH_THREADS: 4
+      QDRANT__STORAGE__OPTIMIZERS__INDEXING_THRESHOLD: 10000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mem-mesh-benchmark
+
+  # pgAdmin (PostgreSQL 관리 도구 - 선택사항)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: mem-mesh-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@memesh.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres-pgvector
+    networks:
+      - mem-mesh-benchmark
+    profiles:
+      - tools  # docker-compose --profile tools up 으로 실행
+
+volumes:
+  postgres_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  mem-mesh-benchmark:
+    driver: bridge
