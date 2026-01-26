@@ -165,8 +165,8 @@ benchmark-up:
 	@echo "Starting benchmark environment (PostgreSQL + Qdrant)..."
 	docker-compose -f docker-compose.benchmark.yml up -d
 	@echo "Waiting for services to be ready..."
-	@sleep 5
-	@echo "PostgreSQL: localhost:5432 (user: memmesh, db: memmesh)"
+	@sleep 10
+	@echo "PostgreSQL: localhost:5432 (user: memesh, db: memesh)"
 	@echo "Qdrant: localhost:6333"
 
 benchmark-down:
@@ -178,15 +178,19 @@ benchmark-logs:
 
 benchmark-migrate-postgres:
 	@echo "Migrating data to PostgreSQL..."
-	python scripts/migrate_to_postgres.py
+	@echo "📦 Required: pip install asyncpg"
+	@python -c "import asyncpg" 2>/dev/null || (echo "❌ asyncpg not installed. Run: pip install asyncpg" && exit 1)
+	python scripts/migrate_to_postgres.py --pg-url "postgresql://memesh:memesh_password@localhost:5432/memesh"
 
 benchmark-migrate-qdrant:
 	@echo "Migrating data to Qdrant..."
-	python scripts/migrate_to_qdrant.py
+	@echo "📦 Required: pip install qdrant-client"
+	@python -c "import qdrant_client" 2>/dev/null || (echo "❌ qdrant-client not installed. Run: pip install qdrant-client" && exit 1)
+	python scripts/migrate_to_qdrant.py --qdrant-url "http://localhost:6333"
 
 benchmark-run:
 	@echo "Running vector database benchmark..."
-	python scripts/benchmark_vector_dbs.py
+	python scripts/benchmark_vector_dbs.py --dbs all --output benchmark_results.json
 
 benchmark-full: benchmark-up benchmark-migrate-postgres benchmark-migrate-qdrant benchmark-run
 	@echo "Full benchmark completed. Check results in benchmark_results.json"

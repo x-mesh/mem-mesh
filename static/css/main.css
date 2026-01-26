@@ -202,6 +202,11 @@ p {
   color: var(--text-secondary);
 }
 
+/* Global code element - preserve original case */
+code, pre, pre code, .inline-code {
+  text-transform: none !important;
+}
+
 /* Unified Page Header */
 .page-header {
   display: flex;
@@ -5996,6 +6001,7 @@ code.inline-code {
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
   font-size: 0.875em;
   border: 1px solid var(--border-color);
+  text-transform: none !important;
 }
 
 /* Code block container */
@@ -6018,6 +6024,7 @@ pre code {
   font-size: 0.875rem;
   line-height: 1.6;
   display: block;
+  text-transform: none !important;
 }
 
 /* Line numbers styling */

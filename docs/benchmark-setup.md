@@ -4,6 +4,21 @@ PostgreSQL (pgvector)와 Qdrant를 Docker Compose로 실행하는 가이드
 
 ## 빠른 시작
 
+### 0. 필수 패키지 설치
+
+벤치마크를 실행하기 전에 필요한 Python 패키지를 설치하세요:
+
+```bash
+# 벤치마크용 패키지 설치
+pip install asyncpg qdrant-client
+
+# 또는 requirements.txt에서 주석 해제 후 설치
+# requirements.txt에서 다음 줄의 주석(#)을 제거:
+# asyncpg>=0.29.0
+# qdrant-client>=1.7.0
+pip install -r requirements.txt
+```
+
 ### 1. 벤치마크 환경 실행
 
 ```bash
@@ -32,10 +47,9 @@ docker exec mem-mesh-postgres psql -U memesh -d memesh -c "SELECT version(); SEL
 
 ### 3. 데이터 마이그레이션
 
-```bash
-# Python 패키지 설치
-pip install asyncpg qdrant-client
+**주의:** 마이그레이션 전에 필수 패키지가 설치되어 있어야 합니다 (위의 0단계 참조).
 
+```bash
 # PostgreSQL로 마이그레이션
 python scripts/migrate_to_postgres.py \
   --pg-url "postgresql://memesh:memesh_password@localhost:5432/memesh"
@@ -46,16 +60,38 @@ python scripts/migrate_to_qdrant.py \
   --test-search
 ```
 
-### 4. 벤치마크 실행
+**Makefile 사용 (권장):**
 
 ```bash
-# 모든 DB 벤치마크
+# 패키지 설치 확인 포함
+make benchmark-migrate-postgres
+make benchmark-migrate-qdrant
+```
+
+### 4. 벤치마크 실행
+
+**주의:** 현재 PostgreSQL과 Qdrant 벤치마크는 구현 중입니다. SQLite-vec 벤치마크만 사용 가능합니다.
+
+```bash
+# SQLite-vec 벤치마크 (현재 사용 가능)
 python scripts/benchmark_vector_dbs.py \
-  --dbs all \
+  --dbs sqlite \
   --output benchmark_results.json
 
 # 결과 확인
 cat benchmark_results.json | python -m json.tool
+```
+
+**Makefile 사용:**
+
+```bash
+make benchmark-run
+```
+
+**전체 파이프라인 (환경 시작 → 마이그레이션 → 벤치마크):**
+
+```bash
+make benchmark-full
 ```
 
 ## 서비스 정보

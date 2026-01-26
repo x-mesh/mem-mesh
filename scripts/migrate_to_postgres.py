@@ -73,19 +73,52 @@ class PostgreSQLMigrator:
             )
         """)
         
-        # 인덱스 생성
+        # 기본 인덱스 생성 (벡터 인덱스는 데이터 삽입 후 생성)
         await self.pg_conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_memories_project_id 
             ON memories(project_id)
         """)
         
         await self.pg_conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_memories_embedding 
-            ON memories USING ivfflat (embedding vector_cosine_ops)
-            WITH (lists = 100)
+            CREATE INDEX IF NOT EXISTS idx_memories_created_at 
+            ON memories(created_at)
+        """)
+        
+        await self.pg_conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_memories_category 
+            ON memories(category)
+        """)
+        
+        await self.pg_conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_memories_content_hash 
+            ON memories(content_hash)
         """)
         
         print("  ✓ 테이블 생성 완료")
+    
+    async def create_vector_index(self):
+        """벡터 인덱스 생성 (데이터 삽입 후 호출)"""
+        print("\n벡터 인덱스 생성 중...")
+        
+        # 기존 인덱스 삭제 후 재생성 (IVFFlat은 데이터가 있어야 함)
+        await self.pg_conn.execute("DROP INDEX IF EXISTS idx_memories_embedding")
+        
+        # 데이터 수에 따라 lists 파라미터 조정
+        count = await self.pg_conn.fetchval(
+            "SELECT COUNT(*) FROM memories WHERE embedding IS NOT NULL"
+        )
+        
+        # lists = sqrt(n) 권장, 최소 1
+        lists = max(1, int(count ** 0.5))
+        print(f"  데이터 수: {count}, lists: {lists}")
+        
+        await self.pg_conn.execute(f"""
+            CREATE INDEX idx_memories_embedding 
+            ON memories USING ivfflat (embedding vector_cosine_ops)
+            WITH (lists = {lists})
+        """)
+        
+        print("  ✓ 벡터 인덱스 생성 완료")
     
     async def migrate_data(self, batch_size: int = 100):
         """데이터 마이그레이션"""
@@ -113,27 +146,37 @@ class PostgreSQLMigrator:
             
             # PostgreSQL에 삽입
             for row in batch:
-                # 임베딩 변환 (bytes → list)
+                # 임베딩 변환 (bytes → list → string)
                 embedding = None
                 if row["embedding"]:
                     import struct
                     embedding_bytes = row["embedding"]
-                    embedding = list(struct.unpack(
+                    embedding_list = list(struct.unpack(
                         f'{len(embedding_bytes)//4}f',
                         embedding_bytes
                     ))
+                    # pgvector는 문자열 형식 필요: '[0.1, 0.2, ...]'
+                    embedding = str(embedding_list)
+                
+                # datetime 변환 (str → datetime, timezone-naive로 변환)
+                from datetime import datetime
+                created_at = datetime.fromisoformat(row["created_at"].replace('Z', '+00:00'))
+                updated_at = datetime.fromisoformat(row["updated_at"].replace('Z', '+00:00'))
+                # PostgreSQL TIMESTAMP는 timezone-naive 필요
+                created_at = created_at.replace(tzinfo=None)
+                updated_at = updated_at.replace(tzinfo=None)
                 
                 await self.pg_conn.execute(
                     """
                     INSERT INTO memories 
                     (id, content, content_hash, project_id, category, source, 
                      embedding, tags, created_at, updated_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8, $9, $10)
                     ON CONFLICT (id) DO NOTHING
                     """,
                     row["id"], row["content"], row["content_hash"],
                     row["project_id"], row["category"], row["source"],
-                    embedding, row["tags"], row["created_at"], row["updated_at"]
+                    embedding, row["tags"], created_at, updated_at
                 )
             
             print(f"  진행: {min(i + batch_size, total)}/{total}")
@@ -189,6 +232,7 @@ async def main():
         await migrator.setup()
         await migrator.create_tables()
         await migrator.migrate_data(args.batch_size)
+        await migrator.create_vector_index()  # 데이터 삽입 후 벡터 인덱스 생성
         await migrator.verify()
         
         print("\n✅ 마이그레이션 완료!")

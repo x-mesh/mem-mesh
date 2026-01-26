@@ -1,0 +1,548 @@
+{
+  "sqlite-vec": [
+    {
+      "db_type": "sqlite-vec",
+      "query_id": "q1",
+      "query": "MCP 설정 방법",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 5.003690719604492,
+      "results": [
+        {
+          "id": "5f4678b7-a678-4649-acab-5e4031a89d0f",
+          "content": "## 세션 요약 (2026-01-14)\n\n### 주요 작업 내용\n\n1. **코드베이스 분석 및 이해**\n   - mem-mesh 프로젝트의 전체 구조 파악\n   - 60개 이상의 ",
+          "similarity": 0.6582380831241608
+        },
+        {
+          "id": "0a4499a6-6e44-4610-92f5-17234f6a45e1",
+          "content": "MCP 검증 오류 처리 개선 - Pydantic ValidationError를 MCP 에러로 변환",
+          "similarity": 0.6534703075885773
+        },
+        {
+          "id": "22eee58e-0ee7-4c6d-a12e-b95e9056e7f4",
+          "content": "# 프롬프트 효율화 및 검색 품질 개선 작업 완료\n\n## 작업 내용\n\n### 1. Pure MCP 서버에 Work Tracking 도구 추가\n**파일**: `app/mcp_stdi",
+          "similarity": 0.6402164995670319
+        },
+        {
+          "id": "27261e88-f779-4764-9924-1c51300867e5",
+          "content": "# Pure MCP 서버에 batch_operations 추가 완료\n\n## 작업 내용\n\n### 1. Pure MCP 서버 업데이트\n**파일**: `app/mcp_stdio_pure",
+          "similarity": 0.6386032998561859
+        },
+        {
+          "id": "c7fb168b-9a5d-4d2f-aa63-8db084a13cab",
+          "content": "Enhanced MCP tools in app/mcp_stdio/server.py\n\n            New tools added:\n            - batch_add_",
+          "similarity": 0.6203140616416931
+        }
+      ]
+    },
+    {
+      "db_type": "sqlite-vec",
+      "query_id": "q2",
+      "query": "데이터베이스 마이그레이션",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 1.9688606262207031,
+      "results": [
+        {
+          "id": "33c84a6d-b068-4794-ac9a-cdd97fe1c995",
+          "content": "Q: data_macbook의 데이터베이스도 동기화하는 방법은?\n\nA: 범용 데이터베이스 동기화 스크립트 작성 및 실행\n\n## 작업 내용\n\n### 1. 범용 스크립트 작성: scr",
+          "similarity": 0.6223377287387848
+        },
+        {
+          "id": "63b5fa1f-5b77-480f-b007-3907903966e8",
+          "content": "Q: Analytics 페이지에서 총 메모리 수가 실제 DB 값과 다르게 표시되는 문제 해결\n\nA: \n**문제**: `/api/memories/search` API의 limit 파",
+          "similarity": 0.5705714821815491
+        },
+        {
+          "id": "204797f8-eae8-425d-90c4-e0172b2b0d22",
+          "content": "# Session Summary: Analytics 페이지 개선 및 UI 국제화\n\n## 주요 작업 내용\n\n### 1. Analytics 페이지 데이터 정확성 개선\n**문제**: \n",
+          "similarity": 0.5567562878131866
+        },
+        {
+          "id": "bcdcef30-6fd7-47e3-aff2-8987fc3cd8c9",
+          "content": "Q: data_macmini의 데이터베이스에서 data에 없는 메모리를 어떻게 동기화하나요?\n\nA: SQLite 데이터베이스 간 메모리 동기화 스크립트 작성 및 실행\n\n## 문제 ",
+          "similarity": 0.5549764633178711
+        },
+        {
+          "id": "6576f7ef-8140-49c2-8083-77db290e9aa1",
+          "content": "## 대화 세션: 통계 최적화 및 자동 저장 시스템 구축\n\n### 배경 (WHY)\n- 프로젝트 페이지에서 통계값 부정확 (Total: 1000개, Projects: 14개)\n- 실",
+          "similarity": 0.5492605566978455
+        }
+      ]
+    },
+    {
+      "db_type": "sqlite-vec",
+      "query_id": "q3",
+      "query": "검색 품질 개선",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 1.9977092742919922,
+      "results": [
+        {
+          "id": "8b0a3916-916f-4991-b337-e3f14962642b",
+          "content": "검색 품질 개선 방안 구현 - 임베딩 점수 정규화 및 첫 검색 성능 최적화",
+          "similarity": 0.9008970037102699
+        },
+        {
+          "id": "efaec457-7942-453c-8d39-fc4ee02d2854",
+          "content": "검색 결과 품질 메트릭 수집 시스템 구현 - 실시간 검색 통계 및 품질 지표 추적",
+          "similarity": 0.7850834131240845
+        },
+        {
+          "id": "0d59102f-e4d6-41de-8195-c6373def9e61",
+          "content": "검색 품질 개선 방안 구현 - Score Normalization (5배 증가), Search Warmup (45,880배 개선)",
+          "similarity": 0.7831445038318634
+        },
+        {
+          "id": "64fb7c10-0056-41db-9450-ea55c42f1e20",
+          "content": "검색 품질 즉시 개선: 노이즈 필터 완성, 스코어링 통합, MCP 품질 필터 적용",
+          "similarity": 0.7419658303260803
+        },
+        {
+          "id": "b8702303-d8ff-4049-b3a8-357c48ee5284",
+          "content": "Measured search quality improvements:\n\n            Accuracy Metrics:\n            - Category accuracy",
+          "similarity": 0.7412045896053314
+        }
+      ]
+    },
+    {
+      "db_type": "sqlite-vec",
+      "query_id": "q4",
+      "query": "서버 실행 모드",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 2.2020339965820312,
+      "results": [
+        {
+          "id": "740b5b48-e376-48c0-aba2-5e808fd54a67",
+          "content": "Q: Uvicorn 멀티 워커 모드에서 서버 시작 시 로그가 워커 수만큼 중복 출력되는 이유\n\nA: 각 워커 프로세스가 독립적으로 lifespan을 실행하여 초기화가 워커 수만큼 ",
+          "similarity": 0.4908549189567566
+        },
+        {
+          "id": "2e388c68-6f35-4479-b729-81265352d883",
+          "content": "MCP SSE 세션 SQLite 영속화 검토: 불필요로 결정. asyncio.Queue는 직렬화 불가, 서버 재시작 시 SSE 연결 자체가 끊어져 클라이언트 재연결 필수. auto",
+          "similarity": 0.48768311738967896
+        },
+        {
+          "id": "87c7faa7-65b1-4a01-98b2-26e8d42ac701",
+          "content": "Q: mem-mesh 서버 실행 모드 분리 - Dashboard와 MCP SSE를 별도 프로세스로 실행하는 방법\n\nA: 보안과 유연성을 위해 python -m 모듈별 진입점을 구현",
+          "similarity": 0.476362407207489
+        },
+        {
+          "id": "ca61c4bc-220b-4605-bf69-c445a424bd0a",
+          "content": "MCP SSE Session not found 에러 분석: mem-mesh는 2단계 SSE 프로토콜 사용 (GET /mcp/sse로 세션 생성 → POST /mcp/message로",
+          "similarity": 0.4756394028663635
+        },
+        {
+          "id": "4e35d6c7-dc5e-4890-bf0c-e93d907d7a16",
+          "content": "UnifiedSearchService 통합 가이드 및 마이그레이션 문서 작성",
+          "similarity": 0.4740232825279236
+        }
+      ]
+    },
+    {
+      "db_type": "sqlite-vec",
+      "query_id": "q5",
+      "query": "벡터 임베딩 모델",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 2.257823944091797,
+      "results": [
+        {
+          "id": "0d5a2668-2e38-4413-9a19-93504c35c6ce",
+          "content": "# Score Normalization (점수 정규화) 개념 설명\n\n## 정의\nScore Normalization은 임베딩 벡터 간의 유사도 점수를 더 직관적이고 사용하기 쉬운 범",
+          "similarity": 0.4225822687149048
+        },
+        {
+          "id": "e0602ef0-d8c4-46f9-85bc-71ee0137888f",
+          "content": "Q: Pins를 활용한 세션 컨텍스트 관리 전략 - 토큰 절약 및 맥락 유지 방법\n\nA: Pins 시스템을 활용한 계층적 메모리 관리 전략\n\n핵심 개념:\n- 단기 메모리: Pins",
+          "similarity": 0.3864661455154419
+        },
+        {
+          "id": "f71d1396-69ec-43da-9bc3-71e58df0106f",
+          "content": "mem-mesh는 개발자용 메모리 관리 시스템으로, 벡터 검색과 맥락 조회 기능을 제공합니다. MCP (Model Context Protocol)를 통합하여 AI 도구들과 연동되며",
+          "similarity": 0.3785099387168884
+        },
+        {
+          "id": "ca9d85d3-2eef-4c8c-a1cf-562b812d1dcd",
+          "content": "컨텍스트 최적화 전략 수립 - Pins 기반 세션 관리, 토큰 95% 절감 (8000→350 토큰)",
+          "similarity": 0.36935877799987793
+        },
+        {
+          "id": "669afd4f-8fb7-469b-b85c-cc25bd1f8e49",
+          "content": "한국어 검색 품질 문제 진단 및 해결\n\n        문제 현상:\n        - \"토큰\"으로 검색 시 전혀 관련 없는 결과 출력\n        - mem-mesh-optimiz",
+          "similarity": 0.36885154247283936
+        }
+      ]
+    }
+  ],
+  "postgresql": [
+    {
+      "db_type": "postgresql",
+      "query_id": "q1",
+      "query": "MCP 설정 방법",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 21.325111389160156,
+      "results": [
+        {
+          "id": "5f4678b7-a678-4649-acab-5e4031a89d0f",
+          "content": "## 세션 요약 (2026-01-14)\n\n### 주요 작업 내용\n\n1. **코드베이스 분석 및 이해**\n   - mem-mesh 프로젝트의 전체 구조 파악\n   - 60개 이상의 ",
+          "similarity": 0.6582377502730196
+        },
+        {
+          "id": "0a4499a6-6e44-4610-92f5-17234f6a45e1",
+          "content": "MCP 검증 오류 처리 개선 - Pydantic ValidationError를 MCP 에러로 변환",
+          "similarity": 0.6534705737024561
+        },
+        {
+          "id": "22eee58e-0ee7-4c6d-a12e-b95e9056e7f4",
+          "content": "# 프롬프트 효율화 및 검색 품질 개선 작업 완료\n\n## 작업 내용\n\n### 1. Pure MCP 서버에 Work Tracking 도구 추가\n**파일**: `app/mcp_stdi",
+          "similarity": 0.6402163870013612
+        },
+        {
+          "id": "27261e88-f779-4764-9924-1c51300867e5",
+          "content": "# Pure MCP 서버에 batch_operations 추가 완료\n\n## 작업 내용\n\n### 1. Pure MCP 서버 업데이트\n**파일**: `app/mcp_stdio_pure",
+          "similarity": 0.6386031475497533
+        },
+        {
+          "id": "c7fb168b-9a5d-4d2f-aa63-8db084a13cab",
+          "content": "Enhanced MCP tools in app/mcp_stdio/server.py\n\n            New tools added:\n            - batch_add_",
+          "similarity": 0.6203138164165657
+        }
+      ]
+    },
+    {
+      "db_type": "postgresql",
+      "query_id": "q2",
+      "query": "데이터베이스 마이그레이션",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 2.398967742919922,
+      "results": [
+        {
+          "id": "33c84a6d-b068-4794-ac9a-cdd97fe1c995",
+          "content": "Q: data_macbook의 데이터베이스도 동기화하는 방법은?\n\nA: 범용 데이터베이스 동기화 스크립트 작성 및 실행\n\n## 작업 내용\n\n### 1. 범용 스크립트 작성: scr",
+          "similarity": 0.6223377214446618
+        },
+        {
+          "id": "63b5fa1f-5b77-480f-b007-3907903966e8",
+          "content": "Q: Analytics 페이지에서 총 메모리 수가 실제 DB 값과 다르게 표시되는 문제 해결\n\nA: \n**문제**: `/api/memories/search` API의 limit 파",
+          "similarity": 0.5705713994834668
+        },
+        {
+          "id": "204797f8-eae8-425d-90c4-e0172b2b0d22",
+          "content": "# Session Summary: Analytics 페이지 개선 및 UI 국제화\n\n## 주요 작업 내용\n\n### 1. Analytics 페이지 데이터 정확성 개선\n**문제**: \n",
+          "similarity": 0.5567561653335331
+        },
+        {
+          "id": "bcdcef30-6fd7-47e3-aff2-8987fc3cd8c9",
+          "content": "Q: data_macmini의 데이터베이스에서 data에 없는 메모리를 어떻게 동기화하나요?\n\nA: SQLite 데이터베이스 간 메모리 동기화 스크립트 작성 및 실행\n\n## 문제 ",
+          "similarity": 0.5549765460470227
+        },
+        {
+          "id": "6576f7ef-8140-49c2-8083-77db290e9aa1",
+          "content": "## 대화 세션: 통계 최적화 및 자동 저장 시스템 구축\n\n### 배경 (WHY)\n- 프로젝트 페이지에서 통계값 부정확 (Total: 1000개, Projects: 14개)\n- 실",
+          "similarity": 0.5492604744896209
+        }
+      ]
+    },
+    {
+      "db_type": "postgresql",
+      "query_id": "q3",
+      "query": "검색 품질 개선",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 3.3271312713623047,
+      "results": [
+        {
+          "id": "8b0a3916-916f-4991-b337-e3f14962642b",
+          "content": "검색 품질 개선 방안 구현 - 임베딩 점수 정규화 및 첫 검색 성능 최적화",
+          "similarity": 0.900897343312995
+        },
+        {
+          "id": "efaec457-7942-453c-8d39-fc4ee02d2854",
+          "content": "검색 결과 품질 메트릭 수집 시스템 구현 - 실시간 검색 통계 및 품질 지표 추적",
+          "similarity": 0.7850831116236109
+        },
+        {
+          "id": "0d59102f-e4d6-41de-8195-c6373def9e61",
+          "content": "검색 품질 개선 방안 구현 - Score Normalization (5배 증가), Search Warmup (45,880배 개선)",
+          "similarity": 0.7831445266544347
+        },
+        {
+          "id": "64fb7c10-0056-41db-9450-ea55c42f1e20",
+          "content": "검색 품질 즉시 개선: 노이즈 필터 완성, 스코어링 통합, MCP 품질 필터 적용",
+          "similarity": 0.7419656002725535
+        },
+        {
+          "id": "b8702303-d8ff-4049-b3a8-357c48ee5284",
+          "content": "Measured search quality improvements:\n\n            Accuracy Metrics:\n            - Category accuracy",
+          "similarity": 0.7412042612353532
+        }
+      ]
+    },
+    {
+      "db_type": "postgresql",
+      "query_id": "q4",
+      "query": "서버 실행 모드",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 4.569768905639648,
+      "results": [
+        {
+          "id": "740b5b48-e376-48c0-aba2-5e808fd54a67",
+          "content": "Q: Uvicorn 멀티 워커 모드에서 서버 시작 시 로그가 워커 수만큼 중복 출력되는 이유\n\nA: 각 워커 프로세스가 독립적으로 lifespan을 실행하여 초기화가 워커 수만큼 ",
+          "similarity": 0.4908548069147566
+        },
+        {
+          "id": "2e388c68-6f35-4479-b729-81265352d883",
+          "content": "MCP SSE 세션 SQLite 영속화 검토: 불필요로 결정. asyncio.Queue는 직렬화 불가, 서버 재시작 시 SSE 연결 자체가 끊어져 클라이언트 재연결 필수. auto",
+          "similarity": 0.48768315604249657
+        },
+        {
+          "id": "87c7faa7-65b1-4a01-98b2-26e8d42ac701",
+          "content": "Q: mem-mesh 서버 실행 모드 분리 - Dashboard와 MCP SSE를 별도 프로세스로 실행하는 방법\n\nA: 보안과 유연성을 위해 python -m 모듈별 진입점을 구현",
+          "similarity": 0.4763624539037543
+        },
+        {
+          "id": "ca61c4bc-220b-4605-bf69-c445a424bd0a",
+          "content": "MCP SSE Session not found 에러 분석: mem-mesh는 2단계 SSE 프로토콜 사용 (GET /mcp/sse로 세션 생성 → POST /mcp/message로",
+          "similarity": 0.47563935865919604
+        },
+        {
+          "id": "4e35d6c7-dc5e-4890-bf0c-e93d907d7a16",
+          "content": "UnifiedSearchService 통합 가이드 및 마이그레이션 문서 작성",
+          "similarity": 0.4740236525723114
+        }
+      ]
+    },
+    {
+      "db_type": "postgresql",
+      "query_id": "q5",
+      "query": "벡터 임베딩 모델",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 2.9060840606689453,
+      "results": [
+        {
+          "id": "0d5a2668-2e38-4413-9a19-93504c35c6ce",
+          "content": "# Score Normalization (점수 정규화) 개념 설명\n\n## 정의\nScore Normalization은 임베딩 벡터 간의 유사도 점수를 더 직관적이고 사용하기 쉬운 범",
+          "similarity": 0.42258227041717045
+        },
+        {
+          "id": "e0602ef0-d8c4-46f9-85bc-71ee0137888f",
+          "content": "Q: Pins를 활용한 세션 컨텍스트 관리 전략 - 토큰 절약 및 맥락 유지 방법\n\nA: Pins 시스템을 활용한 계층적 메모리 관리 전략\n\n핵심 개념:\n- 단기 메모리: Pins",
+          "similarity": 0.3864658191432663
+        },
+        {
+          "id": "f71d1396-69ec-43da-9bc3-71e58df0106f",
+          "content": "mem-mesh는 개발자용 메모리 관리 시스템으로, 벡터 검색과 맥락 조회 기능을 제공합니다. MCP (Model Context Protocol)를 통합하여 AI 도구들과 연동되며",
+          "similarity": 0.37851006181820146
+        },
+        {
+          "id": "ca9d85d3-2eef-4c8c-a1cf-562b812d1dcd",
+          "content": "컨텍스트 최적화 전략 수립 - Pins 기반 세션 관리, 토큰 95% 절감 (8000→350 토큰)",
+          "similarity": 0.369358748738551
+        },
+        {
+          "id": "669afd4f-8fb7-469b-b85c-cc25bd1f8e49",
+          "content": "한국어 검색 품질 문제 진단 및 해결\n\n        문제 현상:\n        - \"토큰\"으로 검색 시 전혀 관련 없는 결과 출력\n        - mem-mesh-optimiz",
+          "similarity": 0.3688514921862216
+        }
+      ]
+    }
+  ],
+  "qdrant": [
+    {
+      "db_type": "qdrant",
+      "query_id": "q1",
+      "query": "MCP 설정 방법",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 23.031949996948242,
+      "results": [
+        {
+          "id": "5f4678b7-a678-4649-acab-5e4031a89d0f",
+          "content": "## 세션 요약 (2026-01-14)\n\n### 주요 작업 내용\n\n1. **코드베이스 분석 및 이해**\n   - mem-mesh 프로젝트의 전체 구조 파악\n   - 60개 이상의 ",
+          "similarity": 0.65823764
+        },
+        {
+          "id": "0a4499a6-6e44-4610-92f5-17234f6a45e1",
+          "content": "MCP 검증 오류 처리 개선 - Pydantic ValidationError를 MCP 에러로 변환",
+          "similarity": 0.6534705
+        },
+        {
+          "id": "22eee58e-0ee7-4c6d-a12e-b95e9056e7f4",
+          "content": "# 프롬프트 효율화 및 검색 품질 개선 작업 완료\n\n## 작업 내용\n\n### 1. Pure MCP 서버에 Work Tracking 도구 추가\n**파일**: `app/mcp_stdi",
+          "similarity": 0.64021635
+        },
+        {
+          "id": "27261e88-f779-4764-9924-1c51300867e5",
+          "content": "# Pure MCP 서버에 batch_operations 추가 완료\n\n## 작업 내용\n\n### 1. Pure MCP 서버 업데이트\n**파일**: `app/mcp_stdio_pure",
+          "similarity": 0.6386032
+        },
+        {
+          "id": "c7fb168b-9a5d-4d2f-aa63-8db084a13cab",
+          "content": "Enhanced MCP tools in app/mcp_stdio/server.py\n\n            New tools added:\n            - batch_add_",
+          "similarity": 0.6203139
+        }
+      ]
+    },
+    {
+      "db_type": "qdrant",
+      "query_id": "q2",
+      "query": "데이터베이스 마이그레이션",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 6.638765335083008,
+      "results": [
+        {
+          "id": "33c84a6d-b068-4794-ac9a-cdd97fe1c995",
+          "content": "Q: data_macbook의 데이터베이스도 동기화하는 방법은?\n\nA: 범용 데이터베이스 동기화 스크립트 작성 및 실행\n\n## 작업 내용\n\n### 1. 범용 스크립트 작성: scr",
+          "similarity": 0.62233776
+        },
+        {
+          "id": "63b5fa1f-5b77-480f-b007-3907903966e8",
+          "content": "Q: Analytics 페이지에서 총 메모리 수가 실제 DB 값과 다르게 표시되는 문제 해결\n\nA: \n**문제**: `/api/memories/search` API의 limit 파",
+          "similarity": 0.5705714
+        },
+        {
+          "id": "204797f8-eae8-425d-90c4-e0172b2b0d22",
+          "content": "# Session Summary: Analytics 페이지 개선 및 UI 국제화\n\n## 주요 작업 내용\n\n### 1. Analytics 페이지 데이터 정확성 개선\n**문제**: \n",
+          "similarity": 0.55675626
+        },
+        {
+          "id": "bcdcef30-6fd7-47e3-aff2-8987fc3cd8c9",
+          "content": "Q: data_macmini의 데이터베이스에서 data에 없는 메모리를 어떻게 동기화하나요?\n\nA: SQLite 데이터베이스 간 메모리 동기화 스크립트 작성 및 실행\n\n## 문제 ",
+          "similarity": 0.55497646
+        },
+        {
+          "id": "6576f7ef-8140-49c2-8083-77db290e9aa1",
+          "content": "## 대화 세션: 통계 최적화 및 자동 저장 시스템 구축\n\n### 배경 (WHY)\n- 프로젝트 페이지에서 통계값 부정확 (Total: 1000개, Projects: 14개)\n- 실",
+          "similarity": 0.5492605
+        }
+      ]
+    },
+    {
+      "db_type": "qdrant",
+      "query_id": "q3",
+      "query": "검색 품질 개선",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 5.2738189697265625,
+      "results": [
+        {
+          "id": "8b0a3916-916f-4991-b337-e3f14962642b",
+          "content": "검색 품질 개선 방안 구현 - 임베딩 점수 정규화 및 첫 검색 성능 최적화",
+          "similarity": 0.9008972
+        },
+        {
+          "id": "efaec457-7942-453c-8d39-fc4ee02d2854",
+          "content": "검색 결과 품질 메트릭 수집 시스템 구현 - 실시간 검색 통계 및 품질 지표 추적",
+          "similarity": 0.7850832
+        },
+        {
+          "id": "0d59102f-e4d6-41de-8195-c6373def9e61",
+          "content": "검색 품질 개선 방안 구현 - Score Normalization (5배 증가), Search Warmup (45,880배 개선)",
+          "similarity": 0.7831445
+        },
+        {
+          "id": "64fb7c10-0056-41db-9450-ea55c42f1e20",
+          "content": "검색 품질 즉시 개선: 노이즈 필터 완성, 스코어링 통합, MCP 품질 필터 적용",
+          "similarity": 0.74196565
+        },
+        {
+          "id": "b8702303-d8ff-4049-b3a8-357c48ee5284",
+          "content": "Measured search quality improvements:\n\n            Accuracy Metrics:\n            - Category accuracy",
+          "similarity": 0.7412043
+        }
+      ]
+    },
+    {
+      "db_type": "qdrant",
+      "query_id": "q4",
+      "query": "서버 실행 모드",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 5.708932876586914,
+      "results": [
+        {
+          "id": "740b5b48-e376-48c0-aba2-5e808fd54a67",
+          "content": "Q: Uvicorn 멀티 워커 모드에서 서버 시작 시 로그가 워커 수만큼 중복 출력되는 이유\n\nA: 각 워커 프로세스가 독립적으로 lifespan을 실행하여 초기화가 워커 수만큼 ",
+          "similarity": 0.49085486
+        },
+        {
+          "id": "2e388c68-6f35-4479-b729-81265352d883",
+          "content": "MCP SSE 세션 SQLite 영속화 검토: 불필요로 결정. asyncio.Queue는 직렬화 불가, 서버 재시작 시 SSE 연결 자체가 끊어져 클라이언트 재연결 필수. auto",
+          "similarity": 0.4876831
+        },
+        {
+          "id": "87c7faa7-65b1-4a01-98b2-26e8d42ac701",
+          "content": "Q: mem-mesh 서버 실행 모드 분리 - Dashboard와 MCP SSE를 별도 프로세스로 실행하는 방법\n\nA: 보안과 유연성을 위해 python -m 모듈별 진입점을 구현",
+          "similarity": 0.47636238
+        },
+        {
+          "id": "ca61c4bc-220b-4605-bf69-c445a424bd0a",
+          "content": "MCP SSE Session not found 에러 분석: mem-mesh는 2단계 SSE 프로토콜 사용 (GET /mcp/sse로 세션 생성 → POST /mcp/message로",
+          "similarity": 0.47563928
+        },
+        {
+          "id": "4e35d6c7-dc5e-4890-bf0c-e93d907d7a16",
+          "content": "UnifiedSearchService 통합 가이드 및 마이그레이션 문서 작성",
+          "similarity": 0.47402367
+        }
+      ]
+    },
+    {
+      "db_type": "qdrant",
+      "query_id": "q5",
+      "query": "벡터 임베딩 모델",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "query_time_ms": 14.65606689453125,
+      "results": [
+        {
+          "id": "0d5a2668-2e38-4413-9a19-93504c35c6ce",
+          "content": "# Score Normalization (점수 정규화) 개념 설명\n\n## 정의\nScore Normalization은 임베딩 벡터 간의 유사도 점수를 더 직관적이고 사용하기 쉬운 범",
+          "similarity": 0.42258227
+        },
+        {
+          "id": "e0602ef0-d8c4-46f9-85bc-71ee0137888f",
+          "content": "Q: Pins를 활용한 세션 컨텍스트 관리 전략 - 토큰 절약 및 맥락 유지 방법\n\nA: Pins 시스템을 활용한 계층적 메모리 관리 전략\n\n핵심 개념:\n- 단기 메모리: Pins",
+          "similarity": 0.38646585
+        },
+        {
+          "id": "f71d1396-69ec-43da-9bc3-71e58df0106f",
+          "content": "mem-mesh는 개발자용 메모리 관리 시스템으로, 벡터 검색과 맥락 조회 기능을 제공합니다. MCP (Model Context Protocol)를 통합하여 AI 도구들과 연동되며",
+          "similarity": 0.37851006
+        },
+        {
+          "id": "ca9d85d3-2eef-4c8c-a1cf-562b812d1dcd",
+          "content": "컨텍스트 최적화 전략 수립 - Pins 기반 세션 관리, 토큰 95% 절감 (8000→350 토큰)",
+          "similarity": 0.36935872
+        },
+        {
+          "id": "669afd4f-8fb7-469b-b85c-cc25bd1f8e49",
+          "content": "한국어 검색 품질 문제 진단 및 해결\n\n        문제 현상:\n        - \"토큰\"으로 검색 시 전혀 관련 없는 결과 출력\n        - mem-mesh-optimiz",
+          "similarity": 0.36885142
+        }
+      ]
+    }
+  ]
+}

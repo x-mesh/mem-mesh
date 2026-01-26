@@ -37,6 +37,11 @@ numpy>=1.24.0
 psutil>=5.9.0
 scipy>=1.11.0
 
+# Benchmark dependencies (optional)
+# Uncomment for vector database benchmarking
+# asyncpg>=0.29.0          # PostgreSQL with pgvector
+# qdrant-client>=1.7.0     # Qdrant vector database
+
 # Development dependencies (optional)
 # Uncomment for development setup
 # pytest>=7.4.0

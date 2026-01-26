@@ -113,23 +113,28 @@ class QdrantMigrator:
                         embedding_bytes
                     ))
                 
-                if embedding:
-                    # Qdrant Point 생성
-                    point = PointStruct(
-                        id=row["id"],
-                        vector=embedding,
-                        payload={
-                            "content": row["content"],
-                            "content_hash": row["content_hash"],
-                            "project_id": row["project_id"],
-                            "category": row["category"],
-                            "source": row["source"],
-                            "tags": row["tags"],
-                            "created_at": row["created_at"],
-                            "updated_at": row["updated_at"]
-                        }
-                    )
-                    points.append(point)
+                # 임베딩이 없어도 Point 생성 (zero vector 사용)
+                if not embedding:
+                    # 임베딩이 없으면 zero vector 사용
+                    embedding = [0.0] * 384
+                
+                # Qdrant Point 생성
+                point = PointStruct(
+                    id=row["id"],
+                    vector=embedding,
+                    payload={
+                        "content": row["content"],
+                        "content_hash": row["content_hash"],
+                        "project_id": row["project_id"],
+                        "category": row["category"],
+                        "source": row["source"],
+                        "tags": row["tags"],
+                        "created_at": row["created_at"],
+                        "updated_at": row["updated_at"],
+                        "has_embedding": row["embedding"] is not None
+                    }
+                )
+                points.append(point)
             
             # Qdrant에 업로드
             if points:

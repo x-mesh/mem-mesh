@@ -627,6 +627,7 @@ style.textContent = `
     border-radius: var(--border-radius-sm);
     font-family: var(--font-mono);
     font-size: 0.875rem;
+    text-transform: none !important;
   }
   
   .content-full a {
