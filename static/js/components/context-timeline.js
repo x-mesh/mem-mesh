@@ -593,7 +593,6 @@ style.textContent = `
   .memory-meta {
     color: var(--text-muted);
     font-size: 0.625rem;
-    text-transform: capitalize;
   }
   
   .timeline-legend {

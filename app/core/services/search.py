@@ -288,6 +288,15 @@ class SearchService:
             if isinstance(newest, str):
                 newest = datetime.fromisoformat(newest.replace('Z', '+00:00'))
             
+            # timezone-aware와 timezone-naive datetime 혼합 방지
+            # 모든 datetime을 naive로 통일 (tzinfo 제거)
+            if hasattr(created_at, 'tzinfo') and created_at.tzinfo is not None:
+                created_at = created_at.replace(tzinfo=None)
+            if hasattr(oldest, 'tzinfo') and oldest.tzinfo is not None:
+                oldest = oldest.replace(tzinfo=None)
+            if hasattr(newest, 'tzinfo') and newest.tzinfo is not None:
+                newest = newest.replace(tzinfo=None)
+            
             if oldest == newest:
                 return 1.0
             

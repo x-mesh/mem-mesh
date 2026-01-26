@@ -656,7 +656,6 @@ style.textContent = `
     flex: 1;
     color: var(--text-primary);
     font-weight: var(--font-medium);
-    text-transform: capitalize;
   }
 
   .category-count {
@@ -768,7 +767,6 @@ style.textContent = `
   }
 
   .activity-type {
-    text-transform: capitalize;
     font-weight: var(--font-medium);
   }
 
@@ -810,7 +808,6 @@ style.textContent = `
   }
 
   .activity-category {
-    text-transform: capitalize;
     font-weight: var(--font-medium);
     color: var(--text-muted);
   }

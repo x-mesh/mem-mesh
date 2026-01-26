@@ -1678,7 +1678,6 @@ style.textContent = `
   .legend-text {
     flex: 1;
     color: var(--text-primary);
-    text-transform: capitalize;
   }
   
   .legend-count {

@@ -1148,7 +1148,6 @@ style.textContent = `
     border-radius: var(--border-radius-sm);
     font-size: 0.875rem;
     font-weight: 500;
-    text-transform: capitalize;
   }
   
   .project-badge {
@@ -1169,6 +1168,7 @@ style.textContent = `
     line-height: 1.7;
     color: var(--text-primary);
     margin-bottom: 2rem;
+    text-transform: none !important;
   }
   
   .memory-text code {
@@ -1177,6 +1177,7 @@ style.textContent = `
     border-radius: var(--border-radius-sm);
     font-family: var(--font-mono);
     font-size: 0.875rem;
+    text-transform: none !important;
   }
   
   .memory-text a {
@@ -1504,7 +1505,6 @@ style.textContent = `
     font-size: 0.75rem;
     font-weight: 500;
     color: var(--text-secondary);
-    text-transform: capitalize;
   }
   
   .context-category svg {

@@ -5,17 +5,36 @@ CORS, 에러 처리 등 공통 기능을 제공합니다.
 """
 
 import logging
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.schemas.responses import ErrorResponse
 
 logger = logging.getLogger(__name__)
 
 
+class NoCacheStaticMiddleware(BaseHTTPMiddleware):
+    """Static 파일에 no-cache 헤더 추가 (개발 환경용)"""
+    
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        
+        # static 파일 요청에 대해 캐시 비활성화
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        
+        return response
+
+
 def setup_middleware(app: FastAPI) -> None:
     """미들웨어 설정"""
+    # Static 파일 캐시 비활성화 미들웨어 (개발용)
+    app.add_middleware(NoCacheStaticMiddleware)
+    
     # CORS 미들웨어 추가
     app.add_middleware(
         CORSMiddleware,

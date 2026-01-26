@@ -1664,7 +1664,6 @@ style.textContent = `
   .view-mode {
     font-weight: 500;
     color: var(--primary-color);
-    text-transform: capitalize;
   }
   
   .memories-list {

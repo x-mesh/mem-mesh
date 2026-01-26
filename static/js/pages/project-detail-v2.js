@@ -425,7 +425,6 @@ style.textContent = `
     border-radius: 12px;
     font-size: 0.7rem;
     font-weight: 500;
-    text-transform: capitalize;
     border: 1px solid #e0e0e0;
   }
   
@@ -478,7 +477,6 @@ style.textContent = `
     border-radius: 4px;
     font-size: 0.7rem;
     font-weight: 500;
-    text-transform: capitalize;
     border: 1px solid #e9ecef;
   }
   

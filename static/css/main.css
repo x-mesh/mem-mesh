@@ -2344,7 +2344,6 @@ h3 svg {
   gap: 0.25rem;
   font-size: var(--text-sm);
   font-weight: var(--font-medium);
-  text-transform: capitalize;
   color: var(--text-secondary);
 }
 
@@ -3158,7 +3157,6 @@ h3 svg {
   padding: 2px var(--space-2);
   background: var(--primary-100);
   border-radius: var(--radius-sm);
-  text-transform: capitalize;
   flex-shrink: 0;
 }
 
@@ -3545,7 +3543,6 @@ h3 svg {
   font-size: var(--text-xs);
   font-weight: var(--font-medium);
   color: var(--text-secondary);
-  text-transform: capitalize;
 }
 
 .chroma-result-category svg {
@@ -4951,7 +4948,6 @@ h3 svg {
   font-weight: var(--font-semibold);
   color: var(--text-primary);
   margin-bottom: var(--space-1);
-  text-transform: capitalize;
 }
 
 .tooltip-value {
@@ -5008,7 +5004,6 @@ h3 svg {
   font-weight: var(--font-medium);
   color: var(--text-primary);
   margin-bottom: 1px;
-  text-transform: capitalize;
   line-height: 1.2;
 }
 
