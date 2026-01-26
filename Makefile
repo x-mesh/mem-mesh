@@ -1,4 +1,4 @@
-.PHONY: help build build-dev up up-dev down logs bash bash-dev test clean prune health
+.PHONY: help build build-dev up up-dev down logs bash bash-dev test clean prune health benchmark-up benchmark-down benchmark-migrate-postgres benchmark-migrate-qdrant benchmark-run benchmark-full benchmark-clean
 
 # Default target
 help:
@@ -17,6 +17,15 @@ help:
 	@echo "  health     - Check container health"
 	@echo "  clean      - Remove containers and images"
 	@echo "  prune      - Clean up Docker system"
+	@echo ""
+	@echo "Benchmark targets:"
+	@echo "  benchmark-up                - Start PostgreSQL + Qdrant"
+	@echo "  benchmark-down              - Stop benchmark environment"
+	@echo "  benchmark-migrate-postgres  - Migrate data to PostgreSQL"
+	@echo "  benchmark-migrate-qdrant    - Migrate data to Qdrant"
+	@echo "  benchmark-run               - Run benchmark comparison"
+	@echo "  benchmark-full              - Run full benchmark pipeline"
+	@echo "  benchmark-clean             - Clean benchmark data and volumes"
 
 # Build targets
 build:
@@ -150,3 +159,39 @@ restart-prod:
 
 restart-dev:
 	docker-compose restart mem-mesh-dev
+
+# Benchmark targets
+benchmark-up:
+	@echo "Starting benchmark environment (PostgreSQL + Qdrant)..."
+	docker-compose -f docker-compose.benchmark.yml up -d
+	@echo "Waiting for services to be ready..."
+	@sleep 5
+	@echo "PostgreSQL: localhost:5432 (user: memmesh, db: memmesh)"
+	@echo "Qdrant: localhost:6333"
+
+benchmark-down:
+	@echo "Stopping benchmark environment..."
+	docker-compose -f docker-compose.benchmark.yml down
+
+benchmark-logs:
+	docker-compose -f docker-compose.benchmark.yml logs -f
+
+benchmark-migrate-postgres:
+	@echo "Migrating data to PostgreSQL..."
+	python scripts/migrate_to_postgres.py
+
+benchmark-migrate-qdrant:
+	@echo "Migrating data to Qdrant..."
+	python scripts/migrate_to_qdrant.py
+
+benchmark-run:
+	@echo "Running vector database benchmark..."
+	python scripts/benchmark_vector_dbs.py
+
+benchmark-full: benchmark-up benchmark-migrate-postgres benchmark-migrate-qdrant benchmark-run
+	@echo "Full benchmark completed. Check results in benchmark_results.json"
+
+benchmark-clean:
+	@echo "Cleaning benchmark environment..."
+	docker-compose -f docker-compose.benchmark.yml down -v
+	@echo "Benchmark data cleaned"
