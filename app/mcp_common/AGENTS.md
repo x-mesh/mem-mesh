@@ -59,6 +59,32 @@ python -m pytest tests/test_mcp_tools.py -v
 - 각 MCP 서버 구현체와의 통합 테스트
 - 스토리지 백엔드 모킹을 통한 단위 테스트
 
+## MCP Dispatcher Pattern
+
+**Architecture** (v2.1+):
+- `dispatcher.py` - Unified MCPDispatcher class for all tool dispatch
+- `transport.py` - JSON-RPC formatting utilities
+
+**Usage**:
+```python
+from .dispatcher import MCPDispatcher
+from .transport import format_jsonrpc_response
+
+dispatcher = MCPDispatcher(tool_handlers)
+result = await dispatcher.dispatch(tool_name, arguments)
+response = format_jsonrpc_response(result, request_id)
+```
+
+**Benefits**:
+- Eliminates 355 lines of duplication between Pure MCP and SSE MCP
+- Centralizes tool dispatch logic for all 11 tools
+- Consistent error handling across implementations
+- Easier to maintain and test (39 dispatcher tests)
+
+**Implementations Using Dispatcher**:
+- `app/mcp_stdio_pure/server.py` - Pure MCP protocol (247 lines, was 582)
+- `app/web/mcp/sse.py` - SSE MCP transport (236 lines, was 480)
+
 ## Local Golden Rules
 
 **Do's:**
@@ -66,12 +92,14 @@ python -m pytest tests/test_mcp_tools.py -v
 - 에러 처리는 JSON-RPC 표준 준수
 - 로깅은 구조화된 형태로 수행
 - 버전 정보는 app.core.version에서 import
+- Use MCPDispatcher for new MCP implementations
 
 **Don'ts:**
 - Tool 함수에서 직접 데이터베이스 접근 금지
 - 하드코딩된 스키마 정의 금지
 - MCP 프로토콜 버전 하드코딩 금지
 - 동기 함수로 tool 구현 금지
+- Duplicate tool dispatch logic (use dispatcher)
 
 **Protocol Compliance:**
 - JSON-RPC 2.0 메시지 형식 엄격 준수

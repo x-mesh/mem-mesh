@@ -18,6 +18,17 @@
 - Connection pooling through Database class singleton
 - WAL mode enabled for concurrent access
 
+**Database Architecture** (v2.1+):
+Split by responsibility for better maintainability:
+- `database/connection.py` - DatabaseConnection class (252 lines)
+  - Connection management, WAL mode, extension loading
+- `database/initializer.py` - DatabaseInitializer class (256 lines)
+  - Table creation, schema setup, index creation
+- `database/migrator.py` - DatabaseMigrator class (189 lines)
+  - Schema migrations, embedding migrations, version tracking
+- `database/base.py` - Database facade (276 lines)
+  - Backward-compatible interface, delegates to specialized modules
+
 **Embedding Strategy:**
 - sentence-transformers models only
 - Default: `all-MiniLM-L6-v2` (384 dimensions)
