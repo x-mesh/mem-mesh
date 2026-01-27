@@ -163,11 +163,6 @@ class TestSearchService:
             content="Old memory for recency test", source="test"
         )
 
-        # 약간의 시간 차이를 위해 대기
-        import asyncio
-
-        await asyncio.sleep(0.1)
-
         await memory_service.create(
             content="New memory for recency test", source="test"
         )

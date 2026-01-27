@@ -156,9 +156,7 @@ async def test_get_context_relationship_classification(context_service, memory_s
         source="test",
     )
 
-    # 잠시 대기 (시간 차이 생성)
-    await asyncio.sleep(0.1)
-
+    # 시간 차이는 데이터베이스 타임스탬프로 자동 생성됨
     memory2 = await memory_service.create(
         content="Completed authentication implementation",
         project_id="test-project",
@@ -195,7 +193,6 @@ async def test_get_context_depth_expansion(context_service, memory_service):
             source="test",
         )
         memories.append(memory)
-        await asyncio.sleep(0.01)  # 시간 차이 생성
 
     # 깊이 1로 조회
     context_depth1 = await context_service.get_context(memories[2].id, depth=1)

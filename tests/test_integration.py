@@ -373,9 +373,6 @@ async def test_recency_weighting(services):
         source="integration-test",
     )
 
-    # 의도적인 지연 (순서 보장을 위해)
-    await asyncio.sleep(0.1)
-
     new_memory = await memory_service.create(
         content="New authentication implementation with advanced features",
         project_id="test-project",
