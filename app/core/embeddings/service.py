@@ -177,7 +177,7 @@ class EmbeddingService:
 
         try:
             # sentence-transformers는 numpy array를 반환하므로 list로 변환
-            embedding = self.model.encode(text, convert_to_tensor=False)
+            embedding = self.model.encode(text, convert_to_tensor=False, normalize_embeddings=True)
             result = embedding.tolist()
 
             # 메트릭 수집
@@ -204,7 +204,7 @@ class EmbeddingService:
         cache_hit = False
 
         try:
-            embeddings = self.model.encode(texts, convert_to_tensor=False)
+            embeddings = self.model.encode(texts, convert_to_tensor=False, normalize_embeddings=True)
             result = [embedding.tolist() for embedding in embeddings]
 
             # 메트릭 수집

@@ -7,7 +7,7 @@ Provides endpoints for searching memories with various modes and filters.
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 
-from app.core.services.legacy.search import SearchService
+from app.core.services.unified_search import UnifiedSearchService
 from app.core.schemas.responses import SearchResponse
 from ...common.dependencies import get_search_service
 
@@ -29,7 +29,7 @@ async def search_memories(
     sort_direction: str = "desc",
     recency_weight: float = 0.0,
     search_mode: str = "hybrid",
-    service: SearchService = Depends(get_search_service),
+    service: UnifiedSearchService = Depends(get_search_service),
 ) -> SearchResponse:
     """
     Search memories with various modes and filters.

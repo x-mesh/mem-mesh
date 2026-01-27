@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from app.core.database.base import Database
 from app.core.services.memory import MemoryService
-from app.core.services.legacy.search import SearchService
+from app.core.services.unified_search import UnifiedSearchService
 from app.core.services.context import ContextService
 from app.core.services.stats import StatsService
 from app.core.services.embedding_manager import EmbeddingManagerService
@@ -34,7 +34,7 @@ def get_memory_service() -> MemoryService:
     return services["memory_service"]
 
 
-def get_search_service() -> SearchService:
+def get_search_service() -> UnifiedSearchService:
     """검색 서비스 의존성"""
     services = get_services()
     if services["search_service"] is None:

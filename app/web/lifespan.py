@@ -16,7 +16,7 @@ from app.core.config import Settings
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.memory import MemoryService
-from app.core.services.legacy.search import SearchService
+from app.core.services.unified_search import UnifiedSearchService
 from app.core.services.context import ContextService
 from app.core.services.stats import StatsService
 from app.core.services.embedding_manager import EmbeddingManagerService
@@ -36,7 +36,7 @@ logger = None
 db: Optional[Database] = None
 embedding_service: Optional[EmbeddingService] = None
 memory_service: Optional[MemoryService] = None
-search_service: Optional[SearchService] = None
+search_service: Optional[UnifiedSearchService] = None
 context_service: Optional[ContextService] = None
 stats_service: Optional[StatsService] = None
 embedding_manager: Optional[EmbeddingManagerService] = None
@@ -142,7 +142,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await metrics_collector.start()  # 백그라운드 플러시 태스크 시작
 
         memory_service = MemoryService(db, embedding_service)
-        search_service = SearchService(db, embedding_service, metrics_collector)
+        search_service = UnifiedSearchService(
+            db=db,
+            embedding_service=embedding_service,
+            metrics_collector=metrics_collector,
+            enable_quality_features=settings.enable_quality_features,
+            enable_korean_optimization=settings.enable_korean_optimization,
+            enable_noise_filter=settings.enable_noise_filter,
+            enable_score_normalization=settings.enable_score_normalization,
+            score_normalization_method=settings.score_normalization_method,
+            cache_embedding_ttl=settings.cache_embedding_ttl,
+            cache_search_ttl=settings.cache_search_ttl,
+            cache_context_ttl=settings.cache_context_ttl
+        )
         context_service = ContextService(db, embedding_service)
         stats_service = StatsService(db)
         embedding_manager = EmbeddingManagerService(db, embedding_service)

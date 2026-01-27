@@ -12,8 +12,8 @@ from .stats import router as stats_router
 
 router = APIRouter()
 
-router.include_router(memories_router)
-router.include_router(search_router)
 router.include_router(stats_router)
+router.include_router(search_router)
+router.include_router(memories_router)
 
 __all__ = ["router", "memories_router", "search_router", "stats_router"]
