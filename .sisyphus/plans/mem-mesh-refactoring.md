@@ -146,7 +146,7 @@ Phase 4: Cleanup (Ongoing)
 
 ---
 
-- [ ] 1.1 Archive Legacy Search Implementations
+- [x] 1.1 Archive Legacy Search Implementations
 
   **What to do**:
   - Create `app/core/services/legacy/` directory
@@ -186,7 +186,7 @@ Phase 4: Cleanup (Ongoing)
 
 ---
 
-- [ ] 1.2 Fix Bare Except Clauses
+- [x] 1.2 Fix Bare Except Clauses
 
   **What to do**:
   - Replace all 6 bare `except:` with specific exception types
@@ -230,7 +230,7 @@ Phase 4: Cleanup (Ongoing)
 
 ---
 
-- [ ] 1.3 Verify Baseline After Phase 1
+- [x] 1.3 Verify Baseline After Phase 1
 
   **What to do**:
   - Run full test suite to confirm no regressions
@@ -260,7 +260,7 @@ Phase 4: Cleanup (Ongoing)
 
 ---
 
-- [ ] 2.1 Create MCP Stdio Server Tests (TDD)
+- [x] 2.1 Create MCP Stdio Server Tests (TDD)
 
   **What to do**:
   - Create `tests/test_mcp_stdio.py` with comprehensive tests
@@ -298,7 +298,7 @@ Phase 4: Cleanup (Ongoing)
 
 ---
 
-- [ ] 2.2 Create MCP Pure Server Tests (TDD)
+- [x] 2.2 Create MCP Pure Server Tests (TDD)
 
   **What to do**:
   - Create `tests/test_mcp_stdio_pure.py` with comprehensive tests
@@ -336,7 +336,7 @@ Phase 4: Cleanup (Ongoing)
 
 ---
 
-- [ ] 2.3 Create Session and Pin Service Tests (TDD)
+- [x] 2.3 Create Session and Pin Service Tests (TDD)
 
   **What to do**:
   - Create `tests/test_session_service.py` with unit tests
