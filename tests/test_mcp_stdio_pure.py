@@ -100,6 +100,14 @@ async def tool_handlers(storage_manager):
 
 
 @pytest.fixture
+async def dispatcher_fixture(tool_handlers):
+    """MCP 디스패처 인스턴스"""
+    from app.mcp_common.dispatcher import MCPDispatcher
+
+    return MCPDispatcher(tool_handlers)
+
+
+@pytest.fixture
 def mock_tool_handlers():
     """Mock tool handlers for isolated testing"""
     handlers = MagicMock(spec=MCPToolHandlers)
@@ -140,6 +148,14 @@ def mock_tool_handlers():
         return_value={"status": "ended", "summary": "test"}
     )
     return handlers
+
+
+@pytest.fixture
+def mock_dispatcher(mock_tool_handlers):
+    """Mock dispatcher for isolated testing"""
+    from app.mcp_common.dispatcher import MCPDispatcher
+
+    return MCPDispatcher(mock_tool_handlers)
 
 
 # ============== JSON-RPC Message Parsing Tests ==============
@@ -320,13 +336,14 @@ def test_list_tools():
 
 
 @pytest.mark.asyncio
-async def test_dispatch_add_tool(tool_handlers):
+async def test_dispatch_add_tool(tool_handlers, dispatcher_fixture):
     """add 도구 디스패치 테스트"""
     import app.mcp_stdio_pure.server as server
 
-    # Inject tool handlers
     original_handlers = server.tool_handlers
+    original_dispatcher = server.dispatcher
     server.tool_handlers = tool_handlers
+    server.dispatcher = dispatcher_fixture
 
     try:
         params = {
@@ -344,24 +361,25 @@ async def test_dispatch_add_tool(tool_handlers):
         assert result["content"][0]["type"] == "text"
         assert "isError" not in result or result.get("isError") is False
 
-        # Parse the JSON response
         response_data = json.loads(result["content"][0]["text"])
         assert "id" in response_data
         assert response_data["status"] == "saved"
     finally:
         server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_dispatch_search_tool(tool_handlers):
+async def test_dispatch_search_tool(tool_handlers, dispatcher_fixture):
     """search 도구 디스패치 테스트"""
     import app.mcp_stdio_pure.server as server
 
     original_handlers = server.tool_handlers
+    original_dispatcher = server.dispatcher
     server.tool_handlers = tool_handlers
+    server.dispatcher = dispatcher_fixture
 
     try:
-        # First add a memory
         await tool_handlers.add(
             content="Authentication system with JWT tokens for testing",
             project_id="test-project",
@@ -380,15 +398,18 @@ async def test_dispatch_search_tool(tool_handlers):
         assert "results" in response_data
     finally:
         server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_dispatch_pin_tool(tool_handlers):
+async def test_dispatch_pin_tool(tool_handlers, dispatcher_fixture):
     """pin_add 도구 디스패치 테스트"""
     import app.mcp_stdio_pure.server as server
 
     original_handlers = server.tool_handlers
+    original_dispatcher = server.dispatcher
     server.tool_handlers = tool_handlers
+    server.dispatcher = dispatcher_fixture
 
     try:
         params = {
@@ -408,27 +429,25 @@ async def test_dispatch_pin_tool(tool_handlers):
         assert response_data["project_id"] == "test-project"
     finally:
         server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 # ============== Invalid Tool Parameters Tests ==============
 
 
 @pytest.mark.asyncio
-async def test_invalid_tool_params_missing_content():
+async def test_invalid_tool_params_missing_content(mock_dispatcher):
     """필수 파라미터 누락 테스트 - add 도구"""
     import app.mcp_stdio_pure.server as server
 
-    # Create mock handlers
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_dispatcher
 
     try:
         params = {
             "name": "add",
             "arguments": {
                 "project_id": "test-project",
-                # Missing required 'content'
             },
         }
 
@@ -439,24 +458,22 @@ async def test_invalid_tool_params_missing_content():
         assert response_data["success"] is False
         assert "content" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_invalid_tool_params_missing_query():
+async def test_invalid_tool_params_missing_query(mock_dispatcher):
     """필수 파라미터 누락 테스트 - search 도구"""
     import app.mcp_stdio_pure.server as server
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_dispatcher
 
     try:
         params = {
             "name": "search",
             "arguments": {
                 "limit": 5,
-                # Missing required 'query'
             },
         }
 
@@ -467,17 +484,16 @@ async def test_invalid_tool_params_missing_query():
         assert response_data["success"] is False
         assert "query" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_unknown_tool():
+async def test_unknown_tool(mock_dispatcher):
     """알 수 없는 도구 호출 테스트"""
     import app.mcp_stdio_pure.server as server
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_dispatcher
 
     try:
         params = {"name": "unknown_tool", "arguments": {}}
@@ -489,20 +505,19 @@ async def test_unknown_tool():
         assert response_data["success"] is False
         assert "unknown" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_missing_tool_name():
+async def test_missing_tool_name(mock_dispatcher):
     """도구 이름 누락 테스트"""
     import app.mcp_stdio_pure.server as server
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_dispatcher
 
     try:
-        params = {"arguments": {"content": "test"}}  # Missing 'name'
+        params = {"arguments": {"content": "test"}}
 
         result = await call_tool(params)
 
@@ -511,7 +526,7 @@ async def test_missing_tool_name():
         assert response_data["success"] is False
         assert "tool name" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 # ============== Response Formatting Tests ==============
@@ -560,15 +575,16 @@ def test_write_error_format(capsys):
 
 
 @pytest.mark.asyncio
-async def test_dispatch_context_tool(tool_handlers):
+async def test_dispatch_context_tool(tool_handlers, dispatcher_fixture):
     """context 도구 디스패치 테스트"""
     import app.mcp_stdio_pure.server as server
 
     original_handlers = server.tool_handlers
+    original_dispatcher = server.dispatcher
     server.tool_handlers = tool_handlers
+    server.dispatcher = dispatcher_fixture
 
     try:
-        # First add a memory
         add_result = await tool_handlers.add(
             content="Test memory for context retrieval testing",
             project_id="test-project",
@@ -588,18 +604,20 @@ async def test_dispatch_context_tool(tool_handlers):
         assert "related_memories" in response_data
     finally:
         server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_dispatch_update_tool(tool_handlers):
+async def test_dispatch_update_tool(tool_handlers, dispatcher_fixture):
     """update 도구 디스패치 테스트"""
     import app.mcp_stdio_pure.server as server
 
     original_handlers = server.tool_handlers
+    original_dispatcher = server.dispatcher
     server.tool_handlers = tool_handlers
+    server.dispatcher = dispatcher_fixture
 
     try:
-        # First add a memory
         add_result = await tool_handlers.add(
             content="Original content for update testing purposes",
             project_id="test-project",
@@ -623,18 +641,20 @@ async def test_dispatch_update_tool(tool_handlers):
         assert response_data["status"] == "updated"
     finally:
         server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_dispatch_delete_tool(tool_handlers):
+async def test_dispatch_delete_tool(tool_handlers, dispatcher_fixture):
     """delete 도구 디스패치 테스트"""
     import app.mcp_stdio_pure.server as server
 
     original_handlers = server.tool_handlers
+    original_dispatcher = server.dispatcher
     server.tool_handlers = tool_handlers
+    server.dispatcher = dispatcher_fixture
 
     try:
-        # First add a memory
         add_result = await tool_handlers.add(
             content="Memory to be deleted for testing purposes",
             project_id="test-project",
@@ -651,15 +671,18 @@ async def test_dispatch_delete_tool(tool_handlers):
         assert response_data["status"] == "deleted"
     finally:
         server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_dispatch_stats_tool(tool_handlers):
+async def test_dispatch_stats_tool(tool_handlers, dispatcher_fixture):
     """stats 도구 디스패치 테스트"""
     import app.mcp_stdio_pure.server as server
 
     original_handlers = server.tool_handlers
+    original_dispatcher = server.dispatcher
     server.tool_handlers = tool_handlers
+    server.dispatcher = dispatcher_fixture
 
     try:
         params = {"name": "stats", "arguments": {}}
@@ -672,18 +695,21 @@ async def test_dispatch_stats_tool(tool_handlers):
         assert "unique_projects" in response_data
     finally:
         server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 # ============== Session Tool Dispatch Tests ==============
 
 
 @pytest.mark.asyncio
-async def test_dispatch_session_resume_tool(tool_handlers):
+async def test_dispatch_session_resume_tool(tool_handlers, dispatcher_fixture):
     """session_resume 도구 디스패치 테스트"""
     import app.mcp_stdio_pure.server as server
 
     original_handlers = server.tool_handlers
+    original_dispatcher = server.dispatcher
     server.tool_handlers = tool_handlers
+    server.dispatcher = dispatcher_fixture
 
     try:
         params = {
@@ -699,15 +725,18 @@ async def test_dispatch_session_resume_tool(tool_handlers):
         assert isinstance(response_data, dict)
     finally:
         server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_dispatch_session_end_tool(tool_handlers):
+async def test_dispatch_session_end_tool(tool_handlers, dispatcher_fixture):
     """session_end 도구 디스패치 테스트"""
     import app.mcp_stdio_pure.server as server
 
     original_handlers = server.tool_handlers
+    original_dispatcher = server.dispatcher
     server.tool_handlers = tool_handlers
+    server.dispatcher = dispatcher_fixture
 
     try:
         params = {
@@ -722,6 +751,7 @@ async def test_dispatch_session_end_tool(tool_handlers):
         assert isinstance(response_data, dict)
     finally:
         server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 # ============== Tool Handlers Not Initialized Test ==============
@@ -732,8 +762,8 @@ async def test_tool_handlers_not_initialized():
     """도구 핸들러 미초기화 상태 테스트"""
     import app.mcp_stdio_pure.server as server
 
-    original_handlers = server.tool_handlers
-    server.tool_handlers = None
+    original_dispatcher = server.dispatcher
+    server.dispatcher = None
 
     try:
         params = {"name": "add", "arguments": {"content": "test"}}
@@ -745,23 +775,21 @@ async def test_tool_handlers_not_initialized():
         assert response_data["success"] is False
         assert "not initialized" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 # ============== Pin Tool Required Parameters Tests ==============
 
 
 @pytest.mark.asyncio
-async def test_pin_add_missing_params():
+async def test_pin_add_missing_params(mock_dispatcher):
     """pin_add 필수 파라미터 누락 테스트"""
     import app.mcp_stdio_pure.server as server
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_dispatcher
 
     try:
-        # Missing project_id
         params = {"name": "pin_add", "arguments": {"content": "test content"}}
 
         result = await call_tool(params)
@@ -770,20 +798,19 @@ async def test_pin_add_missing_params():
         response_data = json.loads(result["content"][0]["text"])
         assert response_data["success"] is False
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_pin_complete_missing_params():
+async def test_pin_complete_missing_params(mock_dispatcher):
     """pin_complete 필수 파라미터 누락 테스트"""
     import app.mcp_stdio_pure.server as server
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_dispatcher
 
     try:
-        params = {"name": "pin_complete", "arguments": {}}  # Missing pin_id
+        params = {"name": "pin_complete", "arguments": {}}
 
         result = await call_tool(params)
 
@@ -792,17 +819,16 @@ async def test_pin_complete_missing_params():
         assert response_data["success"] is False
         assert "pin_id" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_pin_promote_missing_params():
+async def test_pin_promote_missing_params(mock_dispatcher):
     """pin_promote 필수 파라미터 누락 테스트"""
     import app.mcp_stdio_pure.server as server
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_dispatcher
 
     try:
         params = {"name": "pin_promote", "arguments": {}}
@@ -814,17 +840,16 @@ async def test_pin_promote_missing_params():
         assert response_data["success"] is False
         assert "pin_id" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_context_missing_memory_id():
+async def test_context_missing_memory_id(mock_dispatcher):
     """context 필수 파라미터 누락 테스트"""
     import app.mcp_stdio_pure.server as server
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_dispatcher
 
     try:
         params = {"name": "context", "arguments": {"depth": 2}}
@@ -836,17 +861,16 @@ async def test_context_missing_memory_id():
         assert response_data["success"] is False
         assert "memory_id" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_update_missing_memory_id():
+async def test_update_missing_memory_id(mock_dispatcher):
     """update 필수 파라미터 누락 테스트"""
     import app.mcp_stdio_pure.server as server
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_dispatcher
 
     try:
         params = {"name": "update", "arguments": {"content": "new content"}}
@@ -858,17 +882,16 @@ async def test_update_missing_memory_id():
         assert response_data["success"] is False
         assert "memory_id" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_delete_missing_memory_id():
+async def test_delete_missing_memory_id(mock_dispatcher):
     """delete 필수 파라미터 누락 테스트"""
     import app.mcp_stdio_pure.server as server
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_dispatcher
 
     try:
         params = {"name": "delete", "arguments": {}}
@@ -880,17 +903,16 @@ async def test_delete_missing_memory_id():
         assert response_data["success"] is False
         assert "memory_id" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_session_resume_missing_project_id():
+async def test_session_resume_missing_project_id(mock_dispatcher):
     """session_resume 필수 파라미터 누락 테스트"""
     import app.mcp_stdio_pure.server as server
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_dispatcher
 
     try:
         params = {"name": "session_resume", "arguments": {"expand": True}}
@@ -902,17 +924,16 @@ async def test_session_resume_missing_project_id():
         assert response_data["success"] is False
         assert "project_id" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_session_end_missing_project_id():
+async def test_session_end_missing_project_id(mock_dispatcher):
     """session_end 필수 파라미터 누락 테스트"""
     import app.mcp_stdio_pure.server as server
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_dispatcher
 
     try:
         params = {"name": "session_end", "arguments": {"summary": "test"}}
@@ -924,17 +945,16 @@ async def test_session_end_missing_project_id():
         assert response_data["success"] is False
         assert "project_id" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_batch_operations_missing_operations():
+async def test_batch_operations_missing_operations(mock_dispatcher):
     """batch_operations 필수 파라미터 누락 테스트"""
     import app.mcp_stdio_pure.server as server
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_dispatcher
 
     try:
         params = {"name": "batch_operations", "arguments": {}}
@@ -946,18 +966,17 @@ async def test_batch_operations_missing_operations():
         assert response_data["success"] is False
         assert "operations" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_batch_operations_handler_not_initialized():
+async def test_batch_operations_handler_not_initialized(mock_dispatcher):
     """batch_operations 핸들러 미초기화 테스트"""
     import app.mcp_stdio_pure.server as server
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    original_handlers = server.tool_handlers
+    original_dispatcher = server.dispatcher
     original_batch = server.batch_handler
-    server.tool_handlers = mock_handlers
+    server.dispatcher = mock_dispatcher
     server.batch_handler = None
 
     try:
@@ -970,17 +989,19 @@ async def test_batch_operations_handler_not_initialized():
         assert response_data["success"] is False
         assert "not initialized" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
         server.batch_handler = original_batch
 
 
 @pytest.mark.asyncio
-async def test_dispatch_pin_promote_tool(tool_handlers):
+async def test_dispatch_pin_promote_tool(tool_handlers, dispatcher_fixture):
     """pin_promote 도구 디스패치 테스트"""
     import app.mcp_stdio_pure.server as server
 
     original_handlers = server.tool_handlers
+    original_dispatcher = server.dispatcher
     server.tool_handlers = tool_handlers
+    server.dispatcher = dispatcher_fixture
 
     try:
         pin_result = await tool_handlers.pin_add(
@@ -1001,17 +1022,19 @@ async def test_dispatch_pin_promote_tool(tool_handlers):
         assert isinstance(response_data, dict)
     finally:
         server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_tool_exception_handling(tool_handlers):
+async def test_tool_exception_handling(mock_tool_handlers):
     """도구 실행 중 예외 처리 테스트"""
     import app.mcp_stdio_pure.server as server
+    from app.mcp_common.dispatcher import MCPDispatcher
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-    mock_handlers.add = AsyncMock(side_effect=Exception("Test exception"))
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    mock_tool_handlers.add = AsyncMock(side_effect=Exception("Test exception"))
+    mock_disp = MCPDispatcher(mock_tool_handlers)
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_disp
 
     try:
         params = {
@@ -1029,26 +1052,26 @@ async def test_tool_exception_handling(tool_handlers):
         assert response_data["success"] is False
         assert "Test exception" in response_data["error"]
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_validation_error_handling():
+async def test_validation_error_handling(mock_tool_handlers):
     """ValidationError 처리 테스트"""
     import app.mcp_stdio_pure.server as server
+    from app.mcp_common.dispatcher import MCPDispatcher
     from pydantic import BaseModel
 
     class TestModel(BaseModel):
         value: int
 
-    mock_handlers = MagicMock(spec=MCPToolHandlers)
-
     async def raise_validation_error(*args, **kwargs):
         TestModel(value="not_an_int")
 
-    mock_handlers.add = AsyncMock(side_effect=raise_validation_error)
-    original_handlers = server.tool_handlers
-    server.tool_handlers = mock_handlers
+    mock_tool_handlers.add = AsyncMock(side_effect=raise_validation_error)
+    mock_disp = MCPDispatcher(mock_tool_handlers)
+    original_dispatcher = server.dispatcher
+    server.dispatcher = mock_disp
 
     try:
         params = {
@@ -1063,16 +1086,18 @@ async def test_validation_error_handling():
         assert response_data["success"] is False
         assert "validation error" in response_data["error"].lower()
     finally:
-        server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 @pytest.mark.asyncio
-async def test_dispatch_pin_complete_tool(tool_handlers):
+async def test_dispatch_pin_complete_tool(tool_handlers, dispatcher_fixture):
     """pin_complete 도구 디스패치 테스트"""
     import app.mcp_stdio_pure.server as server
 
     original_handlers = server.tool_handlers
+    original_dispatcher = server.dispatcher
     server.tool_handlers = tool_handlers
+    server.dispatcher = dispatcher_fixture
 
     try:
         pin_result = await tool_handlers.pin_add(
@@ -1091,6 +1116,7 @@ async def test_dispatch_pin_complete_tool(tool_handlers):
         assert response_data["status"] == "completed"
     finally:
         server.tool_handlers = original_handlers
+        server.dispatcher = original_dispatcher
 
 
 # ============== Notification Handling Test ==============

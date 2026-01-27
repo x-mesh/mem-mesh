@@ -7,41 +7,27 @@ FastMCP 대신 직접 MCP 프로토콜을 구현하여 안정성 향상.
 """
 
 import sys
-import os
 import json
 import asyncio
 from typing import Optional, Dict, Any
-from pydantic import ValidationError
 
-from ..core.config import Settings
-from ..mcp_common.storage import StorageManager
-from ..mcp_common.tools import MCPToolHandlers
-from ..mcp_common.schemas import get_tool_schemas
 from ..core.version import SERVER_INFO, MCP_PROTOCOL_VERSION
 from ..core.utils.logger import setup_logging
+from ..mcp_common.storage import StorageManager
+from ..mcp_common.tools import MCPToolHandlers
+from ..mcp_common.dispatcher import MCPDispatcher
+from ..mcp_common.transport import format_tool_error
 
-
-# -------------------------
-# Logging setup
-# -------------------------
 log = setup_logging("mem-mesh-mcp-pure")
 
-# -------------------------
-# Global instances
-# -------------------------
 storage_manager = StorageManager()
 tool_handlers: Optional[MCPToolHandlers] = None
+dispatcher: Optional[MCPDispatcher] = None
 batch_handler: Optional["BatchOperationHandler"] = None
-
-# Global stdin reader for reuse
 _stdin_reader: Optional[asyncio.StreamReader] = None
 
 
-# -------------------------
-# Transport: NDJSON
-# -------------------------
 def write_message(payload: Dict[str, Any]) -> None:
-    """Write message to stdout as NDJSON"""
     line = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     sys.stdout.write(line + "\n")
     sys.stdout.flush()
@@ -58,7 +44,6 @@ def write_error(id_value: Any, code: int, message: str) -> None:
 
 
 async def get_stdin_reader() -> asyncio.StreamReader:
-    """Get or create async stdin reader"""
     global _stdin_reader
     if _stdin_reader is None:
         loop = asyncio.get_running_loop()
@@ -69,7 +54,6 @@ async def get_stdin_reader() -> asyncio.StreamReader:
 
 
 async def read_line_async() -> Optional[str]:
-    """Read a single line from stdin asynchronously"""
     try:
         reader = await get_stdin_reader()
         line = await reader.readline()
@@ -82,7 +66,6 @@ async def read_line_async() -> Optional[str]:
 
 
 def parse_message(line: str) -> Optional[Dict[str, Any]]:
-    """Parse and validate a JSON-RPC message"""
     if not line:
         return None
 
@@ -90,11 +73,11 @@ def parse_message(line: str) -> Optional[Dict[str, Any]]:
         message = json.loads(line)
 
         if not isinstance(message, dict):
-            log.warning(f"Invalid message format: not a dictionary")
+            log.warning("Invalid message format: not a dictionary")
             return None
 
         if "jsonrpc" not in message or message["jsonrpc"] != "2.0":
-            log.warning(f"Invalid jsonrpc version")
+            log.warning("Invalid jsonrpc version")
             return None
 
         return message
@@ -103,11 +86,7 @@ def parse_message(line: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-# -------------------------
-# MCP Protocol Handlers
-# -------------------------
 def resp_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle initialize request"""
     return {
         "protocolVersion": MCP_PROTOCOL_VERSION,
         "capabilities": {"tools": {}},
@@ -119,359 +98,49 @@ def resp_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def list_tools() -> Dict[str, Any]:
-    """List available tools"""
     from ..mcp_common.schemas import get_all_tool_schemas
 
     return {"tools": get_all_tool_schemas()}
 
 
 async def call_tool(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle tool call using shared MCPToolHandlers"""
     name = params.get("name")
     args = params.get("arguments", {}) or {}
 
     if not name:
         log.error("Missing tool name")
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": json.dumps(
-                        {"success": False, "error": "Missing tool name"}
-                    ),
-                }
-            ],
-            "isError": True,
-        }
+        return format_tool_error("Missing tool name")
 
     log.info(f"tools/call: {name}")
 
-    if tool_handlers is None:
-        log.error("Tool handlers not initialized")
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": json.dumps(
-                        {"success": False, "error": "Storage not initialized"}
-                    ),
-                }
-            ],
-            "isError": True,
-        }
+    if dispatcher is None:
+        log.error("Dispatcher not initialized")
+        return format_tool_error("Storage not initialized")
 
-    try:
-        if name == "add":
-            if "content" not in args:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "success": False,
-                                    "error": "Missing required argument: content",
-                                }
-                            ),
-                        }
-                    ],
-                    "isError": True,
-                }
-            result = await tool_handlers.add(
-                content=args["content"],
-                project_id=args.get("project_id"),
-                category=args.get("category", "task"),
-                source=args.get("source", "mcp"),
-                tags=args.get("tags"),
-            )
+    if name == "batch_operations":
+        return await _handle_batch_operations(args)
 
-        elif name == "search":
-            if "query" not in args:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "success": False,
-                                    "error": "Missing required argument: query",
-                                }
-                            ),
-                        }
-                    ],
-                    "isError": True,
-                }
-            result = await tool_handlers.search(
-                query=args["query"],
-                project_id=args.get("project_id"),
-                category=args.get("category"),
-                limit=args.get("limit", 5),
-                recency_weight=args.get("recency_weight", 0.0),
-                response_format=args.get("response_format", "standard"),
-            )
-
-        elif name == "context":
-            if "memory_id" not in args:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "success": False,
-                                    "error": "Missing required argument: memory_id",
-                                }
-                            ),
-                        }
-                    ],
-                    "isError": True,
-                }
-            result = await tool_handlers.context(
-                memory_id=args["memory_id"],
-                depth=args.get("depth", 2),
-                project_id=args.get("project_id"),
-                response_format=args.get("response_format", "standard"),
-            )
-
-        elif name == "update":
-            if "memory_id" not in args:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "success": False,
-                                    "error": "Missing required argument: memory_id",
-                                }
-                            ),
-                        }
-                    ],
-                    "isError": True,
-                }
-            result = await tool_handlers.update(
-                memory_id=args["memory_id"],
-                content=args.get("content"),
-                category=args.get("category"),
-                tags=args.get("tags"),
-            )
-
-        elif name == "delete":
-            if "memory_id" not in args:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "success": False,
-                                    "error": "Missing required argument: memory_id",
-                                }
-                            ),
-                        }
-                    ],
-                    "isError": True,
-                }
-            result = await tool_handlers.delete(memory_id=args["memory_id"])
-
-        elif name == "stats":
-            result = await tool_handlers.stats(
-                project_id=args.get("project_id"),
-                start_date=args.get("start_date"),
-                end_date=args.get("end_date"),
-            )
-
-        # Work Tracking Tools
-        elif name == "pin_add":
-            if "content" not in args or "project_id" not in args:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "success": False,
-                                    "error": "Missing required arguments: content, project_id",
-                                }
-                            ),
-                        }
-                    ],
-                    "isError": True,
-                }
-            result = await tool_handlers.pin_add(
-                content=args["content"],
-                project_id=args["project_id"],
-                importance=args.get("importance"),
-                tags=args.get("tags"),
-            )
-
-        elif name == "pin_complete":
-            if "pin_id" not in args:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "success": False,
-                                    "error": "Missing required argument: pin_id",
-                                }
-                            ),
-                        }
-                    ],
-                    "isError": True,
-                }
-            result = await tool_handlers.pin_complete(pin_id=args["pin_id"])
-
-        elif name == "pin_promote":
-            if "pin_id" not in args:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "success": False,
-                                    "error": "Missing required argument: pin_id",
-                                }
-                            ),
-                        }
-                    ],
-                    "isError": True,
-                }
-            result = await tool_handlers.pin_promote(pin_id=args["pin_id"])
-
-        elif name == "session_resume":
-            if "project_id" not in args:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "success": False,
-                                    "error": "Missing required argument: project_id",
-                                }
-                            ),
-                        }
-                    ],
-                    "isError": True,
-                }
-            result = await tool_handlers.session_resume(
-                project_id=args["project_id"],
-                expand=args.get("expand", False),
-                limit=args.get("limit", 10),
-            )
-
-        elif name == "session_end":
-            if "project_id" not in args:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "success": False,
-                                    "error": "Missing required argument: project_id",
-                                }
-                            ),
-                        }
-                    ],
-                    "isError": True,
-                }
-            result = await tool_handlers.session_end(
-                project_id=args["project_id"], summary=args.get("summary")
-            )
-
-        # Batch Operations
-        elif name == "batch_operations":
-            if "operations" not in args:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "success": False,
-                                    "error": "Missing required argument: operations",
-                                }
-                            ),
-                        }
-                    ],
-                    "isError": True,
-                }
-
-            if batch_handler is None:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "success": False,
-                                    "error": "Batch handler not initialized",
-                                }
-                            ),
-                        }
-                    ],
-                    "isError": True,
-                }
-
-            result = await batch_handler.batch_operations(operations=args["operations"])
-
-        else:
-            log.warning(f"Unknown tool: {name}")
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": json.dumps(
-                            {"success": False, "error": f"Unknown tool: {name}"}
-                        ),
-                    }
-                ],
-                "isError": True,
-            }
-
-        return {"content": [{"type": "text", "text": json.dumps(result)}]}
-
-    except ValidationError as ve:
-        log.error(f"Validation error in tool {name}: {ve}")
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": json.dumps(
-                        {"success": False, "error": f"Validation error: {str(ve)}"}
-                    ),
-                }
-            ],
-            "isError": True,
-        }
-    except Exception as e:
-        log.exception(f"Error in tool {name}")
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": json.dumps({"success": False, "error": str(e)}),
-                }
-            ],
-            "isError": True,
-        }
+    return await dispatcher.dispatch(name, args)
 
 
-# -------------------------
-# Storage initialization
-# -------------------------
+async def _handle_batch_operations(args: Dict[str, Any]) -> Dict[str, Any]:
+    if "operations" not in args:
+        return format_tool_error("Missing required argument: operations")
+
+    if batch_handler is None:
+        return format_tool_error("Batch handler not initialized")
+
+    result = await batch_handler.batch_operations(operations=args["operations"])
+    return {"content": [{"type": "text", "text": json.dumps(result)}], "isError": False}
+
+
 async def initialize_storage():
-    """Initialize storage backend"""
-    global tool_handlers, batch_handler
+    global tool_handlers, dispatcher, batch_handler
 
     storage = await storage_manager.initialize()
     tool_handlers = MCPToolHandlers(storage)
+    dispatcher = MCPDispatcher(tool_handlers)
 
-    # 배치 핸들러 초기화
     from ..core.database.base import Database
     from ..core.embeddings.service import EmbeddingService
     from ..core.services.memory import MemoryService
@@ -493,9 +162,6 @@ async def initialize_storage():
     log.info("Tool handlers and batch handler initialized")
 
 
-# -------------------------
-# Main loop
-# -------------------------
 async def main():
     log.info("Starting mem-mesh Pure MCP Server (stdio, NDJSON)")
 
@@ -532,7 +198,6 @@ async def main():
             method = req.get("method")
             req_id = req.get("id")
 
-            # Notifications: no response
             if req_id is None:
                 log.debug(f"Notification received: {method}")
                 continue
@@ -561,13 +226,13 @@ async def main():
                 log.error("Request handling timed out")
                 write_error(req_id, -32603, "Request handling timed out")
             except Exception as e:
-                log.exception("Error handling request")
+                log.error(f"Error handling request: {e}")
                 write_error(req_id, -32603, f"Internal error: {e}")
         except asyncio.CancelledError:
             log.info("Main loop cancelled")
             break
         except Exception as e:
-            log.exception(f"Unexpected error: {e}")
+            log.error(f"Unexpected error: {e}")
             continue
 
     log.info("Performing cleanup...")

@@ -14,75 +14,47 @@ import asyncio
 import uuid
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import ValidationError
 from sse_starlette.sse import EventSourceResponse
 
 from app.mcp_common.tools import MCPToolHandlers
 from app.mcp_common.schemas import get_all_tool_schemas
+from app.mcp_common.dispatcher import MCPDispatcher
+from app.mcp_common.transport import format_jsonrpc_response, format_jsonrpc_error
 from app.core.version import SERVER_INFO, MCP_PROTOCOL_VERSION
-from app.core.storage.base import StorageBackend
 
 logger = logging.getLogger(__name__)
 
-# SSE MCP Router
 router = APIRouter(prefix="/mcp", tags=["MCP SSE"])
 
-# 세션별 메시지 큐 (SSE 스트림용)
 _sessions: Dict[str, asyncio.Queue] = {}
-
-# Tool handlers (main.py에서 초기화됨)
 _tool_handlers: Optional[MCPToolHandlers] = None
+_dispatcher: Optional[MCPDispatcher] = None
 
 
 def set_tool_handlers(handlers: MCPToolHandlers) -> None:
-    """Tool handlers 설정 (main.py에서 호출)"""
-    global _tool_handlers
+    global _tool_handlers, _dispatcher
     _tool_handlers = handlers
+    _dispatcher = MCPDispatcher(handlers)
 
 
 def get_tool_handlers() -> MCPToolHandlers:
-    """Tool handlers 반환"""
     if _tool_handlers is None:
         raise RuntimeError("MCP SSE tool handlers not initialized")
     return _tool_handlers
 
 
-# -------------------------
-# MCP Protocol Handlers
-# -------------------------
-
-def create_jsonrpc_response(id: Any, result: Any) -> Dict[str, Any]:
-    """JSON-RPC 성공 응답 생성"""
-    return {
-        "jsonrpc": "2.0",
-        "id": id,
-        "result": result
-    }
-
-
-def create_jsonrpc_error(id: Any, code: int, message: str) -> Dict[str, Any]:
-    """JSON-RPC 에러 응답 생성"""
-    return {
-        "jsonrpc": "2.0",
-        "id": id,
-        "error": {
-            "code": code,
-            "message": message
-        }
-    }
+def get_dispatcher() -> MCPDispatcher:
+    if _dispatcher is None:
+        raise RuntimeError("MCP SSE dispatcher not initialized")
+    return _dispatcher
 
 
 async def handle_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
-    """initialize 요청 처리"""
     return {
         "protocolVersion": MCP_PROTOCOL_VERSION,
-        "capabilities": {
-            "tools": {},
-        },
+        "capabilities": {"tools": {}},
         "serverInfo": {
             "name": SERVER_INFO["name"],
             "version": SERVER_INFO["version"],
@@ -91,331 +63,131 @@ async def handle_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def handle_tools_list() -> Dict[str, Any]:
-    """tools/list 요청 처리"""
     return {"tools": get_all_tool_schemas()}
 
 
 async def handle_tools_call(params: Dict[str, Any]) -> Dict[str, Any]:
-    """tools/call 요청 처리"""
     name = params.get("name")
     args = params.get("arguments", {}) or {}
-    
+
     if not name:
         return {
-            "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing tool name"})}],
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {"success": False, "error": "Missing tool name"}
+                    ),
+                }
+            ],
             "isError": True,
         }
-    
-    handlers = get_tool_handlers()
-    
-    try:
-        if name == "add":
-            if "content" not in args:
-                return {
-                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: content"})}],
-                    "isError": True,
-                }
-            result = await handlers.add(
-                content=args["content"],
-                project_id=args.get("project_id"),
-                category=args.get("category", "task"),
-                source=args.get("source", "mcp-sse"),
-                tags=args.get("tags")
-            )
-        
-        elif name == "search":
-            if "query" not in args:
-                return {
-                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: query"})}],
-                    "isError": True,
-                }
-            result = await handlers.search(
-                query=args["query"],
-                project_id=args.get("project_id"),
-                category=args.get("category"),
-                limit=args.get("limit", 5),
-                recency_weight=args.get("recency_weight", 0.0)
-            )
-        
-        elif name == "context":
-            if "memory_id" not in args:
-                return {
-                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: memory_id"})}],
-                    "isError": True,
-                }
-            result = await handlers.context(
-                memory_id=args["memory_id"],
-                depth=args.get("depth", 2),
-                project_id=args.get("project_id")
-            )
-        
-        elif name == "update":
-            if "memory_id" not in args:
-                return {
-                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: memory_id"})}],
-                    "isError": True,
-                }
-            result = await handlers.update(
-                memory_id=args["memory_id"],
-                content=args.get("content"),
-                category=args.get("category"),
-                tags=args.get("tags")
-            )
-        
-        elif name == "delete":
-            if "memory_id" not in args:
-                return {
-                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: memory_id"})}],
-                    "isError": True,
-                }
-            result = await handlers.delete(memory_id=args["memory_id"])
-        
-        elif name == "stats":
-            result = await handlers.stats(
-                project_id=args.get("project_id"),
-                start_date=args.get("start_date"),
-                end_date=args.get("end_date")
-            )
-        
-        # ===== Pin/Session Tools =====
-        elif name == "pin_add":
-            if "content" not in args or "project_id" not in args:
-                return {
-                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required arguments: content, project_id"})}],
-                    "isError": True,
-                }
-            result = await handlers.pin_add(
-                content=args["content"],
-                project_id=args["project_id"],
-                importance=args.get("importance"),
-                tags=args.get("tags")
-            )
-        
-        elif name == "pin_complete":
-            if "pin_id" not in args:
-                return {
-                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: pin_id"})}],
-                    "isError": True,
-                }
-            result = await handlers.pin_complete(pin_id=args["pin_id"])
-        
-        elif name == "pin_promote":
-            if "pin_id" not in args:
-                return {
-                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: pin_id"})}],
-                    "isError": True,
-                }
-            result = await handlers.pin_promote(pin_id=args["pin_id"])
-        
-        elif name == "session_resume":
-            if "project_id" not in args:
-                return {
-                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: project_id"})}],
-                    "isError": True,
-                }
-            result = await handlers.session_resume(
-                project_id=args["project_id"],
-                expand=args.get("expand", False),
-                limit=args.get("limit", 10)
-            )
-        
-        elif name == "session_end":
-            if "project_id" not in args:
-                return {
-                    "content": [{"type": "text", "text": json.dumps({"success": False, "error": "Missing required argument: project_id"})}],
-                    "isError": True,
-                }
-            result = await handlers.session_end(
-                project_id=args["project_id"],
-                summary=args.get("summary")
-            )
-        
-        else:
-            return {
-                "content": [{"type": "text", "text": json.dumps({"success": False, "error": f"Unknown tool: {name}"})}],
-                "isError": True,
-            }
-        
-        return {"content": [{"type": "text", "text": json.dumps(result)}]}
-    
-    except ValidationError as e:
-        # Pydantic 검증 오류를 사용자 친화적인 메시지로 변환
-        errors = e.errors()
-        error_messages = []
-        for error in errors:
-            field = ".".join(str(loc) for loc in error["loc"])
-            msg = error["msg"]
-            error_messages.append(f"{field}: {msg}")
-        
-        error_text = "; ".join(error_messages)
-        logger.warning(f"Validation error in tool {name}: {error_text}")
-        
-        return {
-            "content": [{"type": "text", "text": json.dumps({
-                "success": False, 
-                "error": f"Validation error: {error_text}",
-                "details": errors
-            })}],
-            "isError": True,
-        }
-    
-    except Exception as e:
-        logger.exception(f"Error in tool {name}")
-        return {
-            "content": [{"type": "text", "text": json.dumps({"success": False, "error": str(e)})}],
-            "isError": True,
-        }
+
+    return await get_dispatcher().dispatch(name, args)
 
 
 async def process_jsonrpc_request(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """JSON-RPC 요청 처리"""
     method = request.get("method")
     req_id = request.get("id")
     params = request.get("params", {})
-    
-    # Notification (id가 없으면 응답 불필요)
+
     if req_id is None:
         logger.debug(f"Received notification: {method}")
         return None
-    
+
     try:
         if method == "initialize":
             result = await handle_initialize(params)
-            return create_jsonrpc_response(req_id, result)
-        
+            return format_jsonrpc_response(result, req_id)
+
         elif method == "tools/list":
             result = await handle_tools_list()
-            return create_jsonrpc_response(req_id, result)
-        
+            return format_jsonrpc_response(result, req_id)
+
         elif method == "tools/call":
             result = await handle_tools_call(params)
-            return create_jsonrpc_response(req_id, result)
-        
+            return format_jsonrpc_response(result, req_id)
+
         elif method == "ping":
-            return create_jsonrpc_response(req_id, {})
-        
+            return format_jsonrpc_response({}, req_id)
+
         else:
-            return create_jsonrpc_error(req_id, -32601, f"Method not found: {method}")
-    
+            return format_jsonrpc_error(f"Method not found: {method}", req_id, -32601)
+
     except Exception as e:
         logger.exception(f"Error processing request: {method}")
-        return create_jsonrpc_error(req_id, -32603, f"Internal error: {str(e)}")
+        return format_jsonrpc_error(f"Internal error: {str(e)}", req_id)
 
-
-# -------------------------
-# SSE Endpoints
-# -------------------------
 
 @router.get("/sse")
 async def sse_endpoint(request: Request):
-    """
-    SSE 연결 엔드포인트.
-    
-    클라이언트가 이 엔드포인트에 연결하면 세션 ID를 받고,
-    서버로부터 메시지를 SSE 스트림으로 수신합니다.
-    """
     session_id = str(uuid.uuid4())
     _sessions[session_id] = asyncio.Queue()
-    
+
     logger.info(f"SSE session created: {session_id}")
-    
+
     async def event_generator():
         try:
-            # 연결 시 세션 ID 전송
-            yield {
-                "event": "endpoint",
-                "data": f"/mcp/message?session_id={session_id}"
-            }
-            
-            # 메시지 대기 및 전송
+            yield {"event": "endpoint", "data": f"/mcp/message?session_id={session_id}"}
+
             while True:
                 if await request.is_disconnected():
                     break
-                
+
                 try:
-                    # 타임아웃으로 연결 상태 확인
                     message = await asyncio.wait_for(
-                        _sessions[session_id].get(),
-                        timeout=30.0
+                        _sessions[session_id].get(), timeout=30.0
                     )
-                    yield {
-                        "event": "message",
-                        "data": json.dumps(message)
-                    }
+                    yield {"event": "message", "data": json.dumps(message)}
                 except asyncio.TimeoutError:
-                    # Keep-alive ping
-                    yield {
-                        "event": "ping",
-                        "data": ""
-                    }
+                    yield {"event": "ping", "data": ""}
         finally:
-            # 세션 정리
             if session_id in _sessions:
                 del _sessions[session_id]
             logger.info(f"SSE session closed: {session_id}")
-    
+
     return EventSourceResponse(event_generator())
 
 
 @router.post("/message")
 async def message_endpoint(request: Request, session_id: str, auto_create: bool = True):
-    """
-    메시지 수신 엔드포인트.
-    
-    클라이언트가 JSON-RPC 요청을 POST로 전송하면,
-    처리 결과를 해당 세션의 SSE 스트림으로 전송합니다.
-    
-    auto_create: 세션이 없을 때 자동 생성 (기본값: True)
-    """
-    # 세션이 없으면 짧은 대기 후 재확인 (race condition 방지)
     if session_id not in _sessions:
-        await asyncio.sleep(0.05)  # 50ms 대기
-        
-    # 세션이 여전히 없으면 자동 생성 (서버 재시작 등의 상황 대응)
+        await asyncio.sleep(0.05)
+
     if session_id not in _sessions:
         _sessions[session_id] = asyncio.Queue()
         logger.info(f"Auto-created session (server restart recovery): {session_id}")
-    
+
     try:
         body = await request.json()
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
-    
-    # JSON-RPC 요청 검증
+
     if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
         raise HTTPException(status_code=400, detail="Invalid JSON-RPC request")
-    
+
     logger.debug(f"Received message for session {session_id}: {body.get('method')}")
-    
-    # 요청 처리
+
     response = await process_jsonrpc_request(body)
-    
-    # 응답이 있으면 SSE 스트림으로 전송
+
     if response:
         await _sessions[session_id].put(response)
-    
-    # HTTP 응답은 202 Accepted (실제 응답은 SSE로 전송)
+
     return {"status": "accepted"}
 
 
 @router.post("/sse")
 async def sse_post_endpoint(request: Request):
-    """
-    단일 요청-응답 방식의 MCP 엔드포인트.
-    
-    SSE 스트림 없이 단일 JSON-RPC 요청을 처리하고 응답합니다.
-    간단한 테스트나 단발성 요청에 유용합니다.
-    """
     try:
         body = await request.json()
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
-    
+
     if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
         raise HTTPException(status_code=400, detail="Invalid JSON-RPC request")
-    
+
     response = await process_jsonrpc_request(body)
-    
+
     if response:
         return response
     else:
@@ -424,43 +196,27 @@ async def sse_post_endpoint(request: Request):
 
 @router.post("/tools/call")
 async def stateless_tools_call(request: Request):
-    """
-    Stateless 도구 호출 엔드포인트.
-    
-    세션 없이 직접 도구를 호출할 수 있습니다.
-    SSE 연결이 불안정하거나 단발성 요청에 유용합니다.
-    
-    Request body:
-    {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/call",
-        "params": {"name": "add", "arguments": {...}}
-    }
-    """
     try:
         body = await request.json()
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
-    
+
     if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
         raise HTTPException(status_code=400, detail="Invalid JSON-RPC request")
-    
+
     method = body.get("method")
     if method != "tools/call":
-        # 다른 메서드도 지원
         response = await process_jsonrpc_request(body)
         if response:
             return response
         return {"status": "notification received"}
-    
+
     response = await process_jsonrpc_request(body)
     return response if response else {"status": "processed"}
 
 
 @router.get("/info")
 async def mcp_info():
-    """MCP 서버 정보 반환"""
     return {
         "name": SERVER_INFO["name"],
         "version": SERVER_INFO["version"],
@@ -469,12 +225,12 @@ async def mcp_info():
         "endpoints": {
             "sse": "/mcp/sse",
             "message": "/mcp/message",
-            "tools_call": "/mcp/tools/call",  # Stateless endpoint
-            "info": "/mcp/info"
+            "tools_call": "/mcp/tools/call",
+            "info": "/mcp/info",
         },
         "tools": [t["name"] for t in get_all_tool_schemas()],
         "notes": {
             "stateless": "Use POST /mcp/sse or /mcp/tools/call for session-less requests",
-            "auto_create": "Add ?auto_create=true to /mcp/message to auto-create sessions"
-        }
+            "auto_create": "Add ?auto_create=true to /mcp/message to auto-create sessions",
+        },
     }

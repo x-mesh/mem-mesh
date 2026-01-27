@@ -125,3 +125,67 @@
 - 2.3: Session/Pin Service Tests ✅
 - 2.4: Type Hints Refactoring ✅
 
+
+## [2026-01-27 11:15] Phase 3 Task 3.1: MCP Dispatcher Abstraction
+
+### Task 3.1: Create MCP Dispatcher Abstraction
+**Completed**: Eliminated ~388 lines of duplicated tool dispatch code
+**Files Created**:
+- `app/mcp_common/dispatcher.py` (183 lines) - Unified MCPDispatcher class
+- `app/mcp_common/transport.py` (41 lines) - JSON-RPC formatting utilities
+- `tests/test_mcp_dispatcher.py` (534 lines) - 39 comprehensive tests
+
+**Files Modified**:
+- `app/mcp_stdio_pure/server.py`: 582 → 247 lines (335 lines removed, 57% reduction)
+- `app/web/mcp/sse.py`: 480 → 236 lines (244 lines removed, 51% reduction)
+- `tests/test_mcp_stdio_pure.py`: Updated to inject dispatcher fixture
+
+**Key Learnings:**
+
+1. **TDD Workflow Effective**:
+   - Wrote 39 dispatcher tests FIRST (RED phase)
+   - Implemented dispatcher to pass tests (GREEN phase)
+   - Refactored servers to use dispatcher (REFACTOR phase)
+   - All tests passed on first refactor attempt
+
+2. **Custom Logger Limitations**:
+   - MemMeshLogger doesn't have `exception()` method
+   - Use `logger.error(msg, error=str(e))` instead
+   - Discovered during test failure, fixed immediately
+
+3. **Test Fixture Injection Pattern**:
+   - When refactoring to use new abstractions, tests need updated fixtures
+   - Created `dispatcher_fixture` and `mock_dispatcher` fixtures
+   - Tests must inject BOTH tool_handlers AND dispatcher for proper isolation
+
+4. **Dispatcher Design Decisions**:
+   - Single dispatch() method with tool_name and arguments
+   - Private _dispatch_* methods for each tool
+   - Returns MCP-formatted response with content array and isError flag
+   - Handles ValidationError and generic Exception uniformly
+
+5. **Transport Utilities**:
+   - `format_tool_response()` - Success response with content array
+   - `format_tool_error()` - Error response with isError=True
+   - `format_jsonrpc_response()` - JSON-RPC 2.0 success
+   - `format_jsonrpc_error()` - JSON-RPC 2.0 error with code
+
+**Verification Results:**
+- 39 dispatcher tests: All passing
+- 42 Pure MCP tests: All passing
+- 19 FastMCP tests: All passing
+- Line count targets exceeded:
+  - Pure MCP: 247 < 350 ✅
+  - SSE MCP: 236 < 400 ✅
+
+**Code Reduction Summary:**
+- Total lines removed: 579 (335 + 244)
+- New abstraction lines: 224 (183 + 41)
+- Net reduction: 355 lines
+- Duplication eliminated: 100%
+
+**Phase 3 Status**: 1/4 tasks completed
+- 3.1: MCP Dispatcher Abstraction ✅
+- 3.2: Pending
+- 3.3: Pending
+- 3.4: Pending

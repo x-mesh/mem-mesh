@@ -376,7 +376,7 @@ Phase 4: Cleanup (Ongoing)
 
 ---
 
-- [ ] 2.4 Add Missing Return Type Hints
+- [x] 2.4 Add Missing Return Type Hints
 
   **What to do**:
   - Add return type hints to 23 identified functions
@@ -419,7 +419,7 @@ Phase 4: Cleanup (Ongoing)
 
 ---
 
-- [ ] 3.1 Create MCP Dispatcher Abstraction
+- [x] 3.1 Create MCP Dispatcher Abstraction
 
   **What to do**:
   - Create `app/mcp_common/dispatcher.py` with unified dispatch logic
