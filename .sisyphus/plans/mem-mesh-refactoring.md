@@ -51,11 +51,11 @@ Eliminate technical debt and improve maintainability of mem-mesh through systema
 - Large files split by responsibility
 
 ### Definition of Done
-- [ ] All pytest tests pass: `python -m pytest tests/ -v`
-- [ ] No bare except clauses: `grep -r "except:" app/ | wc -l` = 0
-- [ ] Type check passes: `mypy app/ --ignore-missing-imports`
-- [ ] MCP servers tested: `pytest tests/test_mcp_stdio*.py` shows >10 tests
-- [ ] Legacy files archived: `ls app/core/services/legacy/` shows 5 files
+- [x] All pytest tests pass: `python -m pytest tests/ -v`
+- [x] No bare except clauses: `grep -r "except:" app/ | wc -l` = 0
+- [x] Type check passes: `mypy app/ --ignore-missing-imports`
+- [x] MCP servers tested: `pytest tests/test_mcp_stdio*.py` shows >10 tests
+- [x] Legacy files archived: `ls app/core/services/legacy/` shows 5 files
 
 ### Must Have
 - Zero breaking changes to MCP tool interfaces
@@ -737,16 +737,16 @@ wc -l app/core/database/*.py app/web/dashboard/routes/*.py | grep -v total
 ```
 
 ### Final Checklist
-- [ ] All "Must Have" present
-- [ ] All "Must NOT Have" absent (no schema changes, no new features)
-- [ ] All tests pass (existing + new)
-- [ ] Zero bare except clauses
-- [ ] Type hints on all 23 identified functions
-- [ ] MCP servers have >80% test coverage
-- [ ] Legacy search files archived
-- [ ] Large files split appropriately
-- [ ] No flaky tests (minimal sleep calls)
-- [ ] Documentation updated
+- [x] All "Must Have" present
+- [x] All "Must NOT Have" absent (no schema changes, no new features)
+- [x] All tests pass (existing + new)
+- [x] Zero bare except clauses
+- [x] Type hints on all 23 identified functions
+- [x] MCP servers have >80% test coverage
+- [x] Legacy search files archived
+- [x] Large files split appropriately
+- [x] No flaky tests (minimal sleep calls)
+- [x] Documentation updated
 
 ---
 
