@@ -573,7 +573,7 @@ class RelevanceFeedback:
         result_id: str,
         position: int,
         dwell_time: Optional[float] = None,
-    ):
+    ) -> None:
         """Record user click on a result"""
         if query not in self.feedback_data["click_through"]:
             self.feedback_data["click_through"][query] = []
@@ -594,7 +594,7 @@ class RelevanceFeedback:
         query: str,
         result_id: str,
         rating: float,  # 0.0 - 1.0
-    ):
+    ) -> None:
         """Record explicit user rating"""
         if query not in self.feedback_data["result_ratings"]:
             self.feedback_data["result_ratings"][query] = {}
