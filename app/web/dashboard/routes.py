@@ -399,13 +399,13 @@ async def delete_memory(
 ) -> DeleteResponse:
     """메모리 삭제"""
     try:
-         # 삭제 전에 메모리 정보 조회 (프로젝트 ID 확인용)
-         try:
-             memory_info = await service.get_by_id(memory_id)
-             project_id = memory_info.project_id if memory_info else None
-         except Exception as e:
-             logger.error(f"Failed to delete memory: {e}")
-             project_id = None
+        # 삭제 전에 메모리 정보 조회 (프로젝트 ID 확인용)
+        try:
+            memory_info = await service.get_by_id(memory_id)
+            project_id = memory_info.project_id if memory_info else None
+        except Exception as e:
+            logger.error(f"Failed to delete memory: {e}")
+            project_id = None
 
         result = await service.delete(memory_id)
 

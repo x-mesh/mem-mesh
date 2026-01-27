@@ -4,7 +4,7 @@ This module provides business logic services.
 """
 
 from .memory import MemoryService, MemoryNotFoundError, DatabaseError, EmbeddingError
-from .search import SearchService
+from .legacy.search import SearchService
 from .context import ContextService, ContextNotFoundError
 from .stats import StatsService
 
