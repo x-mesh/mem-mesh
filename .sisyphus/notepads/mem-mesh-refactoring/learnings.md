@@ -69,3 +69,59 @@
 
 ### Next: Session/Pin Service Tests (2.3) and Type Hints (2.4)
 
+
+## [2026-01-27 11:15] Phase 2 Task 2.4: Type Hints Refactoring
+
+### Task 2.4: Add Return Type Hints to 23 Functions
+**Completed**: All 23 functions now have proper return type hints
+**Files Modified**: 6 files across core services and schemas
+
+**Functions Updated:**
+1. **app/core/schemas/requests.py** (10 validators):
+   - AddParams: validate_project_id, validate_category
+   - SearchParams: validate_search_mode, validate_project_id, validate_category
+   - ContextParams: validate_project_id
+   - UpdateParams: validate_category
+   - StatsParams: validate_project_id, validate_date_format, validate_group_by
+
+2. **app/core/services/search_quality.py** (2 functions):
+   - RelevanceFeedback.record_click() -> None
+   - RelevanceFeedback.record_rating() -> None
+
+3. **app/core/utils/logger.py** (1 function):
+   - MemMeshLogger.log_duration() -> Generator[None, None, None]
+
+4. **app/web/lifespan.py** (1 function):
+   - get_services() -> Dict[str, Any]
+
+5. **app/core/services/pin.py** (1 function):
+   - PinService.session_service property -> "SessionService"
+
+6. **app/core/services/alert.py** (1 function):
+   - AlertService.update_thresholds() -> None
+
+**Key Learnings:**
+- Pydantic field_validator functions require both parameter and return type hints
+- Parameter types for validators: match the field type (str, Optional[str], etc.)
+- Return types for validators: match the field type they validate
+- Context managers need Generator[None, None, None] return type
+- Properties can use forward references with quotes for circular imports
+- All 24 core tests pass after type hint additions (no regressions)
+
+**Type Hint Patterns Applied:**
+- Validators: `def validate_field(cls, v: FieldType) -> FieldType:`
+- Context managers: `@contextmanager def method(...) -> Generator[None, None, None]:`
+- Properties: `@property def prop(self) -> ServiceType:`
+- Regular functions: `def func(...) -> ReturnType:`
+
+**Verification Results:**
+- mypy: No new errors introduced (pre-existing import errors unrelated)
+- pytest: 24/24 core tests passing
+- Commit: f69e583 - refactor: add missing return type hints to 23 functions
+
+**Phase 2 Status**: 4/4 tasks completed
+- 2.1: MCP Stdio Server Tests ✅
+- 2.2: MCP Pure Server Tests ✅
+- 2.3: Session/Pin Service Tests ✅
+- 2.4: Type Hints Refactoring ✅
+
