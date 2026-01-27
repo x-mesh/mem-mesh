@@ -2,6 +2,7 @@
 
 mcp_common 모듈을 사용하여 공통 로직을 공유합니다.
 """
+
 import os
 from fastmcp import FastMCP
 from typing import Optional
@@ -19,9 +20,11 @@ logger = get_logger("mcp-stdio-server")
 log_level = os.getenv("MCP_LOG_LEVEL", "INFO")
 log_file = os.getenv("MCP_LOG_FILE", "")
 
-logger.info("Starting mem-mesh MCP server (FastMCP)", 
-           log_level=log_level,
-           log_file=log_file if log_file else "console_only")
+logger.info(
+    "Starting mem-mesh MCP server (FastMCP)",
+    log_level=log_level,
+    log_file=log_file if log_file else "console_only",
+)
 
 # FastMCP 서버 인스턴스 생성
 mcp = FastMCP("mem-mesh")
@@ -44,7 +47,7 @@ async def initialize_storage(settings: Optional[Settings] = None) -> None:
     from ..core.database.base import Database
     from ..core.embeddings.service import EmbeddingService
     from ..core.services.memory import MemoryService
-    from ..core.services.search import SearchService
+    from ..core.services.legacy.search import SearchService
 
     db = Database()
     embedding_service = EmbeddingService(preload=False)
@@ -55,7 +58,7 @@ async def initialize_storage(settings: Optional[Settings] = None) -> None:
         memory_service=memory_service,
         search_service=search_service,
         embedding_service=embedding_service,
-        db=db
+        db=db,
     )
 
     logger.info("Tool handlers and batch operations initialized with caching")
@@ -81,10 +84,10 @@ async def add(
     project_id: Optional[str] = None,
     category: str = "task",
     source: str = "mcp",
-    tags: Optional[list[str]] = None
+    tags: Optional[list[str]] = None,
 ) -> dict:
     """Add a new memory to the memory store
-    
+
     Args:
         content: Memory content (10-10000 characters)
         project_id: Project identifier (optional)
@@ -102,10 +105,10 @@ async def search(
     category: Optional[str] = None,
     limit: int = 5,
     recency_weight: float = 0.0,
-    response_format: str = "standard"
+    response_format: str = "standard",
 ) -> dict:
     """Search memories using hybrid search (vector + metadata)
-    
+
     Args:
         query: Search query (min 3 characters)
         project_id: Project filter
@@ -114,7 +117,9 @@ async def search(
         recency_weight: Recency weight (0.0-1.0)
         response_format: Response format (minimal/compact/standard/full)
     """
-    return await _get_handlers().search(query, project_id, category, limit, recency_weight, response_format)
+    return await _get_handlers().search(
+        query, project_id, category, limit, recency_weight, response_format
+    )
 
 
 @mcp.tool()
@@ -122,10 +127,10 @@ async def context(
     memory_id: str,
     depth: int = 2,
     project_id: Optional[str] = None,
-    response_format: str = "standard"
+    response_format: str = "standard",
 ) -> dict:
     """Get context around a specific memory
-    
+
     Args:
         memory_id: Memory ID to get context for
         depth: Search depth (1-5)
@@ -140,10 +145,10 @@ async def update(
     memory_id: str,
     content: Optional[str] = None,
     category: Optional[str] = None,
-    tags: Optional[list[str]] = None
+    tags: Optional[list[str]] = None,
 ) -> dict:
     """Update an existing memory
-    
+
     Args:
         memory_id: Memory ID to update
         content: New content
@@ -156,7 +161,7 @@ async def update(
 @mcp.tool()
 async def delete(memory_id: str) -> dict:
     """Delete a memory from the store
-    
+
     Args:
         memory_id: Memory ID to delete
     """
@@ -167,10 +172,10 @@ async def delete(memory_id: str) -> dict:
 async def stats(
     project_id: Optional[str] = None,
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    end_date: Optional[str] = None,
 ) -> dict:
     """Get statistics about stored memories
-    
+
     Args:
         project_id: Project filter
         start_date: Start date filter (YYYY-MM-DD)
@@ -185,7 +190,7 @@ async def batch_add_memories(
     project_id: Optional[str] = None,
     category: str = "task",
     source: str = "mcp_batch",
-    tags: Optional[list[str]] = None
+    tags: Optional[list[str]] = None,
 ) -> dict:
     """Batch add multiple memories with optimized embedding generation
 
@@ -207,7 +212,7 @@ async def batch_add_memories(
         project_id=project_id,
         category=category,
         source=source,
-        tags=tags
+        tags=tags,
     )
 
 
@@ -216,7 +221,7 @@ async def batch_search(
     queries: list[str],
     project_id: Optional[str] = None,
     category: Optional[str] = None,
-    limit: int = 5
+    limit: int = 5,
 ) -> dict:
     """Batch search multiple queries with caching optimization
 
@@ -233,10 +238,7 @@ async def batch_search(
         return {"status": "error", "message": "Batch handler not initialized"}
 
     return await batch_handler.batch_search(
-        queries=queries,
-        project_id=project_id,
-        category=category,
-        limit=limit
+        queries=queries, project_id=project_id, category=category, limit=limit
     )
 
 
@@ -273,7 +275,7 @@ async def cache_stats() -> dict:
     return {
         "status": "success",
         "cache_stats": stats,
-        "message": f"Total tokens saved: {stats['total_tokens_saved']} (~${stats['estimated_cost_saved']:.4f})"
+        "message": f"Total tokens saved: {stats['total_tokens_saved']} (~${stats['estimated_cost_saved']:.4f})",
     }
 
 
