@@ -460,7 +460,7 @@ Phase 4: Cleanup (Ongoing)
 
 ---
 
-- [ ] 3.2 Split database/base.py by Responsibility
+- [x] 3.2 Split database/base.py by Responsibility
 
   **What to do**:
   - Split 768-line `app/core/database/base.py` into:
@@ -503,7 +503,7 @@ Phase 4: Cleanup (Ongoing)
 
 ---
 
-- [ ] 3.3 Split dashboard/routes.py
+- [x] 3.3 Split dashboard/routes.py
 
   **What to do**:
   - Split 819-line `app/web/dashboard/routes.py` into:

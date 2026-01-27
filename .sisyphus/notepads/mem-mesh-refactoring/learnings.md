@@ -189,3 +189,125 @@
 - 3.2: Pending
 - 3.3: Pending
 - 3.4: Pending
+
+## [2026-01-27 11:18] Phase 3 Task 3.2: Split database/base.py
+
+### Task 3.2: Split database/base.py into Three Modules
+**Completed**: 817-line monolith split into 4 focused modules
+**Files Created**:
+- `app/core/database/connection.py` (252 lines) - DatabaseConnection class
+- `app/core/database/initializer.py` (256 lines) - DatabaseInitializer class
+- `app/core/database/migrator.py` (189 lines) - DatabaseMigrator class
+
+**Files Modified**:
+- `app/core/database/base.py`: 817 → 276 lines (facade pattern)
+
+**Key Learnings:**
+
+1. **Facade Pattern for Backward Compatibility**:
+   - Original Database class preserved as facade
+   - Delegates to specialized modules internally
+   - All 69 import sites continue working unchanged
+   - No changes needed to __init__.py exports
+
+2. **Responsibility Boundaries**:
+   - **Connection**: SQLite connection, WAL mode, extension loading, basic queries
+   - **Initializer**: Table creation, indexes, schema setup
+   - **Migrator**: Embedding metadata, model consistency, data migrations
+
+3. **sqlite-vec Constraint Documentation**:
+   - Critical comment preserved: "sqlite-vec virtual tables don't support INSERT OR REPLACE"
+   - This constraint from AGENTS.md Golden Rules must be visible to developers
+   - Without this comment, future developers might "optimize" and break the system
+
+4. **TYPE_CHECKING Pattern**:
+   - Used `if TYPE_CHECKING:` for circular import prevention
+   - Initializer and Migrator import DatabaseConnection only for type hints
+   - Runtime imports avoided to prevent circular dependencies
+
+5. **Test Verification Strategy**:
+   - Ran 24 core tests (memory, search, context services) - all passing
+   - Verified import compatibility across 69 files
+   - Checked web app and storage manager imports
+   - Property-based test failure unrelated (pre-existing null byte issue)
+
+**Line Count Results:**
+- connection.py: 252 lines (< 300 ✅)
+- initializer.py: 256 lines (< 300 ✅)
+- migrator.py: 189 lines (< 300 ✅)
+- base.py: 276 lines (facade, < 300 ✅)
+
+**Verification Results:**
+- `from app.core.database.base import Database` - OK
+- `from app.core.database import Database` - OK
+- Web app import - OK
+- Storage manager import - OK
+- 24/24 core tests passing
+
+**Phase 3 Status**: 2/4 tasks completed
+- 3.1: MCP Dispatcher Abstraction ✅
+- 3.2: Split database/base.py ✅
+- 3.3: Pending
+- 3.4: Pending
+
+## [2026-01-27 11:30] Phase 3 Task 3.3: Split dashboard routes.py
+
+### Task 3.3: Split dashboard routes.py into Modular Route Files
+**Completed**: 806-line routes.py split into modular route files
+**Files Created**:
+- `app/web/dashboard/route_modules/__init__.py` (19 lines) - Router aggregation
+- `app/web/dashboard/route_modules/memories.py` (188 lines) - Memory CRUD endpoints
+- `app/web/dashboard/route_modules/search.py` (63 lines) - Search endpoints
+- `app/web/dashboard/route_modules/stats.py` (65 lines) - Statistics endpoints
+
+**Files Modified**:
+- `app/web/dashboard/routes.py`: 806 → 527 lines (imports modular router)
+
+**Key Learnings:**
+
+1. **Python Package vs Module Naming Conflict**:
+   - Initially created `routes/` directory alongside `routes.py`
+   - Python imports `routes` as the package (directory), not the module (file)
+   - Solution: Renamed directory to `route_modules/` to avoid conflict
+   - This is a critical gotcha when splitting files into packages
+
+2. **FastAPI Router Composition**:
+   - Modular routers don't need prefix - parent router provides it
+   - `router.include_router(modular_router)` inherits parent's prefix
+   - Tags can be set per-module for API documentation grouping
+
+3. **Pre-existing Test Failures**:
+   - API tests (test_fastapi_app.py) were already failing before refactoring
+   - 9/10 tests failing due to test fixture issues (service initialization)
+   - Verified by running tests on original code (git stash)
+   - Refactoring did NOT introduce any new test failures
+
+4. **Endpoint Grouping Strategy**:
+   - memories.py: POST/GET/PUT/DELETE /memories, GET /memories/{id}/context
+   - search.py: GET /memories/search
+   - stats.py: GET /memories/stats, GET /projects
+   - Remaining in routes.py: rules, embeddings, work tracking (pins/sessions)
+
+5. **Import Verification Critical**:
+   - Must clear __pycache__ when testing import changes
+   - Test both direct imports and app-level imports
+   - Verify route registration with app.routes inspection
+
+**Line Count Results:**
+- memories.py: 188 lines (< 250 ✅)
+- search.py: 63 lines (< 250 ✅)
+- stats.py: 65 lines (< 250 ✅)
+- __init__.py: 19 lines (small ✅)
+- routes.py: 527 lines (reduced from 806)
+
+**Verification Results:**
+- All imports work correctly
+- All routes registered at correct paths (/api/memories/*, etc.)
+- Python syntax validation passed
+- Pre-existing test failures confirmed (not caused by refactoring)
+
+**Phase 3 Status**: 3/4 tasks completed
+- 3.1: MCP Dispatcher Abstraction ✅
+- 3.2: Split database/base.py ✅
+- 3.3: Split dashboard routes.py ✅
+- 3.4: Pending
