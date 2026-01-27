@@ -244,4 +244,5 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
+        # Graceful shutdown on Ctrl+C - no additional cleanup needed
         pass

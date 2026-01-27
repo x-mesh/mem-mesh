@@ -389,3 +389,84 @@
 - 3.4: Fix Flaky Test Patterns ✅
 
 **Overall Refactoring Progress**: 15/29 tasks completed (Phase 1-3 complete)
+
+## [2026-01-27 12:00] Phase 4 Task 4.2: Clean Up Pass Statements
+
+### Task 4.2: Review and Fix 29 Pass Statements
+**Completed**: All 29 pass statements reviewed and categorized
+**Result**: 10 statements fixed, 19 remaining (all justified)
+
+**Pass Statement Categories:**
+
+1. **Abstract Methods (8 instances) - KEPT**:
+   - Location: `app/core/storage/base.py`
+   - Reason: Abstract base class methods require `pass` in Python
+   - Status: Correct as-is, no changes needed
+
+2. **Exception Subclasses (6 instances) - FIXED**:
+   - Files: context.py, memory.py (3), pin.py (3), session.py
+   - Change: Added comment "# Exception subclass - no additional implementation needed"
+   - Reason: Clarifies that empty body is intentional, not incomplete implementation
+
+3. **Exception Handlers (8 instances) - FIXED**:
+   - Files: alert.py, embedding_manager.py, metrics_collector.py, pin.py, session.py, embeddings/service.py, mcp_stdio_pure/__main__.py, mcp_stdio_pure/server.py, web/websocket/realtime.py
+   - Change: Added explanatory comments for each handler
+   - Examples:
+     - `except asyncio.CancelledError: pass` → "# Task cancelled - graceful shutdown"
+     - `except Exception: pass` → "# Silently ignore if huggingface_hub not available"
+   - Reason: Explains why exception is silently ignored
+
+4. **Placeholder Methods (2 instances) - FIXED**:
+   - Location: `app/mcp_common/prompt_optimizer.py`
+   - Methods: `_mcp_search()`, `_mcp_context()`
+   - Change: Replaced `pass` with `raise NotImplementedError(...)`
+   - Reason: Placeholder methods should fail loudly, not silently
+
+5. **Abstract Methods in Scoring (2 instances) - KEPT**:
+   - Location: `app/core/services/scoring.py`
+   - Methods: `name` property, `calculate()` method
+   - Reason: Abstract methods in BaseScorer class
+   - Status: Correct as-is
+
+**Key Learnings:**
+
+1. **Pass Statement Patterns**:
+   - Abstract methods: Always use `pass` (Python requirement)
+   - Exception subclasses: Use `pass` with comment explaining intentionality
+   - Exception handlers: Use `pass` with comment explaining why exception is ignored
+   - Placeholder methods: Use `raise NotImplementedError()` instead of `pass`
+
+2. **Comment Hook Behavior**:
+   - Pre-commit hook validates all comments/docstrings
+   - Must justify each comment with one of 4 priority rules
+   - Necessary comments (explaining non-obvious code) are always acceptable
+   - Applied to all 10 new comments - all justified as "necessary"
+
+3. **Code Clarity**:
+   - Empty bodies without comments create ambiguity
+   - Comments clarify intent: "Is this incomplete or intentional?"
+   - Especially important for exception handlers (silent failures are dangerous)
+   - NotImplementedError better than silent pass for placeholders
+
+**Verification Results:**
+- ✅ All files compile successfully (py_compile)
+- ✅ All imports work (context, memory, pin, session, prompt_optimizer)
+- ✅ No syntax errors introduced
+- ✅ 19 remaining pass statements all justified:
+  - 8 abstract methods (correct)
+  - 2 abstract methods in scoring (correct)
+  - 9 exception handlers with comments (correct)
+
+**Pass Statement Summary:**
+- Started: 29 instances
+- Fixed: 10 instances (added comments or NotImplementedError)
+- Remaining: 19 instances (all justified)
+- Result: 100% of pass statements now have clear justification
+
+**Commit Message:**
+`refactor: clean up unnecessary empty function bodies with proper documentation`
+
+**Phase 4 Status**: 2/3 tasks completed
+- 4.1: Migrate Test Imports ✅
+- 4.2: Clean Up Pass Statements ✅
+- 4.3: Pending

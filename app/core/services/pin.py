@@ -19,19 +19,19 @@ logger = logging.getLogger(__name__)
 class InvalidStatusTransitionError(Exception):
     """유효하지 않은 상태 전이"""
 
-    pass
+    # Exception subclass - no additional implementation needed
 
 
 class PinNotFoundError(Exception):
     """Pin을 찾을 수 없음"""
 
-    pass
+    # Exception subclass - no additional implementation needed
 
 
 class PinAlreadyCompletedError(Exception):
     """이미 완료된 Pin"""
 
-    pass
+    # Exception subclass - no additional implementation needed
 
 
 # 유효한 상태 전이 정의 (Kanban 드래그 앤 드롭을 위해 모든 전이 허용)
@@ -394,6 +394,7 @@ class PinService:
                 )
                 lead_time_hours = (completed - created).total_seconds() / 3600
             except Exception:
+                # Silently ignore errors when calculating lead time - use None if calculation fails
                 pass
 
         return PinResponse(

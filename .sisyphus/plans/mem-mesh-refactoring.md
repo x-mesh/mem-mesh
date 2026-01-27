@@ -587,7 +587,7 @@ Phase 4: Cleanup (Ongoing)
 
 ---
 
-- [ ] 4.1 Migrate Test Imports to app/ Architecture
+- [x] 4.1 Migrate Test Imports to app/ Architecture
 
   **What to do**:
   - Update test files to import from `app/` instead of `src/`
@@ -622,7 +622,7 @@ Phase 4: Cleanup (Ongoing)
 
 ---
 
-- [ ] 4.2 Clean Up Empty Function Bodies
+- [x] 4.2 Clean Up Empty Function Bodies
 
   **What to do**:
   - Review 31 instances of `pass` placeholders
