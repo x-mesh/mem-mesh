@@ -6,7 +6,7 @@ Noise filtering for search results
 import re
 import logging
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from ..schemas.responses import SearchResult, SearchResponse
 
@@ -223,12 +223,15 @@ class SmartSearchFilter:
     ) -> List[SearchResult]:
         """시간 기준 필터링"""
 
+        # 현재 시간을 UTC로 설정
+        now = datetime.now(timezone.utc)
+
         # 시간 범위 파싱 (예: '7d', '30d', 'today')
         if time_range == "today":
-            cutoff = datetime.now().replace(hour=0, minute=0, second=0)
+            cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
         elif time_range.endswith("d"):
             days = int(time_range[:-1])
-            cutoff = datetime.now() - timedelta(days=days)
+            cutoff = now - timedelta(days=days)
         else:
             return results
 
@@ -244,10 +247,14 @@ class SmartSearchFilter:
                     else:
                         created = result.created_at
 
+                    # 시간대 정보가 없는 경우 UTC로 가정
+                    if created.tzinfo is None:
+                        created = created.replace(tzinfo=timezone.utc)
+
                     if created >= cutoff:
                         filtered.append(result)
                         # 최신 데이터 부스팅
-                        days_old = (datetime.now() - created).days
+                        days_old = (now - created).days
                         if days_old < 7:
                             result.similarity_score *= 1.2
                         elif days_old < 30:

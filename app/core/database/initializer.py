@@ -33,6 +33,7 @@ class DatabaseInitializer:
             await self._create_indexes()
             await self._create_vector_tables()
             await self._create_fallback_tables()
+            await self._create_fts_tables()
 
             self.connection.commit()
             logger.info("Database tables and indexes initialized")
@@ -254,3 +255,64 @@ class DatabaseInitializer:
             )
         """)
         logger.info("Created fallback vector table")
+
+    async def _create_fts_tables(self) -> None:
+        """Create FTS5 virtual tables for full-text search."""
+        conn = self.connection.connection
+        
+        # 1. memories_fts 테이블 생성 (content 컬럼 인덱싱)
+        try:
+            conn.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+                    id UNINDEXED,
+                    content,
+                    project_id UNINDEXED,
+                    category UNINDEXED,
+                    created_at UNINDEXED,
+                    tokenize='unicode61 remove_diacritics 2'
+                )
+            """)
+            
+            # 2. 기존 데이터 마이그레이션 (동기화)
+            # FTS 테이블이 비어있을 때만 수행하는 것이 성능상 좋지만, 
+            # INSERT OR IGNORE는 id 유니크 제약조건이 없으면 중복 삽입될 수 있음.
+            # FTS5는 PK 개념이 rowid임. id 컬럼은 그냥 컬럼임.
+            # 따라서 중복 방지를 위해 DELETE 후 INSERT 하거나, 별도 로직 필요.
+            # 하지만 여기선 간단하게 INSERT하되, 이미 trigger가 설정되어 있다면 중복은 안 됨(앱 실행 시점)
+            # 안전하게: memories의 id가 memories_fts에 없는 경우만 INSERT
+            conn.execute("""
+                INSERT INTO memories_fts(id, content, project_id, category, created_at)
+                SELECT id, content, project_id, category, created_at FROM memories
+                WHERE id NOT IN (SELECT id FROM memories_fts)
+            """)
+            
+            # 3. Triggers 생성 (자동 동기화)
+            # INSERT
+            conn.execute("""
+                CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+                    INSERT INTO memories_fts(id, content, project_id, category, created_at)
+                    VALUES (new.id, new.content, new.project_id, new.category, new.created_at);
+                END;
+            """)
+            # DELETE
+            conn.execute("""
+                CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+                    DELETE FROM memories_fts WHERE id = old.id;
+                END;
+            """)
+            # UPDATE
+            conn.execute("""
+                CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+                    UPDATE memories_fts SET 
+                        content = new.content,
+                        project_id = new.project_id,
+                        category = new.category,
+                        created_at = new.created_at
+                    WHERE id = old.id;
+                END;
+            """)
+            
+            logger.info("FTS tables and triggers initialized")
+            
+        except Exception as e:
+            logger.warning(f"Failed to create FTS tables (might be unsupported): {e}")
