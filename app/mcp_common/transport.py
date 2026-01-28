@@ -3,9 +3,29 @@
 import json
 from typing import Any, Dict
 
+from .token_estimator import add_token_metadata
+from ..core.config import get_settings
 
-def format_tool_response(result: Dict[str, Any]) -> Dict[str, Any]:
-    """Format successful tool result as MCP content structure."""
+
+def format_tool_response(
+    result: Dict[str, Any], include_meta: bool = None
+) -> Dict[str, Any]:
+    """Format successful tool result as MCP content structure.
+    
+    Args:
+        result: Tool result dictionary
+        include_meta: Whether to include token estimation metadata.
+                     If None, uses settings.enable_token_metadata
+        
+    Returns:
+        MCP-formatted response with content array
+    """
+    if include_meta is None:
+        include_meta = get_settings().enable_token_metadata
+    
+    if include_meta:
+        result = add_token_metadata(result)
+    
     return {
         "content": [{"type": "text", "text": json.dumps(result)}],
         "isError": False,

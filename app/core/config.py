@@ -115,6 +115,12 @@ class Settings(BaseSettings):
         description="Context cache TTL in seconds (default: 30 minutes)"
     )
     
+    # Token estimation settings
+    enable_token_metadata: bool = Field(
+        default=True,
+        description="Include token estimation metadata (_meta) in MCP responses"
+    )
+    
     # Logging configuration
     log_level: str = Field(
         default="INFO",
