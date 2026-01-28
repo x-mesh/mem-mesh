@@ -22,7 +22,14 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
     return [
         {
             "name": "add",
-            "description": "Add a new memory to the memory store",
+            "description": """Add a new memory to the memory store.
+
+Use this to save important information, decisions, code snippets, or learnings for future reference.
+
+EXAMPLES:
+- Save a bug fix: {"content": "Fixed login bug by...", "category": "bug", "project_id": "my-app"}
+- Save a decision: {"content": "Decided to use PostgreSQL because...", "category": "decision"}
+- Save code snippet: {"content": "```python\\ndef helper()...```", "category": "code_snippet", "tags": ["python", "utility"]}""",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -67,14 +74,24 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
         },
         {
             "name": "search",
-            "description": "Search memories using hybrid search (vector + metadata)",
+            "description": """Search memories using hybrid search (vector + metadata).
+
+USAGE PATTERNS:
+- Recent memories: Use query="" (empty string) to get most recent memories sorted by date
+- Keyword search: Use query="keyword" for semantic + text search
+- Project filter: Add project_id to filter by project
+- Recency boost: Set recency_weight=0.5 to prioritize recent results
+
+EXAMPLES:
+- Get 5 most recent memories: {"query": "", "limit": 5}
+- Search in project: {"query": "bug fix", "project_id": "my-project"}
+- Recent + relevant: {"query": "search", "recency_weight": 0.3}""",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query (min 3 characters)",
-                        "minLength": 3,
+                        "description": "Search query. Use empty string '' to get recent memories without search.",
                         "maxLength": 500
                     },
                     "project_id": {
@@ -206,7 +223,14 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
         },
         {
             "name": "stats",
-            "description": "Get statistics about stored memories",
+            "description": """Get statistics about stored memories.
+
+Returns total count, category breakdown, project distribution, and recent activity.
+
+EXAMPLES:
+- Overall stats: {}
+- Project stats: {"project_id": "my-project"}
+- Date range: {"start_date": "2026-01-01", "end_date": "2026-01-31"}""",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -311,7 +335,13 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
         },
         {
             "name": "session_resume",
-            "description": "Resume the last session for a project. Returns active pins and session context.",
+            "description": """Resume the last session for a project. Returns active pins and session context.
+
+Call this at the START of any work session to see what was in progress.
+
+EXAMPLES:
+- Quick summary: {"project_id": "my-project", "expand": false}
+- Full details: {"project_id": "my-project", "expand": true, "limit": 5}""",
             "inputSchema": {
                 "type": "object",
                 "properties": {

@@ -1,12 +1,12 @@
 """
-MCP over SSE (Server-Sent Events) 엔드포인트.
+MCP Streamable HTTP Transport 엔드포인트.
 
-HTTP 기반으로 MCP 프로토콜을 사용할 수 있게 해주는 transport입니다.
-- 클라이언트 → 서버: HTTP POST /mcp/sse (JSON-RPC 요청)
-- 서버 → 클라이언트: SSE 스트림으로 응답
+MCP 2025-03-26 스펙의 Streamable HTTP transport 구현.
+- 단일 엔드포인트에서 GET/POST 모두 지원
+- Mcp-Session-Id 헤더로 세션 관리
+- Accept 헤더에 따라 JSON 또는 SSE 응답
 
-MCP SSE Transport Spec:
-https://spec.modelcontextprotocol.io/specification/basic/transports/#http-with-sse
+Spec: https://modelcontextprotocol.io/specification/2025-03-26/basic/transports
 """
 
 import json
@@ -15,7 +15,8 @@ import uuid
 import logging
 from typing import Dict, Any, Optional
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, Response, HTTPException, Header
+from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from app.mcp_common.tools import MCPToolHandlers
@@ -26,8 +27,9 @@ from app.core.version import SERVER_INFO, MCP_PROTOCOL_VERSION
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/mcp", tags=["MCP SSE"])
+router = APIRouter(prefix="/mcp", tags=["MCP Streamable HTTP"])
 
+# 세션 저장소: session_id -> Queue
 _sessions: Dict[str, asyncio.Queue] = {}
 _tool_handlers: Optional[MCPToolHandlers] = None
 _dispatcher: Optional[MCPDispatcher] = None
@@ -41,17 +43,18 @@ def set_tool_handlers(handlers: MCPToolHandlers) -> None:
 
 def get_tool_handlers() -> MCPToolHandlers:
     if _tool_handlers is None:
-        raise RuntimeError("MCP SSE tool handlers not initialized")
+        raise RuntimeError("MCP tool handlers not initialized")
     return _tool_handlers
 
 
 def get_dispatcher() -> MCPDispatcher:
     if _dispatcher is None:
-        raise RuntimeError("MCP SSE dispatcher not initialized")
+        raise RuntimeError("MCP dispatcher not initialized")
     return _dispatcher
 
 
 async def handle_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Initialize 요청 처리 - 새 세션 생성"""
     return {
         "protocolVersion": MCP_PROTOCOL_VERSION,
         "capabilities": {"tools": {}},
@@ -63,10 +66,12 @@ async def handle_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def handle_tools_list() -> Dict[str, Any]:
+    """tools/list 요청 처리"""
     return {"tools": get_all_tool_schemas()}
 
 
 async def handle_tools_call(params: Dict[str, Any]) -> Dict[str, Any]:
+    """tools/call 요청 처리"""
     name = params.get("name")
     args = params.get("arguments", {}) or {}
 
@@ -86,49 +91,110 @@ async def handle_tools_call(params: Dict[str, Any]) -> Dict[str, Any]:
     return await get_dispatcher().dispatch(name, args)
 
 
-async def process_jsonrpc_request(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+async def process_jsonrpc_request(
+    request: Dict[str, Any]
+) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """
+    JSON-RPC 요청 처리
+    
+    Returns:
+        tuple: (response, new_session_id)
+        - response: JSON-RPC 응답 (notification인 경우 None)
+        - new_session_id: initialize 요청 시 새로 생성된 세션 ID
+    """
     method = request.get("method")
     req_id = request.get("id")
     params = request.get("params", {})
+    new_session_id = None
 
+    # Notification (id가 없음) - 응답 불필요
     if req_id is None:
         logger.debug(f"Received notification: {method}")
-        return None
+        return None, None
 
     try:
         if method == "initialize":
             result = await handle_initialize(params)
-            return format_jsonrpc_response(result, req_id)
+            # 새 세션 ID 생성
+            new_session_id = str(uuid.uuid4())
+            _sessions[new_session_id] = asyncio.Queue()
+            logger.info(f"New session created: {new_session_id}")
+            return format_jsonrpc_response(result, req_id), new_session_id
 
         elif method == "tools/list":
             result = await handle_tools_list()
-            return format_jsonrpc_response(result, req_id)
+            return format_jsonrpc_response(result, req_id), None
 
         elif method == "tools/call":
             result = await handle_tools_call(params)
-            return format_jsonrpc_response(result, req_id)
+            return format_jsonrpc_response(result, req_id), None
 
         elif method == "ping":
-            return format_jsonrpc_response({}, req_id)
+            return format_jsonrpc_response({}, req_id), None
 
         else:
-            return format_jsonrpc_error(f"Method not found: {method}", req_id, -32601)
+            return format_jsonrpc_error(f"Method not found: {method}", req_id, -32601), None
 
     except Exception as e:
         logger.exception(f"Error processing request: {method}")
-        return format_jsonrpc_error(f"Internal error: {str(e)}", req_id)
+        return format_jsonrpc_error(f"Internal error: {str(e)}", req_id), None
+
+
+def accepts_sse(accept_header: Optional[str]) -> bool:
+    """Accept 헤더가 SSE를 지원하는지 확인"""
+    if not accept_header:
+        return False
+    return "text/event-stream" in accept_header
+
+
+def accepts_json(accept_header: Optional[str]) -> bool:
+    """Accept 헤더가 JSON을 지원하는지 확인"""
+    if not accept_header:
+        return True  # 기본값
+    return "application/json" in accept_header or "*/*" in accept_header
 
 
 @router.get("/sse")
-async def sse_endpoint(request: Request):
-    session_id = str(uuid.uuid4())
-    _sessions[session_id] = asyncio.Queue()
-
-    logger.info(f"SSE session created: {session_id}")
+async def streamable_http_get(
+    request: Request,
+    accept: Optional[str] = Header(None),
+    mcp_session_id: Optional[str] = Header(None, alias="Mcp-Session-Id"),
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
+):
+    """
+    Streamable HTTP GET - SSE 스트림 연결
+    
+    클라이언트가 서버로부터 메시지를 받기 위한 SSE 스트림을 엽니다.
+    """
+    # SSE를 지원하지 않으면 405
+    if not accepts_sse(accept):
+        raise HTTPException(
+            status_code=405,
+            detail="This endpoint requires Accept: text/event-stream"
+        )
+    
+    # 세션 ID가 없으면 새 세션 생성 (backwards compatibility)
+    session_id = mcp_session_id
+    if not session_id:
+        session_id = str(uuid.uuid4())
+        _sessions[session_id] = asyncio.Queue()
+        logger.info(f"SSE stream opened with new session: {session_id}")
+    elif session_id not in _sessions:
+        # 세션이 만료됨
+        raise HTTPException(status_code=404, detail="Session not found")
+    else:
+        logger.info(f"SSE stream opened for existing session: {session_id}")
 
     async def event_generator():
+        event_id = 0
         try:
-            yield {"event": "endpoint", "data": f"/mcp/message?session_id={session_id}"}
+            # 기존 SSE transport 호환성: endpoint 이벤트 전송
+            yield {
+                "event": "endpoint",
+                "data": f"/mcp/message?session_id={session_id}",
+                "id": str(event_id)
+            }
+            event_id += 1
 
             while True:
                 if await request.is_disconnected():
@@ -138,64 +204,37 @@ async def sse_endpoint(request: Request):
                     message = await asyncio.wait_for(
                         _sessions[session_id].get(), timeout=30.0
                     )
-                    yield {"event": "message", "data": json.dumps(message)}
+                    yield {
+                        "event": "message",
+                        "data": json.dumps(message),
+                        "id": str(event_id)
+                    }
+                    event_id += 1
                 except asyncio.TimeoutError:
-                    yield {"event": "ping", "data": ""}
+                    # Keep-alive ping
+                    yield {"event": "ping", "data": "", "id": str(event_id)}
+                    event_id += 1
         finally:
-            if session_id in _sessions:
-                del _sessions[session_id]
-            logger.info(f"SSE session closed: {session_id}")
+            logger.info(f"SSE stream closed: {session_id}")
 
-    return EventSourceResponse(event_generator())
-
-
-@router.post("/message")
-async def message_endpoint(request: Request, session_id: str, auto_create: bool = True):
-    if session_id not in _sessions:
-        await asyncio.sleep(0.05)
-
-    if session_id not in _sessions:
-        _sessions[session_id] = asyncio.Queue()
-        logger.info(f"Auto-created session (server restart recovery): {session_id}")
-
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
-
-    if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
-        raise HTTPException(status_code=400, detail="Invalid JSON-RPC request")
-
-    logger.debug(f"Received message for session {session_id}: {body.get('method')}")
-
-    response = await process_jsonrpc_request(body)
-
-    if response:
-        await _sessions[session_id].put(response)
-
-    return {"status": "accepted"}
+    response = EventSourceResponse(event_generator())
+    if session_id:
+        response.headers["Mcp-Session-Id"] = session_id
+    return response
 
 
 @router.post("/sse")
-async def sse_post_endpoint(request: Request):
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
-
-    if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
-        raise HTTPException(status_code=400, detail="Invalid JSON-RPC request")
-
-    response = await process_jsonrpc_request(body)
-
-    if response:
-        return response
-    else:
-        return {"status": "notification received"}
-
-
-@router.post("/tools/call")
-async def stateless_tools_call(request: Request):
+async def streamable_http_post(
+    request: Request,
+    accept: Optional[str] = Header(None),
+    mcp_session_id: Optional[str] = Header(None, alias="Mcp-Session-Id"),
+):
+    """
+    Streamable HTTP POST - JSON-RPC 요청 처리
+    
+    클라이언트가 서버로 JSON-RPC 메시지를 보냅니다.
+    Accept 헤더에 따라 JSON 또는 SSE로 응답합니다.
+    """
     try:
         body = await request.json()
     except json.JSONDecodeError:
@@ -205,24 +244,124 @@ async def stateless_tools_call(request: Request):
         raise HTTPException(status_code=400, detail="Invalid JSON-RPC request")
 
     method = body.get("method")
-    if method != "tools/call":
-        response = await process_jsonrpc_request(body)
-        if response:
-            return response
-        return {"status": "notification received"}
+    logger.debug(f"POST request: method={method}, session={mcp_session_id}")
 
-    response = await process_jsonrpc_request(body)
+    # 세션 검증 (initialize 제외)
+    if method != "initialize" and mcp_session_id:
+        if mcp_session_id not in _sessions:
+            # 세션 자동 복구 (서버 재시작 등)
+            _sessions[mcp_session_id] = asyncio.Queue()
+            logger.info(f"Session auto-recovered: {mcp_session_id}")
+
+    # 요청 처리
+    response, new_session_id = await process_jsonrpc_request(body)
+
+    # Notification인 경우 (응답 없음)
+    if response is None:
+        return Response(status_code=202)
+
+    # SSE 스트림으로 응답할지 JSON으로 응답할지 결정
+    # Streamable HTTP에서는 기본적으로 JSON 응답
+    # (SSE는 여러 응답이 필요한 경우에만 사용)
+    
+    # JSON 응답 생성
+    json_response = JSONResponse(content=response)
+    
+    # initialize 응답에 세션 ID 포함
+    if new_session_id:
+        json_response.headers["Mcp-Session-Id"] = new_session_id
+    
+    return json_response
+
+
+@router.delete("/sse")
+async def streamable_http_delete(
+    mcp_session_id: Optional[str] = Header(None, alias="Mcp-Session-Id"),
+):
+    """
+    Streamable HTTP DELETE - 세션 종료
+    
+    클라이언트가 세션을 명시적으로 종료합니다.
+    """
+    if not mcp_session_id:
+        raise HTTPException(status_code=400, detail="Mcp-Session-Id header required")
+    
+    if mcp_session_id in _sessions:
+        del _sessions[mcp_session_id]
+        logger.info(f"Session terminated: {mcp_session_id}")
+        return Response(status_code=204)
+    else:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
+# ============================================================
+# 기존 HTTP+SSE transport 호환성 엔드포인트 (deprecated)
+# ============================================================
+
+@router.post("/message")
+async def legacy_message_endpoint(
+    request: Request,
+    session_id: str,
+    auto_create: bool = True
+):
+    """
+    [DEPRECATED] 기존 HTTP+SSE transport의 message 엔드포인트
+    
+    새 클라이언트는 POST /mcp/sse를 사용하세요.
+    """
+    if session_id not in _sessions:
+        await asyncio.sleep(0.05)
+
+    if session_id not in _sessions:
+        if auto_create:
+            _sessions[session_id] = asyncio.Queue()
+            logger.info(f"Auto-created session (legacy): {session_id}")
+        else:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
+        raise HTTPException(status_code=400, detail="Invalid JSON-RPC request")
+
+    logger.debug(f"Legacy message for session {session_id}: {body.get('method')}")
+
+    response, _ = await process_jsonrpc_request(body)
+
+    if response:
+        await _sessions[session_id].put(response)
+
+    return {"status": "accepted"}
+
+
+@router.post("/tools/call")
+async def stateless_tools_call(request: Request):
+    """Stateless tools/call 엔드포인트 (세션 불필요)"""
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
+        raise HTTPException(status_code=400, detail="Invalid JSON-RPC request")
+
+    response, _ = await process_jsonrpc_request(body)
     return response if response else {"status": "processed"}
 
 
 @router.get("/info")
 async def mcp_info():
+    """MCP 서버 정보"""
     return {
         "name": SERVER_INFO["name"],
         "version": SERVER_INFO["version"],
         "protocol_version": MCP_PROTOCOL_VERSION,
-        "transports": ["sse", "stateless"],
+        "transports": ["streamable-http", "sse"],
         "endpoints": {
+            "streamable_http": "/mcp/sse",
             "sse": "/mcp/sse",
             "message": "/mcp/message",
             "tools_call": "/mcp/tools/call",
@@ -230,7 +369,8 @@ async def mcp_info():
         },
         "tools": [t["name"] for t in get_all_tool_schemas()],
         "notes": {
-            "stateless": "Use POST /mcp/sse or /mcp/tools/call for session-less requests",
-            "auto_create": "Add ?auto_create=true to /mcp/message to auto-create sessions",
+            "streamable_http": "MCP 2025-03-26 Streamable HTTP transport",
+            "sse": "Legacy HTTP+SSE transport (deprecated)",
+            "stateless": "Use POST /mcp/tools/call for session-less requests",
         },
     }

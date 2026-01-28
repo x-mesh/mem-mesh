@@ -148,12 +148,12 @@ class SessionService:
             self.db.connection.commit()
             session.status = "active"
 
-        # Pin 통계 조회
+        # Pin 통계 조회 (open과 in_progress 모두 "열린" 핀으로 카운트)
         stats_row = await self.db.fetchone(
             """
             SELECT 
                 COUNT(*) as total,
-                SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_count,
+                SUM(CASE WHEN status IN ('open', 'in_progress') THEN 1 ELSE 0 END) as open_count,
                 SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count
             FROM pins
             WHERE session_id = ?
@@ -178,6 +178,23 @@ class SessionService:
                 (session.id, limit),
             )
             pins = [self._pin_row_to_response(r) for r in pin_rows]
+        
+        # 세션 요약이 없으면 최근 열린 핀들로 자동 생성
+        summary = session.summary
+        if not summary and open_pins > 0:
+            # 열린 핀들의 내용으로 간단한 요약 생성
+            open_pin_rows = await self.db.fetchall(
+                """
+                SELECT content FROM pins
+                WHERE session_id = ? AND status IN ('open', 'in_progress')
+                ORDER BY importance DESC, created_at DESC
+                LIMIT 3
+                """,
+                (session.id,),
+            )
+            if open_pin_rows:
+                open_tasks = [r["content"][:50] for r in open_pin_rows]
+                summary = f"진행 중: {', '.join(open_tasks)}"
 
         return SessionContext(
             session_id=session.id,
@@ -185,7 +202,7 @@ class SessionService:
             user_id=session.user_id,
             status=session.status,
             started_at=session.started_at,
-            summary=session.summary,
+            summary=summary,  # 자동 생성된 요약 사용
             pins_count=pins_count,
             open_pins=open_pins,
             completed_pins=completed_pins,
