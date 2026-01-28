@@ -5,7 +5,7 @@
 {
   "mcpServers": {
     "mem-mesh": {
-      "url": "http://localhost:8000/mcp/sse"
+      "url": "http://meme.24x365.online/mcp/sse"
     }
   }
 }
