@@ -115,31 +115,45 @@ class DashboardPage extends HTMLElement {
    * Handle memory created event
    */
   handleMemoryCreated(data) {
-    const { memory } = data;
-    
-    // 중복 체크: 이미 존재하는 메모리인지 확인
-    const existingIndex = this.recentMemories.findIndex(m => m.id === memory.id);
-    if (existingIndex !== -1) {
-      console.log('Dashboard: Memory already exists, ignoring duplicate');
-      return;
+    try {
+      console.log('Dashboard handleMemoryCreated called with data:', data);
+      const { memory } = data;
+      
+      if (!memory) {
+        console.error('Dashboard: No memory in data', data);
+        return;
+      }
+      
+      console.log('Dashboard: Processing memory:', memory.id, memory.content?.substring(0, 50));
+      
+      // 중복 체크: 이미 존재하는 메모리인지 확인
+      const existingIndex = this.recentMemories.findIndex(m => m.id === memory.id);
+      if (existingIndex !== -1) {
+        console.log('Dashboard: Memory already exists, ignoring duplicate');
+        return;
+      }
+      
+      // 최근 메모리 목록에 추가 (맨 앞에)
+      this.recentMemories.unshift(memory);
+      
+      // 최대 개수 제한 (10개)
+      if (this.recentMemories.length > 10) {
+        this.recentMemories = this.recentMemories.slice(0, 10);
+      }
+      
+      // UI 업데이트 - 애니메이션과 함께
+      this.updateRecentMemoriesWithAnimation('created', memory);
+      
+      // 통계 새로고침 (비동기)
+      this.refreshStatsAsync();
+      
+      // 토스트 알림
+      this.showToast(`새 메모리가 생성되었습니다: ${memory.category}`, 'success');
+      
+      console.log('Dashboard: Memory created handler completed successfully');
+    } catch (error) {
+      console.error('Dashboard handleMemoryCreated error:', error);
     }
-    
-    // 최근 메모리 목록에 추가 (맨 앞에)
-    this.recentMemories.unshift(memory);
-    
-    // 최대 개수 제한 (10개)
-    if (this.recentMemories.length > 10) {
-      this.recentMemories = this.recentMemories.slice(0, 10);
-    }
-    
-    // UI 업데이트 - 애니메이션과 함께
-    this.updateRecentMemoriesWithAnimation('created', memory);
-    
-    // 통계 새로고침 (비동기)
-    this.refreshStatsAsync();
-    
-    // 토스트 알림
-    this.showToast(`새 메모리가 생성되었습니다: ${memory.category}`, 'success');
   }
 
   /**

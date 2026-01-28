@@ -653,7 +653,8 @@ class UnifiedSearchService:
                 tags=self._parse_tags(row)
             ))
         
-        search_results.sort(key=lambda x: x.similarity_score, reverse=True)
+        # 1차: similarity_score 내림차순, 2차: created_at 내림차순 (안정적 정렬)
+        search_results.sort(key=lambda x: (x.similarity_score, x.created_at or ''), reverse=True)
         return SearchResponse(results=search_results, total=len(search_results))
 
     async def _fuzzy_search(
@@ -714,8 +715,8 @@ class UnifiedSearchService:
                 
                 scored_results.append((row, final_score))
         
-        # 정렬 및 제한
-        scored_results.sort(key=lambda x: x[1], reverse=True)
+        # 정렬 및 제한 (1차: score 내림차순, 2차: created_at 내림차순)
+        scored_results.sort(key=lambda x: (x[1], x[0]['created_at'] or ''), reverse=True)
         scored_results = scored_results[:limit]
         
         search_results = []
@@ -780,7 +781,8 @@ class UnifiedSearchService:
                 tags=self._parse_tags(row)
             ))
         
-        search_results.sort(key=lambda x: x.similarity_score, reverse=True)
+        # 1차: similarity_score 내림차순, 2차: created_at 내림차순 (안정적 정렬)
+        search_results.sort(key=lambda x: (x.similarity_score, x.created_at or ''), reverse=True)
         return SearchResponse(results=search_results, total=len(search_results))
 
     async def _apply_quality_scoring(
@@ -864,8 +866,8 @@ class UnifiedSearchService:
                     result.similarity_score *= 1.5  # 50% 부스팅
                     logger.debug(f"Partial project match boost: {result.project_id}")
         
-        # 점수 순으로 재정렬
-        response.results.sort(key=lambda x: x.similarity_score, reverse=True)
+        # 점수 순으로 재정렬 (1차: similarity_score, 2차: created_at)
+        response.results.sort(key=lambda x: (x.similarity_score, x.created_at or ''), reverse=True)
         
         return response
     

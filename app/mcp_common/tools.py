@@ -85,11 +85,15 @@ class MCPToolHandlers:
             logger.info("Successfully added memory", memory_id=result.id)
             
             # 실시간 알림 전송 - 완전한 메모리 데이터 조회 후 전송
+            logger.debug(f"Checking notifier: {self._notifier is not None}")
             if self._notifier:
                 try:
                     # 생성된 메모리의 완전한 데이터 조회 (MemoryService 사용)
-                    if hasattr(self._storage, 'memory_service') and self._storage.memory_service:
+                    has_memory_service = hasattr(self._storage, 'memory_service') and self._storage.memory_service
+                    logger.debug(f"Has memory_service: {has_memory_service}")
+                    if has_memory_service:
                         memory = await self._storage.memory_service.get(result.id)
+                        logger.debug(f"Retrieved memory for notification: {memory is not None}")
                         if memory:
                             import json
                             memory_data = {
