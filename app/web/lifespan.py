@@ -27,12 +27,12 @@ from app.core.services.metrics_collector import MetricsCollector
 from app.core.storage.direct import DirectStorageBackend
 from app.mcp_common.tools import MCPToolHandlers
 from app.core.utils.logger import get_logger
+from app.core.auth.service import OAuthService
 from .mcp import sse
 
 # 로깅 시스템은 lifespan 함수 내에서 초기화
 logger = None
 
-# 전역 서비스 인스턴스들
 db: Optional[Database] = None
 embedding_service: Optional[EmbeddingService] = None
 memory_service: Optional[MemoryService] = None
@@ -45,6 +45,7 @@ session_service: Optional[SessionService] = None
 pin_service: Optional[PinService] = None
 metrics_collector: Optional[MetricsCollector] = None
 mcp_storage: Optional[DirectStorageBackend] = None
+oauth_service: Optional[OAuthService] = None
 
 
 @asynccontextmanager
@@ -63,6 +64,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         pin_service, \
         metrics_collector, \
         mcp_storage, \
+        oauth_service, \
         logger
 
     # .env 파일 로드 (최우선)
@@ -153,7 +155,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             score_normalization_method=settings.score_normalization_method,
             cache_embedding_ttl=settings.cache_embedding_ttl,
             cache_search_ttl=settings.cache_search_ttl,
-            cache_context_ttl=settings.cache_context_ttl
+            cache_context_ttl=settings.cache_context_ttl,
         )
         context_service = ContextService(db, embedding_service)
         stats_service = StatsService(db)
@@ -163,6 +165,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         project_service = ProjectService(db)
         session_service = SessionService(db)
         pin_service = PinService(db)
+
+        # OAuth 서비스 초기화
+        logger.info("Initializing OAuth service")
+        oauth_service = OAuthService(db)
+        app.state.oauth_service = oauth_service
 
         # MCP SSE용 스토리지 및 핸들러 초기화
         logger.info("Initializing MCP SSE handlers")
@@ -222,7 +229,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             except Exception as e:
                 logger.warning("Error closing database connection", error=str(e))
 
-        # 서비스 인스턴스 정리
         db = None
         embedding_service = None
         memory_service = None
@@ -235,6 +241,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         pin_service = None
         metrics_collector = None
         mcp_storage = None
+        oauth_service = None
 
         logger.info("Application shutdown complete")
 
@@ -254,4 +261,5 @@ def get_services() -> Dict[str, Any]:
         "pin_service": pin_service,
         "metrics_collector": metrics_collector,
         "mcp_storage": mcp_storage,
+        "oauth_service": oauth_service,
     }

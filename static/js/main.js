@@ -46,6 +46,7 @@ import { SettingsPage } from './pages/settings-page.js';
 import { WorkPage } from './pages/work.js';
 import { MonitoringPage } from './pages/monitoring.js';
 import { ProjectAnalyticsPage } from './pages/project-analytics.js';
+import { OAuthPage } from './pages/oauth.js';
 
 /**
  * Main Application Class
@@ -121,6 +122,7 @@ class App {
     this.pages.set('work', WorkPage);
     this.pages.set('monitoring', MonitoringPage);
     this.pages.set('project-analytics', ProjectAnalyticsPage);
+    this.pages.set('oauth', OAuthPage);
   }
   
   /**
@@ -142,6 +144,7 @@ class App {
     this.router.register('/settings', () => this.renderPage('settings'));
     this.router.register('/monitoring', () => this.renderPage('monitoring'));
     this.router.register('/project-analytics', () => this.renderPage('project-analytics'));
+    this.router.register('/oauth', () => this.renderPage('oauth'));
   }
   
   /**
@@ -296,6 +299,9 @@ class App {
           break;
         case 'project-analytics':
           pageElement = document.createElement('project-analytics-page');
+          break;
+        case 'oauth':
+          pageElement = document.createElement('oauth-page');
           break;
         default:
           throw new Error(`Unknown page: ${pageName}`);

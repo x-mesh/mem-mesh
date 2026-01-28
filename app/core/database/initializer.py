@@ -30,6 +30,7 @@ class DatabaseInitializer:
             await self._create_core_tables()
             await self._create_work_tracking_tables()
             await self._create_monitoring_tables()
+            await self._create_oauth_tables()
             await self._create_indexes()
             await self._create_vector_tables()
             await self._create_fallback_tables()
@@ -122,11 +123,66 @@ class DatabaseInitializer:
             )
         """)
 
+    async def _create_oauth_tables(self) -> None:
+        """Create OAuth 2.1 related tables."""
+        conn = self.connection.connection
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS oauth_clients (
+                id TEXT PRIMARY KEY,
+                client_id TEXT UNIQUE NOT NULL,
+                client_secret_hash TEXT NOT NULL,
+                client_name TEXT NOT NULL,
+                client_type TEXT NOT NULL DEFAULT 'public',
+                redirect_uris TEXT DEFAULT '[]',
+                scopes TEXT DEFAULT '["read", "write"]',
+                grant_types TEXT DEFAULT '["authorization_code", "refresh_token"]',
+                access_token_ttl INTEGER DEFAULT 3600,
+                refresh_token_ttl INTEGER DEFAULT 604800,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS oauth_tokens (
+                id TEXT PRIMARY KEY,
+                client_id TEXT NOT NULL,
+                access_token_hash TEXT NOT NULL,
+                refresh_token TEXT,
+                token_type TEXT DEFAULT 'Bearer',
+                scopes TEXT DEFAULT '["read", "write"]',
+                access_token_expires_at TEXT NOT NULL,
+                refresh_token_expires_at TEXT,
+                is_revoked INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id)
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
+                id TEXT PRIMARY KEY,
+                code TEXT UNIQUE NOT NULL,
+                client_id TEXT NOT NULL,
+                redirect_uri TEXT NOT NULL,
+                code_challenge TEXT NOT NULL,
+                code_challenge_method TEXT DEFAULT 'S256',
+                scopes TEXT DEFAULT '["read", "write"]',
+                state TEXT,
+                expires_at TEXT NOT NULL,
+                is_used INTEGER DEFAULT 0,
+                used_at TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id)
+            )
+        """)
+
     async def _create_monitoring_tables(self) -> None:
         """Create monitoring system tables."""
         conn = self.connection.connection
 
-        # search_metrics 테이블 생성
         conn.execute("""
             CREATE TABLE IF NOT EXISTS search_metrics (
                 id TEXT PRIMARY KEY,
@@ -211,7 +267,18 @@ class DatabaseInitializer:
             "CREATE INDEX IF NOT EXISTS idx_alerts_status_timestamp ON alerts(status, timestamp)",
         ]
 
-        all_indexes = core_indexes + work_tracking_indexes + monitoring_indexes
+        oauth_indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_oauth_clients_client_id ON oauth_clients(client_id)",
+            "CREATE INDEX IF NOT EXISTS idx_oauth_tokens_client_id ON oauth_tokens(client_id)",
+            "CREATE INDEX IF NOT EXISTS idx_oauth_tokens_access_hash ON oauth_tokens(access_token_hash)",
+            "CREATE INDEX IF NOT EXISTS idx_oauth_tokens_refresh ON oauth_tokens(refresh_token)",
+            "CREATE INDEX IF NOT EXISTS idx_oauth_codes_code ON oauth_authorization_codes(code)",
+            "CREATE INDEX IF NOT EXISTS idx_oauth_codes_client ON oauth_authorization_codes(client_id)",
+        ]
+
+        all_indexes = (
+            core_indexes + work_tracking_indexes + monitoring_indexes + oauth_indexes
+        )
         for index_sql in all_indexes:
             conn.execute(index_sql)
 
@@ -259,7 +326,7 @@ class DatabaseInitializer:
     async def _create_fts_tables(self) -> None:
         """Create FTS5 virtual tables for full-text search."""
         conn = self.connection.connection
-        
+
         # 1. memories_fts 테이블 생성 (content 컬럼 인덱싱)
         try:
             conn.execute("""
@@ -272,9 +339,9 @@ class DatabaseInitializer:
                     tokenize='unicode61 remove_diacritics 2'
                 )
             """)
-            
+
             # 2. 기존 데이터 마이그레이션 (동기화)
-            # FTS 테이블이 비어있을 때만 수행하는 것이 성능상 좋지만, 
+            # FTS 테이블이 비어있을 때만 수행하는 것이 성능상 좋지만,
             # INSERT OR IGNORE는 id 유니크 제약조건이 없으면 중복 삽입될 수 있음.
             # FTS5는 PK 개념이 rowid임. id 컬럼은 그냥 컬럼임.
             # 따라서 중복 방지를 위해 DELETE 후 INSERT 하거나, 별도 로직 필요.
@@ -285,7 +352,7 @@ class DatabaseInitializer:
                 SELECT id, content, project_id, category, created_at FROM memories
                 WHERE id NOT IN (SELECT id FROM memories_fts)
             """)
-            
+
             # 3. Triggers 생성 (자동 동기화)
             # INSERT
             conn.execute("""
@@ -311,8 +378,8 @@ class DatabaseInitializer:
                     WHERE id = old.id;
                 END;
             """)
-            
+
             logger.info("FTS tables and triggers initialized")
-            
+
         except Exception as e:
             logger.warning(f"Failed to create FTS tables (might be unsupported): {e}")
