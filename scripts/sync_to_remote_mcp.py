@@ -123,8 +123,14 @@ async def add_memory_to_remote(
     session: aiohttp.ClientSession,
     memory: Dict[str, Any],
     session_id: Optional[str] = None
-) -> bool:
-    """리모트 서버에 메모리를 추가합니다."""
+) -> tuple[str, Optional[str]]:
+    """리모트 서버에 메모리를 추가합니다.
+    
+    Returns:
+        tuple: (status, memory_id)
+        - status: "saved", "duplicate", "error"
+        - memory_id: 생성/중복된 메모리 ID (에러 시 None)
+    """
     
     # tags 파싱
     tags = memory.get("tags")
@@ -157,12 +163,22 @@ async def add_memory_to_remote(
             if resp.status == 200:
                 result = await resp.json()
                 if "error" in result:
-                    return False
-                return True
-            return False
+                    return ("error", None)
+                
+                # MCP 응답에서 결과 파싱
+                content = result.get("result", {}).get("content", [])
+                if content:
+                    text = content[0].get("text", "{}")
+                    data = json.loads(text)
+                    status = data.get("status", "saved")
+                    memory_id = data.get("id")
+                    return (status, memory_id)
+                
+                return ("saved", None)
+            return ("error", None)
     except Exception as e:
         print(f"   ❌ 에러: {e}")
-        return False
+        return ("error", None)
 
 
 async def sync_memories(
@@ -229,24 +245,28 @@ async def sync_memories(
         # 메모리 전송
         print(f"\n💾 메모리 전송 중 (배치 크기: {batch_size})...")
         
-        success_count = 0
-        fail_count = 0
+        saved_count = 0
+        duplicate_count = 0
+        error_count = 0
         
         for i, memory in enumerate(memories, 1):
-            success = await add_memory_to_remote(session, memory, session_id)
+            status, memory_id = await add_memory_to_remote(session, memory, session_id)
             
-            if success:
-                success_count += 1
+            if status == "saved":
+                saved_count += 1
+            elif status == "duplicate":
+                duplicate_count += 1
             else:
-                fail_count += 1
+                error_count += 1
             
             if i % batch_size == 0:
-                print(f"   진행: {i}/{len(memories)} (성공: {success_count}, 실패: {fail_count})")
+                print(f"   진행: {i}/{len(memories)} (저장: {saved_count}, 중복스킵: {duplicate_count}, 실패: {error_count})")
                 await asyncio.sleep(0.1)  # Rate limiting
         
         print(f"\n✅ 완료!")
-        print(f"   성공: {success_count}")
-        print(f"   실패: {fail_count}")
+        print(f"   새로 저장: {saved_count}")
+        print(f"   중복 스킵: {duplicate_count}")
+        print(f"   실패: {error_count}")
 
 
 def main():

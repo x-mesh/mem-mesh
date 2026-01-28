@@ -179,6 +179,10 @@ class UnifiedSearchService:
             SearchResponse: 검색 결과
         """
         start_time = time.perf_counter()
+        
+        # URL 인코딩된 공백(+) 처리 및 정규화
+        # FastAPI는 '+'를 자동으로 공백으로 변환하지 않으므로 수동 처리
+        query = query.replace('+', ' ').strip() if query else ''
         original_query = query
         
         # 1. 의도 분석 (품질 기능 활성화 시)
@@ -227,10 +231,20 @@ class UnifiedSearchService:
         if tag:
             filters['tag'] = tag
         
+        # 빈 쿼리 여부 확인 (후처리 스킵 결정용)
+        is_empty_query = not query.strip()
+        
         # 5. 검색 모드에 따른 검색 수행
-        if not query.strip():
-            # 빈 쿼리: 최근 메모리 반환
+        if is_empty_query:
+            # 빈 쿼리: 최근 메모리 반환 (후처리 없이 바로 반환)
             result = await self._get_recent_memories(filters, limit, offset, sort_by, sort_direction)
+            # 빈 쿼리는 노이즈 필터링, 품질 스코어링, 점수 정규화 없이 바로 반환
+            search_time = time.perf_counter() - start_time
+            logger.info(
+                f"Recent memories returned in {search_time:.3f}s - "
+                f"results: {len(result.results)}"
+            )
+            return result
         elif search_mode == "exact":
             result = await self._exact_search(expanded_query, filters, limit)
         elif search_mode == "semantic":

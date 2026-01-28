@@ -63,6 +63,20 @@
       "path": "docs/rules/modules/mcp-helper.md",
       "kind": "module",
       "tags": ["mcp", "helper", "api"]
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start Guide",
+      "path": "docs/rules/modules/quick-start.md",
+      "kind": "module",
+      "tags": ["quick-start", "guide", "sse"]
+    },
+    {
+      "id": "minimal",
+      "title": "Minimal Prompt",
+      "path": "docs/rules/modules/minimal.md",
+      "kind": "module",
+      "tags": ["minimal", "simple", "sse"]
     }
   ]
 }
