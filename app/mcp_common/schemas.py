@@ -394,8 +394,8 @@ EXAMPLES:
 
 
 def get_all_tool_schemas() -> List[Dict[str, Any]]:
-    """모든 MCP tool 스키마 반환 (memory + pin/session + batch)"""
-    return get_tool_schemas() + get_pin_tool_schemas() + get_batch_tool_schemas()
+    """모든 MCP tool 스키마 반환 (memory + pin/session + batch + relations)"""
+    return get_tool_schemas() + get_pin_tool_schemas() + get_batch_tool_schemas() + get_relation_tool_schemas()
 
 
 def get_batch_tool_schemas() -> List[Dict[str, Any]]:
@@ -467,6 +467,149 @@ def get_batch_tool_schemas() -> List[Dict[str, Any]]:
                     },
                 },
                 "required": ["operations"],
+                "additionalProperties": False
+            },
+        },
+    ]
+
+
+# 유효한 관계 유형 목록
+VALID_RELATION_TYPES = ["related", "parent", "child", "supersedes", "references", "depends_on", "similar"]
+
+
+def get_relation_tool_schemas() -> List[Dict[str, Any]]:
+    """Memory Relations MCP tools/list 응답용 스키마 반환"""
+    return [
+        {
+            "name": "link",
+            "description": """Create a relation between two memories.
+
+Use this to establish semantic connections between memories for better context retrieval.
+
+RELATION TYPES:
+- related: General relationship (default)
+- parent/child: Hierarchical relationship
+- supersedes: Source replaces target (for updates/corrections)
+- references: Source cites or mentions target
+- depends_on: Source requires target
+- similar: Content similarity
+
+EXAMPLES:
+- Link related memories: {"source_id": "abc123", "target_id": "def456"}
+- Create dependency: {"source_id": "task-1", "target_id": "task-2", "relation_type": "depends_on"}
+- Mark supersession: {"source_id": "new-decision", "target_id": "old-decision", "relation_type": "supersedes"}""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source_id": {
+                        "type": "string",
+                        "description": "Source memory ID",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100
+                    },
+                    "target_id": {
+                        "type": "string",
+                        "description": "Target memory ID",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100
+                    },
+                    "relation_type": {
+                        "type": "string",
+                        "description": "Type of relation",
+                        "default": "related",
+                        "enum": VALID_RELATION_TYPES
+                    },
+                    "strength": {
+                        "type": "number",
+                        "description": "Relation strength (0.0-1.0)",
+                        "default": 1.0,
+                        "minimum": 0.0,
+                        "maximum": 1.0
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "description": "Optional metadata for the relation",
+                        "additionalProperties": True
+                    },
+                },
+                "required": ["source_id", "target_id"],
+                "additionalProperties": False
+            },
+        },
+        {
+            "name": "unlink",
+            "description": """Remove a relation between two memories.
+
+EXAMPLES:
+- Remove specific relation: {"source_id": "abc123", "target_id": "def456", "relation_type": "depends_on"}
+- Remove all relations: {"source_id": "abc123", "target_id": "def456"}""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source_id": {
+                        "type": "string",
+                        "description": "Source memory ID",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100
+                    },
+                    "target_id": {
+                        "type": "string",
+                        "description": "Target memory ID",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100
+                    },
+                    "relation_type": {
+                        "type": "string",
+                        "description": "Specific relation type to remove (optional - removes all if not specified)",
+                        "enum": VALID_RELATION_TYPES
+                    },
+                },
+                "required": ["source_id", "target_id"],
+                "additionalProperties": False
+            },
+        },
+        {
+            "name": "get_links",
+            "description": """Get relations for a memory.
+
+DIRECTION OPTIONS:
+- outgoing: Relations where memory is the source
+- incoming: Relations where memory is the target
+- both: All relations (default)
+
+EXAMPLES:
+- Get all links: {"memory_id": "abc123"}
+- Get dependencies: {"memory_id": "abc123", "relation_type": "depends_on", "direction": "outgoing"}
+- Get what references this: {"memory_id": "abc123", "relation_type": "references", "direction": "incoming"}""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "memory_id": {
+                        "type": "string",
+                        "description": "Memory ID to get relations for",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100
+                    },
+                    "relation_type": {
+                        "type": "string",
+                        "description": "Filter by relation type (optional)",
+                        "enum": VALID_RELATION_TYPES
+                    },
+                    "direction": {
+                        "type": "string",
+                        "description": "Relation direction filter",
+                        "default": "both",
+                        "enum": ["outgoing", "incoming", "both"]
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum relations to return",
+                        "default": 20,
+                        "minimum": 1,
+                        "maximum": 100
+                    },
+                },
+                "required": ["memory_id"],
                 "additionalProperties": False
             },
         },

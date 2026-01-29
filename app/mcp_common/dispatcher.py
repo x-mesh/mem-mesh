@@ -58,6 +58,14 @@ class MCPDispatcher:
                 return await self._dispatch_session_resume(args)
             elif tool_name == "session_end":
                 return await self._dispatch_session_end(args)
+            elif tool_name == "link":
+                return await self._dispatch_link(args)
+            elif tool_name == "unlink":
+                return await self._dispatch_unlink(args)
+            elif tool_name == "get_links":
+                return await self._dispatch_get_links(args)
+            elif tool_name == "batch_operations":
+                return await self._dispatch_batch_operations(args)
             else:
                 logger.warning(f"Unknown tool: {tool_name}")
                 return format_tool_error(f"Unknown tool: {tool_name}")
@@ -181,3 +189,48 @@ class MCPDispatcher:
             summary=args.get("summary"),
         )
         return format_tool_response(result)
+
+    # ===== Memory Relations Dispatchers =====
+
+    async def _dispatch_link(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if "source_id" not in args or "target_id" not in args:
+            return format_tool_error("Missing required arguments: source_id, target_id")
+
+        result = await self._tool_handlers.link(
+            source_id=args["source_id"],
+            target_id=args["target_id"],
+            relation_type=args.get("relation_type", "related"),
+            strength=args.get("strength", 1.0),
+            metadata=args.get("metadata"),
+        )
+        return format_tool_response(result)
+
+    async def _dispatch_unlink(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if "source_id" not in args or "target_id" not in args:
+            return format_tool_error("Missing required arguments: source_id, target_id")
+
+        result = await self._tool_handlers.unlink(
+            source_id=args["source_id"],
+            target_id=args["target_id"],
+            relation_type=args.get("relation_type"),
+        )
+        return format_tool_response(result)
+
+    async def _dispatch_get_links(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if "memory_id" not in args:
+            return format_tool_error("Missing required argument: memory_id")
+
+        result = await self._tool_handlers.get_links(
+            memory_id=args["memory_id"],
+            relation_type=args.get("relation_type"),
+            direction=args.get("direction", "both"),
+            limit=args.get("limit", 20),
+        )
+        return format_tool_response(result)
+
+    async def _dispatch_batch_operations(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if "operations" not in args:
+            return format_tool_error("Missing required argument: operations")
+
+        # batch_operations는 tools.py에 아직 구현되지 않았으므로 에러 반환
+        return format_tool_error("batch_operations not yet implemented in tool handlers")
