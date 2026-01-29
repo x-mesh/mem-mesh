@@ -733,16 +733,17 @@ class MCPToolHandlers:
                         "error": f"Invalid relation_type. Must be one of: {valid_types}"
                     }
                 
-                result = await db.execute(
+                cursor = await db.execute(
                     """
                     DELETE FROM memory_relations 
                     WHERE source_id = ? AND target_id = ? AND relation_type = ?
                     """,
                     (source_id, target_id, relation_type)
                 )
+                deleted_count = cursor.rowcount
             else:
                 # 모든 관계 삭제 (양방향)
-                result = await db.execute(
+                cursor = await db.execute(
                     """
                     DELETE FROM memory_relations 
                     WHERE (source_id = ? AND target_id = ?) 
@@ -750,8 +751,7 @@ class MCPToolHandlers:
                     """,
                     (source_id, target_id, target_id, source_id)
                 )
-            
-            deleted_count = result if isinstance(result, int) else 0
+                deleted_count = cursor.rowcount
             
             logger.info(
                 "Successfully unlinked memories",
