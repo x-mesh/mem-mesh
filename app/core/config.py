@@ -123,6 +123,20 @@ class Settings(BaseSettings):
         default=False,
         description="Enable OAuth authentication for Dashboard/Web API endpoints",
     )
+    
+    # Basic Auth for Web Dashboard (simpler alternative to OAuth for browser access)
+    web_basic_auth_enabled: bool = Field(
+        default=False,
+        description="Enable Basic Auth for web dashboard (browser login)",
+    )
+    admin_username: str = Field(
+        default="admin",
+        description="Admin username for web dashboard Basic Auth",
+    )
+    admin_password: str = Field(
+        default="",
+        description="Admin password for web dashboard Basic Auth (required if basic_auth_enabled)",
+    )
     oauth_issuer: str = Field(
         default="http://localhost:8000",
         description="OAuth issuer URL (used in metadata discovery)",

@@ -18,6 +18,7 @@ from .websocket import router as websocket_router
 from .monitoring import router as monitoring_router
 from .oauth import router as oauth_router
 from .oauth.middleware import BearerTokenMiddleware
+from .oauth.basic_auth import BasicAuthMiddleware
 
 
 # Jinja2 템플릿 설정
@@ -38,6 +39,7 @@ def create_app() -> FastAPI:
     # 미들웨어 설정
     setup_middleware(app)
     app.add_middleware(BearerTokenMiddleware)
+    app.add_middleware(BasicAuthMiddleware)  # Basic Auth for web dashboard
 
     # 예외 핸들러 설정
     setup_exception_handlers(app)

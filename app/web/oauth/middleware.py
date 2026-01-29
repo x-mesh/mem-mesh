@@ -79,24 +79,46 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
     def _requires_auth(self, path: str, settings) -> bool:
+        """
+        Determine if a path requires authentication.
+        
+        Logic:
+        1. If auth_enabled=False, no authentication required anywhere
+        2. Public paths (health, docs, static) are always exempt
+        3. OAuth paths are always exempt (needed for auth flow)
+        4. For /mcp/* paths: use mcp_auth_enabled (defaults to auth_enabled)
+        5. For /api/* paths: use web_auth_enabled (defaults to auth_enabled)
+        6. For dashboard pages: use web_auth_enabled (defaults to auth_enabled)
+        """
+        # Global auth disabled = no auth anywhere
         if not settings.auth_enabled:
             return False
 
+        # Public paths are always exempt
         for public_path in PUBLIC_PATHS:
             if path.startswith(public_path):
                 return False
 
+        # OAuth paths are always exempt (needed for auth flow)
         for oauth_path in OAUTH_PATHS:
             if path == oauth_path or path.startswith(oauth_path):
                 return False
 
+        # MCP endpoints: check mcp_auth_enabled
+        # When auth_enabled=True and mcp_auth_enabled is not explicitly set,
+        # it defaults to False (opt-in for MCP auth)
         if path.startswith("/mcp/"):
             return settings.mcp_auth_enabled
 
+        # API endpoints: check web_auth_enabled
+        # When auth_enabled=True and web_auth_enabled is not explicitly set,
+        # it defaults to False (opt-in for Web API auth)
         if path.startswith("/api/"):
             return settings.web_auth_enabled
 
-        return False
+        # Dashboard pages (/, /work, /oauth, etc.): follow web_auth_enabled
+        # This ensures dashboard pages are protected when web auth is enabled
+        return settings.web_auth_enabled
 
 
 def require_scope(required_scope: str):
