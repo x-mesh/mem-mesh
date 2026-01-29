@@ -13,6 +13,23 @@ class ChromaHeader extends HTMLElement {
     this.render();
     this.setupEventListeners();
     this.setupScrollBehavior();
+    this.fetchVersion();
+  }
+
+  async fetchVersion() {
+    try {
+      const response = await fetch('/api/');
+      if (response.ok) {
+        const data = await response.json();
+        const versionBadge = this.querySelector('#version-badge');
+        if (versionBadge && data.version) {
+          versionBadge.textContent = `v${data.version}`;
+          versionBadge.classList.add('loaded');
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to fetch version:', error);
+    }
   }
 
   render() {
@@ -28,6 +45,7 @@ class ChromaHeader extends HTMLElement {
                 <path d="M4 16L16 22L28 16" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
               </svg>
               <span class="logo-text">mem-mesh</span>
+              <span class="version-badge" id="version-badge"></span>
             </a>
           </div>
 

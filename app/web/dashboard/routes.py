@@ -76,10 +76,13 @@ def _resolve_rule_path(rule_entry: dict) -> Path:
 @router.get("/")
 async def api_root():
     """API root endpoint"""
+    from app.core.version import __VERSION__, MCP_PROTOCOL_VERSION
+    
     return {
         "name": "mem-mesh",
         "description": "Central memory server with vector search",
-        "version": "1.0.0",
+        "version": __VERSION__,
+        "mcp_protocol": MCP_PROTOCOL_VERSION,
         "status": "running",
     }
 
@@ -87,7 +90,12 @@ async def api_root():
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "timestamp": "2026-01-11T12:30:00Z"}
+    from datetime import datetime, timezone
+    
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @router.get("/rules")

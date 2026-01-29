@@ -107,9 +107,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
 
         # 설정 정보 출력
+        from app.core.version import __VERSION__, MCP_PROTOCOL_VERSION
+        
         print("\n" + "=" * 60)
-        print("  mem-mesh Web Server Starting")
+        print(f"  mem-mesh Web Server v{__VERSION__}")
         print("=" * 60)
+        print(f"  Version:         {__VERSION__}")
+        print(f"  MCP Protocol:    {MCP_PROTOCOL_VERSION}")
         print(f"  Database Path:   {settings.database_path}")
         print(f"  LOG_LEVEL:       {log_level}")
         print(f"  LOG_FILE:        {log_file if log_file else 'console only'}")
