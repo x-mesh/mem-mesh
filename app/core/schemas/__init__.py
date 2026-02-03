@@ -41,6 +41,16 @@ from .projects import (
     ProjectResponse,
     ProjectWithStats,
 )
+from .optimization import (
+    TokenInfo,
+    SessionStatistics,
+    PinStatistics,
+    OptimizedSessionContext,
+    SessionStatRecord,
+    TokenUsageRecord,
+    TokenSavingsReport,
+    PromotionSuggestion,
+)
 
 __all__ = [
     # Requests
@@ -76,4 +86,13 @@ __all__ = [
     "ProjectUpdate",
     "ProjectResponse",
     "ProjectWithStats",
+    # Optimization
+    "TokenInfo",
+    "SessionStatistics",
+    "PinStatistics",
+    "OptimizedSessionContext",
+    "SessionStatRecord",
+    "TokenUsageRecord",
+    "TokenSavingsReport",
+    "PromotionSuggestion",
 ]

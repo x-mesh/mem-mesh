@@ -234,11 +234,24 @@ class PinService:
             pin_id: Pin ID
 
         Returns:
-            {"memory_id": str, "pin_deleted": bool, "message": str}
+            {"memory_id": str, "pin_deleted": bool, "message": str, "already_promoted": bool}
+        
+        Raises:
+            PinNotFoundError: Pin이 없을 때
         """
         pin = await self.get_pin(pin_id)
         if not pin:
             raise PinNotFoundError(f"Pin not found: {pin_id}")
+
+        # 중복 승격 방지: 이미 승격된 핀인지 확인
+        if pin.promoted_to_memory_id:
+            logger.info(f"Pin {pin_id} already promoted to memory {pin.promoted_to_memory_id}")
+            return {
+                "memory_id": pin.promoted_to_memory_id,
+                "pin_deleted": False,
+                "message": f"Pin이 이미 Memory로 승격되었습니다 (ID: {pin.promoted_to_memory_id})",
+                "already_promoted": True,
+            }
 
         # Memory 생성 (MemoryService 사용)
         from app.core.services.memory import MemoryService
@@ -248,7 +261,7 @@ class PinService:
         embedding_service = EmbeddingService()
         memory_service = MemoryService(self.db, embedding_service)
 
-        # Memory 생성
+        # Memory 생성 - importance를 메타데이터에 포함
         memory_response = await memory_service.create(
             content=pin.content,
             project_id=pin.project_id,
@@ -257,15 +270,25 @@ class PinService:
             tags=pin.tags,
         )
 
-        # Pin 삭제
-        await self.delete_pin(pin_id)
+        # Pin에 promoted_to_memory_id 기록 (삭제하지 않고 유지)
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            """
+            UPDATE pins 
+            SET promoted_to_memory_id = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (memory_response.id, now, pin_id),
+        )
+        self.db.connection.commit()
 
         logger.info(f"Promoted pin {pin_id} to memory {memory_response.id}")
 
         return {
             "memory_id": memory_response.id,
-            "pin_deleted": True,
+            "pin_deleted": False,
             "message": f"Pin이 Memory로 승격되었습니다 (ID: {memory_response.id})",
+            "already_promoted": False,
         }
 
     async def delete_pin(self, pin_id: str) -> bool:
@@ -397,6 +420,22 @@ class PinService:
                 # Silently ignore errors when calculating lead time - use None if calculation fails
                 pass
 
+        # 새로운 컬럼 안전하게 접근
+        try:
+            estimated_tokens = row["estimated_tokens"] if row["estimated_tokens"] is not None else 0
+        except (KeyError, IndexError):
+            estimated_tokens = 0
+
+        try:
+            promoted_to_memory_id = row["promoted_to_memory_id"]
+        except (KeyError, IndexError):
+            promoted_to_memory_id = None
+
+        try:
+            auto_importance = bool(row["auto_importance"])
+        except (KeyError, IndexError):
+            auto_importance = False
+
         return PinResponse(
             id=row["id"],
             session_id=row["session_id"],
@@ -408,6 +447,9 @@ class PinService:
             tags=tags,
             completed_at=row["completed_at"],
             lead_time_hours=lead_time_hours,
+            estimated_tokens=estimated_tokens,
+            promoted_to_memory_id=promoted_to_memory_id,
+            auto_importance=auto_importance,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -415,3 +457,103 @@ class PinService:
     def should_suggest_promotion(self, pin: PinResponse) -> bool:
         """승격 제안 여부 판단"""
         return pin.status == "completed" and pin.importance >= 4
+
+    async def get_pins_filtered(
+        self,
+        session_id: str,
+        min_importance: Optional[int] = None,
+        status: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        limit: int = 10,
+    ) -> List[PinResponse]:
+        """
+        필터링된 핀 목록 조회.
+
+        Args:
+            session_id: 세션 ID
+            min_importance: 최소 중요도 (1-5)
+            status: 상태 필터 ('open', 'in_progress', 'completed')
+            tags: 태그 필터 (AND 조건)
+            limit: 결과 개수
+
+        Returns:
+            필터링된 핀 목록 (created_at 기준 내림차순)
+        """
+        query = "SELECT * FROM pins WHERE session_id = ?"
+        params = [session_id]
+
+        # importance 필터
+        if min_importance is not None:
+            query += " AND importance >= ?"
+            params.append(min_importance)
+
+        # status 필터
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+
+        # tags 필터 (AND 조건)
+        if tags:
+            for tag in tags:
+                # JSON 배열에서 태그 검색
+                query += " AND tags LIKE ?"
+                params.append(f'%"{tag}"%')
+
+        # 정렬 및 제한
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        rows = await self.db.fetchall(query, tuple(params))
+        return [self._row_to_response(row) for row in rows]
+
+    async def get_pin_statistics(self, session_id: str) -> dict:
+        """
+        세션의 핀 통계 조회.
+
+        Args:
+            session_id: 세션 ID
+
+        Returns:
+            {
+                "total": int,
+                "by_status": {"open": int, "in_progress": int, "completed": int},
+                "by_importance": {1: int, 2: int, 3: int, 4: int, 5: int},
+                "avg_lead_time_hours": float,
+                "promotion_candidates": int  # importance >= 4인 완료된 핀
+            }
+        """
+        # 전체 핀 조회
+        pins = await self.get_pins_by_session(session_id, limit=1000, order_by_importance=False)
+
+        # 기본 통계
+        total = len(pins)
+        by_status = {"open": 0, "in_progress": 0, "completed": 0}
+        by_importance = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+        lead_times = []
+        promotion_candidates = 0
+
+        for pin in pins:
+            # 상태별 집계
+            by_status[pin.status] = by_status.get(pin.status, 0) + 1
+
+            # 중요도별 집계
+            by_importance[pin.importance] = by_importance.get(pin.importance, 0) + 1
+
+            # lead_time 수집
+            if pin.lead_time_hours is not None:
+                lead_times.append(pin.lead_time_hours)
+
+            # 승격 후보 집계
+            if pin.status == "completed" and pin.importance >= 4:
+                promotion_candidates += 1
+
+        # 평균 lead_time 계산
+        avg_lead_time_hours = sum(lead_times) / len(lead_times) if lead_times else None
+
+        return {
+            "total": total,
+            "by_status": by_status,
+            "by_importance": by_importance,
+            "avg_lead_time_hours": avg_lead_time_hours,
+            "promotion_candidates": promotion_candidates,
+        }

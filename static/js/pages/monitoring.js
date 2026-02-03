@@ -108,6 +108,11 @@ export class MonitoringPage extends HTMLElement {
         <div class="tab-content">
           <!-- Overview Tab -->
           <div id="tab-overview" class="tab-panel active">
+            <!-- Active Alerts Section -->
+            <section class="alerts-section">
+              <alert-panel></alert-panel>
+            </section>
+            
             <div class="charts-grid">
               <div class="chart-container">
                 <h3>검색 품질 추이</h3>

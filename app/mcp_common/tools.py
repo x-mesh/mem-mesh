@@ -439,19 +439,41 @@ class MCPToolHandlers:
         
         try:
             from ..core.services.pin import PinService
+            from ..core.services.importance_analyzer import ImportanceAnalyzer
             
             db = self._get_database()
             pin_service = PinService(db)
             
+            # importance가 명시되지 않으면 ImportanceAnalyzer로 자동 추정
+            effective_importance = importance
+            auto_importance = False
+            
+            if importance is None:
+                analyzer = ImportanceAnalyzer()
+                effective_importance = analyzer.analyze(content, tags)
+                auto_importance = True
+                logger.info(
+                    f"Auto-determined importance: {effective_importance} for content: '{content[:50]}...'"
+                )
+            
             result = await pin_service.create_pin(
                 project_id=project_id,
                 content=content,
-                importance=importance,
+                importance=effective_importance,
                 tags=tags
             )
             
-            logger.info("Successfully added pin", pin_id=result.id)
-            return result.model_dump()
+            # 응답에 auto_importance 플래그 추가
+            response = result.model_dump()
+            response["auto_importance"] = auto_importance
+            if auto_importance:
+                response["importance_note"] = (
+                    f"중요도가 자동으로 {effective_importance}점으로 설정되었습니다. "
+                    "필요시 수정할 수 있습니다."
+                )
+            
+            logger.info("Successfully added pin", pin_id=result.id, importance=effective_importance, auto=auto_importance)
+            return response
         except Exception as e:
             logger.error("Error in pin_add", error=str(e))
             raise
@@ -538,7 +560,7 @@ class MCPToolHandlers:
             limit: Maximum number of pins to return (default 10)
             
         Returns:
-            dict: Session context with pins
+            dict: Session context with pins and token tracking information
         """
         logger.info(
             "Tool session_resume called",
@@ -553,20 +575,38 @@ class MCPToolHandlers:
             db = self._get_database()
             session_service = SessionService(db)
             
-            result = await session_service.resume_last_session(
+            # resume_with_token_tracking 메서드 사용
+            session_context, token_info = await session_service.resume_with_token_tracking(
                 project_id=project_id,
                 expand=expand,
                 limit=limit
             )
             
-            if result is None:
+            if session_context is None:
                 return {
                     "status": "no_session",
-                    "message": f"프로젝트 '{project_id}'에 활성 세션이 없습니다. pin_add로 새 작업을 시작하세요."
+                    "message": f"프로젝트 '{project_id}'에 활성 세션이 없습니다. pin_add로 새 작업을 시작하세요.",
+                    "token_info": token_info
                 }
             
-            logger.info("Successfully resumed session", session_id=result.session_id)
-            return result.model_dump()
+            # 세션 컨텍스트와 토큰 정보를 함께 반환
+            response = session_context.model_dump()
+            response["token_info"] = token_info
+            
+            # expand=false일 때 토큰 제한 경고
+            if not expand and token_info["loaded_tokens"] > 100:
+                response["token_warning"] = (
+                    f"요약 모드에서 {token_info['loaded_tokens']} 토큰이 로드되었습니다. "
+                    "100 토큰 이하를 권장합니다."
+                )
+            
+            logger.info(
+                "Successfully resumed session with token tracking",
+                session_id=session_context.session_id,
+                loaded_tokens=token_info["loaded_tokens"],
+                saved_tokens=token_info["unloaded_tokens"]
+            )
+            return response
         except Exception as e:
             logger.error("Error in session_resume", error=str(e))
             raise

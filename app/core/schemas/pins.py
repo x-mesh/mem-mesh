@@ -50,6 +50,9 @@ class PinResponse(BaseModel):
     tags: List[str]
     completed_at: Optional[str] = None
     lead_time_hours: Optional[float] = None
+    estimated_tokens: Optional[int] = Field(default=0, description="예상 토큰 수")
+    promoted_to_memory_id: Optional[str] = Field(default=None, description="승격된 메모리 ID")
+    auto_importance: Optional[bool] = Field(default=False, description="자동 중요도 추정 여부")
     created_at: str
     updated_at: str
 

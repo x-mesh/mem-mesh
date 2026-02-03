@@ -55,7 +55,12 @@ if _ignore_ssl:
         # Silently ignore if huggingface_hub is not available or configuration fails
         pass
 
-from sentence_transformers import SentenceTransformer
+try:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
+    SentenceTransformer = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +108,12 @@ class EmbeddingService:
             preload: True면 초기화 시 모델을 미리 로드 (기본값: True)
             metrics_collector: 메트릭 수집기 (선택적)
         """
+        if not SENTENCE_TRANSFORMERS_AVAILABLE:
+            raise ImportError(
+                "sentence-transformers is not installed. "
+                "Install it with: pip install sentence-transformers"
+            )
+        
         self.model: Optional[SentenceTransformer] = None
         self.metrics_collector = metrics_collector
 

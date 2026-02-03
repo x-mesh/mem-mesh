@@ -393,9 +393,10 @@ export class ProjectAnalyticsPage extends HTMLElement {
     }
   }
 
-  async fetchProjectStats(hours) {
+  async fetchProjectStats(hours, projectId = null) {
     // Fetch project-specific stats
-    const response = await fetch(`/api/monitoring/search/quality-stats?hours=${hours}&project_id=${encodeURIComponent(this.projectId)}`);
+    const pid = projectId || this.projectId;
+    const response = await fetch(`/api/monitoring/search/quality-stats?hours=${hours}&project_id=${encodeURIComponent(pid)}`);
     if (!response.ok) throw new Error('Failed to fetch project stats');
     return response.json();
   }
@@ -467,11 +468,139 @@ export class ProjectAnalyticsPage extends HTMLElement {
       topQueriesEl.innerHTML = '<p class="empty">데이터 없음</p>';
     }
 
-    // TODO: Implement zero-result, low-score, and slow queries
+    // Zero-result queries
+    const zeroResultEl = this.querySelector('#zero-result-queries');
+    if (stats.zero_result_queries && stats.zero_result_queries.length > 0) {
+      zeroResultEl.innerHTML = stats.zero_result_queries.map((q, i) => `
+        <div class="query-item warning">
+          <span class="rank">${i + 1}</span>
+          <span class="query">${this.escapeHtml(q.query)}</span>
+          <span class="count">${q.count}회</span>
+          <span class="badge badge-warning">결과 없음</span>
+        </div>
+      `).join('');
+    } else {
+      zeroResultEl.innerHTML = '<p class="empty success">✓ Zero-result 쿼리 없음</p>';
+    }
+
+    // Low score queries
+    const lowScoreEl = this.querySelector('#low-score-queries');
+    if (stats.low_score_queries && stats.low_score_queries.length > 0) {
+      lowScoreEl.innerHTML = stats.low_score_queries.map((q, i) => `
+        <div class="query-item warning">
+          <span class="rank">${i + 1}</span>
+          <span class="query">${this.escapeHtml(q.query)}</span>
+          <span class="score">${(q.avg_similarity * 100).toFixed(1)}%</span>
+          <span class="badge badge-warning">낮은 점수</span>
+        </div>
+      `).join('');
+    } else {
+      lowScoreEl.innerHTML = '<p class="empty success">✓ 낮은 점수 쿼리 없음</p>';
+    }
+
+    // Slow queries
+    const slowQueriesEl = this.querySelector('#slow-queries');
+    if (stats.slow_queries && stats.slow_queries.length > 0) {
+      slowQueriesEl.innerHTML = stats.slow_queries.map((q, i) => `
+        <div class="query-item warning">
+          <span class="rank">${i + 1}</span>
+          <span class="query">${this.escapeHtml(q.query)}</span>
+          <span class="time">${q.avg_response_time.toFixed(0)}ms</span>
+          <span class="badge badge-warning">느림</span>
+        </div>
+      `).join('');
+    } else {
+      slowQueriesEl.innerHTML = '<p class="empty success">✓ 느린 쿼리 없음</p>';
+    }
   }
 
   updateTrendsCharts(stats) {
-    // TODO: Implement hourly/daily pattern charts
+    // Hourly pattern chart
+    if (stats.hourly_pattern && stats.hourly_pattern.length > 0) {
+      const hourlyData = new Array(24).fill(0);
+      stats.hourly_pattern.forEach(h => {
+        hourlyData[h.hour] = h.count;
+      });
+
+      this.createOrUpdateChart('hourly-pattern-chart', {
+        type: 'bar',
+        data: {
+          labels: Array.from({length: 24}, (_, i) => `${i}시`),
+          datasets: [{
+            label: '검색 수',
+            data: hourlyData,
+            backgroundColor: '#3b82f6',
+            borderRadius: 4
+          }]
+        },
+        options: this.getChartOptions('검색 수')
+      });
+    }
+
+    // Daily pattern chart (day of week)
+    if (stats.daily_pattern && stats.daily_pattern.length > 0) {
+      const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+      const dailyData = new Array(7).fill(0);
+      stats.daily_pattern.forEach(d => {
+        dailyData[d.day_of_week] = d.count;
+      });
+
+      this.createOrUpdateChart('daily-pattern-chart', {
+        type: 'bar',
+        data: {
+          labels: dayNames,
+          datasets: [{
+            label: '검색 수',
+            data: dailyData,
+            backgroundColor: '#10b981',
+            borderRadius: 4
+          }]
+        },
+        options: this.getChartOptions('검색 수')
+      });
+    }
+
+    // Quality trend chart
+    if (stats.trend && stats.trend.length > 0) {
+      const labels = stats.trend.map(t => this.formatTime(t.hour)).reverse();
+      
+      this.createOrUpdateChart('quality-trend-chart', {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: '평균 점수',
+            data: stats.trend.map(t => (t.avg_similarity * 100).toFixed(1)).reverse(),
+            borderColor: '#10b981',
+            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+            fill: true,
+            tension: 0.4
+          }]
+        },
+        options: this.getChartOptions('점수 (%)', 0, 100)
+      });
+    }
+
+    // Response time trend chart
+    if (stats.trend && stats.trend.length > 0) {
+      const labels = stats.trend.map(t => this.formatTime(t.hour)).reverse();
+      
+      this.createOrUpdateChart('response-trend-chart', {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: '평균 응답시간',
+            data: stats.trend.map(t => t.avg_response_time).reverse(),
+            borderColor: '#f59e0b',
+            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+            fill: true,
+            tension: 0.4
+          }]
+        },
+        options: this.getChartOptions('응답시간 (ms)', 0)
+      });
+    }
   }
 
   async loadComparisonProjects() {
@@ -501,7 +630,116 @@ export class ProjectAnalyticsPage extends HTMLElement {
   }
 
   updateComparisonView() {
-    // TODO: Implement comparison charts
+    const selectedEl = this.querySelector('#selected-projects');
+    
+    // Display selected projects
+    selectedEl.innerHTML = this.comparisonProjects.map(pid => `
+      <div class="selected-project-tag">
+        <span>${this.escapeHtml(pid)}</span>
+        <button class="remove-btn" data-project="${pid}">×</button>
+      </div>
+    `).join('');
+
+    // Add remove listeners
+    selectedEl.querySelectorAll('.remove-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const project = e.target.dataset.project;
+        this.comparisonProjects = this.comparisonProjects.filter(p => p !== project);
+        this.updateComparisonView();
+      });
+    });
+
+    // Load comparison data if projects selected
+    if (this.comparisonProjects.length > 0) {
+      this.loadComparisonData();
+    }
+  }
+
+  async loadComparisonData() {
+    try {
+      const hours = this.getHoursFromRange();
+      const projects = [this.projectId, ...this.comparisonProjects];
+      
+      // Fetch stats for all projects
+      const statsPromises = projects.map(pid => 
+        this.fetchProjectStats(hours, pid)
+      );
+      const allStats = await Promise.all(statsPromises);
+
+      // Create comparison charts
+      this.createComparisonCharts(projects, allStats);
+      this.createComparisonTable(projects, allStats);
+      
+    } catch (error) {
+      console.error('Failed to load comparison data:', error);
+    }
+  }
+
+  createComparisonCharts(projects, allStats) {
+    // Searches comparison
+    this.createOrUpdateChart('comparison-searches-chart', {
+      type: 'bar',
+      data: {
+        labels: projects.map(p => p === this.projectId ? `${p} (현재)` : p),
+        datasets: [{
+          label: '총 검색 수',
+          data: allStats.map(s => s.summary.total_searches),
+          backgroundColor: projects.map((p, i) => 
+            p === this.projectId ? '#3b82f6' : `hsl(${i * 60}, 70%, 60%)`
+          ),
+          borderRadius: 4
+        }]
+      },
+      options: this.getChartOptions('검색 수')
+    });
+
+    // Quality comparison
+    this.createOrUpdateChart('comparison-quality-chart', {
+      type: 'bar',
+      data: {
+        labels: projects.map(p => p === this.projectId ? `${p} (현재)` : p),
+        datasets: [{
+          label: '평균 점수 (%)',
+          data: allStats.map(s => (s.summary.avg_similarity_score * 100).toFixed(1)),
+          backgroundColor: projects.map((p, i) => 
+            p === this.projectId ? '#10b981' : `hsl(${i * 60 + 120}, 70%, 60%)`
+          ),
+          borderRadius: 4
+        }]
+      },
+      options: this.getChartOptions('점수 (%)', 0, 100)
+    });
+  }
+
+  createComparisonTable(projects, allStats) {
+    const tableEl = this.querySelector('#comparison-table');
+    
+    const rows = [
+      { label: '총 검색', key: 'total_searches', format: v => v.toLocaleString() },
+      { label: '평균 결과 수', key: 'avg_results_per_search', format: v => v.toFixed(2) },
+      { label: '평균 점수', key: 'avg_similarity_score', format: v => (v * 100).toFixed(1) + '%' },
+      { label: '평균 응답시간', key: 'avg_response_time_ms', format: v => v.toFixed(0) + 'ms' },
+      { label: 'Zero-result 비율', key: 'zero_result_rate', format: v => v.toFixed(1) + '%' }
+    ];
+
+    tableEl.innerHTML = `
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th>지표</th>
+            ${projects.map(p => `<th>${p === this.projectId ? `${p} (현재)` : p}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(row => `
+            <tr>
+              <td class="label">${row.label}</td>
+              ${allStats.map(s => `<td>${row.format(s.summary[row.key])}</td>`).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
   }
 
   async loadAlertSettings() {
@@ -539,8 +777,99 @@ export class ProjectAnalyticsPage extends HTMLElement {
   }
 
   async exportData() {
-    // TODO: Implement data export (CSV/JSON)
-    alert('데이터 내보내기 기능은 곧 제공됩니다.');
+    try {
+      const hours = this.getHoursFromRange();
+      const stats = await this.fetchProjectStats(hours);
+      
+      // Show export format selection
+      const format = await this.showExportDialog();
+      if (!format) return;
+
+      if (format === 'csv') {
+        this.exportAsCSV(stats);
+      } else if (format === 'json') {
+        this.exportAsJSON(stats);
+      }
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert('데이터 내보내기 실패');
+    }
+  }
+
+  showExportDialog() {
+    return new Promise((resolve) => {
+      const dialog = document.createElement('div');
+      dialog.className = 'export-dialog-overlay';
+      dialog.innerHTML = `
+        <div class="export-dialog">
+          <h3>데이터 내보내기</h3>
+          <p>내보낼 형식을 선택하세요:</p>
+          <div class="export-options">
+            <button class="btn btn-primary" data-format="csv">CSV</button>
+            <button class="btn btn-primary" data-format="json">JSON</button>
+            <button class="btn btn-secondary" data-format="cancel">취소</button>
+          </div>
+        </div>
+      `;
+
+      dialog.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const format = e.target.dataset.format;
+          document.body.removeChild(dialog);
+          resolve(format === 'cancel' ? null : format);
+        });
+      });
+
+      document.body.appendChild(dialog);
+    });
+  }
+
+  exportAsCSV(stats) {
+    const rows = [];
+    
+    // Header
+    rows.push(['지표', '값']);
+    
+    // Summary data
+    const summary = stats.summary;
+    rows.push(['총 검색', summary.total_searches]);
+    rows.push(['평균 결과 수', summary.avg_results_per_search.toFixed(2)]);
+    rows.push(['평균 점수', (summary.avg_similarity_score * 100).toFixed(1) + '%']);
+    rows.push(['평균 응답시간', summary.avg_response_time_ms.toFixed(0) + 'ms']);
+    rows.push(['Zero-result 비율', summary.zero_result_rate.toFixed(1) + '%']);
+    
+    rows.push([]); // Empty row
+    rows.push(['인기 검색어', '검색 수', '평균 결과']);
+    
+    // Popular queries
+    if (stats.popular_queries) {
+      stats.popular_queries.forEach(q => {
+        rows.push([q.query, q.count, q.avg_results.toFixed(1)]);
+      });
+    }
+
+    // Convert to CSV
+    const csv = rows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+    
+    // Download
+    this.downloadFile(csv, `project-${this.projectId}-${this.dateRange}.csv`, 'text/csv');
+  }
+
+  exportAsJSON(stats) {
+    const json = JSON.stringify(stats, null, 2);
+    this.downloadFile(json, `project-${this.projectId}-${this.dateRange}.json`, 'application/json');
+  }
+
+  downloadFile(content, filename, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   createOrUpdateChart(canvasId, config) {

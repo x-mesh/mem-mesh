@@ -21,6 +21,9 @@ class SessionResponse(BaseModel):
     ended_at: Optional[str] = None
     status: str
     summary: Optional[str] = None
+    initial_context_tokens: Optional[int] = Field(default=0, description="초기 맥락 토큰 수")
+    total_loaded_tokens: Optional[int] = Field(default=0, description="총 로드된 토큰 수")
+    total_saved_tokens: Optional[int] = Field(default=0, description="절감된 토큰 수")
     created_at: str
     updated_at: str
 

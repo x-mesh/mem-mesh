@@ -906,6 +906,116 @@ class UnifiedSearchService:
             return None
         return None
 
+    async def search_with_context_optimization(
+        self,
+        query: str,
+        project_id: Optional[str] = None,
+        category: Optional[str] = None,
+        limit: int = 25,
+        optimize_context: bool = True
+    ) -> tuple:
+        """
+        맥락 최적화와 함께 검색 수행
+        
+        검색 의도를 분석하여 세션 맥락을 최적화된 방식으로 로드합니다.
+        이를 통해 토큰 사용량을 절감하면서도 관련성 높은 정보를 제공합니다.
+        
+        Args:
+            query: 검색 쿼리
+            project_id: 프로젝트 ID
+            category: 카테고리 필터
+            limit: 결과 개수
+            optimize_context: 맥락 최적화 활성화 (False면 기본 검색만 수행)
+            
+        Returns:
+            (search_response, optimized_context)
+            - search_response: 검색 결과
+            - optimized_context: 최적화된 세션 맥락 (optimize_context=False이거나 세션이 없으면 None)
+            
+        Requirements: 6.1, 6.2, 6.3, 6.4, 6.5
+        """
+        start_time = time.perf_counter()
+        
+        # 1. 기본 검색 수행
+        search_response = await self.search(
+            query=query,
+            project_id=project_id,
+            category=category,
+            limit=limit,
+            search_mode="smart"  # 의도 기반 자동 조정 활성화
+        )
+        
+        # 2. 맥락 최적화가 비활성화되었거나 프로젝트 ID가 없으면 검색 결과만 반환
+        if not optimize_context or not project_id:
+            logger.info(
+                f"Context optimization skipped: "
+                f"optimize_context={optimize_context}, project_id={project_id}"
+            )
+            return search_response, None
+        
+        # 3. 의도 분석 (이미 search()에서 수행되었지만 명시적으로 다시 수행)
+        intent = None
+        if self.enable_quality_features and self.intent_analyzer and query:
+            intent = self.intent_analyzer.analyze(query)
+            logger.info(
+                f"Intent analyzed for context optimization: "
+                f"type={intent.intent_type}, urgency={intent.urgency:.2f}, "
+                f"specificity={intent.specificity:.2f}"
+            )
+        else:
+            # 의도 분석기가 없으면 기본 의도 생성
+            from .search_quality import SearchIntent
+            intent = SearchIntent(
+                intent_type='lookup',
+                urgency=0.5,
+                specificity=0.5,
+                temporal_focus='any',
+                expected_category=category,
+                key_entities=[]
+            )
+            logger.debug("Using default intent for context optimization")
+        
+        # 4. ContextOptimizer를 통한 맥락 로드
+        optimized_context = None
+        try:
+            # SessionService와 ContextOptimizer 초기화
+            from .session import SessionService
+            from .context_optimizer import ContextOptimizer
+            
+            session_service = SessionService(self.db)
+            context_optimizer = ContextOptimizer(session_service)
+            
+            # 의도 기반 맥락 로드
+            optimized_context = await context_optimizer.load_context_for_search(
+                query=query,
+                project_id=project_id,
+                intent=intent
+            )
+            
+            if optimized_context:
+                logger.info(
+                    f"Context loaded and optimized: "
+                    f"session={optimized_context.session_id}, "
+                    f"pins={len(optimized_context.pins) if optimized_context.pins else 0}"
+                )
+            else:
+                logger.info(f"No active session found for project: {project_id}")
+                
+        except Exception as e:
+            logger.error(f"Failed to load optimized context: {e}", exc_info=True)
+            # 맥락 로드 실패는 치명적이지 않으므로 검색 결과는 반환
+            optimized_context = None
+        
+        # 5. 검색 시간 로깅
+        search_time = time.perf_counter() - start_time
+        logger.info(
+            f"Search with context optimization completed in {search_time:.3f}s - "
+            f"results: {len(search_response.results)}, "
+            f"context_loaded: {optimized_context is not None}"
+        )
+        
+        return search_response, optimized_context
+
     async def _collect_metrics(
         self,
         query: str,

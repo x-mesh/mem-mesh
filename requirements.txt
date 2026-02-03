@@ -2,53 +2,45 @@
 # 벡터 검색과 맥락 조회를 지원하는 개발자용 메모리 관리 시스템
 
 # Core web framework
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
+fastapi>=0.104.0,<0.116.0
+uvicorn[standard]>=0.24.0,<0.32.0
+jinja2>=3.1.0,<4.0.0
 
-# Machine learning and embeddings
-sentence-transformers>=2.2.2
-torch>=2.0.0
-transformers>=4.30.0
+# Data validation and settings
+pydantic>=2.5.0,<3.0.0
+pydantic-settings>=2.1.0,<3.0.0
+sqlmodel>=0.0.14,<0.1.0
+
+# MCP (Model Context Protocol) support
+mcp>=1.0.0,<2.0.0
+fastmcp>=0.1.0,<1.0.0
+
+# HTTP client and utilities
+httpx>=0.25.0,<0.28.0
+python-multipart>=0.0.6,<0.1.0
+python-dotenv>=1.0.0,<2.0.0
+sse-starlette>=1.6.0,<3.0.0
+requests>=2.31.0,<3.0.0
 
 # Database and vector search
 sqlite-vec>=0.0.1a12
-pysqlite3>=0.5.0
+# pysqlite3는 Python 3.13에서 불필요 (내장 sqlite3 사용)
 
-# Data validation and settings
-pydantic>=2.5.0
-pydantic-settings>=2.1.0
-sqlmodel>=0.0.14
+# Basic utilities
+numpy>=1.24.0,<2.0.0
+psutil>=5.9.0,<6.0.0
 
-# MCP (Model Context Protocol) support
-mcp>=1.0.0
-fastmcp>=0.1.0
+# Machine learning and embeddings
+sentence-transformers>=2.2.2,<4.0.0
+# torch는 sentence-transformers의 의존성으로 자동 설치됨
+transformers>=4.30.0,<5.0.0
 
-# HTTP client and utilities
-httpx>=0.25.0
-python-multipart>=0.0.6
-python-dotenv>=1.0.0
-sse-starlette>=1.6.0
-
-# Data analysis and visualization (for embedding model testing)
-matplotlib>=3.7.0
-seaborn>=0.12.0
-scikit-learn>=1.3.0
-numpy>=1.24.0
-psutil>=5.9.0
-scipy>=1.11.0
-
-# Benchmark dependencies (optional)
-# Uncomment for vector database benchmarking
-# asyncpg>=0.29.0          # PostgreSQL with pgvector
-# qdrant-client>=1.7.0     # Qdrant vector database
+# Token counting
+tiktoken>=0.5.0,<1.0.0
 
 # Development dependencies (optional)
-# Uncomment for development setup
 # pytest>=7.4.0
 # pytest-asyncio>=0.21.0
-# hypothesis>=6.88.0
 # black>=23.0.0
 # isort>=5.12.0
 # mypy>=1.7.0
-# coverage>=7.3.0
-# pre-commit>=3.5.0
