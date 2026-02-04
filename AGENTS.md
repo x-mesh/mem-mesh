@@ -22,6 +22,8 @@ python scripts/migrate_embeddings.py --dry-run
 uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 ```
 
+Note: If port 8000 is already in use locally, it indicates the FastAPI server is already running in reload mode. Do not restart it.
+
 ## Golden Rules
 **Immutable Constraints:**
 - SQLite + sqlite-vec virtual tables are the sole vector store; no external vector DBs allowed.
@@ -54,6 +56,15 @@ uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 - Whenever Korean explanations are needed, pair them with English technical terms for clarity.
 - Use `git --no-pager` variants (`git --no-pager log`, `git --no-pager status`) when reviewing history.
 
+## Workflow
+**Thinking Process (CoT)**
+
+Before generating code or executing commands, you must perform a brief <Thinking> step:
+1. Identify Intent: What is the user's specific goal? (Feat/Fix/Refactor/Query)
+2. Check Context: Which AGENTS.md or module is relevant? (Refer to Context Map)
+3. Verify Constraints: Does this action violate any Golden Rules?
+4. Plan: Outline the step-by-step execution plan.
+
 **Maintenance Policy:**
 규칙과 코드 사이에 괴리가 보이면 즉시 개선 제안을 제출하고, 중앙 통제 루트(이 AGENTS.md) 및 관련 AGENT 하위 파일을 동시에 업데이트합니다.
 
@@ -71,12 +82,52 @@ uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 
 ## Session Context Management
 ### Session Start
-- Always begin with `mcp_mem_mesh_session_resume` (project_id=mem-mesh, expand=false, limit=10) and report the returned summary (pins_count, open_pins, completed_pins) before modifying AGENT files.
+```
+mcp_mem_mesh_session_resume(project_id="mem-mesh", expand=false, limit=10)
+```
+Report: `pins_count`, `open_pins`, `completed_pins`
 
-### During Work
-- For every new task, call `mcp_mem_mesh_pin_add` with a one-line description, importance (default 3, 4 for important changes, 5 for architecture), and relevant tags. Report the `pin_id` immediately in your response. Work must not proceed until a pin exists.
-- Track dependencies and context by referencing the pin content; keep importance aligned with impact.
+**Token Optimization:**
+- `expand=false`: Summary only (no pin content) - saves ~90% tokens
+- `expand=true`: Full pin content loaded
+- `token_info` shows: `loaded_tokens`, `unloaded_tokens`, `estimated_total`
 
-### After Work
-- Call `mcp_mem_mesh_pin_complete` with the `pin_id` when work finishes. If importance ≥4, recommend `mcp_mem_mesh_pin_promote` to preserve the outcome and mention the promotion ID in the wrap-up.
-- Close the session with `mcp_mem_mesh_session_end` (project_id=mem-mesh) and summarize the session in the final report.
+### Task Start
+```
+mcp_mem_mesh_pin_add(content="<description>", project_id="mem-mesh", importance=3, tags=[...])
+```
+- `3`: normal, `4`: important, `5`: architecture
+- Wait for `pin_id` before proceeding
+
+### Task Complete
+```
+mcp_mem_mesh_pin_complete(pin_id="<pin_id>")
+```
+If importance ≥ 4: `mcp_mem_mesh_pin_promote(pin_id)`
+
+### Session End
+```
+mcp_mem_mesh_session_end(project_id="mem-mesh")
+```
+
+### Batch Operations (30-50% token savings)
+```
+mcp_mem_mesh_batch_operations(operations=[
+  {"type": "add", "content": "...", "project_id": "...", "category": "task"},
+  {"type": "search", "query": "...", "limit": 5}
+])
+```
+
+### Memory Relations
+- `link(source_id, target_id, relation_type)` - Create relation
+- `get_links(memory_id)` - Get relations
+- Types: `related` | `parent` | `child` | `supersedes` | `references` | `depends_on` | `similar`
+
+### Search Patterns
+- Recent: `search(query="", limit=5)`
+- Project: `search(query="...", project_id="...")`
+- Recency: `search(query="...", recency_weight=0.3)`
+- Category: `search(query="", category="decision")`
+
+### Categories
+`task` | `bug` | `idea` | `decision` | `incident` | `code_snippet` | `git-history`

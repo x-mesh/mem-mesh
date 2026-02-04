@@ -1,9 +1,17 @@
 """Session 관련 스키마 정의"""
 
-from typing import Optional, List
+from typing import Optional, List, Any, Union
 from pydantic import BaseModel, Field, field_validator
 
 from .pins import PinResponse
+
+
+class PinCompact(BaseModel):
+    """컴팩트 핀 정보 (expand=false용, 토큰 절약)"""
+    id: str
+    content: str = Field(description="80자로 제한된 내용 요약")
+    importance: int
+    status: str
 
 
 class SessionCreate(BaseModel):
@@ -39,7 +47,10 @@ class SessionContext(BaseModel):
     pins_count: int
     open_pins: int
     completed_pins: int
-    pins: List[PinResponse] = Field(default_factory=list)
+    pins: List[Union[PinResponse, PinCompact, dict]] = Field(
+        default_factory=list,
+        description="expand=true: PinResponse 전체, expand=false: PinCompact 요약"
+    )
 
 
 class SessionResumeParams(BaseModel):

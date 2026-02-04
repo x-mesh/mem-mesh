@@ -168,17 +168,23 @@ class SessionService:
 
         # Pin 목록 조회 (importance 순)
         pins = []
+        pin_rows = await self.db.fetchall(
+            """
+            SELECT * FROM pins
+            WHERE session_id = ?
+            ORDER BY importance DESC, created_at DESC
+            LIMIT ?
+            """,
+            (session.id, limit),
+        )
+        
         if expand:
-            pin_rows = await self.db.fetchall(
-                """
-                SELECT * FROM pins
-                WHERE session_id = ?
-                ORDER BY importance DESC, created_at DESC
-                LIMIT ?
-                """,
-                (session.id, limit),
-            )
+            # expand=true: 전체 핀 정보 반환
             pins = [self._pin_row_to_response(r) for r in pin_rows]
+        else:
+            # expand=false: 컴팩트 핀 정보 반환 (맥락 유지용)
+            # content를 80자로 제한하여 토큰 절약하면서 맥락 제공
+            pins = [self._pin_row_to_compact(r) for r in pin_rows]
         
         # 세션 요약이 없으면 최근 열린 핀들로 자동 생성
         summary = session.summary
@@ -374,6 +380,26 @@ class SessionService:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+    def _pin_row_to_compact(self, row) -> Dict[str, Any]:
+        """
+        DB row를 컴팩트 핀 정보로 변환 (토큰 절약용).
+        
+        expand=false일 때 사용. 맥락 유지에 필요한 최소 정보만 포함:
+        - id: 핀 식별자 (complete/promote 호출용)
+        - content: 80자로 제한된 내용 요약
+        - importance: 중요도 (1-5)
+        - status: 상태 (open/in_progress/completed)
+        """
+        content = row["content"] or ""
+        truncated_content = content[:80] + "..." if len(content) > 80 else content
+        
+        return {
+            "id": row["id"],
+            "content": truncated_content,
+            "importance": row["importance"],
+            "status": row["status"],
+        }
 
     async def resume_with_token_tracking(
         self,
