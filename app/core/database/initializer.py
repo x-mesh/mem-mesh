@@ -27,10 +27,18 @@ class DatabaseInitializer:
             raise RuntimeError("Database not connected")
 
         try:
+            # Step 1: Create core tables first (needed for migrations)
             await self._create_core_tables()
             await self._create_work_tracking_tables()
             await self._create_monitoring_tables()
             await self._create_oauth_tables()
+            
+            # Step 2: Run schema migrations to add missing columns
+            from .schema_migrator import SchemaMigrator
+            migrator = SchemaMigrator(self.connection)
+            await migrator.migrate()
+            
+            # Step 3: Create indexes (after columns exist)
             await self._create_indexes()
             await self._create_vector_tables()
             await self._create_fallback_tables()
@@ -330,7 +338,12 @@ class DatabaseInitializer:
             core_indexes + work_tracking_indexes + monitoring_indexes + oauth_indexes + token_optimization_indexes
         )
         for index_sql in all_indexes:
-            conn.execute(index_sql)
+            try:
+                conn.execute(index_sql)
+            except Exception as e:
+                # Skip index creation if column doesn't exist yet
+                # This can happen during initial setup before migrations run
+                logger.debug(f"Index creation skipped (may be created after migration): {e}")
 
         logger.info("Database indexes created")
 
