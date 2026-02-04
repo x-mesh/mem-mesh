@@ -1,5 +1,7 @@
 # mem-mesh Session Rules
 
+> See also: `docs/rules/mem-mesh-mcp-guide.md` for complete integration guide.
+
 ## Session Lifecycle
 
 ```
