@@ -138,16 +138,15 @@ class ScoreNormalizer:
         """
         Sigmoid 정규화: S-curve 적용
         
-        낮은 점수를 더 높게, 높은 점수를 더 낮게 조정하여
-        점수 분포를 더 균등하게 만듦
+        점수 분포를 더 균등하게 만들어 차이를 명확하게 함
         
         Formula: 1 / (1 + exp(-k * (x - threshold)))
         """
         import math
         
-        # 파라미터 조정
-        k = 10.0  # 기울기 (클수록 가파름)
-        threshold = 0.15  # 중심점 (현재 평균 점수 근처)
+        # 파라미터 조정 - 벡터 검색 점수 범위(0.5~0.8)에 맞춤
+        k = 8.0  # 기울기 (클수록 가파름)
+        threshold = 0.6  # 중심점 (벡터 검색 평균 점수 근처)
         
         normalized = []
         for score in scores:

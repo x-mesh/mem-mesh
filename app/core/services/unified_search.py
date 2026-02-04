@@ -524,35 +524,40 @@ class UnifiedSearchService:
         """
         Reciprocal Rank Fusion 알고리즘 적용
         Score = 1 / (k + rank)
+        
+        RRF는 순위 결정에만 사용하고, 최종 점수는 원래 벡터 유사도를 유지
         """
-        scores = {}
+        rrf_scores = {}
         content_map = {}
+        original_scores = {}  # 원래 벡터 점수 보존
         
         # Vector Results 점수 합산
         for rank, item in enumerate(vector_results):
             if item.id not in content_map:
                 content_map[item.id] = item
-            scores[item.id] = scores.get(item.id, 0) + (1.0 / (k + rank + 1))
+                original_scores[item.id] = item.similarity_score  # 원래 점수 저장
+            rrf_scores[item.id] = rrf_scores.get(item.id, 0) + (1.0 / (k + rank + 1))
             
         # Text Results 점수 합산
         for rank, item in enumerate(text_results):
             if item.id not in content_map:
                 content_map[item.id] = item
+                # 텍스트 매칭 결과는 벡터 점수가 없으므로 기본값 사용
+                original_scores[item.id] = item.similarity_score
             # 텍스트 매칭은 강력한 시그널이므로 동일한 가중치 적용
-            scores[item.id] = scores.get(item.id, 0) + (1.0 / (k + rank + 1))
+            rrf_scores[item.id] = rrf_scores.get(item.id, 0) + (1.0 / (k + rank + 1))
+            # 텍스트 매칭된 경우 점수 부스트
+            if item.id in original_scores:
+                original_scores[item.id] = min(1.0, original_scores[item.id] + 0.1)
             
         # RRF 점수 기준 정렬
-        sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
+        sorted_ids = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
         
         final_results = []
-        # 상위 결과 추출 및 점수 정규화 (Rank-based Decay)
-        # 1등 1.0, 2등 0.98, ... 
-        for i, doc_id in enumerate(sorted_ids[:limit]):
+        for doc_id in sorted_ids[:limit]:
             item = content_map[doc_id]
-            # 순위에 따른 인위적인 점수 부여 (직관적인 UI 표시를 위함)
-            # RRF 점수는 사용자에게 의미가 없으므로 변환함
-            decay_score = 0.99 * (0.98 ** i) 
-            item.similarity_score = round(decay_score, 4)
+            # 원래 벡터 유사도 점수 유지 (의미 있는 점수)
+            item.similarity_score = original_scores.get(doc_id, 0.5)
             final_results.append(item)
             
         return final_results
@@ -595,11 +600,14 @@ class UnifiedSearchService:
             rows = await self.db.fetchall(sql, tuple(params))
             
             results = []
-            for row in rows:
+            # FTS rank 기반 점수 계산 (순위에 따라 0.9 ~ 0.7 범위)
+            for i, row in enumerate(rows):
+                # 텍스트 매칭은 높은 점수지만 1.0은 아님
+                text_score = max(0.7, 0.9 - (i * 0.02))
                 results.append(SearchResult(
                     id=row['id'],
                     content=row['content'],
-                    similarity_score=1.0,
+                    similarity_score=text_score,
                     created_at=row['created_at'],
                     project_id=row['project_id'],
                     category=row['category'],
