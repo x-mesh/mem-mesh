@@ -250,6 +250,8 @@ class BatchOperationHandler:
         # 배치 추가 작업 처리
         if add_operations:
             contents = [op.get("content", "") for op in add_operations]
+            logger.info(f"Processing {len(add_operations)} add operations with contents: {[c[:30] for c in contents]}")
+            
             batch_add_result = await self.batch_add_memories(
                 contents=contents,
                 project_id=add_operations[0].get("project_id"),
@@ -257,15 +259,35 @@ class BatchOperationHandler:
                 source=add_operations[0].get("source", "mcp_batch"),
                 tags=add_operations[0].get("tags"),
             )
+            
+            logger.info(f"batch_add_result status: {batch_add_result.get('status')}, results count: {len(batch_add_result.get('results', []))}, errors count: {len(batch_add_result.get('errors', []))}")
 
             # 결과를 원래 인덱스에 매핑
-            for i, op in enumerate(add_operations):
-                if i < len(batch_add_result.get("results", [])):
+            if batch_add_result.get("status") == "success":
+                for i, op in enumerate(add_operations):
+                    # batch_add_result["results"]는 리스트이고, 각 항목에 index가 있음
+                    add_results = batch_add_result.get("results", [])
+                    logger.info(f"Mapping add operation {i}: op_index={op['index']}, add_results_len={len(add_results)}")
+                    if i < len(add_results):
+                        results.append(
+                            {
+                                "index": op["index"],
+                                "type": "add",
+                                "success": True,
+                                "memory_id": add_results[i].get("id"),
+                                "content": add_results[i].get("content"),
+                            }
+                        )
+                        logger.info(f"Added result for index {op['index']}")
+            else:
+                # 배치 추가 실패 시 모든 작업을 실패로 표시
+                for op in add_operations:
                     results.append(
                         {
                             "index": op["index"],
                             "type": "add",
-                            "result": batch_add_result["results"][i],
+                            "success": False,
+                            "error": batch_add_result.get("error", "Unknown error"),
                         }
                     )
 
@@ -280,14 +302,30 @@ class BatchOperationHandler:
             )
 
             # 결과를 원래 인덱스에 매핑
-            for op in search_operations:
-                query = op.get("query", "")
-                if query in batch_search_result.get("results", {}):
+            if batch_search_result.get("status") == "success":
+                for op in search_operations:
+                    query = op.get("query", "")
+                    search_results = batch_search_result.get("results", {})
+                    if query in search_results:
+                        query_result = search_results[query]
+                        results.append(
+                            {
+                                "index": op["index"],
+                                "type": "search",
+                                "success": True,
+                                "results": query_result.get("results", []),
+                                "total": query_result.get("total"),
+                            }
+                        )
+            else:
+                # 배치 검색 실패 시 모든 작업을 실패로 표시
+                for op in search_operations:
                     results.append(
                         {
                             "index": op["index"],
                             "type": "search",
-                            "result": batch_search_result["results"][query],
+                            "success": False,
+                            "error": batch_search_result.get("error", "Unknown error"),
                         }
                     )
 
