@@ -1,6 +1,9 @@
 # mem-mesh - 중앙 메모리 서버
 # 벡터 검색과 맥락 조회를 지원하는 개발자용 메모리 관리 시스템
 
+# PyTorch CPU-only index (NVIDIA 패키지 제외, ~2-3GB 절약)
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 # Core web framework
 fastapi>=0.104.0,<0.116.0
 uvicorn[standard]>=0.24.0,<0.32.0
@@ -30,9 +33,11 @@ sqlite-vec>=0.0.1a12
 numpy>=1.24.0,<2.0.0
 psutil>=5.9.0,<6.0.0
 
-# Machine learning and embeddings
+# Machine learning and embeddings (CPU-only)
+torch
 sentence-transformers>=2.2.2,<4.0.0
 # torch는 sentence-transformers의 의존성으로 자동 설치됨
+# --extra-index-url로 CPU 전용 빌드 사용 (NVIDIA 패키지 제외)
 transformers>=4.30.0,<5.0.0
 
 # Token counting
