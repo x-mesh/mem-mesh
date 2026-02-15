@@ -96,17 +96,15 @@ class SearchPage extends HTMLElement {
       this.isLoading = true;
       this.updateLoadingState();
       
-      const url = new URL('/api/memories/search', window.location.origin);
-      url.searchParams.append('query', this.searchQuery || '');
-      if (this.selectedCategory) url.searchParams.append('category', this.selectedCategory);
-      if (this.selectedProject) url.searchParams.append('project_id', this.selectedProject);
-      url.searchParams.append('limit', this.pageSize.toString());
-      url.searchParams.append('search_mode', this.searchMode);
-      
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      
-      const result = await response.json();
+      const params = {
+        query: this.searchQuery || '',
+        limit: this.pageSize,
+        search_mode: this.searchMode
+      };
+      if (this.selectedCategory) params.category = this.selectedCategory;
+      if (this.selectedProject) params.project_id = this.selectedProject;
+
+      const result = await window.app.apiClient.get('/memories/search', params);
       this.searchResults = result.results || [];
       this.totalResults = result.total || this.searchResults.length;
       this.hasMore = this.searchResults.length >= this.pageSize;

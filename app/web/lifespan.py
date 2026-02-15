@@ -23,6 +23,7 @@ from app.core.services.embedding_manager import EmbeddingManagerService
 from app.core.services.project import ProjectService
 from app.core.services.session import SessionService
 from app.core.services.pin import PinService
+from app.core.services.relation import RelationService
 from app.core.services.metrics_collector import MetricsCollector
 from app.core.storage.direct import DirectStorageBackend
 from app.mcp_common.tools import MCPToolHandlers
@@ -44,6 +45,7 @@ project_service: Optional[ProjectService] = None
 session_service: Optional[SessionService] = None
 pin_service: Optional[PinService] = None
 metrics_collector: Optional[MetricsCollector] = None
+relation_service: Optional[RelationService] = None
 mcp_storage: Optional[DirectStorageBackend] = None
 oauth_service: Optional[OAuthService] = None
 
@@ -63,6 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         session_service, \
         pin_service, \
         metrics_collector, \
+        relation_service, \
         mcp_storage, \
         oauth_service, \
         logger
@@ -169,11 +172,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         project_service = ProjectService(db)
         session_service = SessionService(db)
         pin_service = PinService(db)
+        relation_service = RelationService(db)
 
         # OAuth 서비스 초기화
         logger.info("Initializing OAuth service")
         oauth_service = OAuthService(db)
         app.state.oauth_service = oauth_service
+
+        # Basic Auth 세션 저장소에 DB 연결
+        from .oauth.basic_auth import session_store
+        session_store.set_database(db)
 
         # MCP SSE용 스토리지 및 핸들러 초기화
         logger.info("Initializing MCP SSE handlers")
@@ -244,6 +252,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         session_service = None
         pin_service = None
         metrics_collector = None
+        relation_service = None
         mcp_storage = None
         oauth_service = None
 
@@ -264,6 +273,7 @@ def get_services() -> Dict[str, Any]:
         "session_service": session_service,
         "pin_service": pin_service,
         "metrics_collector": metrics_collector,
+        "relation_service": relation_service,
         "mcp_storage": mcp_storage,
         "oauth_service": oauth_service,
     }

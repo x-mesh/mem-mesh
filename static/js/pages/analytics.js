@@ -72,20 +72,7 @@ class AnalyticsPage extends HTMLElement {
       // Get all memories for detailed analysis
       let searchResult;
       
-      if (window.app && window.app.apiClient) {
-        // Use app API client if available
-        searchResult = await window.app.apiClient.searchMemories('', { 
-          limit: 10000 // Get as many as possible for analysis
-        });
-      } else {
-        // Direct API call as fallback
-        console.log('App not ready, using direct API call for analytics');
-        const response = await fetch('/api/memories/search?query=&limit=10000');
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        searchResult = await response.json();
-      }
+      searchResult = await window.app.apiClient.searchMemories('', { limit: 10000 });
       
       if (searchResult && searchResult.results) {
         this.memories = searchResult.results;
@@ -515,7 +502,7 @@ class AnalyticsPage extends HTMLElement {
     const growthElement = this.querySelector('#growth-rate');
     if (growthElement && overview.growthRate !== undefined) {
       const growthSign = overview.growthRate > 0 ? '+' : '';
-      const growthColor = overview.growthRate > 0 ? '#10b981' : (overview.growthRate < 0 ? '#ef4444' : '#6b7280');
+      const growthColor = overview.growthRate > 0 ? 'var(--success-color)' : (overview.growthRate < 0 ? 'var(--error-color)' : 'var(--text-muted)');
       growthElement.textContent = `${growthSign}${overview.growthRate}%`;
       growthElement.style.color = growthColor;
     }
@@ -596,6 +583,13 @@ class AnalyticsPage extends HTMLElement {
   }
   
   /**
+   * Get theme-aware color from CSS variable
+   */
+  getThemeColor(varName) {
+    return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || '#64748b';
+  }
+
+  /**
    * Render trend chart
    */
   renderTrendChart() {
@@ -615,8 +609,8 @@ class AnalyticsPage extends HTMLElement {
     const height = canvas.height - 2 * padding;
     const maxCount = Math.max(...counts, 1);
     
-    // Draw axes
-    ctx.strokeStyle = '#e5e7eb';
+    // Draw axes (theme-aware)
+    ctx.strokeStyle = this.getThemeColor('--border-color');
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(padding, padding);
@@ -624,8 +618,8 @@ class AnalyticsPage extends HTMLElement {
     ctx.lineTo(canvas.width - padding, canvas.height - padding);
     ctx.stroke();
     
-    // Draw line
-    ctx.strokeStyle = '#3b82f6';
+    // Draw line (theme-aware)
+    ctx.strokeStyle = this.getThemeColor('--info');
     ctx.lineWidth = 2;
     ctx.beginPath();
     
@@ -642,8 +636,8 @@ class AnalyticsPage extends HTMLElement {
     
     ctx.stroke();
     
-    // Draw points
-    ctx.fillStyle = '#3b82f6';
+    // Draw points (theme-aware)
+    ctx.fillStyle = this.getThemeColor('--info');
     counts.forEach((count, index) => {
       const x = padding + (index / (counts.length - 1)) * width;
       const y = canvas.height - padding - (count / maxCount) * height;
@@ -675,7 +669,14 @@ class AnalyticsPage extends HTMLElement {
     const barWidth = width / labels.length * 0.8;
     const barSpacing = width / labels.length * 0.2;
     
-    const colors = ['#3b82f6', '#ef4444', '#f59e0b', '#8b5cf6', '#10b981', '#f97316'];
+    const colors = [
+      this.getThemeColor('--info'),
+      this.getThemeColor('--error-color'),
+      this.getThemeColor('--warning-color'),
+      this.getThemeColor('--primary-500'),
+      this.getThemeColor('--success-color'),
+      this.getThemeColor('--primary-600')
+    ];
     
     counts.forEach((count, index) => {
       const x = padding + index * (barWidth + barSpacing) + barSpacing / 2;
@@ -685,14 +686,14 @@ class AnalyticsPage extends HTMLElement {
       ctx.fillStyle = colors[index % colors.length];
       ctx.fillRect(x, y, barWidth, barHeight);
       
-      // Draw label
-      ctx.fillStyle = '#374151';
+      // Draw label (theme-aware)
+      ctx.fillStyle = this.getThemeColor('--text-secondary');
       ctx.font = '12px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(labels[index], x + barWidth / 2, canvas.height - padding + 20);
       
-      // Draw count
-      ctx.fillStyle = '#ffffff';
+      // Draw count (contrast on bar)
+      ctx.fillStyle = this.getThemeColor('--text-primary');
       ctx.font = 'bold 12px sans-serif';
       ctx.fillText(count.toString(), x + barWidth / 2, y + barHeight / 2 + 4);
     });
@@ -724,7 +725,18 @@ class AnalyticsPage extends HTMLElement {
     const barHeight = height / displayTags.length * 0.7;
     const barSpacing = height / displayTags.length * 0.3;
     
-    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#6366f1'];
+    const colors = [
+      this.getThemeColor('--info'),
+      this.getThemeColor('--success-color'),
+      this.getThemeColor('--warning-color'),
+      this.getThemeColor('--primary-500'),
+      this.getThemeColor('--error-color'),
+      this.getThemeColor('--primary-400'),
+      this.getThemeColor('--primary-600'),
+      this.getThemeColor('--accent-500'),
+      this.getThemeColor('--accent-600'),
+      this.getThemeColor('--primary-700')
+    ];
     
     displayCounts.forEach((count, index) => {
       const y = padding + index * (barHeight + barSpacing);
@@ -735,14 +747,14 @@ class AnalyticsPage extends HTMLElement {
       ctx.fillStyle = colors[index % colors.length];
       ctx.fillRect(x, y, barWidth, barHeight);
       
-      // Draw tag label
-      ctx.fillStyle = '#374151';
+      // Draw tag label (theme-aware)
+      ctx.fillStyle = this.getThemeColor('--text-secondary');
       ctx.font = '12px sans-serif';
       ctx.textAlign = 'right';
       ctx.fillText(displayTags[index], x - 10, y + barHeight / 2 + 4);
       
-      // Draw count
-      ctx.fillStyle = '#ffffff';
+      // Draw count (theme-aware)
+      ctx.fillStyle = this.getThemeColor('--text-primary');
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(count.toString(), x + barWidth + 5, y + barHeight / 2 + 4);
@@ -772,19 +784,19 @@ class AnalyticsPage extends HTMLElement {
       const barHeight = (count / maxCount) * height;
       const y = canvas.height - padding - barHeight;
       
-      // Color based on time of day
-      let color = '#64748b'; // Default
-      if (hour >= 6 && hour < 12) color = '#f59e0b'; // Morning
-      else if (hour >= 12 && hour < 18) color = '#3b82f6'; // Afternoon
-      else if (hour >= 18 && hour < 22) color = '#8b5cf6'; // Evening
-      else color = '#1f2937'; // Night
+      // Color based on time of day (theme-aware)
+      let color = this.getThemeColor('--primary-500');
+      if (hour >= 6 && hour < 12) color = this.getThemeColor('--warning-color');
+      else if (hour >= 12 && hour < 18) color = this.getThemeColor('--info');
+      else if (hour >= 18 && hour < 22) color = this.getThemeColor('--primary-500');
+      else color = this.getThemeColor('--primary-700');
       
       ctx.fillStyle = color;
       ctx.fillRect(x, y, barWidth * 0.8, barHeight);
       
-      // Draw hour label every 4 hours
+      // Draw hour label every 4 hours (theme-aware)
       if (hour % 4 === 0) {
-        ctx.fillStyle = '#374151';
+        ctx.fillStyle = this.getThemeColor('--text-secondary');
         ctx.font = '10px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(hour.toString(), x + barWidth * 0.4, canvas.height - padding + 15);
@@ -1121,7 +1133,7 @@ style.textContent = `
   
   .tab-button.active {
     background: var(--primary-color);
-    color: white;
+    color: var(--bg-primary);
   }
   
   .tabs-content {
@@ -1168,10 +1180,10 @@ style.textContent = `
     border-radius: 2px;
   }
   
-  .legend-color.morning { background: #f59e0b; }
-  .legend-color.afternoon { background: #3b82f6; }
-  .legend-color.evening { background: #8b5cf6; }
-  .legend-color.night { background: #1f2937; }
+  .legend-color.morning { background: var(--warning-color); }
+  .legend-color.afternoon { background: var(--info); }
+  .legend-color.evening { background: var(--primary-500); }
+  .legend-color.night { background: var(--gray-800); }
   
   .word-cloud {
     background: var(--bg-secondary);

@@ -37,7 +37,7 @@ async def login_page(
     session_id = request.cookies.get(SESSION_COOKIE_NAME)
     if session_id:
         from .basic_auth import validate_session
-        if validate_session(session_id):
+        if await validate_session(session_id):
             return RedirectResponse(url=next, status_code=302)
     
     # Show login page
@@ -71,7 +71,7 @@ async def login_submit(
         )
     
     # Create session
-    session_id = create_session(username)
+    session_id = await create_session(username)
     logger.info(f"User logged in: {username}")
     
     # Redirect to next page with session cookie
@@ -92,7 +92,7 @@ async def logout(request: Request):
     session_id = request.cookies.get(SESSION_COOKIE_NAME)
     
     if session_id:
-        delete_session(session_id)
+        await delete_session(session_id)
         logger.info("User logged out")
     
     response = RedirectResponse(url="/login", status_code=302)

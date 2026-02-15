@@ -394,11 +394,8 @@ export class ProjectAnalyticsPage extends HTMLElement {
   }
 
   async fetchProjectStats(hours, projectId = null) {
-    // Fetch project-specific stats
     const pid = projectId || this.projectId;
-    const response = await fetch(`/api/monitoring/search/quality-stats?hours=${hours}&project_id=${encodeURIComponent(pid)}`);
-    if (!response.ok) throw new Error('Failed to fetch project stats');
-    return response.json();
+    return window.app.apiClient.get('/monitoring/search/quality-stats', { hours, project_id: pid });
   }
 
   updateSummaryCards(stats) {
@@ -605,10 +602,7 @@ export class ProjectAnalyticsPage extends HTMLElement {
 
   async loadComparisonProjects() {
     try {
-      const response = await fetch('/api/monitoring/search/project-stats?hours=168');
-      if (!response.ok) throw new Error('Failed to fetch projects');
-      
-      const projects = await response.json();
+      const projects = await window.app.apiClient.get('/monitoring/search/project-stats', { hours: 168 });
       const select = this.querySelector('#comparison-project-select');
       
       select.innerHTML = projects

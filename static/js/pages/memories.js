@@ -384,8 +384,8 @@ class MemoriesPage extends HTMLElement {
     memoryCards.forEach((card, index) => {
       // 새로 추가된 카드 (첫 번째)에 하이라이트 효과
       if (index === 0) {
-        card.style.background = 'linear-gradient(135deg, #f0fdf4, #dcfce7)';
-        card.style.border = '2px solid #22c55e';
+        card.style.background = 'var(--success-bg)';
+        card.style.border = '2px solid var(--success-color)';
         card.style.transform = 'scale(1.02)';
         
         // 3초 후 하이라이트 제거
@@ -833,12 +833,11 @@ class MemoriesPage extends HTMLElement {
     try {
       let projectsData;
       
+      const api = window.app?.apiClient;
+
       // Try to use the new projects API endpoint first
       try {
-        const response = await fetch('/api/projects');
-        if (response.ok) {
-          projectsData = await response.json();
-        }
+        projectsData = await api.get('/projects');
       } catch (error) {
         console.log('Projects API not available, falling back to search API');
       }
@@ -847,14 +846,10 @@ class MemoriesPage extends HTMLElement {
       if (!projectsData) {
         let searchResult;
         
-        if (window.app && window.app.apiClient) {
-          // Use a smaller limit for project discovery
-          searchResult = await window.app.apiClient.searchMemories('', { limit: 100 });
-        } else {
-          const response = await fetch('/api/memories/search?query=&limit=100');
-          if (response.ok) {
-            searchResult = await response.json();
-          }
+        try {
+          searchResult = await api.searchMemories('', { limit: 100 });
+        } catch {
+          searchResult = null;
         }
         
         if (searchResult && searchResult.results) {
@@ -958,12 +953,7 @@ class MemoriesPage extends HTMLElement {
           }
         });
         
-        const response = await fetch(`/api/memories/search?${urlParams.toString()}`);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const searchResult = await response.json();
+        const searchResult = await window.app.apiClient.get('/memories/search', Object.fromEntries(urlParams));
         if (searchResult && searchResult.results) {
           this.memories = searchResult.results;
           this.totalMemories = searchResult.total || searchResult.results.length;
@@ -1694,7 +1684,7 @@ style.textContent = `
   
   .clear-filters-btn {
     background: var(--primary-color);
-    color: white;
+    color: var(--bg-primary);
     border: none;
     padding: 0.75rem 1.5rem;
     border-radius: var(--border-radius);
@@ -1735,9 +1725,9 @@ style.textContent = `
     border-color: var(--primary-color);
   }
   
-  .page-btn.active {
+    .page-btn.active {
     background: var(--primary-color);
-    color: white;
+    color: var(--bg-primary);
     border-color: var(--primary-color);
   }
   

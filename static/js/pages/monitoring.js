@@ -24,268 +24,227 @@ export class MonitoringPage extends HTMLElement {
   }
 
   render() {
+    this.className = 'monitoring-page page-container';
+    
     this.innerHTML = `
-      <div class="monitoring-page">
-        <header class="monitoring-header">
-          <div class="header-content">
-            <h1>Performance Monitoring</h1>
-            <p class="subtitle">검색 품질 및 성능 실시간 모니터링</p>
-          </div>
-          <div class="header-actions">
-            <select id="date-range" class="date-range-select">
-              <option value="last_1h">최근 1시간</option>
-              <option value="last_24h" selected>최근 24시간</option>
-              <option value="last_7d">최근 7일</option>
-              <option value="last_30d">최근 30일</option>
-            </select>
-            <button id="refresh-btn" class="refresh-btn" title="새로고침">
-              새로고침
-            </button>
-          </div>
-        </header>
+      <div class="page-header">
+        <div class="page-header-main">
+          <h1 class="page-title">Performance Monitoring</h1>
+          <p class="page-subtitle">검색 품질 및 성능 실시간 모니터링</p>
+        </div>
+        <div class="page-header-actions">
+          <select id="date-range" class="secondary-button monitoring-select">
+            <option value="last_1h">최근 1시간</option>
+            <option value="last_24h" selected>최근 24시간</option>
+            <option value="last_7d">최근 7일</option>
+            <option value="last_30d">최근 30일</option>
+          </select>
+          <button id="refresh-btn" class="secondary-button">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+            Refresh
+          </button>
+        </div>
+      </div>
 
-        <!-- Summary Cards -->
-        <section class="summary-cards">
-          <div class="summary-card" id="card-searches">
-            <div class="card-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="11" cy="11" r="8"/>
-                <path d="m21 21-4.35-4.35"/>
-              </svg>
-            </div>
-            <div class="card-content">
-              <span class="card-value" id="total-searches">-</span>
-              <span class="card-label">총 검색</span>
-            </div>
-          </div>
-          <div class="summary-card" id="card-similarity">
-            <div class="card-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/>
-              </svg>
-            </div>
-            <div class="card-content">
-              <span class="card-value" id="avg-similarity">-</span>
-              <span class="card-label">평균 유사도</span>
-            </div>
-          </div>
-          <div class="summary-card" id="card-response">
-            <div class="card-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="23,6 13.5,15.5 8.5,10.5 1,18"/>
-                <polyline points="17,6 23,6 23,12"/>
-              </svg>
-            </div>
-            <div class="card-content">
-              <span class="card-value" id="avg-response">-</span>
-              <span class="card-label">평균 응답시간</span>
-            </div>
-          </div>
-          <div class="summary-card" id="card-no-results">
-            <div class="card-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="15" y1="9" x2="9" y2="15"/>
-                <line x1="9" y1="9" x2="15" y2="15"/>
-              </svg>
-            </div>
-            <div class="card-content">
-              <span class="card-value" id="no-results-rate">-</span>
-              <span class="card-label">결과없음 비율</span>
-            </div>
-          </div>
-        </section>
+      <!-- Summary Cards -->
+      <section class="mon-stats-grid">
+        <div class="mon-stat-card" id="card-searches">
+          <span class="mon-stat-label">총 검색</span>
+          <span class="mon-stat-value" id="total-searches">-</span>
+        </div>
+        <div class="mon-stat-card" id="card-similarity">
+          <span class="mon-stat-label">평균 유사도</span>
+          <span class="mon-stat-value" id="avg-similarity">-</span>
+        </div>
+        <div class="mon-stat-card" id="card-response">
+          <span class="mon-stat-label">평균 응답시간</span>
+          <span class="mon-stat-value" id="avg-response">-</span>
+        </div>
+        <div class="mon-stat-card" id="card-no-results">
+          <span class="mon-stat-label">결과없음 비율</span>
+          <span class="mon-stat-value" id="no-results-rate">-</span>
+        </div>
+      </section>
 
-        <!-- Tab Navigation -->
-        <nav class="tab-nav">
-          <button class="tab-btn active" data-tab="overview">개요</button>
-          <button class="tab-btn" data-tab="quality">검색 품질</button>
-          <button class="tab-btn" data-tab="queries">쿼리 분석</button>
-          <button class="tab-btn" data-tab="embedding">임베딩 성능</button>
-        </nav>
+      <!-- Tab Navigation -->
+      <nav class="mon-tab-nav">
+        <button class="mon-tab-btn active" data-tab="overview">개요</button>
+        <button class="mon-tab-btn" data-tab="quality">검색 품질</button>
+        <button class="mon-tab-btn" data-tab="queries">쿼리 분석</button>
+        <button class="mon-tab-btn" data-tab="embedding">임베딩 성능</button>
+      </nav>
 
-        <!-- Tab Content -->
-        <div class="tab-content">
-          <!-- Overview Tab -->
-          <div id="tab-overview" class="tab-panel active">
-            <!-- Active Alerts Section -->
-            <section class="alerts-section">
-              <alert-panel></alert-panel>
-            </section>
-            
-            <div class="charts-grid">
-              <div class="chart-container">
-                <h3>검색 품질 추이</h3>
-                <canvas id="similarity-chart"></canvas>
-              </div>
-              <div class="chart-container">
-                <h3>응답 시간 추이</h3>
-                <canvas id="response-time-chart"></canvas>
-              </div>
-              <div class="chart-container">
-                <h3>검색량 추이</h3>
-                <canvas id="search-volume-chart"></canvas>
-              </div>
-              <div class="chart-container">
-                <h3>결과없음 비율 추이</h3>
-                <canvas id="no-results-chart"></canvas>
-              </div>
+      <!-- Tab Content -->
+      <div class="mon-tab-content">
+        <!-- Overview Tab -->
+        <div id="tab-overview" class="tab-panel active">
+          <section class="alerts-section">
+            <alert-panel></alert-panel>
+          </section>
+          
+          <div class="mon-charts-grid">
+            <div class="mon-chart-card">
+              <h3>검색 품질 추이</h3>
+              <div class="mon-chart-body"><canvas id="similarity-chart"></canvas></div>
             </div>
-          </div>
-
-          <!-- Search Quality Tab (NEW) -->
-          <div id="tab-quality" class="tab-panel hidden">
-            <div class="quality-grid">
-              <!-- Quality Summary Cards -->
-              <div class="quality-summary">
-                <div class="summary-card small">
-                  <span class="card-value" id="quality-total-searches">-</span>
-                  <span class="card-label">총 검색</span>
-                </div>
-                <div class="summary-card small">
-                  <span class="card-value" id="quality-avg-results">-</span>
-                  <span class="card-label">평균 결과 수</span>
-                </div>
-                <div class="summary-card small">
-                  <span class="card-value" id="quality-avg-score">-</span>
-                  <span class="card-label">평균 점수</span>
-                </div>
-                <div class="summary-card small">
-                  <span class="card-value" id="quality-zero-rate">-</span>
-                  <span class="card-label">Zero-Result 비율</span>
-                </div>
-                <div class="summary-card small">
-                  <span class="card-value" id="quality-low-score-rate">-</span>
-                  <span class="card-label">낮은 점수 비율</span>
-                </div>
-              </div>
-
-              <!-- Source Performance -->
-              <div class="chart-container wide">
-                <h3>검색 소스별 성능</h3>
-                <div id="source-stats-table"></div>
-              </div>
-
-              <!-- Hourly Trend -->
-              <div class="chart-container wide">
-                <h3>시간대별 검색 트렌드</h3>
-                <canvas id="quality-trend-chart"></canvas>
-              </div>
-
-              <!-- Project Stats -->
-              <div class="chart-container wide">
-                <h3>프로젝트별 검색 통계</h3>
-                <div id="project-stats-table"></div>
-              </div>
-
-              <!-- Cache Performance -->
-              <div class="chart-container">
-                <h3>캐시 성능</h3>
-                <div id="cache-stats">
-                  <div class="cache-metric">
-                    <span class="metric-label">총 작업</span>
-                    <span class="metric-value" id="cache-total-ops">-</span>
-                  </div>
-                  <div class="cache-metric">
-                    <span class="metric-label">캐시 히트</span>
-                    <span class="metric-value" id="cache-hits">-</span>
-                  </div>
-                  <div class="cache-metric">
-                    <span class="metric-label">히트율</span>
-                    <span class="metric-value" id="cache-hit-rate-detail">-</span>
-                  </div>
-                  <div class="cache-metric">
-                    <span class="metric-label">평균 시간</span>
-                    <span class="metric-value" id="cache-avg-time">-</span>
-                  </div>
-                </div>
-                <canvas id="cache-performance-chart"></canvas>
-              </div>
-
-              <!-- Popular Queries -->
-              <div class="chart-container">
-                <h3>인기 검색어 (최근 24시간)</h3>
-                <div id="quality-popular-queries" class="queries-list"></div>
-              </div>
+            <div class="mon-chart-card">
+              <h3>응답 시간 추이</h3>
+              <div class="mon-chart-body"><canvas id="response-time-chart"></canvas></div>
             </div>
-          </div>
-
-          <!-- Queries Tab -->
-          <div id="tab-queries" class="tab-panel hidden">
-            <div class="queries-grid">
-              <div class="queries-section">
-                <h3>인기 검색어 Top 10</h3>
-                <div id="top-queries" class="queries-list"></div>
-              </div>
-              <div class="queries-section">
-                <h3>개선 필요 쿼리 (낮은 유사도)</h3>
-                <div id="low-similarity-queries" class="queries-list"></div>
-              </div>
-              <div class="queries-section">
-                <h3>결과없음 쿼리</h3>
-                <div id="no-results-queries" class="queries-list"></div>
-              </div>
-              <div class="queries-section">
-                <h3>쿼리 길이 분포</h3>
-                <canvas id="query-length-chart"></canvas>
-              </div>
+            <div class="mon-chart-card">
+              <h3>검색량 추이</h3>
+              <div class="mon-chart-body"><canvas id="search-volume-chart"></canvas></div>
             </div>
-          </div>
-
-          <!-- Embedding Tab -->
-          <div id="tab-embedding" class="tab-panel hidden">
-            <div class="embedding-grid">
-              <div class="embedding-summary">
-                <div class="summary-card small">
-                  <span class="card-value" id="total-embeddings">-</span>
-                  <span class="card-label">총 임베딩</span>
-                </div>
-                <div class="summary-card small">
-                  <span class="card-value" id="avg-embedding-time">-</span>
-                  <span class="card-label">평균 생성시간</span>
-                </div>
-                <div class="summary-card small">
-                  <span class="card-value" id="cache-hit-rate">-</span>
-                  <span class="card-label">캐시 히트율</span>
-                </div>
-              </div>
-              <div class="chart-container wide">
-                <h3>임베딩 생성 시간 추이</h3>
-                <canvas id="embedding-time-chart"></canvas>
-              </div>
-              <div class="chart-container">
-                <h3>작업 유형별 분포</h3>
-                <canvas id="operation-type-chart"></canvas>
-              </div>
+            <div class="mon-chart-card">
+              <h3>결과없음 비율 추이</h3>
+              <div class="mon-chart-body"><canvas id="no-results-chart"></canvas></div>
             </div>
           </div>
         </div>
 
-        <!-- Recent Searches -->
-        <section class="recent-searches">
-          <h3>최근 검색</h3>
-          <div id="recent-searches-list" class="searches-table"></div>
-        </section>
+        <!-- Search Quality Tab -->
+        <div id="tab-quality" class="tab-panel hidden">
+          <div class="mon-quality-stats">
+            <div class="mon-stat-card small">
+              <span class="mon-stat-label">총 검색</span>
+              <span class="mon-stat-value" id="quality-total-searches">-</span>
+            </div>
+            <div class="mon-stat-card small">
+              <span class="mon-stat-label">평균 결과 수</span>
+              <span class="mon-stat-value" id="quality-avg-results">-</span>
+            </div>
+            <div class="mon-stat-card small">
+              <span class="mon-stat-label">평균 점수</span>
+              <span class="mon-stat-value" id="quality-avg-score">-</span>
+            </div>
+            <div class="mon-stat-card small">
+              <span class="mon-stat-label">Zero-Result 비율</span>
+              <span class="mon-stat-value" id="quality-zero-rate">-</span>
+            </div>
+            <div class="mon-stat-card small">
+              <span class="mon-stat-label">낮은 점수 비율</span>
+              <span class="mon-stat-value" id="quality-low-score-rate">-</span>
+            </div>
+          </div>
+
+          <div class="mon-charts-grid">
+            <div class="mon-chart-card wide">
+              <h3>검색 소스별 성능</h3>
+              <div id="source-stats-table"></div>
+            </div>
+
+            <div class="mon-chart-card wide">
+              <h3>시간대별 검색 트렌드</h3>
+              <div class="mon-chart-body"><canvas id="quality-trend-chart"></canvas></div>
+            </div>
+
+            <div class="mon-chart-card wide">
+              <h3>프로젝트별 검색 통계</h3>
+              <div id="project-stats-table"></div>
+            </div>
+
+            <div class="mon-chart-card">
+              <h3>캐시 성능</h3>
+              <div class="mon-cache-grid" id="cache-stats">
+                <div class="mon-cache-item">
+                  <span class="mon-cache-label">총 작업</span>
+                  <span class="mon-cache-value" id="cache-total-ops">-</span>
+                </div>
+                <div class="mon-cache-item">
+                  <span class="mon-cache-label">캐시 히트</span>
+                  <span class="mon-cache-value" id="cache-hits">-</span>
+                </div>
+                <div class="mon-cache-item">
+                  <span class="mon-cache-label">히트율</span>
+                  <span class="mon-cache-value" id="cache-hit-rate-detail">-</span>
+                </div>
+                <div class="mon-cache-item">
+                  <span class="mon-cache-label">평균 시간</span>
+                  <span class="mon-cache-value" id="cache-avg-time">-</span>
+                </div>
+              </div>
+              <div class="mon-chart-body"><canvas id="cache-performance-chart"></canvas></div>
+            </div>
+
+            <div class="mon-chart-card">
+              <h3>인기 검색어 (최근 24시간)</h3>
+              <div id="quality-popular-queries" class="mon-queries-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Queries Tab -->
+        <div id="tab-queries" class="tab-panel hidden">
+          <div class="mon-charts-grid">
+            <div class="mon-chart-card">
+              <h3>인기 검색어 Top 10</h3>
+              <div id="top-queries" class="mon-queries-list"></div>
+            </div>
+            <div class="mon-chart-card">
+              <h3>개선 필요 쿼리 (낮은 유사도)</h3>
+              <div id="low-similarity-queries" class="mon-queries-list"></div>
+            </div>
+            <div class="mon-chart-card">
+              <h3>결과없음 쿼리</h3>
+              <div id="no-results-queries" class="mon-queries-list"></div>
+            </div>
+            <div class="mon-chart-card">
+              <h3>쿼리 길이 분포</h3>
+              <div class="mon-chart-body"><canvas id="query-length-chart"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Embedding Tab -->
+        <div id="tab-embedding" class="tab-panel hidden">
+          <div class="mon-quality-stats" style="margin-bottom: var(--space-6);">
+            <div class="mon-stat-card small">
+              <span class="mon-stat-label">총 임베딩</span>
+              <span class="mon-stat-value" id="total-embeddings">-</span>
+            </div>
+            <div class="mon-stat-card small">
+              <span class="mon-stat-label">평균 생성시간</span>
+              <span class="mon-stat-value" id="avg-embedding-time">-</span>
+            </div>
+            <div class="mon-stat-card small">
+              <span class="mon-stat-label">캐시 히트율</span>
+              <span class="mon-stat-value" id="cache-hit-rate">-</span>
+            </div>
+          </div>
+          <div class="mon-charts-grid">
+            <div class="mon-chart-card wide">
+              <h3>임베딩 생성 시간 추이</h3>
+              <div class="mon-chart-body"><canvas id="embedding-time-chart"></canvas></div>
+            </div>
+            <div class="mon-chart-card">
+              <h3>작업 유형별 분포</h3>
+              <div class="mon-chart-body"><canvas id="operation-type-chart"></canvas></div>
+            </div>
+          </div>
+        </div>
       </div>
+
+      <!-- Recent Searches -->
+      <section class="mon-chart-card" style="margin-top: var(--space-6);">
+        <h3>최근 검색</h3>
+        <div id="recent-searches-list" class="mon-table-wrap"></div>
+      </section>
     `;
 
     this.setupEventListeners();
   }
 
   setupEventListeners() {
-    // Date range selector
     const dateRange = this.querySelector('#date-range');
     dateRange?.addEventListener('change', (e) => {
       this.dateRange = e.target.value;
       this.loadData();
     });
 
-    // Refresh button
     const refreshBtn = this.querySelector('#refresh-btn');
     refreshBtn?.addEventListener('click', () => this.loadData());
 
-    // Tab navigation
-    const tabBtns = this.querySelectorAll('.tab-btn');
+    const tabBtns = this.querySelectorAll('.mon-tab-btn');
     tabBtns.forEach(btn => {
       btn.addEventListener('click', (e) => {
         const tab = e.target.dataset.tab;
@@ -297,12 +256,10 @@ export class MonitoringPage extends HTMLElement {
   switchTab(tab) {
     this.currentTab = tab;
 
-    // Update tab buttons
-    this.querySelectorAll('.tab-btn').forEach(btn => {
+    this.querySelectorAll('.mon-tab-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === tab);
     });
 
-    // Update tab panels
     this.querySelectorAll('.tab-panel').forEach(panel => {
       panel.classList.toggle('active', panel.id === `tab-${tab}`);
       panel.classList.toggle('hidden', panel.id !== `tab-${tab}`);
@@ -365,65 +322,53 @@ export class MonitoringPage extends HTMLElement {
     }
   }
 
+  get apiClient() {
+    return window.app?.apiClient;
+  }
+
   async fetchSearchMetrics(range) {
-    const params = new URLSearchParams({
+    return this.apiClient.get('/monitoring/search/metrics', {
       start_date: range.start_date,
       end_date: range.end_date,
       aggregation: range.aggregation
     });
-    const response = await fetch(`/api/monitoring/search/metrics?${params}`);
-    if (!response.ok) throw new Error('Failed to fetch search metrics');
-    return response.json();
   }
 
   async fetchQueryAnalysis() {
     const days = this.dateRange === 'last_30d' ? 30 : this.dateRange === 'last_7d' ? 7 : 1;
-    const response = await fetch(`/api/monitoring/search/queries?days=${days}&limit=100`);
-    if (!response.ok) throw new Error('Failed to fetch query analysis');
-    return response.json();
+    return this.apiClient.get('/monitoring/search/queries', { days, limit: 100 });
   }
 
   async fetchEmbeddingMetrics(range) {
-    const params = new URLSearchParams({
+    return this.apiClient.get('/monitoring/embedding/metrics', {
       start_date: range.start_date,
       end_date: range.end_date
     });
-    const response = await fetch(`/api/monitoring/embedding/metrics?${params}`);
-    if (!response.ok) throw new Error('Failed to fetch embedding metrics');
-    return response.json();
   }
 
   async fetchRecentSearches() {
-    const response = await fetch('/api/monitoring/search/recent?limit=20');
-    if (!response.ok) throw new Error('Failed to fetch recent searches');
-    return response.json();
+    return this.apiClient.get('/monitoring/search/recent', { limit: 20 });
   }
 
   async fetchSearchQualityStats() {
     const hours = this.dateRange === 'last_1h' ? 1 : 
                   this.dateRange === 'last_24h' ? 24 : 
                   this.dateRange === 'last_7d' ? 168 : 24;
-    const response = await fetch(`/api/monitoring/search/quality-stats?hours=${hours}`);
-    if (!response.ok) throw new Error('Failed to fetch search quality stats');
-    return response.json();
+    return this.apiClient.get('/monitoring/search/quality-stats', { hours });
   }
 
   async fetchProjectSearchStats() {
     const hours = this.dateRange === 'last_1h' ? 1 : 
                   this.dateRange === 'last_24h' ? 24 : 
                   this.dateRange === 'last_7d' ? 168 : 24;
-    const response = await fetch(`/api/monitoring/search/project-stats?hours=${hours}`);
-    if (!response.ok) throw new Error('Failed to fetch project search stats');
-    return response.json();
+    return this.apiClient.get('/monitoring/search/project-stats', { hours });
   }
 
   async fetchCachePerformanceStats() {
     const hours = this.dateRange === 'last_1h' ? 1 : 
                   this.dateRange === 'last_24h' ? 24 : 
                   this.dateRange === 'last_7d' ? 168 : 24;
-    const response = await fetch(`/api/monitoring/cache/performance-stats?hours=${hours}`);
-    if (!response.ok) throw new Error('Failed to fetch cache performance stats');
-    return response.json();
+    return this.apiClient.get('/monitoring/cache/performance-stats', { hours });
   }
 
   updateSummaryCards(data) {
@@ -561,33 +506,30 @@ export class MonitoringPage extends HTMLElement {
   }
 
   updateQueryAnalysis(data) {
-    // Top Queries
     const topQueriesEl = this.querySelector('#top-queries');
     topQueriesEl.innerHTML = data.top_queries.slice(0, 10).map((q, i) => `
-      <div class="query-item">
-        <span class="rank">${i + 1}</span>
-        <span class="query">${this.escapeHtml(q.query)}</span>
-        <span class="count">${q.count}회</span>
+      <div class="mon-query-item">
+        <span class="mon-query-rank">${i + 1}</span>
+        <span class="mon-query-text">${this.escapeHtml(q.query)}</span>
+        <span class="mon-query-meta">${q.count}회</span>
       </div>
-    `).join('') || '<p class="empty">데이터 없음</p>';
+    `).join('') || '<p class="mon-empty">데이터 없음</p>';
 
-    // Low Similarity Queries
     const lowSimEl = this.querySelector('#low-similarity-queries');
     lowSimEl.innerHTML = data.low_similarity_queries.slice(0, 10).map(q => `
-      <div class="query-item warning">
-        <span class="query">${this.escapeHtml(q.query)}</span>
-        <span class="similarity">${(q.avg_similarity * 100).toFixed(1)}%</span>
+      <div class="mon-query-item warning">
+        <span class="mon-query-text">${this.escapeHtml(q.query)}</span>
+        <span class="mon-query-badge warn">${(q.avg_similarity * 100).toFixed(1)}%</span>
       </div>
-    `).join('') || '<p class="empty">데이터 없음</p>';
+    `).join('') || '<p class="mon-empty">데이터 없음</p>';
 
-    // No Results Queries
     const noResultsEl = this.querySelector('#no-results-queries');
     noResultsEl.innerHTML = data.no_results_queries.slice(0, 10).map(q => `
-      <div class="query-item error">
-        <span class="query">${this.escapeHtml(q.query)}</span>
-        <span class="count">${q.count}회</span>
+      <div class="mon-query-item error">
+        <span class="mon-query-text">${this.escapeHtml(q.query)}</span>
+        <span class="mon-query-meta">${q.count}회</span>
       </div>
-    `).join('') || '<p class="empty">데이터 없음</p>';
+    `).join('') || '<p class="mon-empty">데이터 없음</p>';
 
     // Query Length Distribution
     const dist = data.length_distribution;
@@ -626,12 +568,12 @@ export class MonitoringPage extends HTMLElement {
     const container = this.querySelector('#recent-searches-list');
     
     if (searches.length === 0) {
-      container.innerHTML = '<p class="empty">최근 검색 없음</p>';
+      container.innerHTML = '<p class="mon-empty">최근 검색 없음</p>';
       return;
     }
 
     container.innerHTML = `
-      <table class="data-table">
+      <table class="mon-table">
         <thead>
           <tr>
             <th>시간</th>
@@ -645,7 +587,7 @@ export class MonitoringPage extends HTMLElement {
           ${searches.map(s => `
             <tr>
               <td>${this.formatTime(s.timestamp)}</td>
-              <td class="query-cell">${this.escapeHtml(s.query)}</td>
+              <td class="mon-query-cell">${this.escapeHtml(s.query)}</td>
               <td>${s.result_count}</td>
               <td>${s.avg_similarity_score ? (s.avg_similarity_score * 100).toFixed(1) + '%' : '-'}</td>
               <td>${s.response_time_ms}ms</td>
@@ -727,11 +669,10 @@ export class MonitoringPage extends HTMLElement {
     this.querySelector('#quality-zero-rate').textContent = summary.zero_result_rate.toFixed(1) + '%';
     this.querySelector('#quality-low-score-rate').textContent = summary.low_score_rate.toFixed(1) + '%';
 
-    // Update source stats table
     const sourceTable = this.querySelector('#source-stats-table');
     if (qualityStats.by_source.length > 0) {
       sourceTable.innerHTML = `
-        <table class="data-table">
+        <table class="mon-table">
           <thead>
             <tr>
               <th>소스</th>
@@ -743,7 +684,7 @@ export class MonitoringPage extends HTMLElement {
           <tbody>
             ${qualityStats.by_source.map(s => `
               <tr>
-                <td><span class="badge">${s.source}</span></td>
+                <td><span class="mon-badge">${s.source}</span></td>
                 <td>${s.count.toLocaleString()}</td>
                 <td>${s.avg_results.toFixed(2)}</td>
                 <td>${s.avg_response_time_ms.toFixed(0)}ms</td>
@@ -753,7 +694,7 @@ export class MonitoringPage extends HTMLElement {
         </table>
       `;
     } else {
-      sourceTable.innerHTML = '<p class="empty">데이터 없음</p>';
+      sourceTable.innerHTML = '<p class="mon-empty">데이터 없음</p>';
     }
 
     // Update quality trend chart
@@ -806,11 +747,10 @@ export class MonitoringPage extends HTMLElement {
       });
     }
 
-    // Update project stats table
     const projectTable = this.querySelector('#project-stats-table');
     if (projectStats.length > 0) {
       projectTable.innerHTML = `
-        <table class="data-table">
+        <table class="mon-table">
           <thead>
             <tr>
               <th>프로젝트</th>
@@ -830,9 +770,9 @@ export class MonitoringPage extends HTMLElement {
                 <td>${p.avg_results.toFixed(2)}</td>
                 <td>${(p.avg_score * 100).toFixed(1)}%</td>
                 <td>${p.avg_response_time_ms.toFixed(0)}ms</td>
-                <td class="${p.zero_result_rate > 20 ? 'text-warning' : ''}">${p.zero_result_rate.toFixed(1)}%</td>
+                <td class="${p.zero_result_rate > 20 ? 'mon-text-warning' : ''}">${p.zero_result_rate.toFixed(1)}%</td>
                 <td>
-                  <button class="btn-link view-project-btn" data-project="${this.escapeHtml(p.project_id)}">
+                  <button class="mon-link-btn view-project-btn" data-project="${this.escapeHtml(p.project_id)}">
                     상세보기 →
                   </button>
                 </td>
@@ -842,7 +782,6 @@ export class MonitoringPage extends HTMLElement {
         </table>
       `;
       
-      // Add click handlers for view buttons
       this.querySelectorAll('.view-project-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
           const projectId = e.target.dataset.project;
@@ -850,10 +789,9 @@ export class MonitoringPage extends HTMLElement {
         });
       });
     } else {
-      projectTable.innerHTML = '<p class="empty">프로젝트별 데이터 없음</p>';
+      projectTable.innerHTML = '<p class="mon-empty">프로젝트별 데이터 없음</p>';
     }
 
-    // Update cache stats
     const cache = cacheStats.embedding_cache;
     this.querySelector('#cache-total-ops').textContent = cache.total_operations.toLocaleString();
     this.querySelector('#cache-hits').textContent = cache.cache_hits.toLocaleString();
@@ -890,18 +828,17 @@ export class MonitoringPage extends HTMLElement {
       }
     });
 
-    // Update popular queries
     const popularQueriesEl = this.querySelector('#quality-popular-queries');
     if (qualityStats.popular_queries.length > 0) {
       popularQueriesEl.innerHTML = qualityStats.popular_queries.map((q, i) => `
-        <div class="query-item">
-          <span class="rank">${i + 1}</span>
-          <span class="query">${this.escapeHtml(q.query)}</span>
-          <span class="count">${q.count}회 (평균 ${q.avg_results.toFixed(1)}개 결과)</span>
+        <div class="mon-query-item">
+          <span class="mon-query-rank">${i + 1}</span>
+          <span class="mon-query-text">${this.escapeHtml(q.query)}</span>
+          <span class="mon-query-meta">${q.count}회 (평균 ${q.avg_results.toFixed(1)}개 결과)</span>
         </div>
       `).join('');
     } else {
-      popularQueriesEl.innerHTML = '<p class="empty">인기 검색어 데이터 없음 (쿼리 해싱 활성화됨)</p>';
+      popularQueriesEl.innerHTML = '<p class="mon-empty">인기 검색어 데이터 없음 (쿼리 해싱 활성화됨)</p>';
     }
   }
 

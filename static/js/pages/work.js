@@ -26,22 +26,14 @@ class WorkPage extends HTMLElement {
 
     try {
       // 병렬로 데이터 로드
-      const [pinsRes, projectsRes] = await Promise.all([
-        fetch('/api/work/pins?limit=50'),
-        fetch('/api/work/projects')
+      const api = window.app.apiClient;
+      const [pinsData, projectsData] = await Promise.all([
+        api.get('/work/pins', { limit: 50 }),
+        api.get('/work/projects')
       ]);
 
-      if (pinsRes.ok) {
-        const pinsData = await pinsRes.json();
-        this.pins = pinsData.pins || [];
-        console.log('Loaded pins:', this.pins.length, 'pins');
-      }
-
-      if (projectsRes.ok) {
-        const projectsData = await projectsRes.json();
-        this.projects = projectsData.projects || [];
-        console.log('Loaded projects:', this.projects.length, 'projects');
-      }
+      this.pins = pinsData.pins || [];
+      this.projects = projectsData.projects || [];
 
       // 프로젝트 통계 로드
       let projectId = this.selectedProject;
@@ -58,12 +50,10 @@ class WorkPage extends HTMLElement {
       
       // 프로젝트 ID가 있으면 통계 로드
       if (projectId) {
-        const statsRes = await fetch(`/api/work/projects/${projectId}/stats`);
-        if (statsRes.ok) {
-          this.stats = await statsRes.json();
-          console.log('Loaded stats for project:', projectId, this.stats);
-        } else {
-          console.error('Failed to load stats:', statsRes.status);
+        try {
+          this.stats = await api.get(`/work/projects/${projectId}/stats`);
+        } catch {
+          console.error('Failed to load stats for project:', projectId);
         }
       } else {
         console.warn('No project ID available for stats');
@@ -522,45 +512,29 @@ class WorkPage extends HTMLElement {
     const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
 
     try {
-      const response = await fetch('/api/work/pins', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content,
-          project_id: projectId,
-          importance,
-          tags
-        })
+      await window.app.apiClient.post('/work/pins', {
+        content,
+        project_id: projectId,
+        importance,
+        tags
       });
-
-      if (response.ok) {
-        this.hideNewPinModal();
-        this.loadData();
-      } else {
-        const error = await response.json();
-        alert(`Failed to create pin: ${error.detail}`);
-      }
+      this.hideNewPinModal();
+      this.loadData();
     } catch (error) {
       console.error('Failed to create pin:', error);
-      alert('Failed to create pin');
+      alert(`Failed to create pin: ${error.message}`);
     }
   }
 
   async completePin(pinId) {
     try {
-      const response = await fetch(`/api/work/pins/${pinId}/complete`, {
-        method: 'PUT'
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        if (result.suggest_promotion) {
-          if (confirm(result.promotion_message)) {
-            await this.promotePin(pinId);
-          }
+      const result = await window.app.apiClient.put(`/work/pins/${pinId}/complete`);
+      if (result.suggest_promotion) {
+        if (confirm(result.promotion_message)) {
+          await this.promotePin(pinId);
         }
-        this.loadData();
       }
+      this.loadData();
     } catch (error) {
       console.error('Failed to complete pin:', error);
     }
@@ -568,15 +542,9 @@ class WorkPage extends HTMLElement {
 
   async promotePin(pinId) {
     try {
-      const response = await fetch(`/api/work/pins/${pinId}/promote`, {
-        method: 'POST'
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        alert(result.message);
-        this.loadData();
-      }
+      const result = await window.app.apiClient.post(`/work/pins/${pinId}/promote`);
+      alert(result.message);
+      this.loadData();
     } catch (error) {
       console.error('Failed to promote pin:', error);
     }
@@ -685,22 +653,11 @@ class WorkPage extends HTMLElement {
 
   async updatePinStatus(pinId, newStatus) {
     try {
-      const response = await fetch(`/api/work/pins/${pinId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus })
-      });
-
-      if (response.ok) {
-        // Reload data to reflect changes
-        await this.loadData();
-      } else {
-        const error = await response.json();
-        alert(`Failed to update pin: ${error.detail}`);
-      }
+      await window.app.apiClient.patch(`/work/pins/${pinId}`, { status: newStatus });
+      await this.loadData();
     } catch (error) {
       console.error('Failed to update pin status:', error);
-      alert('Failed to update pin status');
+      alert(`Failed to update pin status: ${error.message}`);
     }
   }
 }

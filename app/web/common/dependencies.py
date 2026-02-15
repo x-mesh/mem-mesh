@@ -96,7 +96,5 @@ def get_relation_service() -> RelationService:
     """관계 서비스 의존성"""
     services = get_services()
     if services.get("relation_service") is None:
-        # Lazy initialization - DB에서 직접 생성
-        db = get_database()
-        return RelationService(db)
+        raise HTTPException(status_code=500, detail="Relation service not initialized")
     return services["relation_service"]

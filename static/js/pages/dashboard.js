@@ -319,9 +319,8 @@ class DashboardPage extends HTMLElement {
       // 새로 추가된 카드 애니메이션
       const newCard = memoryList.firstElementChild;
       if (newCard) {
-        // 하이라이트 효과
-        newCard.style.background = 'linear-gradient(135deg, #f0fdf4, #dcfce7)';
-        newCard.style.border = '2px solid #22c55e';
+        // 하이라이트 효과 (theme-aware via CSS class)
+        newCard.classList.add('highlight-created');
         
         // 페이드인 애니메이션
         requestAnimationFrame(() => {
@@ -331,8 +330,7 @@ class DashboardPage extends HTMLElement {
 
         // 하이라이트 제거 (3초 후)
         setTimeout(() => {
-          newCard.style.background = '';
-          newCard.style.border = '';
+          newCard.classList.remove('highlight-created');
           newCard.style.transition = 'all 0.3s ease';
         }, 3000);
       }
@@ -369,9 +367,8 @@ class DashboardPage extends HTMLElement {
     const targetCard = cards[index];
     
     if (targetCard) {
-      // 업데이트 하이라이트 효과
-      targetCard.style.background = 'linear-gradient(135deg, #eff6ff, #dbeafe)';
-      targetCard.style.border = '2px solid #3b82f6';
+      // 업데이트 하이라이트 효과 (theme-aware via CSS class)
+      targetCard.classList.add('highlight-updated');
       targetCard.style.transform = 'scale(1.02)';
       
       // 속성 업데이트
@@ -381,8 +378,7 @@ class DashboardPage extends HTMLElement {
 
       // 하이라이트 제거 (2초 후)
       setTimeout(() => {
-        targetCard.style.background = '';
-        targetCard.style.border = '';
+        targetCard.classList.remove('highlight-updated');
         targetCard.style.transform = '';
         targetCard.style.transition = 'all 0.3s ease';
       }, 2000);
@@ -406,9 +402,8 @@ class DashboardPage extends HTMLElement {
     const targetCard = cards[index];
     
     if (targetCard) {
-      // 삭제 애니메이션
-      targetCard.style.background = 'linear-gradient(135deg, #fef2f2, #fee2e2)';
-      targetCard.style.border = '2px solid #ef4444';
+      // 삭제 애니메이션 (theme-aware via CSS class)
+      targetCard.classList.add('highlight-deleted');
       targetCard.style.transform = 'scale(0.95)';
       targetCard.style.opacity = '0.7';
       
@@ -744,7 +739,7 @@ class DashboardPage extends HTMLElement {
       const [stats, recentResponse, pinStatsResponse] = await Promise.all([
         window.app.apiClient.getStats(),
         window.app.apiClient.searchMemories(' ', { limit: 10 }),  // 공백 문자 사용
-        fetch('/api/work/projects/default/stats').then(r => r.ok ? r.json() : null).catch(() => null)
+        window.app.apiClient.get('/work/projects/default/stats').catch(() => null)
       ]);
       
       console.log('Stats received:', stats);
@@ -787,31 +782,15 @@ class DashboardPage extends HTMLElement {
     try {
       console.log('Loading dashboard data via direct API calls...');
       
-      // Load stats, recent memories, and pin stats using direct fetch
-      const [statsResponse, searchResponse, pinStatsResponse] = await Promise.all([
-        fetch('/api/memories/stats'),
-        fetch('/api/memories/search?query= &limit=10'),
-        fetch('/api/work/projects/default/stats').catch(() => null)
+      // Load stats, recent memories, and pin stats using APIClient
+      const api = window.app?.apiClient;
+      if (!api) throw new Error('APIClient not available');
+
+      const [stats, searchResult, pinStats] = await Promise.all([
+        api.getStats(),
+        api.searchMemories(' ', { limit: 10 }),
+        api.get('/work/projects/default/stats').catch(() => null)
       ]);
-      
-      if (!statsResponse.ok) {
-        throw new Error(`Stats API failed: ${statsResponse.status}`);
-      }
-      
-      if (!searchResponse.ok) {
-        throw new Error(`Search API failed: ${searchResponse.status}`);
-      }
-      
-      const [stats, searchResult] = await Promise.all([
-        statsResponse.json(),
-        searchResponse.json()
-      ]);
-      
-      // Pin stats 처리 (실패해도 무시)
-      let pinStats = null;
-      if (pinStatsResponse && pinStatsResponse.ok) {
-        pinStats = await pinStatsResponse.json();
-      }
       
       console.log('Direct API - Stats received:', stats);
       console.log('Direct API - Recent memories received:', searchResult);
@@ -1532,7 +1511,7 @@ style.textContent = `
     align-items: center;
     gap: 0.5rem;
     background: var(--primary-color);
-    color: white;
+    color: var(--bg-primary);
     border: none;
     padding: 0.75rem 1rem;
     border-radius: var(--border-radius);
@@ -1592,7 +1571,7 @@ style.textContent = `
   }
   
   .stat-card {
-    background: var(--bg-primary);
+    background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: var(--border-radius);
     padding: 1.5rem;
@@ -1644,7 +1623,7 @@ style.textContent = `
     display: flex;
     align-items: center;
     gap: 2rem;
-    background: var(--bg-primary);
+    background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: var(--border-radius);
     padding: 2rem;
@@ -1708,7 +1687,7 @@ style.textContent = `
   
   /* Project List */
   .project-list {
-    background: var(--bg-primary);
+    background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: var(--border-radius);
     overflow: hidden;
@@ -1786,7 +1765,7 @@ style.textContent = `
   
   .create-memory-btn {
     background: var(--primary-color);
-    color: white;
+    color: var(--bg-primary);
     border: none;
     padding: 0.75rem 1.5rem;
     border-radius: var(--border-radius);

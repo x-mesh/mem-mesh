@@ -70,10 +70,7 @@ export class AlertPanel extends HTMLElement {
 
   async loadAlerts() {
     try {
-      const response = await fetch('/api/monitoring/alerts?limit=50');
-      if (!response.ok) throw new Error('Failed to fetch alerts');
-      
-      this.alerts = await response.json();
+      this.alerts = await window.app.apiClient.get('/monitoring/alerts', { limit: 50 });
       this.renderAlerts();
     } catch (error) {
       console.error('Failed to load alerts:', error);
@@ -211,11 +208,7 @@ export class AlertPanel extends HTMLElement {
 
   async resolveAlert(alertId) {
     try {
-      const response = await fetch(`/api/monitoring/alerts/${alertId}/resolve`, {
-        method: 'POST'
-      });
-
-      if (!response.ok) throw new Error('Failed to resolve alert');
+      await window.app.apiClient.post(`/monitoring/alerts/${alertId}/resolve`);
 
       // Update local state
       const alert = this.alerts.find(a => a.id === alertId);
