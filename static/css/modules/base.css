@@ -412,6 +412,7 @@ code, pre, pre code, .inline-code {
   flex: 1;
   display: flex;
   justify-content: center;
+  align-items: center;
 }
 
 .nav-links {
@@ -492,17 +493,22 @@ code, pre, pre code, .inline-code {
   flex-shrink: 0;
 }
 
-/* Header Actions */
-.header-actions {
+/* Header Actions — scoped to header-container to beat page-specific overrides */
+.header-container > .header-actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
+  padding: 0;
+  margin: 0;
 }
 
-.action-btn {
+.header-container > .header-actions .action-btn {
   width: 40px;
   height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  max-width: 40px;
   padding: 0;
   border: none;
   border-radius: var(--radius-md);
@@ -515,9 +521,12 @@ code, pre, pre code, .inline-code {
   justify-content: center;
   position: relative;
   overflow: hidden;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
-.action-btn::before {
+.header-container > .header-actions .action-btn::before {
   content: '';
   position: absolute;
   top: 0;
@@ -530,20 +539,20 @@ code, pre, pre code, .inline-code {
   border-radius: var(--radius-md);
 }
 
-.action-btn:hover::before {
+.header-container > .header-actions .action-btn:hover::before {
   opacity: 1;
 }
 
-.action-btn:hover {
+.header-container > .header-actions .action-btn:hover {
   color: var(--text-primary);
   transform: translateY(-1px);
 }
 
-.action-btn:active {
+.header-container > .header-actions .action-btn:active {
   transform: translateY(0);
 }
 
-.action-btn svg {
+.header-container > .header-actions .action-btn svg {
   width: 20px;
   height: 20px;
   position: relative;
@@ -676,11 +685,12 @@ code, pre, pre code, .inline-code {
 }
 
 /* Create Memory Button */
-.create-memory-btn {
+.header-container > .header-actions .create-memory-btn {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
+  height: 40px;
+  padding: 0 var(--space-4);
   background: var(--text-primary);
   color: var(--bg-primary);
   border: 1px solid var(--text-primary);
@@ -690,6 +700,9 @@ code, pre, pre code, .inline-code {
   text-decoration: none;
   cursor: pointer;
   transition: var(--transition);
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .create-memory-btn:hover {
@@ -704,6 +717,10 @@ code, pre, pre code, .inline-code {
 
 /* Mobile Styles */
 .mobile-only {
+  display: none;
+}
+
+.header-container > .header-actions .mobile-only {
   display: none;
 }
 
@@ -872,7 +889,8 @@ code, pre, pre code, .inline-code {
     display: none;
   }
 
-  .mobile-only {
+  .mobile-only,
+  .header-container > .header-actions .mobile-only {
     display: flex;
   }
 
@@ -893,10 +911,11 @@ code, pre, pre code, .inline-code {
   }
 
   /* Improve touch targets */
-  .action-btn {
+  .header-container > .header-actions .action-btn {
     width: 44px;
     height: 44px;
     min-width: 44px;
+    max-width: 44px;
     min-height: 44px;
   }
 
