@@ -98,6 +98,16 @@ class UnifiedSearchService:
                 logger.warning("SearchIntentAnalyzer not available, quality features disabled")
                 self.enable_quality_features = False
         
+        # RRF weights from config
+        try:
+            from ..config import get_settings
+            _settings = get_settings()
+            self._rrf_vector_weight = _settings.rrf_vector_weight
+            self._rrf_text_weight = _settings.rrf_text_weight
+        except Exception:
+            self._rrf_vector_weight = 1.0
+            self._rrf_text_weight = 1.2
+
         # Korean translation dictionary
         self.korean_translations = self._init_korean_translations()
         
@@ -106,7 +116,8 @@ class UnifiedSearchService:
             f"Quality: {enable_quality_features}, "
             f"Korean: {enable_korean_optimization}, "
             f"NoiseFilter: {enable_noise_filter}, "
-            f"ScoreNorm: {enable_score_normalization} ({score_normalization_method})"
+            f"ScoreNorm: {enable_score_normalization} ({score_normalization_method}), "
+            f"RRF weights: vector={self._rrf_vector_weight}, text={self._rrf_text_weight}"
         )
 
     def _init_korean_translations(self) -> Dict[str, List[str]]:
@@ -440,10 +451,10 @@ class UnifiedSearchService:
         """
         RRF 기반 하이브리드 검색 (벡터 + 텍스트 병렬 수행)
         """
-        # 1. 임베딩 생성 (캐시 활용)
+        # 1. 임베딩 생성 (캐시 활용, 검색 쿼리이므로 is_query=True)
         query_embedding_list = await self.cache_manager.get_cached_embedding(query)
         if query_embedding_list is None:
-            query_embedding_list = self.embedding_service.embed(query)
+            query_embedding_list = self.embedding_service.embed(query, is_query=True)
             await self.cache_manager.cache_embedding(query, query_embedding_list)
         
         query_embedding = self.embedding_service.to_bytes(query_embedding_list)
@@ -474,7 +485,7 @@ class UnifiedSearchService:
                 except (KeyError, TypeError):
                     distance = 1.0
                 
-                vector_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
+                vector_score = max(0.0, min(1.0, 1.0 - (distance ** 2 / 2.0)))
                 
                 context = ScoringContext(
                     query=query,
@@ -519,34 +530,39 @@ class UnifiedSearchService:
         vector_results: List[SearchResult], 
         text_results: List[SearchResult], 
         limit: int, 
-        k: int = 60
+        k: int = 60,
+        vector_weight: Optional[float] = None,
+        text_weight: Optional[float] = None,
     ) -> List[SearchResult]:
         """
         Reciprocal Rank Fusion 알고리즘 적용
-        Score = 1 / (k + rank)
+        Score = weight * (1 / (k + rank))
         
-        RRF는 순위 결정에만 사용하고, 최종 점수는 원래 벡터 유사도를 유지
+        RRF는 순위 결정에만 사용하고, 최종 점수는 원래 벡터 유사도를 유지.
+        text_weight > vector_weight 이면 키워드 정확 매칭을 우대 (작은 모델에 유리).
         """
-        rrf_scores = {}
-        content_map = {}
-        original_scores = {}  # 원래 벡터 점수 보존
+        if vector_weight is None:
+            vector_weight = self._rrf_vector_weight
+        if text_weight is None:
+            text_weight = self._rrf_text_weight
+
+        rrf_scores: Dict[str, float] = {}
+        content_map: Dict[str, SearchResult] = {}
+        original_scores: Dict[str, float] = {}
         
         # Vector Results 점수 합산
         for rank, item in enumerate(vector_results):
             if item.id not in content_map:
                 content_map[item.id] = item
-                original_scores[item.id] = item.similarity_score  # 원래 점수 저장
-            rrf_scores[item.id] = rrf_scores.get(item.id, 0) + (1.0 / (k + rank + 1))
+                original_scores[item.id] = item.similarity_score
+            rrf_scores[item.id] = rrf_scores.get(item.id, 0) + vector_weight * (1.0 / (k + rank + 1))
             
         # Text Results 점수 합산
         for rank, item in enumerate(text_results):
             if item.id not in content_map:
                 content_map[item.id] = item
-                # 텍스트 매칭 결과는 벡터 점수가 없으므로 기본값 사용
                 original_scores[item.id] = item.similarity_score
-            # 텍스트 매칭은 강력한 시그널이므로 동일한 가중치 적용
-            rrf_scores[item.id] = rrf_scores.get(item.id, 0) + (1.0 / (k + rank + 1))
-            # 텍스트 매칭된 경우 점수 부스트
+            rrf_scores[item.id] = rrf_scores.get(item.id, 0) + text_weight * (1.0 / (k + rank + 1))
             if item.id in original_scores:
                 original_scores[item.id] = min(1.0, original_scores[item.id] + 0.1)
             
@@ -556,11 +572,31 @@ class UnifiedSearchService:
         final_results = []
         for doc_id in sorted_ids[:limit]:
             item = content_map[doc_id]
-            # 원래 벡터 유사도 점수 유지 (의미 있는 점수)
             item.similarity_score = original_scores.get(doc_id, 0.5)
             final_results.append(item)
             
         return final_results
+
+    def _split_korean_compound(self, token: str) -> List[str]:
+        """
+        한국어 복합어를 가능한 서브토큰으로 분해.
+        
+        unicode61 토크나이저는 공백 없는 한국어 복합어를 하나의 토큰으로 처리하므로,
+        2~3음절 단위로 분해하여 OR 검색이 가능하게 함.
+        예: "토큰최적화" → ["토큰최적화", "토큰", "최적화", "토큰최", "적화"]
+        """
+        korean_chars = [c for c in token if '가' <= c <= '힣']
+        if len(korean_chars) < 4:
+            return [token]
+
+        sub_tokens = {token}
+        n = len(token)
+        for size in (2, 3):
+            for i in range(n - size + 1):
+                chunk = token[i:i + size]
+                if any('가' <= c <= '힣' for c in chunk) and len(chunk) >= 2:
+                    sub_tokens.add(chunk)
+        return list(sub_tokens)
 
     async def _exact_search(
         self,
@@ -574,7 +610,19 @@ class UnifiedSearchService:
         tokens = clean.split()
         if not tokens:
             return SearchResponse(results=[])
-        fts_query = " AND ".join([f'"{t}"' for t in tokens])
+
+        # 한국어 복합어 분해: 각 토큰을 서브토큰으로 확장
+        if self.enable_korean_optimization:
+            expanded_token_groups = []
+            for t in tokens:
+                subs = self._split_korean_compound(t)
+                if len(subs) > 1:
+                    expanded_token_groups.append("(" + " OR ".join(f'"{s}"' for s in subs) + ")")
+                else:
+                    expanded_token_groups.append(f'"{t}"')
+            fts_query = " AND ".join(expanded_token_groups)
+        else:
+            fts_query = " AND ".join([f'"{t}"' for t in tokens])
 
         # FTS 쿼리 실행
         sql = """
@@ -629,10 +677,10 @@ class UnifiedSearchService:
         recency_weight: float
     ) -> SearchResponse:
         """순수 의미 기반 벡터 검색"""
-        # 임베딩 생성
+        # 임베딩 생성 (검색 쿼리이므로 is_query=True)
         query_embedding_list = await self.cache_manager.get_cached_embedding(query)
         if query_embedding_list is None:
-            query_embedding_list = self.embedding_service.embed(query)
+            query_embedding_list = self.embedding_service.embed(query, is_query=True)
             await self.cache_manager.cache_embedding(query, query_embedding_list)
         
         query_embedding = self.embedding_service.to_bytes(query_embedding_list)
@@ -654,7 +702,7 @@ class UnifiedSearchService:
             except (KeyError, TypeError):
                 distance = 1.0
             
-            similarity_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
+            similarity_score = max(0.0, min(1.0, 1.0 - (distance ** 2 / 2.0)))
             
             # 최신성 가중치 적용
             if recency_weight > 0.0:

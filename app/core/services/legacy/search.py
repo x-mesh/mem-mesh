@@ -347,9 +347,7 @@ class SearchService:
             # 캐시에서 임베딩 확인 또는 생성
             query_embedding_list = await self.cache_manager.get_cached_embedding(query)
             if query_embedding_list is None:
-                # 캐시에 없으면 새로 생성
-                query_embedding_list = self.embedding_service.embed(query)
-                # 캐시에 저장
+                query_embedding_list = self.embedding_service.embed(query, is_query=True)
                 await self.cache_manager.cache_embedding(query, query_embedding_list)
                 logger.info(
                     f"[Cache MISS] Generated new embedding for query: '{query[:50]}...'"
@@ -388,7 +386,7 @@ class SearchService:
                     # Vector 검색에서는 distance가 제공됨 (낮을수록 유사)
                     if "distance" in row.keys():
                         distance = float(row["distance"])
-                        vector_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
+                        vector_score = max(0.0, min(1.0, 1.0 - (distance ** 2 / 2.0)))
                     else:
                         vector_score = 0.8
 
@@ -655,9 +653,7 @@ class SearchService:
             # 캐시에서 임베딩 확인 또는 생성
             query_embedding_list = await self.cache_manager.get_cached_embedding(query)
             if query_embedding_list is None:
-                # 캐시에 없으면 새로 생성
-                query_embedding_list = self.embedding_service.embed(query)
-                # 캐시에 저장
+                query_embedding_list = self.embedding_service.embed(query, is_query=True)
                 await self.cache_manager.cache_embedding(query, query_embedding_list)
                 logger.info(
                     f"[Cache MISS] Generated new embedding for query: '{query[:50]}...'"
@@ -681,7 +677,7 @@ class SearchService:
                     # Vector 검색에서는 distance가 제공됨
                     if "distance" in row.keys():
                         distance = float(row["distance"])
-                        similarity_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
+                        similarity_score = max(0.0, min(1.0, 1.0 - (distance ** 2 / 2.0)))
                     else:
                         similarity_score = 0.8
 

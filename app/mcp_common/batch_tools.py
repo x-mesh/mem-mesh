@@ -168,7 +168,7 @@ class BatchOperationHandler:
             logger.info(
                 f"Generating batch embeddings for {len(uncached_queries)} uncached queries"
             )
-            new_embeddings = self.embedding_service.embed_batch(uncached_queries)
+            new_embeddings = self.embedding_service.embed_batch(uncached_queries, is_query=True)
 
             # 캐시에 저장
             for query, embedding in zip(uncached_queries, new_embeddings):

@@ -85,6 +85,28 @@ class Settings(BaseSettings):
         default="sigmoid",
         description="Score normalization method (sigmoid/minmax/zscore/percentile)",
     )
+    sigmoid_k: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=50.0,
+        description="Sigmoid normalization steepness (higher = sharper cutoff)",
+    )
+    sigmoid_threshold: float = Field(
+        default=0.45,
+        ge=0.0,
+        le=1.0,
+        description="Sigmoid normalization center point (should match model's avg similarity score)",
+    )
+    rrf_vector_weight: float = Field(
+        default=1.0,
+        ge=0.0,
+        description="RRF weight for vector search results",
+    )
+    rrf_text_weight: float = Field(
+        default=1.2,
+        ge=0.0,
+        description="RRF weight for FTS text search results (higher = prefer keyword matches)",
+    )
     enable_search_warmup: bool = Field(
         default=True, description="Enable search warmup on server startup"
     )
