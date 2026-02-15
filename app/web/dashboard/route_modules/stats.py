@@ -5,7 +5,8 @@ Provides endpoints for retrieving memory statistics and project information.
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from datetime import datetime, timedelta
+from fastapi import APIRouter, HTTPException, Depends, Query
 
 from app.core.services.stats import StatsService
 from app.core.schemas.responses import StatsResponse
@@ -31,6 +32,38 @@ async def get_memory_stats(
         return StatsResponse(**stats)
     except Exception as e:
         logger.error(f"Get stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/memories/daily-counts")
+async def get_daily_counts(
+    days: int = Query(default=7, ge=1, le=365),
+    project_id: str = None,
+    service: StatsService = Depends(get_stats_service),
+):
+    """Get daily memory creation counts for the last N days."""
+    try:
+        end_date = datetime.utcnow().strftime("%Y-%m-%d")
+        start_date = (datetime.utcnow() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+
+        date_counts = await service.get_date_range_stats(
+            start_date=start_date,
+            end_date=end_date,
+            project_id=project_id,
+        )
+
+        # Fill in missing dates with 0
+        result = []
+        current = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+        while current <= end:
+            date_str = current.strftime("%Y-%m-%d")
+            result.append({"date": date_str, "count": date_counts.get(date_str, 0)})
+            current += timedelta(days=1)
+
+        return {"daily_counts": result, "days": days, "start_date": start_date, "end_date": end_date}
+    except Exception as e:
+        logger.error(f"Get daily counts error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

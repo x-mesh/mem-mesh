@@ -12,6 +12,10 @@ class DashboardPage extends HTMLElement {
     super();
     this.stats = null;
     this.recentMemories = [];
+    this.dailyCounts = [];
+    this.chartDays = 7;
+    this.systemHealth = null;
+    this.topTags = [];
     this.isLoading = true;
     this.isInitialized = false;
     this.refreshInterval = null;
@@ -19,10 +23,7 @@ class DashboardPage extends HTMLElement {
   }
   
   connectedCallback() {
-    if (this.isInitialized) {
-      console.log('Dashboard already initialized, skipping...');
-      return;
-    }
+    if (this.isInitialized) return;
     
     this.isInitialized = true;
     this.setupEventListeners();
@@ -97,9 +98,8 @@ class DashboardPage extends HTMLElement {
     if (!status.isConnected) {
       try {
         await wsClient.connect();
-        console.log('Dashboard WebSocket connected');
       } catch (error) {
-        console.error('Failed to connect WebSocket:', error);
+        // WebSocket connection failed silently
       }
     }
   }
@@ -116,22 +116,12 @@ class DashboardPage extends HTMLElement {
    */
   handleMemoryCreated(data) {
     try {
-      console.log('Dashboard handleMemoryCreated called with data:', data);
       const { memory } = data;
+      if (!memory) return;
       
-      if (!memory) {
-        console.error('Dashboard: No memory in data', data);
-        return;
-      }
-      
-      console.log('Dashboard: Processing memory:', memory.id, memory.content?.substring(0, 50));
-      
-      // 중복 체크: 이미 존재하는 메모리인지 확인
+      // 중복 체크
       const existingIndex = this.recentMemories.findIndex(m => m.id === memory.id);
-      if (existingIndex !== -1) {
-        console.log('Dashboard: Memory already exists, ignoring duplicate');
-        return;
-      }
+      if (existingIndex !== -1) return;
       
       // 최근 메모리 목록에 추가 (맨 앞에)
       this.recentMemories.unshift(memory);
@@ -149,10 +139,8 @@ class DashboardPage extends HTMLElement {
       
       // 토스트 알림
       this.showToast(`새 메모리가 생성되었습니다: ${memory.category}`, 'success');
-      
-      console.log('Dashboard: Memory created handler completed successfully');
     } catch (error) {
-      console.error('Dashboard handleMemoryCreated error:', error);
+      // handleMemoryCreated error
     }
   }
 
@@ -292,64 +280,53 @@ class DashboardPage extends HTMLElement {
   }
 
   /**
+   * Build a single compact recent-item HTML
+   */
+  buildRecentItemHTML(memory) {
+    const icon = this.getCategorySvgIcon(memory.category);
+    const preview = (memory.content || '').replace(/#{1,6}\s+/g, '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/\n/g, ' ').trim();
+    const truncated = preview.length > 120 ? preview.substring(0, 120) + '...' : preview;
+    const timeStr = this.formatRelativeTime(memory.created_at);
+    const source = memory.source && memory.source !== 'unknown' ? memory.source : '';
+    return `
+      <div class="recent-item" data-memory-id="${memory.id}" role="button" tabindex="0">
+        <span class="recent-item-icon">${icon}</span>
+        <span class="recent-item-badge">${memory.category}</span>
+        ${memory.project_id ? `<span class="recent-item-project">${this.escapeHtml(memory.project_id)}</span>` : ''}
+        <span class="recent-item-content">${this.escapeHtml(truncated)}</span>
+        <span class="recent-item-time">${timeStr}${source ? ` · ${source}` : ''}</span>
+      </div>`;
+  }
+
+  /**
    * Animate new memory creation
    */
   animateMemoryCreated(container, memory) {
-    // 새 메모리 카드 생성
-    const newMemoryHTML = `
-      <memory-card
-        memory-id="${memory.id}"
-        content="${this.escapeHtml(memory.content)}"
-        project="${memory.project_id || ''}"
-        category="${memory.category}"
-        created-at="${memory.created_at}"
-        updated-at="${memory.updated_at}"
-        tags="${this.escapeHtml(JSON.stringify(memory.tags || []))}"
-        source="${memory.source || 'unknown'}"
-        style="opacity: 0; transform: translateY(-20px); transition: all 0.3s ease;"
-      ></memory-card>
-    `;
-
-    // 기존 목록 업데이트
-    const memoryList = container.querySelector('.recent-memories-list');
-    if (memoryList) {
-      // 새 메모리를 맨 앞에 추가
-      memoryList.insertAdjacentHTML('afterbegin', newMemoryHTML);
-      
-      // 새로 추가된 카드 애니메이션
-      const newCard = memoryList.firstElementChild;
-      if (newCard) {
-        // 하이라이트 효과 (theme-aware via CSS class)
-        newCard.classList.add('highlight-created');
-        
-        // 페이드인 애니메이션
-        requestAnimationFrame(() => {
-          newCard.style.opacity = '1';
-          newCard.style.transform = 'translateY(0)';
-        });
-
-        // 하이라이트 제거 (3초 후)
-        setTimeout(() => {
-          newCard.classList.remove('highlight-created');
-          newCard.style.transition = 'all 0.3s ease';
-        }, 3000);
-      }
-
-      // 10개 초과 시 마지막 항목 제거
-      const cards = memoryList.querySelectorAll('memory-card');
-      if (cards.length > 10) {
-        const lastCard = cards[cards.length - 1];
-        lastCard.style.opacity = '0';
-        lastCard.style.transform = 'translateX(20px)';
-        setTimeout(() => {
-          if (lastCard.parentNode) {
-            lastCard.parentNode.removeChild(lastCard);
-          }
-        }, 300);
-      }
-    } else {
-      // 목록이 없으면 전체 재생성
+    const memoryList = container.querySelector('.recent-list-compact');
+    if (!memoryList) {
       this.updateRecentMemoriesSection();
+      return;
+    }
+
+    const newItemHTML = this.buildRecentItemHTML(memory);
+    memoryList.insertAdjacentHTML('afterbegin', newItemHTML);
+
+    const newItem = memoryList.firstElementChild;
+    if (newItem) {
+      newItem.style.opacity = '0';
+      newItem.style.background = 'rgba(34, 197, 94, 0.1)';
+      requestAnimationFrame(() => {
+        newItem.style.transition = 'all 0.3s ease';
+        newItem.style.opacity = '1';
+      });
+      setTimeout(() => { newItem.style.background = ''; }, 3000);
+    }
+
+    const items = memoryList.querySelectorAll('.recent-item');
+    if (items.length > 10) {
+      const last = items[items.length - 1];
+      last.style.opacity = '0';
+      setTimeout(() => last.remove(), 300);
     }
   }
 
@@ -357,33 +334,24 @@ class DashboardPage extends HTMLElement {
    * Animate memory update
    */
   animateMemoryUpdated(container, memory, index) {
-    const memoryList = container.querySelector('.recent-memories-list');
+    const memoryList = container.querySelector('.recent-list-compact');
     if (!memoryList) {
       this.updateRecentMemoriesSection();
       return;
     }
 
-    const cards = memoryList.querySelectorAll('memory-card');
-    const targetCard = cards[index];
+    const items = memoryList.querySelectorAll('.recent-item');
+    const target = items[index];
     
-    if (targetCard) {
-      // 업데이트 하이라이트 효과 (theme-aware via CSS class)
-      targetCard.classList.add('highlight-updated');
-      targetCard.style.transform = 'scale(1.02)';
-      
-      // 속성 업데이트
-      targetCard.setAttribute('content', this.escapeHtml(memory.content));
-      targetCard.setAttribute('updated-at', memory.updated_at);
-      targetCard.setAttribute('tags', this.escapeHtml(JSON.stringify(memory.tags || [])));
-
-      // 하이라이트 제거 (2초 후)
-      setTimeout(() => {
-        targetCard.classList.remove('highlight-updated');
-        targetCard.style.transform = '';
-        targetCard.style.transition = 'all 0.3s ease';
-      }, 2000);
+    if (target) {
+      target.style.background = 'rgba(59, 130, 246, 0.1)';
+      const contentEl = target.querySelector('.recent-item-content');
+      if (contentEl) {
+        const preview = (memory.content || '').replace(/#{1,6}\s+/g, '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/\n/g, ' ').trim();
+        contentEl.textContent = preview.length > 120 ? preview.substring(0, 120) + '...' : preview;
+      }
+      setTimeout(() => { target.style.background = ''; }, 2000);
     } else {
-      // 카드를 찾을 수 없으면 전체 재생성
       this.updateRecentMemoriesSection();
     }
   }
@@ -392,34 +360,23 @@ class DashboardPage extends HTMLElement {
    * Animate memory deletion
    */
   animateMemoryDeleted(container, memory, index) {
-    const memoryList = container.querySelector('.recent-memories-list');
+    const memoryList = container.querySelector('.recent-list-compact');
     if (!memoryList) {
       this.updateRecentMemoriesSection();
       return;
     }
 
-    const cards = memoryList.querySelectorAll('memory-card');
-    const targetCard = cards[index];
+    const items = memoryList.querySelectorAll('.recent-item');
+    const target = items[index];
     
-    if (targetCard) {
-      // 삭제 애니메이션 (theme-aware via CSS class)
-      targetCard.classList.add('highlight-deleted');
-      targetCard.style.transform = 'scale(0.95)';
-      targetCard.style.opacity = '0.7';
-      
-      // 슬라이드 아웃 후 제거
+    if (target) {
+      target.style.background = 'rgba(239, 68, 68, 0.1)';
+      target.style.opacity = '0.5';
       setTimeout(() => {
-        targetCard.style.transform = 'translateX(-100%)';
-        targetCard.style.opacity = '0';
-        
-        setTimeout(() => {
-          if (targetCard.parentNode) {
-            targetCard.parentNode.removeChild(targetCard);
-          }
-        }, 300);
+        target.style.opacity = '0';
+        setTimeout(() => target.remove(), 300);
       }, 500);
     } else {
-      // 카드를 찾을 수 없으면 전체 재생성
       this.updateRecentMemoriesSection();
     }
   }
@@ -432,16 +389,12 @@ class DashboardPage extends HTMLElement {
     if (statsSection) {
       const statsGrid = statsSection.querySelector('.chroma-stats-grid');
       if (statsGrid) {
-        // innerHTML 사용하여 grid 내부만 업데이트
         const tempDiv = document.createElement('div');
         tempDiv.innerHTML = this.createStatsCards();
         const newGrid = tempDiv.querySelector('.chroma-stats-grid');
         if (newGrid) {
           statsGrid.innerHTML = newGrid.innerHTML;
-          console.log('Stats section updated successfully');
         }
-      } else {
-        console.warn('Stats grid not found, section may have been removed');
       }
     }
   }
@@ -457,7 +410,7 @@ class DashboardPage extends HTMLElement {
         this.updateStatsSection();
       }
     } catch (error) {
-      console.error('Failed to refresh stats:', error);
+      // stats refresh failed silently
     }
   }
   setupIntersectionObserver() {
@@ -504,17 +457,13 @@ class DashboardPage extends HTMLElement {
     const maxAttempts = 50; // 100ms * 50 = 5초
     
     const checkApp = () => {
-      console.log(`Checking app for dashboard (attempt ${attempts + 1}/${maxAttempts})...`);
-      
       if (window.app && window.app.apiClient) {
-        console.log('App is ready, loading dashboard data...');
         this.loadData();
         return true;
       }
       
       attempts++;
       if (attempts >= maxAttempts) {
-        console.error('App initialization timeout, trying direct API calls...');
         this.loadDataDirect();
         return false;
       }
@@ -655,13 +604,55 @@ class DashboardPage extends HTMLElement {
   handleClick(event) {
     const target = event.target;
     
-    if (target.classList.contains('refresh-btn')) {
+    // Refresh button (check both self and parent for SVG clicks)
+    if (target.closest('.chroma-refresh-btn')) {
       this.loadData();
-    } else if (target.classList.contains('view-all-btn')) {
-      const section = target.getAttribute('data-section');
+      return;
+    }
+    
+    // Settings button
+    if (target.closest('.chroma-settings-btn')) {
+      if (window.app && window.app.router) {
+        window.app.router.navigate('/settings');
+      }
+      return;
+    }
+
+    // Time range selector
+    const timeRangeBtn = target.closest('.time-range-btn');
+    if (timeRangeBtn) {
+      const days = parseInt(timeRangeBtn.getAttribute('data-days'));
+      if (days && days !== this.chartDays) {
+        this.chartDays = days;
+        this.loadData();
+      }
+      return;
+    }
+
+    // Chart expand button
+    if (target.closest('.chart-expand-btn')) {
+      const chartCard = target.closest('.chart-card');
+      if (chartCard) this.expandChart(chartCard);
+      return;
+    }
+    
+    // Recent activity item click
+    const recentItem = target.closest('.recent-item');
+    if (recentItem) {
+      const memoryId = recentItem.getAttribute('data-memory-id');
+      if (memoryId && window.app && window.app.router) {
+        window.app.router.navigate(`/memory/${memoryId}`);
+      }
+      return;
+    }
+
+    if (target.classList.contains('view-all-btn') || target.closest('.view-all-btn')) {
+      const btn = target.closest('.view-all-btn') || target;
+      const section = btn.getAttribute('data-section');
       this.navigateToSection(section);
-    } else if (target.classList.contains('stat-card')) {
-      const type = target.getAttribute('data-type');
+    } else if (target.closest('.chroma-stat-card')) {
+      const card = target.closest('.chroma-stat-card');
+      const type = card.getAttribute('data-type');
       this.navigateToFilteredView(type);
     }
   }
@@ -717,6 +708,37 @@ class DashboardPage extends HTMLElement {
   }
   
   /**
+   * Expand a chart card into a modal
+   */
+  expandChart(chartCard) {
+    const title = chartCard.querySelector('.chart-header h3')?.textContent || 'Chart';
+    const content = chartCard.querySelector('.chart-content');
+    if (!content) return;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'chart-modal-overlay';
+    overlay.innerHTML = `
+      <div class="chart-modal">
+        <div class="chart-modal-header">
+          <h3>${title}</h3>
+          <button class="chart-modal-close" title="Close">&times;</button>
+        </div>
+        <div class="chart-modal-body">${content.innerHTML}</div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    requestAnimationFrame(() => overlay.classList.add('active'));
+
+    const close = () => {
+      overlay.classList.remove('active');
+      setTimeout(() => overlay.remove(), 200);
+    };
+    overlay.querySelector('.chart-modal-close').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  }
+
+  /**
    * Load dashboard data
    */
   async loadData() {
@@ -733,34 +755,47 @@ class DashboardPage extends HTMLElement {
         throw new Error('API client not available');
       }
       
-      console.log('Loading dashboard data...');
-      
-      // Load stats, recent memories, and pin stats in parallel
-      const [stats, recentResponse, pinStatsResponse] = await Promise.all([
+      // Load stats, recent memories, pin stats, and daily counts in parallel
+      const [stats, recentResponse, pinStatsResponse, dailyResponse, healthResponse, projectsResponse] = await Promise.all([
         window.app.apiClient.getStats(),
-        window.app.apiClient.searchMemories(' ', { limit: 10 }),  // 공백 문자 사용
-        window.app.apiClient.get('/work/projects/default/stats').catch(() => null)
+        window.app.apiClient.searchMemories(' ', { limit: 10 }),
+        window.app.apiClient.get('/work/projects/default/stats').catch(() => null),
+        window.app.apiClient.get(`/memories/daily-counts?days=${this.chartDays}`).catch(() => null),
+        window.app.apiClient.get('/monitoring/dashboard/summary').catch(() => null),
+        window.app.apiClient.get('/projects').catch(() => null)
       ]);
-      
-      console.log('Stats received:', stats);
-      console.log('Recent memories received:', recentResponse);
-      console.log('Pin stats received:', pinStatsResponse);
       
       this.stats = stats;
       this.recentMemories = recentResponse.results || [];
+      this.dailyCounts = dailyResponse?.daily_counts || [];
+      this.systemHealth = healthResponse;
+
+      // Extract top tags from projects data (tags is an array of strings per project)
+      if (projectsResponse?.projects) {
+        const tagCounts = {};
+        projectsResponse.projects.forEach(p => {
+          if (Array.isArray(p.tags)) {
+            p.tags.forEach(tag => {
+              if (tag && typeof tag === 'string') {
+                tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+              }
+            });
+          }
+        });
+        this.topTags = Object.entries(tagCounts)
+          .sort(([,a], [,b]) => b - a)
+          .slice(0, 15);
+      }
       
       // Pin stats에서 avg_lead_time 추가
       if (pinStatsResponse && pinStatsResponse.pins) {
         this.stats.average_lead_time = pinStatsResponse.pins.avg_lead_time_hours 
-          ? pinStatsResponse.pins.avg_lead_time_hours / 24  // hours to days
+          ? pinStatsResponse.pins.avg_lead_time_hours / 24
           : 0;
         this.stats.pin_stats = pinStatsResponse.pins;
       }
       
-      console.log('Dashboard data loaded successfully');
-      
     } catch (error) {
-      console.error('Failed to load dashboard data:', error);
       if (window.app && window.app.errorHandler) {
         window.app.errorHandler.showError('Failed to load dashboard data');
       }
@@ -774,43 +809,53 @@ class DashboardPage extends HTMLElement {
    * Load dashboard data using direct API calls (fallback)
    */
   async loadDataDirect() {
-    console.log('loadDataDirect called for dashboard');
-    
     this.isLoading = true;
     this.updateLoadingState();
     
     try {
-      console.log('Loading dashboard data via direct API calls...');
-      
-      // Load stats, recent memories, and pin stats using APIClient
+      // Load stats, recent memories, pin stats, and daily counts using APIClient
       const api = window.app?.apiClient;
       if (!api) throw new Error('APIClient not available');
 
-      const [stats, searchResult, pinStats] = await Promise.all([
+      const [stats, searchResult, pinStats, dailyResponse, healthResponse, projectsResponse] = await Promise.all([
         api.getStats(),
         api.searchMemories(' ', { limit: 10 }),
-        api.get('/work/projects/default/stats').catch(() => null)
+        api.get('/work/projects/default/stats').catch(() => null),
+        api.get(`/memories/daily-counts?days=${this.chartDays}`).catch(() => null),
+        api.get('/monitoring/dashboard/summary').catch(() => null),
+        api.get('/projects').catch(() => null)
       ]);
-      
-      console.log('Direct API - Stats received:', stats);
-      console.log('Direct API - Recent memories received:', searchResult);
-      console.log('Direct API - Pin stats received:', pinStats);
       
       this.stats = stats;
       this.recentMemories = searchResult.results || [];
+      this.dailyCounts = dailyResponse?.daily_counts || [];
+      this.systemHealth = healthResponse;
+
+      if (projectsResponse?.projects) {
+        const tagCounts = {};
+        projectsResponse.projects.forEach(p => {
+          if (Array.isArray(p.tags)) {
+            p.tags.forEach(tag => {
+              if (tag && typeof tag === 'string') {
+                tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+              }
+            });
+          }
+        });
+        this.topTags = Object.entries(tagCounts)
+          .sort(([,a], [,b]) => b - a)
+          .slice(0, 15);
+      }
       
       // Pin stats에서 avg_lead_time 추가
       if (pinStats && pinStats.pins) {
         this.stats.average_lead_time = pinStats.pins.avg_lead_time_hours 
-          ? pinStats.pins.avg_lead_time_hours / 24  // hours to days
+          ? pinStats.pins.avg_lead_time_hours / 24
           : 0;
         this.stats.pin_stats = pinStats.pins;
       }
       
-      console.log('Direct API - Dashboard data loaded successfully');
-      
     } catch (error) {
-      console.error('Direct API - Failed to load dashboard data:', error);
       this.showError('Failed to load dashboard data. Please refresh the page.');
     } finally {
       this.isLoading = false;
@@ -982,106 +1027,44 @@ class DashboardPage extends HTMLElement {
   }
 
   /**
-   * Calculate trend for stats
+   * Calculate trend for stats using daily counts data
    */
   calculateTrend(value, type) {
-    // Mock trend calculation - in real app this would compare with previous period
-    const trends = {
-      memories: { type: 'positive', value: '+12%' },
-      projects: { type: 'positive', value: '+3' },
-      categories: { type: 'neutral', value: 'Stable' },
-      leadtime: { type: 'positive', value: '-0.3d' }
-    };
-    
-    return trends[type] || { type: 'neutral', value: 'N/A' };
+    if (!this.dailyCounts || this.dailyCounts.length === 0) {
+      return { type: 'neutral', value: '—' };
+    }
+
+    if (type === 'memories') {
+      const half = Math.floor(this.dailyCounts.length / 2);
+      const recentHalf = this.dailyCounts.slice(half);
+      const olderHalf = this.dailyCounts.slice(0, half);
+      const recentSum = recentHalf.reduce((s, d) => s + d.count, 0);
+      const olderSum = olderHalf.reduce((s, d) => s + d.count, 0);
+
+      if (olderSum === 0) {
+        return recentSum > 0
+          ? { type: 'positive', value: `+${recentSum}` }
+          : { type: 'neutral', value: '—' };
+      }
+      const pct = Math.round(((recentSum - olderSum) / olderSum) * 100);
+      if (pct > 0) return { type: 'positive', value: `+${pct}%` };
+      if (pct < 0) return { type: 'negative', value: `${pct}%` };
+      return { type: 'neutral', value: '0%' };
+    }
+
+    if (type === 'projects') {
+      const totalToday = this.dailyCounts.reduce((s, d) => s + d.count, 0);
+      if (totalToday > 0 && value > 0) {
+        return { type: 'positive', value: `${value}` };
+      }
+      return { type: 'neutral', value: `${value}` };
+    }
+
+    return { type: 'neutral', value: '—' };
   }
   
   /**
-   * Create category distribution chart
-   */
-  createCategoryChart() {
-    if (!this.stats || !this.stats.categories_breakdown) {
-      return '<div class="loading-placeholder">Loading chart...</div>';
-    }
-    
-    const categories = this.stats.categories_breakdown;
-    const total = Object.values(categories).reduce((sum, count) => sum + count, 0);
-    
-    if (total === 0) {
-      return '<div class="no-data">No data available</div>';
-    }
-    
-    // 일관된 회색 톤 색상 팔레트
-    const categoryColors = {
-      task: '#525252',
-      bug: '#737373',
-      idea: '#a3a3a3',
-      decision: '#404040',
-      incident: '#262626',
-      code_snippet: '#171717'
-    };
-    
-    // SVG 아이콘으로 변경
-    const categoryIcons = {
-      task: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-               <path d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2"/>
-             </svg>`,
-      bug: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M8 2V5M16 2V5M8 19L16 5M16 19L8 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>`,
-      idea: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-               <path d="M9 21H15M12 3C8.68629 3 6 5.68629 6 9C6 11.973 7.818 14.441 10.5 15.5V17C10.5 17.8284 11.1716 18.5 12 18.5C12.8284 18.5 13.5 17.8284 13.5 17V15.5C16.182 14.441 18 11.973 18 9C18 5.68629 15.3137 3 12 3Z" stroke="currentColor" stroke-width="2"/>
-             </svg>`,
-      decision: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 3L2 12L12 21L22 12L12 3Z" stroke="currentColor" stroke-width="2"/>
-                </svg>`,
-      incident: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 9V13M12 17H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2"/>
-                </svg>`,
-      code_snippet: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M16 18L22 12L16 6M8 6L2 12L8 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>`
-    };
-    
-    let chartHTML = '<div class="category-chart">';
-    let currentAngle = 0;
-    
-    // Create pie chart using CSS conic-gradient
-    const gradientStops = [];
-    Object.entries(categories).forEach(([category, count]) => {
-      const percentage = (count / total) * 100;
-      const color = categoryColors[category] || '#64748b';
-      
-      gradientStops.push(`${color} ${currentAngle}% ${currentAngle + percentage}%`);
-      currentAngle += percentage;
-    });
-    
-    chartHTML += `
-      <div class="pie-chart" style="background: conic-gradient(${gradientStops.join(', ')})"></div>
-      <div class="chart-legend">
-    `;
-    
-    Object.entries(categories).forEach(([category, count]) => {
-      const percentage = ((count / total) * 100).toFixed(1);
-      const color = categoryColors[category] || '#64748b';
-      const icon = categoryIcons[category] || categoryIcons.task;
-      
-      chartHTML += `
-        <div class="legend-item">
-          <div class="legend-color" style="background: ${color}"></div>
-          <span class="legend-icon">${icon}</span>
-          <span class="legend-text">${category}</span>
-          <span class="legend-count">${count} (${percentage}%)</span>
-        </div>
-      `;
-    });
-    
-    chartHTML += '</div></div>';
-    return chartHTML;
-  }
-  
-  /**
-   * Create recent memories list
+   * Create recent memories list (compact inline layout)
    */
   createRecentMemories() {
     if (this.isLoading) {
@@ -1097,61 +1080,173 @@ class DashboardPage extends HTMLElement {
       `;
     }
     
-    // Recent Activity 표시 개수 (기본 10개)
     const displayCount = this.getAttribute('recent-count') || 10;
     
     return `
-      <div class="recent-memories-list">
-        ${this.recentMemories.slice(0, displayCount).map(memory => `
-          <memory-card
-            memory-id="${memory.id}"
-            content="${this.escapeHtml(memory.content)}"
-            project="${memory.project_id || ''}"
-            category="${memory.category}"
-            created-at="${memory.created_at}"
-            updated-at="${memory.updated_at}"
-            tags="${this.escapeHtml(JSON.stringify(memory.tags || []))}"
-            source="${memory.source || 'unknown'}"
-          ></memory-card>
-        `).join('')}
+      <div class="recent-list-compact">
+        ${this.recentMemories.slice(0, displayCount).map(memory => {
+          const icon = this.getCategorySvgIcon(memory.category);
+          const preview = (memory.content || '').replace(/#{1,6}\s+/g, '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/\n/g, ' ').trim();
+          const truncated = preview.length > 120 ? preview.substring(0, 120) + '...' : preview;
+          const timeStr = this.formatRelativeTime(memory.created_at);
+          const source = memory.source && memory.source !== 'unknown' ? memory.source : '';
+          return `
+            <div class="recent-item" data-memory-id="${memory.id}" role="button" tabindex="0">
+              <span class="recent-item-icon">${icon}</span>
+              <span class="recent-item-badge">${memory.category}</span>
+              ${memory.project_id ? `<span class="recent-item-project">${this.escapeHtml(memory.project_id)}</span>` : ''}
+              <span class="recent-item-content">${this.escapeHtml(truncated)}</span>
+              <span class="recent-item-time">${timeStr}${source ? ` · ${source}` : ''}</span>
+            </div>`;
+        }).join('')}
       </div>
     `;
+  }
+
+  /**
+   * Get SVG icon for category (gray tone, 14px)
+   */
+  getCategorySvgIcon(category) {
+    const icons = {
+      task: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>',
+      bug: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+      decision: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+      code_snippet: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+      incident: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+      idea: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z"/></svg>'
+    };
+    return icons[category] || '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+  }
+
+  /**
+   * Format relative time string
+   */
+  formatRelativeTime(dateStr) {
+    if (!dateStr) return '';
+    const now = new Date();
+    const date = new Date(dateStr);
+    const diffMs = now - date;
+    const diffMin = Math.floor(diffMs / 60000);
+    const diffHour = Math.floor(diffMs / 3600000);
+    const diffDay = Math.floor(diffMs / 86400000);
+    if (diffMin < 1) return '방금';
+    if (diffMin < 60) return `${diffMin}분 전`;
+    if (diffHour < 24) return `${diffHour}시간 전`;
+    if (diffDay < 7) return `${diffDay}일 전`;
+    if (diffDay < 30) return `${Math.floor(diffDay / 7)}주 전`;
+    return `${Math.floor(diffDay / 30)}개월 전`;
   }
   
   /**
-   * Create project overview
+   * Create search performance mini dashboard
    */
-  createProjectOverview() {
-    if (!this.stats || !this.stats.projects_breakdown) {
-      return '<div class="loading-placeholder">Loading projects...</div>';
-    }
-    
-    const projects = this.stats.projects_breakdown;
-    const projectEntries = Object.entries(projects)
-      .sort(([,a], [,b]) => b - a)
-      .slice(0, 5);
-    
-    if (projectEntries.length === 0) {
-      return '<div class="no-data">No projects found</div>';
-    }
-    
+  createSearchPerfWidget() {
+    const h = this.systemHealth;
+    const s24h = h?.search?.last_24h || {};
+    const s7d = h?.search?.last_7d || {};
+
+    const avgMs = s24h.avg_response_time_ms != null ? `${Math.round(s24h.avg_response_time_ms)}ms` : '—';
+    const noResultRate = s24h.no_results_rate != null ? `${s24h.no_results_rate}%` : '—';
+    const totalSearches24h = s24h.total ?? '—';
+    const totalSearches7d = s7d.total ?? '—';
+
     return `
-      <div class="project-list">
-        ${projectEntries.map(([project, count]) => `
-          <div class="project-item">
-            <div class="project-info">
-              <div class="project-name">${project}</div>
-              <div class="project-count">${count} memories</div>
-            </div>
-            <div class="project-bar">
-              <div class="project-bar-fill" style="width: ${(count / Math.max(...Object.values(projects))) * 100}%"></div>
-            </div>
+      <div class="search-perf-grid">
+        <div class="perf-metric">
+          <div class="perf-value">${avgMs}</div>
+          <div class="perf-label">평균 응답시간 (24h)</div>
+        </div>
+        <div class="perf-metric">
+          <div class="perf-value">${totalSearches24h}</div>
+          <div class="perf-label">검색 수 (24h)</div>
+        </div>
+        <div class="perf-metric">
+          <div class="perf-value">${totalSearches7d}</div>
+          <div class="perf-label">검색 수 (7일)</div>
+        </div>
+        <div class="perf-metric">
+          <div class="perf-value">${noResultRate}</div>
+          <div class="perf-label">무결과 비율</div>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Create system health widget
+   */
+  createSystemHealthWidget() {
+    const h = this.systemHealth;
+    if (!h) {
+      return '<div class="system-health-grid"><div class="health-item"><span class="health-indicator good"></span><div class="health-info"><div class="health-label">상태</div><div class="health-value">데이터 없음</div></div></div></div>';
+    }
+
+    const s24h = h.search?.last_24h || {};
+    const avgTime = s24h.avg_response_time_ms;
+    const searchStatus = avgTime == null ? 'good' : avgTime < 200 ? 'good' : avgTime < 500 ? 'warn' : 'error';
+    const searchLabel = avgTime != null ? `${Math.round(avgTime)}ms` : 'N/A';
+
+    const embed24h = h.embedding?.last_24h || {};
+    const embedOps = embed24h.total_operations || 0;
+    const embedOk = embedOps >= 0;
+
+    const alerts = h.alerts?.active_count || 0;
+    const alertStatus = alerts === 0 ? 'good' : alerts < 3 ? 'warn' : 'error';
+
+    const avgSim = s24h.avg_similarity;
+    const simLabel = avgSim != null ? `${(avgSim * 100).toFixed(1)}%` : 'N/A';
+
+    return `
+      <div class="system-health-grid">
+        <div class="health-item">
+          <span class="health-indicator ${searchStatus}"></span>
+          <div class="health-info">
+            <div class="health-label">검색 응답</div>
+            <div class="health-value">${searchLabel}</div>
           </div>
+        </div>
+        <div class="health-item">
+          <span class="health-indicator ${embedOk ? 'good' : 'error'}"></span>
+          <div class="health-info">
+            <div class="health-label">임베딩 (24h)</div>
+            <div class="health-value">${embedOps}회</div>
+          </div>
+        </div>
+        <div class="health-item">
+          <span class="health-indicator ${alertStatus}"></span>
+          <div class="health-info">
+            <div class="health-label">알림</div>
+            <div class="health-value">${alerts}건</div>
+          </div>
+        </div>
+        <div class="health-item">
+          <span class="health-indicator good"></span>
+          <div class="health-info">
+            <div class="health-label">검색 유사도</div>
+            <div class="health-value">${simLabel}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Create top tags widget
+   */
+  createTopTagsWidget() {
+    if (!this.topTags || this.topTags.length === 0) {
+      return '<div class="no-data">태그 데이터 없음</div>';
+    }
+
+    return `
+      <div class="top-tags-list">
+        ${this.topTags.map(([tag, count]) => `
+          <span class="top-tag-chip">#${this.escapeHtml(tag)} <span class="top-tag-count">${count}</span></span>
         `).join('')}
       </div>
     `;
   }
-  
+
   /**
    * Escape HTML for safe attribute usage
    * Handles: < > & " ' to prevent XSS and attribute breaking
@@ -1210,8 +1305,15 @@ class DashboardPage extends HTMLElement {
         <!-- Charts and Analytics Section -->
         <section class="chroma-dashboard-section charts-section">
           <div class="section-header">
-            <h2 class="section-title">Analytics</h2>
-            <p class="section-subtitle">Data insights and trends</p>
+            <div>
+              <h2 class="section-title">Analytics</h2>
+              <p class="section-subtitle">Data insights and trends</p>
+            </div>
+            <div class="time-range-selector">
+              <button class="time-range-btn${this.chartDays === 7 ? ' active' : ''}" data-days="7">7일</button>
+              <button class="time-range-btn${this.chartDays === 30 ? ' active' : ''}" data-days="30">30일</button>
+              <button class="time-range-btn${this.chartDays === 90 ? ' active' : ''}" data-days="90">90일</button>
+            </div>
           </div>
           <div class="charts-grid">
             <div class="chart-card animate-on-scroll">
@@ -1240,7 +1342,7 @@ class DashboardPage extends HTMLElement {
             
             <div class="chart-card animate-on-scroll">
               <div class="chart-header">
-                <h3>Weekly Activity</h3>
+                <h3>${this.chartDays <= 7 ? 'Weekly' : this.chartDays <= 30 ? 'Monthly' : 'Quarterly'} Activity</h3>
                 <button class="chart-expand-btn" title="Expand chart">
                   <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M15 3H21V9M9 21H3V15M21 3L14 10M3 21L10 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1254,6 +1356,41 @@ class DashboardPage extends HTMLElement {
           </div>
         </section>
         
+        <!-- System Health & Top Tags Row -->
+        <section class="chroma-dashboard-section">
+          <div class="charts-grid">
+            <div class="chart-card animate-on-scroll">
+              <div class="chart-header">
+                <h3>시스템 상태</h3>
+              </div>
+              <div class="chart-content">
+                ${this.createSystemHealthWidget()}
+              </div>
+            </div>
+            <div class="chart-card animate-on-scroll">
+              <div class="chart-header">
+                <h3>인기 태그</h3>
+              </div>
+              <div class="chart-content">
+                ${this.createTopTagsWidget()}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Search Performance Mini Dashboard -->
+        <section class="chroma-dashboard-section">
+          <div class="chart-card animate-on-scroll">
+            <div class="chart-header">
+              <h3>검색 성능</h3>
+              <button class="view-all-btn" data-section="analytics">상세 보기</button>
+            </div>
+            <div class="chart-content">
+              ${this.createSearchPerfWidget()}
+            </div>
+          </div>
+        </section>
+
         <!-- Recent Activity Section -->
         <section class="chroma-dashboard-section activity-section">
           <div class="section-header">
@@ -1396,10 +1533,6 @@ class DashboardPage extends HTMLElement {
    * Create weekly activity chart
    */
   createWeeklyActivityChart() {
-    // Mock weekly activity data - in real app this would come from API
-    const weeklyData = [12, 19, 15, 27, 22, 18, 24];
-    
-    // Generate unique ID for this chart
     const chartId = `weekly-activity-${Date.now()}`;
     
     return `
@@ -1413,10 +1546,7 @@ class DashboardPage extends HTMLElement {
    * Initialize charts after render
    */
   initializeCharts() {
-    if (!window.ChromaCharts) {
-      console.warn('ChromaCharts not loaded');
-      return;
-    }
+    if (!window.ChromaCharts) return;
     
     const charts = new ChromaCharts();
     
@@ -1450,16 +1580,22 @@ class DashboardPage extends HTMLElement {
       );
     }
     
-    // Initialize weekly activity line chart
+    // Initialize weekly activity line chart with real data
     const weeklyChartEl = this.querySelector('[id^="weekly-activity-"]');
     if (weeklyChartEl) {
-      const weeklyData = [12, 19, 15, 27, 22, 18, 24];
+      const dailyData = this.dailyCounts.length > 0
+        ? this.dailyCounts.map(d => d.count)
+        : [0];
+      const dailyLabels = this.dailyCounts.length > 0
+        ? this.dailyCounts.map(d => d.date)
+        : [];
       
       charts.createLineChart(
-        weeklyData,
+        dailyData,
         weeklyChartEl.id,
         {
           title: 'Daily Memory Creation',
+          labels: dailyLabels,
           showPoints: true,
           showGrid: true,
           animate: true,
@@ -1678,11 +1814,78 @@ style.textContent = `
     font-weight: 500;
   }
   
-  /* Recent Memories */
-  .recent-memories-list {
+  /* Recent Activity - Compact List */
+  .recent-list-compact {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+  }
+
+  .recent-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: background 0.15s;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+  }
+
+  .recent-item:last-child {
+    border-bottom: none;
+  }
+
+  .recent-item:hover {
+    background: var(--bg-secondary);
+  }
+
+  .recent-item-icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    color: var(--text-muted);
+  }
+
+  .recent-item-icon svg {
+    display: block;
+  }
+
+  .recent-item-badge {
+    flex-shrink: 0;
+    font-size: 0.6875rem;
+    padding: 1px 6px;
+    border-radius: var(--border-radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+
+  .recent-item-project {
+    flex-shrink: 0;
+    font-size: 0.6875rem;
+    padding: 1px 6px;
+    border-radius: var(--border-radius-sm);
+    background: var(--bg-tertiary, var(--bg-secondary));
+    color: var(--text-primary);
+    font-weight: 500;
+    border: 1px solid var(--border-color);
+  }
+
+  .recent-item-content {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+  }
+
+  .recent-item-time {
+    flex-shrink: 0;
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    white-space: nowrap;
   }
   
   /* Project List */
