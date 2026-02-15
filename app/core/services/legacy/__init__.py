@@ -1,33 +1,17 @@
 """
-Legacy Search Implementations - DEPRECATED
+Legacy Search Implementation - DEPRECATED
 
-This directory contains legacy search implementations that have been archived
-for reference purposes. These implementations are no longer actively maintained
-or used in the system.
+search.py의 SearchService는 일부 모듈에서 아직 참조 중이므로 유지합니다.
+새 코드에서는 반드시 UnifiedSearchService를 사용하세요.
 
 ACTIVE IMPLEMENTATION:
-- Use `app.core.services.unified_search.UnifiedSearchService` instead
+- app.core.services.unified_search.UnifiedSearchService
 
-ARCHIVED IMPLEMENTATIONS:
-- search.py: Legacy base search implementation
-- enhanced_search.py: Quality optimization extension
-- improved_search.py: Korean optimization extension
-- final_improved_search.py: Standalone translation implementation
-- simple_improved_search.py: Lightweight standalone implementation
+REMAINING LEGACY:
+- search.py: 기본 SearchService (batch_tools, storage, mcp_stdio에서 참조)
 
-MIGRATION GUIDE:
-If you need to use any of these legacy implementations, please:
-1. Check if UnifiedSearchService meets your requirements
-2. If not, file an issue with your use case
-3. Do NOT import from this legacy directory in new code
-
-DEPRECATION TIMELINE:
-- v2.1: Archived to legacy/ directory
-- v2.2+: May be removed in future versions
-
-For more information, see:
-- app/core/services/unified_search.py
-- docs/unified-search-migration-guide.md
+REMOVED (v1.0.4):
+- enhanced_search.py, improved_search.py, final_improved_search.py, simple_improved_search.py
 """
 
 __all__ = []

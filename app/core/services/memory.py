@@ -195,14 +195,30 @@ class MemoryService:
         )
 
         try:
-            # 5. 데이터베이스에 저장
-            await self.db.add_memory(memory.model_dump())
-            logger.info(f"Memory saved to database: {memory.id}")
+            async with self.db.transaction():
+                await self.db.execute(
+                    """
+                    INSERT INTO memories 
+                    (id, content, content_hash, project_id, category, source, embedding, tags, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        memory.id,
+                        memory.content,
+                        memory.content_hash,
+                        memory.project_id,
+                        memory.category,
+                        memory.source,
+                        memory.embedding,
+                        memory.tags,
+                        memory.created_at,
+                        memory.updated_at,
+                    ),
+                )
 
-            # 6. 벡터 인덱스에 저장
-            await self._save_to_vector_index(memory.id, embedding_bytes)
-            logger.info(f"Memory saved to vector index: {memory.id}")
+                await self._save_to_vector_index(memory.id, embedding_bytes)
 
+            logger.info(f"Memory created with pre-computed embedding: {memory.id}")
             return AddResponse(
                 id=memory.id, status="saved", created_at=memory.created_at
             )

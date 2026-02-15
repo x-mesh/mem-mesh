@@ -17,8 +17,8 @@ from ..core.services.cache_manager import get_cache_manager
 setup_logging()
 logger = get_logger("mcp-stdio-server")
 
-log_level = os.getenv("MCP_LOG_LEVEL", "INFO")
-log_file = os.getenv("MCP_LOG_FILE", "")
+log_level = os.getenv("MEM_MESH_LOG_LEVEL") or os.getenv("MCP_LOG_LEVEL", "INFO")
+log_file = os.getenv("MEM_MESH_LOG_FILE") or os.getenv("MCP_LOG_FILE", "")
 
 logger.info(
     "Starting mem-mesh MCP server (FastMCP)",
@@ -261,6 +261,128 @@ async def batch_operations(operations: list[dict]) -> dict:
         return {"status": "error", "message": "Batch handler not initialized"}
 
     return await batch_handler.batch_operations(operations=operations)
+
+
+@mcp.tool()
+async def pin_add(
+    content: str,
+    project_id: str,
+    importance: Optional[int] = None,
+    tags: Optional[list[str]] = None,
+) -> dict:
+    """Add a new pin (short-term task) to the current session
+
+    Args:
+        content: Pin content describing the task or work item
+        project_id: Project identifier
+        importance: Importance score (1-5). Auto-determined if not provided.
+        tags: Pin tags
+    """
+    return await _get_handlers().pin_add(content, project_id, importance, tags)
+
+
+@mcp.tool()
+async def pin_complete(pin_id: str) -> dict:
+    """Mark a pin as completed. Returns promotion suggestion if importance >= 4.
+
+    Args:
+        pin_id: Pin ID to complete
+    """
+    return await _get_handlers().pin_complete(pin_id)
+
+
+@mcp.tool()
+async def pin_promote(pin_id: str) -> dict:
+    """Promote a completed pin to a permanent memory.
+
+    Args:
+        pin_id: Pin ID to promote to memory
+    """
+    return await _get_handlers().pin_promote(pin_id)
+
+
+@mcp.tool()
+async def session_resume(
+    project_id: str,
+    expand: bool = False,
+    limit: int = 10,
+) -> dict:
+    """Resume the last session for a project. Returns active pins and session context.
+
+    Args:
+        project_id: Project identifier
+        expand: If true, return full pin contents; if false, return summary only
+        limit: Maximum number of pins to return
+    """
+    return await _get_handlers().session_resume(project_id, expand, limit)
+
+
+@mcp.tool()
+async def session_end(
+    project_id: str,
+    summary: Optional[str] = None,
+) -> dict:
+    """End the current session for a project.
+
+    Args:
+        project_id: Project identifier
+        summary: Session summary (auto-generated if not provided)
+    """
+    return await _get_handlers().session_end(project_id, summary)
+
+
+@mcp.tool()
+async def link(
+    source_id: str,
+    target_id: str,
+    relation_type: str = "related",
+    strength: float = 1.0,
+    metadata: Optional[dict] = None,
+) -> dict:
+    """Create a relation between two memories.
+
+    Args:
+        source_id: Source memory ID
+        target_id: Target memory ID
+        relation_type: Relation type (related, parent, child, supersedes, references, depends_on, similar)
+        strength: Relation strength (0.0-1.0)
+        metadata: Optional metadata for the relation
+    """
+    return await _get_handlers().link(source_id, target_id, relation_type, strength, metadata)
+
+
+@mcp.tool()
+async def unlink(
+    source_id: str,
+    target_id: str,
+    relation_type: Optional[str] = None,
+) -> dict:
+    """Remove a relation between two memories.
+
+    Args:
+        source_id: Source memory ID
+        target_id: Target memory ID
+        relation_type: Specific relation type to remove (optional, removes all if not specified)
+    """
+    return await _get_handlers().unlink(source_id, target_id, relation_type)
+
+
+@mcp.tool()
+async def get_links(
+    memory_id: str,
+    relation_type: Optional[str] = None,
+    direction: str = "both",
+    limit: int = 20,
+) -> dict:
+    """Get relations for a memory.
+
+    Args:
+        memory_id: Memory ID to get relations for
+        relation_type: Filter by relation type (optional)
+        direction: Relation direction filter (outgoing, incoming, both)
+        limit: Maximum relations to return
+    """
+    return await _get_handlers().get_links(memory_id, relation_type, direction, limit)
 
 
 @mcp.tool()

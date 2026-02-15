@@ -15,25 +15,41 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-        
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -e ".[dev]"
-        
-    - name: Run tests
+        pip install ruff
+
+    - name: Lint with Ruff
       run: |
-        pytest tests/ -v
-        
-    - name: Lint with black
+        ruff check app/ tests/
+
+    - name: Format check with Black
       run: |
         black --check app/ tests/
 
+    - name: Import sort check with isort
+      run: |
+        isort --check-only app/ tests/
+
     - name: Type check with mypy
       run: |
-        mypy app/
+        mypy app/ --ignore-missing-imports
+
+    - name: Run tests with coverage
+      run: |
+        pytest tests/ -v --cov=app --cov-report=xml --cov-report=term-missing
+
+    - name: Upload coverage to Codecov
+      if: matrix.python-version == '3.11'
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: false

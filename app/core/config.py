@@ -160,6 +160,12 @@ class Settings(BaseSettings):
         description="Authorization code TTL in seconds (10 minutes)",
     )
 
+    # CORS configuration
+    cors_origins: str = Field(
+        default="http://localhost:8000,http://127.0.0.1:8000",
+        description="Comma-separated list of allowed CORS origins. Use '*' for development only.",
+    )
+
     # Logging configuration
     log_level: str = Field(
         default="INFO",
