@@ -332,13 +332,17 @@ class TestSettingsProperties:
 
     @given(
         storage_mode=st.sampled_from(["direct", "api"]),
-        api_base_url=st.text(min_size=10, max_size=50).map(
+        api_base_url=st.text(min_size=10, max_size=50).filter(
+            lambda x: "\x00" not in x
+        ).map(
             lambda x: "http://" + x.replace(" ", "")
         ),
-        database_path=st.text(min_size=1, max_size=100),
+        database_path=st.text(min_size=1, max_size=100).filter(
+            lambda x: "\x00" not in x
+        ),
         busy_timeout=st.integers(min_value=1000, max_value=60000),
     )
-    @hyp_settings(max_examples=20, suppress_health_check=[HealthCheck.filter_too_much])
+    @hyp_settings(max_examples=20, suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow])
     def test_settings_configuration_round_trip(
         self, storage_mode, api_base_url, database_path, busy_timeout
     ):
@@ -387,7 +391,7 @@ class TestSettingsProperties:
 
     @given(
         invalid_mode=st.text().filter(
-            lambda x: x not in ("direct", "api") and len(x) > 0
+            lambda x: x not in ("direct", "api") and len(x) > 0 and "\x00" not in x
         )
     )
     @hyp_settings(

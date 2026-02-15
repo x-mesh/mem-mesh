@@ -21,7 +21,7 @@ async def temp_db():
     
     # 테이블 생성
     await db.execute("""
-        CREATE TABLE search_metrics (
+        CREATE TABLE IF NOT EXISTS search_metrics (
             id TEXT PRIMARY KEY,
             timestamp DATETIME NOT NULL,
             query TEXT NOT NULL,
@@ -43,7 +43,7 @@ async def temp_db():
     """)
     
     await db.execute("""
-        CREATE TABLE embedding_metrics (
+        CREATE TABLE IF NOT EXISTS embedding_metrics (
             id TEXT PRIMARY KEY,
             timestamp DATETIME NOT NULL,
             operation TEXT NOT NULL,

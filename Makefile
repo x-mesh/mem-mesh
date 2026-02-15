@@ -148,6 +148,9 @@ prod: ## Start production environment with Docker
 	@echo "  Dashboard: http://localhost:8000"
 	@echo "  API Docs: http://localhost:8000/docs"
 
+quickstart: ## Docker quick start (build + up)
+	$(MAKE) prod
+
 stop: ## Stop all services
 	$(MAKE) docker-down
 	@echo "✓ All services stopped"

@@ -1,55 +1,87 @@
-# mem-mesh Quick Start
+# mem-mesh Quick Start (5분)
 
-## MCP 설정
+MCP 설정부터 첫 검색/저장까지.
+
+---
+
+## 1. MCP 설정 (1분)
+
+### Cursor / Claude Desktop / Windsurf
+
 ```json
 {
   "mcpServers": {
     "mem-mesh": {
-      "url": "http://meme.24x365.online/mcp/sse"
+      "url": "http://your-server/mcp/sse"
     }
   }
 }
 ```
 
-## 핵심 도구 3개
-| 도구 | 용도 | 예시 |
-|------|------|------|
-| `search` | 기억 검색 | `search(query="에러 해결", project_id="my-app", limit=5)` |
-| `add` | 기억 저장 | `add(content="Q: ...\nA: ...", project_id="my-app", category="bug", tags=["error"])` |
-| `stats` | 통계 확인 | `stats(project_id="my-app")` |
-
-## 사용 패턴
-
-### 1. 작업 시작 시
-```
-search(query="현재 작업 관련 키워드", project_id="프로젝트명", limit=5)
+또는 stdio:
+```json
+{
+  "mcpServers": {
+    "mem-mesh": {
+      "command": "python",
+      "args": ["-m", "app.mcp_stdio"]
+    }
+  }
+}
 ```
 
-### 2. 문제 해결 후
+---
+
+## 2. 첫 검색 (1분)
+
+```
+search(query="프로젝트 관련 키워드", project_id="프로젝트명", limit=5)
+```
+
+- `project_id`: 현재 디렉토리명 또는 프로젝트 ID
+- 쿼리는 구문 사용 (단일 단어 금지)
+
+---
+
+## 3. 첫 저장 (2분)
+
 ```
 add(
-  content="Q: 문제 설명\n\nA: 해결 방법\n- 핵심: ...\n- 코드: `...`",
+  content="## 제목\n\n### 배경\n...\n### 내용\n...\n### 영향\n...",
   project_id="프로젝트명",
-  category="bug",  # task, bug, idea, decision, code_snippet
-  tags=["관련", "키워드"]
+  category="bug",
+  tags=["Python", "API", "Fix"]
 )
 ```
 
-### 3. 세션 관리 (선택)
+또는 Q&A 형식:
 ```
-session_resume(project_id="프로젝트명")  # 이전 작업 확인
-pin_add(content="현재 작업", project_id="프로젝트명")  # 작업 추적
-pin_complete(pin_id="...")  # 완료 표시
+Q: 문제 설명
+A: 해결 방법
+- 핵심: ...
+- 코드: `...`
 ```
+
+---
+
+## 4. 세션 관리 (선택, 1분)
+
+```
+session_resume(project_id="프로젝트명", expand=false)
+pin_add(content="현재 작업", project_id="프로젝트명", importance=3)
+pin_complete(pin_id="...")
+```
+
+---
 
 ## 카테고리
-- `task`: 일반 작업
-- `bug`: 버그/에러 해결
-- `idea`: 아이디어
-- `decision`: 결정 사항
-- `code_snippet`: 코드 조각
 
-## 팁
-- 검색 먼저, 저장은 가치 있는 것만
-- Q&A 형식으로 저장하면 검색 효율 ↑
-- 태그는 영어 소문자, kebab-case 권장
+`task` | `bug` | `idea` | `decision` | `code_snippet` | `incident` | `git-history`
+
+---
+
+## 다음 단계
+
+- 전체 규칙: `docs/rules/all-tools-full.md`
+- 검색 최적화: `docs/rules/modules/search.md`
+- 저장 가이드: `docs/rules/modules/memory-log.md`

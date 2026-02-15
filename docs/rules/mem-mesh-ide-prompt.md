@@ -1,79 +1,39 @@
-# mem-mesh IDE Prompt (Compact)
+# mem-mesh IDE Prompt (Compact ~300 tokens)
 
-Copy this to your IDE's system prompt or rules file.
+Cursor / Windsurf / Claude Code 등 IDE system prompt에 복사.
 
 ---
 
 ```
-## mem-mesh MCP Memory System
+## mem-mesh MCP Memory
 
-You have access to mem-mesh for persistent context across sessions.
+persistent context across sessions.
 
-### AUTO PROJECT
-Detect from current directory: /path/to/PROJECT → project_id="PROJECT"
-
-### TOOLS
-- search(query, project_id, limit=5) - Find memories
-- add(content, category, project_id, tags) - Save memory
-- session_resume(project_id, expand=false) - Load session
-- pin_add(content, project_id, importance) - Track task
-- pin_complete(pin_id) - Complete task
+### PROJECT
+Directory name → project_id. /path/to/my-app → project_id="my-app"
 
 ### WORKFLOW
-1. Session start: session_resume(project_id="$DIR", expand=false)
-2. Track work: pin_add(content="task", project_id="$DIR", importance=3)
-3. Save knowledge: add(content="Q: ...\nA: ...", category="decision", project_id="$DIR")
-4. Search: search(query="specific phrase", project_id="$DIR", limit=5)
+1. Start: session_resume(project_id, expand=false, limit=10)
+2. Task: pin_add(content, project_id, importance=3)
+3. Search: search(query, project_id, limit=5) — phrases, not words
+4. Save: add(content, category, project_id, tags)
+5. Done: pin_complete(pin_id); importance≥4 → pin_promote(pin_id)
+6. End: session_end(project_id)
 
-### RULES
-- Query: Use phrases ("token optimization"), not words ("token")
-- Save: Q&A format, 3-5 tags, appropriate category
-- Categories: task | bug | idea | decision | code_snippet
+### SEARCH
+- ✅ "token optimization strategy" ❌ "token"
+- Always project_id. recency_weight=0.3 for recent.
 
-### SKILLS
-Use @mem-mesh/skill-name for complex workflows:
-- @mem-mesh/session-start - Initialize with context
-- @mem-mesh/save-qa - Format and save Q&A
-- @mem-mesh/search-context - Smart search
-```
+### SAVE
+- Format: ## Title\n### WHY\n### WHAT\n### IMPACT
+- Categories: task|bug|idea|decision|code_snippet|incident|git-history
+- Tags: 3-6 (tech + module + action)
+- Duplicate → update(memory_id)
 
----
+### RELATIONS
+link(source_id, target_id, relation_type) — supersedes, depends_on, references
+get_links(memory_id) — expand context
 
-## Kiro/Cursor Rules File Version
-
-For `.kiro/steering/mem-mesh.md` or `.cursorrules`:
-
-```markdown
-# mem-mesh Memory Integration
-
-## When to Use
-- Starting work: Call session_resume to load context
-- Learning something: Save with add() in Q&A format
-- Need past context: Search with specific phrases
-- Tracking tasks: Use pin_add/pin_complete
-
-## Project Detection
-Current directory name = project_id
-Example: ~/work/my-app → project_id="my-app"
-
-## Quick Reference
-| Action | Tool | Example |
-|--------|------|---------|
-| Load context | session_resume | `(project_id="my-app", expand=false)` |
-| Save memory | add | `(content="Q:..A:..", category="decision")` |
-| Find memory | search | `(query="auth flow", limit=5)` |
-| Track task | pin_add | `(content="implement X", importance=3)` |
-
-## Format for Saving
-```
-Q: [Clear question]
-
-A: [Detailed answer]
-- Key point 1
-- Key point 2
-- Code: `example`
-```
-
-Tags: 3-5 relevant keywords (kebab-case)
-Categories: task, bug, idea, decision, code_snippet
+### BATCH
+batch_operations([{type:"add",...},{type:"search",...}]) — 30-50% token save
 ```
