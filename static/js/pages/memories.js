@@ -20,6 +20,7 @@ class MemoriesPage extends HTMLElement {
     this.sortDirection = 'desc';
     this.searchQuery = '';
     this.searchMode = 'hybrid'; // hybrid, vector, text
+    this.recencyWeight = 0;
   }
   
   connectedCallback() {
@@ -603,6 +604,20 @@ class MemoriesPage extends HTMLElement {
       searchModeSelect.addEventListener('change', this.handleSearchModeChange.bind(this));
     }
     
+    // Recency weight slider
+    const recencyInput = this.querySelector('.recency-weight-input');
+    if (recencyInput) {
+      recencyInput.addEventListener('input', (e) => {
+        this.recencyWeight = parseInt(e.target.value) / 100;
+        const valueLabel = this.querySelector('.recency-value');
+        if (valueLabel) valueLabel.textContent = `${e.target.value}%`;
+      });
+      recencyInput.addEventListener('change', () => {
+        this.currentPage = 1;
+        this.loadMemories();
+      });
+    }
+    
     // Filter controls
     const categoryCombobox = this.querySelector('.category-combobox');
     if (categoryCombobox) {
@@ -642,13 +657,14 @@ class MemoriesPage extends HTMLElement {
    * Update search mode visibility
    */
   updateSearchModeVisibility() {
+    const show = this.shouldShowSearchMode();
     const searchModeSelect = this.querySelector('.search-mode-select');
     if (searchModeSelect) {
-      if (this.shouldShowSearchMode()) {
-        searchModeSelect.style.display = '';
-      } else {
-        searchModeSelect.style.display = 'none';
-      }
+      searchModeSelect.style.display = show ? '' : 'none';
+    }
+    const recencySlider = this.querySelector('.recency-slider-compact');
+    if (recencySlider) {
+      recencySlider.style.display = show ? '' : 'none';
     }
   }
   
@@ -897,8 +913,13 @@ class MemoriesPage extends HTMLElement {
         limit: this.pageSize,
         offset: (this.currentPage - 1) * this.pageSize,
         sort_by: this.sortBy,
-        sort_direction: this.sortDirection
+        sort_direction: this.sortDirection,
+        search_mode: this.searchMode
       };
+      
+      if (this.recencyWeight > 0) {
+        searchParams.recency_weight = this.recencyWeight;
+      }
       
       // Add filters to search params
       if (this.viewParams.category) {
@@ -1344,11 +1365,17 @@ class MemoriesPage extends HTMLElement {
               </svg>
               Search
             </button>
-            <select class="search-mode-select" ${!this.shouldShowSearchMode() ? 'style="display: none;"' : ''}>
-              <option value="hybrid" ${this.searchMode === 'hybrid' ? 'selected' : ''}>Hybrid</option>
-              <option value="vector" ${this.searchMode === 'vector' ? 'selected' : ''}>Vector</option>
-              <option value="text" ${this.searchMode === 'text' ? 'selected' : ''}>Text</option>
+            <select class="search-mode-select" title="검색 모드 선택" ${!this.shouldShowSearchMode() ? 'style="display: none;"' : ''}>
+              <option value="hybrid" ${this.searchMode === 'hybrid' ? 'selected' : ''} title="키워드 + 의미 결합 검색">Hybrid</option>
+              <option value="vector" ${this.searchMode === 'vector' ? 'selected' : ''} title="의미 기반 유사도 검색">Semantic</option>
+              <option value="text" ${this.searchMode === 'text' ? 'selected' : ''} title="정확한 키워드 매칭">Text</option>
+              <option value="fuzzy" ${this.searchMode === 'fuzzy' ? 'selected' : ''} title="오타 허용 유사 검색">Fuzzy</option>
             </select>
+            <div class="recency-slider-compact" ${!this.shouldShowSearchMode() ? 'style="display: none;"' : ''} title="최신 우선도 — 높을수록 최근 메모리가 상위에 노출">
+              <label class="recency-label">최신</label>
+              <input type="range" class="recency-weight-input" min="0" max="100" step="5" value="${Math.round(this.recencyWeight * 100)}" />
+              <span class="recency-value">${Math.round(this.recencyWeight * 100)}%</span>
+            </div>
           </div>
         </div>
         
@@ -1563,6 +1590,58 @@ style.textContent = `
     color: var(--text-primary);
     font-size: 0.875rem;
     min-width: 100px;
+  }
+  
+  .recency-slider-compact {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 0.5rem;
+  }
+  
+  .recency-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  
+  .recency-weight-input {
+    width: 80px;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  
+  .recency-weight-input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    background: var(--primary-color);
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid var(--bg-primary);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  
+  .recency-weight-input::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: var(--primary-color);
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid var(--bg-primary);
+  }
+  
+  .recency-value {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--primary-color);
+    min-width: 2.5rem;
+    text-align: right;
   }
   
   .filter-controls {

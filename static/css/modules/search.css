@@ -646,6 +646,75 @@
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
 }
 
+/* Advanced Filters in Sidebar */
+.chroma-advanced-filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.chroma-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.chroma-filter-label {
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.chroma-source-select,
+.chroma-tag-input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  transition: all 150ms ease;
+}
+
+.chroma-source-select:focus,
+.chroma-tag-input:focus {
+  outline: none;
+  border-color: var(--primary-500);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.chroma-date-range {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.chroma-date-range input[type="date"] {
+  flex: 1;
+  padding: var(--space-2);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+.chroma-date-range input[type="date"]:focus {
+  outline: none;
+  border-color: var(--primary-500);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.chroma-date-sep {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  flex-shrink: 0;
+}
+
 /* Main Results Area */
 .chroma-search-main {
   min-height: 400px;
@@ -741,11 +810,79 @@
   flex-shrink: 0;
 }
 
+.mode-hint {
+  font-size: var(--text-xs);
+  font-weight: var(--font-normal);
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.chroma-mode-option.active .mode-hint {
+  color: rgba(255, 255, 255, 0.7);
+}
+
 .chroma-mode-description {
   margin-top: var(--space-2);
   font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.5;
+}
+
+/* Recency Weight Slider */
+.chroma-recency-slider {
+  padding: var(--space-1) 0;
+}
+
+.chroma-recency-input {
+  width: 100%;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+
+.chroma-recency-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  background: var(--primary-500);
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid var(--bg-primary);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  transition: transform 150ms ease;
+}
+
+.chroma-recency-input::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+.chroma-recency-input::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: var(--primary-500);
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid var(--bg-primary);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.chroma-recency-labels {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.chroma-recency-value {
+  font-weight: var(--font-semibold);
+  color: var(--primary-500);
+  font-size: var(--text-sm);
 }
 
 /* Loading State */
@@ -904,6 +1041,51 @@
 [data-theme="dark"] .chroma-result-content mark {
   background: rgba(99, 102, 241, 0.3);
   color: var(--primary-300);
+}
+
+/* Tags in Result Cards */
+.chroma-result-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+
+.chroma-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.chroma-tag-chip:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.chroma-tag-more {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.chroma-result-source {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.chroma-result-source svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
 }
 
 .chroma-result-footer {

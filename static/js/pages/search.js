@@ -10,8 +10,13 @@ class SearchPage extends HTMLElement {
     this.searchQuery = '';
     this.selectedCategory = '';
     this.selectedProject = '';
+    this.selectedSource = '';
+    this.selectedTag = '';
+    this.dateFrom = '';
+    this.dateTo = '';
     this.sortBy = 'relevance';
-    this.searchMode = 'hybrid';  // 검색 모드 추가
+    this.searchMode = 'hybrid';
+    this.recencyWeight = 0;
     this.searchResults = [];
     this.isLoading = false;
     this.pageSize = 20;
@@ -39,8 +44,6 @@ class SearchPage extends HTMLElement {
       if (query) redirectURL += `&query=${encodeURIComponent(query)}`;
       if (category) redirectURL += `&category=${encodeURIComponent(category)}`;
       if (project) redirectURL += `&project_id=${encodeURIComponent(project)}`;
-      
-      console.log('Redirecting from search page to:', redirectURL);
       
       if (window.app && window.app.router) {
         window.app.router.navigate(redirectURL);
@@ -103,14 +106,18 @@ class SearchPage extends HTMLElement {
       };
       if (this.selectedCategory) params.category = this.selectedCategory;
       if (this.selectedProject) params.project_id = this.selectedProject;
+      if (this.selectedSource) params.source = this.selectedSource;
+      if (this.selectedTag) params.tag = this.selectedTag;
+      if (this.dateFrom) params.date_from = this.dateFrom;
+      if (this.dateTo) params.date_to = this.dateTo;
+      if (this.recencyWeight > 0) params.recency_weight = this.recencyWeight;
 
       const result = await window.app.apiClient.get('/memories/search', params);
       this.searchResults = result.results || [];
       this.totalResults = result.total || this.searchResults.length;
       this.hasMore = this.searchResults.length >= this.pageSize;
       
-    } catch (error) {
-      console.error('Search failed:', error);
+    } catch {
       this.searchResults = [];
       this.showError('Search failed. Please try again.');
     }
@@ -194,11 +201,36 @@ class SearchPage extends HTMLElement {
         this.updateModeSelection();
         this.performSearch();
       }
+      
+      // Retry button
+      if (target.closest('[data-action="retry"]')) {
+        this.performSearch();
+      }
+      
+      // Clear filters button
+      if (target.closest('[data-action="clear-filters"]')) {
+        this.clearFilters();
+      }
     });
     
-    // Filter select changes
+    // Recency weight slider (live update label)
+    this.addEventListener('input', (e) => {
+      if (e.target.classList.contains('chroma-recency-input')) {
+        this.recencyWeight = parseInt(e.target.value) / 100;
+        const valueLabel = this.querySelector('.chroma-recency-value');
+        if (valueLabel) valueLabel.textContent = `${e.target.value}%`;
+      }
+    });
+    
+    // Filter select & slider changes
     this.addEventListener('change', (e) => {
       const target = e.target;
+      
+      if (target.classList.contains('chroma-recency-input')) {
+        this.recencyWeight = parseInt(target.value) / 100;
+        this.performSearch();
+        return;
+      }
       
       if (target.classList.contains('chroma-category-select')) {
         this.selectedCategory = target.value;
@@ -209,14 +241,39 @@ class SearchPage extends HTMLElement {
       if (target.classList.contains('chroma-project-input')) {
         this.selectedProject = target.value;
       }
-    });
-    
-    // Project input enter key
-    this.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter' && e.target.classList.contains('chroma-project-input')) {
-        this.selectedProject = e.target.value;
+      
+      if (target.classList.contains('chroma-source-select')) {
+        this.selectedSource = target.value;
         this.currentPage = 1;
         this.performSearch();
+      }
+      
+      if (target.classList.contains('chroma-date-from')) {
+        this.dateFrom = target.value;
+        this.currentPage = 1;
+        this.performSearch();
+      }
+      
+      if (target.classList.contains('chroma-date-to')) {
+        this.dateTo = target.value;
+        this.currentPage = 1;
+        this.performSearch();
+      }
+    });
+    
+    // Input enter key handlers
+    this.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        if (e.target.classList.contains('chroma-project-input')) {
+          this.selectedProject = e.target.value;
+          this.currentPage = 1;
+          this.performSearch();
+        }
+        if (e.target.classList.contains('chroma-tag-input')) {
+          this.selectedTag = e.target.value;
+          this.currentPage = 1;
+          this.performSearch();
+        }
       }
     });
   }
@@ -255,19 +312,25 @@ class SearchPage extends HTMLElement {
         return;
       }
       
-      const response = await window.app.apiClient.searchMemories(this.searchQuery, {
+      const params = {
         category: this.selectedCategory || undefined,
         project_id: this.selectedProject || undefined,
+        source: this.selectedSource || undefined,
+        tag: this.selectedTag || undefined,
+        date_from: this.dateFrom || undefined,
+        date_to: this.dateTo || undefined,
         limit: this.pageSize,
         search_mode: this.searchMode
-      });
+      };
+      if (this.recencyWeight > 0) params.recency_weight = this.recencyWeight;
+      
+      const response = await window.app.apiClient.searchMemories(this.searchQuery, params);
       
       this.searchResults = response.results || [];
       this.totalResults = response.total || this.searchResults.length;
       this.hasMore = this.searchResults.length >= this.pageSize;
       
-    } catch (error) {
-      console.error('Search failed:', error);
+    } catch {
       this.searchResults = [];
       this.showError('Search failed.');
     }
@@ -288,12 +351,20 @@ class SearchPage extends HTMLElement {
       this.currentPage++;
       const offset = (this.currentPage - 1) * this.pageSize;
       
-      const response = await window.app.apiClient.searchMemories(this.searchQuery, {
+      const loadMoreParams = {
         category: this.selectedCategory || undefined,
         project_id: this.selectedProject || undefined,
+        source: this.selectedSource || undefined,
+        tag: this.selectedTag || undefined,
+        date_from: this.dateFrom || undefined,
+        date_to: this.dateTo || undefined,
         limit: this.pageSize,
-        offset: offset
-      });
+        offset: offset,
+        search_mode: this.searchMode
+      };
+      if (this.recencyWeight > 0) loadMoreParams.recency_weight = this.recencyWeight;
+      
+      const response = await window.app.apiClient.searchMemories(this.searchQuery, loadMoreParams);
       
       const newResults = response.results || [];
       this.searchResults = [...this.searchResults, ...newResults];
@@ -302,7 +373,6 @@ class SearchPage extends HTMLElement {
       this.appendResults(newResults);
       
     } catch (error) {
-      console.error('Load more failed:', error);
       this.currentPage--;
     }
     
@@ -323,7 +393,7 @@ class SearchPage extends HTMLElement {
             <line x1="12" y1="16" x2="12.01" y2="16"/>
           </svg>
           <p>${message}</p>
-          <button class="chroma-retry-btn" onclick="this.closest('search-page').performSearch()">다시 시도</button>
+          <button class="chroma-retry-btn" data-action="retry">다시 시도</button>
         </div>
       `;
     }
@@ -408,7 +478,7 @@ class SearchPage extends HTMLElement {
           <h3>검색 결과가 없습니다</h3>
           <p>다른 검색어나 필터를 시도해보세요</p>
           <div class="chroma-suggestions-list">
-            <button class="chroma-suggestion-btn" onclick="this.closest('search-page').clearFilters()">
+            <button class="chroma-suggestion-btn" data-action="clear-filters">
               필터 초기화
             </button>
           </div>
@@ -420,9 +490,23 @@ class SearchPage extends HTMLElement {
   clearFilters() {
     this.selectedCategory = '';
     this.selectedProject = '';
+    this.selectedSource = '';
+    this.selectedTag = '';
+    this.dateFrom = '';
+    this.dateTo = '';
     this.querySelectorAll('.chroma-filter-chip').forEach(c => c.classList.remove('active'));
-    this.querySelector('.chroma-category-select').value = '';
-    this.querySelector('.chroma-project-input').value = '';
+    const allChip = this.querySelector('.chroma-filter-chip[data-filter-value=""]');
+    if (allChip) allChip.classList.add('active');
+    const projectInput = this.querySelector('.chroma-project-input');
+    if (projectInput) projectInput.value = '';
+    const sourceSelect = this.querySelector('.chroma-source-select');
+    if (sourceSelect) sourceSelect.value = '';
+    const tagInput = this.querySelector('.chroma-tag-input');
+    if (tagInput) tagInput.value = '';
+    const dateFrom = this.querySelector('.chroma-date-from');
+    if (dateFrom) dateFrom.value = '';
+    const dateTo = this.querySelector('.chroma-date-to');
+    if (dateTo) dateTo.value = '';
     this.performSearch();
   }
   
@@ -501,6 +585,12 @@ class SearchPage extends HTMLElement {
         <div class="chroma-result-content">
           ${truncatedContent}
         </div>
+        ${memory.tags && memory.tags.length > 0 ? `
+          <div class="chroma-result-tags">
+            ${memory.tags.slice(0, 6).map(tag => `<span class="chroma-tag-chip">#${this.escapeHtml(tag)}</span>`).join('')}
+            ${memory.tags.length > 6 ? `<span class="chroma-tag-more">+${memory.tags.length - 6}</span>` : ''}
+          </div>
+        ` : ''}
         <div class="chroma-result-footer">
           ${memory.id ? `
             <span class="chroma-result-id" title="Memory ID: ${memory.id}">
@@ -518,7 +608,7 @@ class SearchPage extends HTMLElement {
             </svg>
             ${date}
           </span>
-          <span class="chroma-result-source">${memory.source || 'unknown'}</span>
+          <span class="chroma-result-source" title="Source: ${memory.source || 'unknown'}">${this.getSourceIcon(memory.source)} ${memory.source || 'unknown'}</span>
         </div>
       </article>
     `;
@@ -570,6 +660,16 @@ class SearchPage extends HTMLElement {
     return div.innerHTML;
   }
   
+  getSourceIcon(source) {
+    const icons = {
+      mcp: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>',
+      web: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+      api: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>',
+      manual: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>'
+    };
+    return icons[source] || icons.web;
+  }
+
   getModeDescription() {
     const descriptions = {
       hybrid: 'Combines vector similarity and text matching to find the most relevant results.',
@@ -649,24 +749,79 @@ class SearchPage extends HTMLElement {
           <div class="chroma-filter-section">
             <h3>Search Mode</h3>
             <div class="chroma-mode-chips">
-              <button class="chroma-mode-option ${this.searchMode === 'hybrid' ? 'active' : ''}" data-mode="hybrid" title="Vector + Text combined search">
+              <button class="chroma-mode-option ${this.searchMode === 'hybrid' ? 'active' : ''}" data-mode="hybrid" title="키워드 + 의미 결합 검색 — 가장 정확한 결과">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="m4.93 19.07 2.83-2.83"/><path d="m16.24 7.76 2.83-2.83"/></svg>
                 Hybrid
+                <span class="mode-hint">키워드+의미</span>
               </button>
-              <button class="chroma-mode-option ${this.searchMode === 'exact' ? 'active' : ''}" data-mode="exact" title="Exact text matching">
+              <button class="chroma-mode-option ${this.searchMode === 'exact' ? 'active' : ''}" data-mode="exact" title="정확한 키워드 매칭 — 에러 메시지, ID 검색에 적합">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
                 Exact
+                <span class="mode-hint">정확한 매칭</span>
               </button>
-              <button class="chroma-mode-option ${this.searchMode === 'semantic' ? 'active' : ''}" data-mode="semantic" title="Semantic similarity search">
+              <button class="chroma-mode-option ${this.searchMode === 'semantic' ? 'active' : ''}" data-mode="semantic" title="의미 기반 유사도 검색 — 비슷한 개념/아이디어 찾기">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 12l8-8"/><circle cx="12" cy="12" r="2"/></svg>
                 Semantic
+                <span class="mode-hint">의미 기반</span>
               </button>
-              <button class="chroma-mode-option ${this.searchMode === 'fuzzy' ? 'active' : ''}" data-mode="fuzzy" title="Fuzzy search with typo tolerance">
+              <button class="chroma-mode-option ${this.searchMode === 'fuzzy' ? 'active' : ''}" data-mode="fuzzy" title="오타 허용 유사 검색 — 정확한 철자를 모를 때">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
                 Fuzzy
+                <span class="mode-hint">오타 허용</span>
               </button>
             </div>
             <p class="chroma-mode-description">${this.getModeDescription()}</p>
+          </div>
+          
+          <div class="chroma-filter-section">
+            <h3>최신 우선도</h3>
+            <div class="chroma-recency-slider">
+              <input 
+                type="range" 
+                class="chroma-recency-input" 
+                min="0" max="100" step="5" 
+                value="${Math.round(this.recencyWeight * 100)}"
+                title="높을수록 최근 메모리가 상위에 노출됩니다"
+              />
+              <div class="chroma-recency-labels">
+                <span>관련도</span>
+                <span class="chroma-recency-value">${Math.round(this.recencyWeight * 100)}%</span>
+                <span>최신순</span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="chroma-filter-section">
+            <h3>고급 필터</h3>
+            <div class="chroma-advanced-filters">
+              <div class="chroma-filter-group">
+                <label class="chroma-filter-label">소스</label>
+                <select class="chroma-source-select">
+                  <option value="">모든 소스</option>
+                  <option value="mcp" ${this.selectedSource === 'mcp' ? 'selected' : ''}>MCP</option>
+                  <option value="web" ${this.selectedSource === 'web' ? 'selected' : ''}>Web</option>
+                  <option value="api" ${this.selectedSource === 'api' ? 'selected' : ''}>API</option>
+                  <option value="manual" ${this.selectedSource === 'manual' ? 'selected' : ''}>Manual</option>
+                </select>
+              </div>
+              <div class="chroma-filter-group">
+                <label class="chroma-filter-label">태그</label>
+                <input 
+                  type="text" 
+                  class="chroma-tag-input" 
+                  placeholder="태그 검색..."
+                  value="${this.escapeHtml(this.selectedTag)}"
+                />
+              </div>
+              <div class="chroma-filter-group">
+                <label class="chroma-filter-label">기간</label>
+                <div class="chroma-date-range">
+                  <input type="date" class="chroma-date-from" value="${this.dateFrom}" />
+                  <span class="chroma-date-sep">~</span>
+                  <input type="date" class="chroma-date-to" value="${this.dateTo}" />
+                </div>
+              </div>
+            </div>
           </div>
         </aside>
         
