@@ -139,6 +139,31 @@ export class SettingsPage extends HTMLElement {
                         </div>
                     </div>
                     
+                    <!-- OAuth Settings Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>OAuth / 인증</h2>
+                        </div>
+                        <div class="card-body">
+                            <p class="description">
+                                MCP 클라이언트 인증을 위한 OAuth 2.1 클라이언트를 관리합니다.
+                            </p>
+                            <div class="oauth-link-section">
+                                <a href="/oauth" class="btn btn-primary" data-route="/oauth">
+                                    OAuth 클라이언트 관리
+                                </a>
+                            </div>
+                            <div class="oauth-info">
+                                <h4>환경변수</h4>
+                                <ul>
+                                    <li><code>MEM_MESH_AUTH_ENABLED</code> - 전역 인증 활성화</li>
+                                    <li><code>MEM_MESH_MCP_AUTH_ENABLED</code> - MCP SSE 인증</li>
+                                    <li><code>MEM_MESH_WEB_AUTH_ENABLED</code> - Web API 인증</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <!-- Info Card -->
                     <div class="card">
                         <div class="card-header">
@@ -484,6 +509,41 @@ export class SettingsPage extends HTMLElement {
                 .rules-hint {
                     font-size: 0.85rem;
                     color: var(--text-secondary, #666);
+                }
+                
+                .oauth-link-section {
+                    margin-bottom: 1.5rem;
+                }
+                
+                .oauth-info {
+                    margin-top: 1rem;
+                    padding-top: 1rem;
+                    border-top: 1px solid var(--border-color, #e0e0e0);
+                }
+                
+                .oauth-info h4 {
+                    margin: 0 0 0.5rem 0;
+                    font-size: 1rem;
+                    color: var(--text-primary, #333);
+                }
+                
+                .oauth-info ul {
+                    margin: 0;
+                    padding-left: 1.5rem;
+                }
+                
+                .oauth-info li {
+                    margin-bottom: 0.25rem;
+                    color: var(--text-secondary, #666);
+                    font-size: 0.9rem;
+                }
+                
+                .oauth-info code {
+                    background: var(--code-bg, #f1f3f5);
+                    padding: 0.15rem 0.35rem;
+                    border-radius: 4px;
+                    font-family: monospace;
+                    font-size: 0.85em;
                 }
             </style>
         `;

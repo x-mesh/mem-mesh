@@ -8,16 +8,16 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from .search import SearchService
-from .search_quality import (
+from ..search_quality import (
     SearchIntentAnalyzer,
     SearchQualityScorer,
     RelevanceFeedback,
-    DynamicEmbeddingSelector
+    DynamicEmbeddingSelector,
 )
-from ..database.base import Database
-from ..embeddings.service import EmbeddingService
-from ..schemas.responses import SearchResponse, SearchResult
-from .cache_manager import get_cache_manager
+from ...database.base import Database
+from ...embeddings.service import EmbeddingService
+from ...schemas.responses import SearchResponse, SearchResult
+from ..cache_manager import get_cache_manager
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class EnhancedSearchService(SearchService):
         embedding_service: EmbeddingService,
         enable_quality_scoring: bool = True,
         enable_feedback: bool = True,
-        enable_dynamic_embedding: bool = False
+        enable_dynamic_embedding: bool = False,
     ):
         """
         Initialize enhanced search service
@@ -53,10 +53,14 @@ class EnhancedSearchService(SearchService):
         self.intent_analyzer = SearchIntentAnalyzer()
         self.quality_scorer = SearchQualityScorer()
         self.feedback_tracker = RelevanceFeedback() if enable_feedback else None
-        self.embedding_selector = DynamicEmbeddingSelector() if enable_dynamic_embedding else None
+        self.embedding_selector = (
+            DynamicEmbeddingSelector() if enable_dynamic_embedding else None
+        )
 
-        logger.info(f"Enhanced search initialized - Quality: {enable_quality_scoring}, "
-                   f"Feedback: {enable_feedback}, Dynamic: {enable_dynamic_embedding}")
+        logger.info(
+            f"Enhanced search initialized - Quality: {enable_quality_scoring}, "
+            f"Feedback: {enable_feedback}, Dynamic: {enable_dynamic_embedding}"
+        )
 
     async def search(
         self,
@@ -72,7 +76,7 @@ class EnhancedSearchService(SearchService):
         recency_weight: float = 0.0,
         search_mode: str = "smart",  # New: smart mode
         performance_mode: str = "balanced",  # fast/balanced/quality
-        min_quality_score: float = 0.3  # Minimum quality threshold
+        min_quality_score: float = 0.3,  # Minimum quality threshold
     ) -> SearchResponse:
         """
         Enhanced search with quality optimization
@@ -99,9 +103,11 @@ class EnhancedSearchService(SearchService):
 
         # Analyze query intent
         intent = self.intent_analyzer.analyze(query)
-        logger.info(f"Query intent: {intent.intent_type}, "
-                   f"urgency: {intent.urgency:.2f}, "
-                   f"specificity: {intent.specificity:.2f}")
+        logger.info(
+            f"Query intent: {intent.intent_type}, "
+            f"urgency: {intent.urgency:.2f}, "
+            f"specificity: {intent.specificity:.2f}"
+        )
 
         # Auto-adjust parameters based on intent
         if search_mode == "smart":
@@ -126,34 +132,36 @@ class EnhancedSearchService(SearchService):
             category=category or intent.expected_category,
             source=source,
             tag=tag,
-            limit=limit * 2 if self.enable_quality_scoring else limit,  # Get extra for filtering
+            limit=limit * 2
+            if self.enable_quality_scoring
+            else limit,  # Get extra for filtering
             offset=offset,
             sort_by="created_at" if sort_by == "relevance" else sort_by,
             sort_direction=sort_direction,
             recency_weight=recency_weight,
-            search_mode=search_mode if search_mode != "smart" else "hybrid"
+            search_mode=search_mode if search_mode != "smart" else "hybrid",
         )
 
         # Apply quality scoring if enabled
         if self.enable_quality_scoring and base_response.results:
             # Prepare user context
             user_context = {
-                'project_id': project_id,
-                'current_time': datetime.now().isoformat(),
-                'performance_mode': performance_mode
+                "project_id": project_id,
+                "current_time": datetime.now().isoformat(),
+                "performance_mode": performance_mode,
             }
 
             # Convert results to dicts for scoring
             results_dict = [
                 {
-                    'id': r.id,
-                    'content': r.content,
-                    'category': r.category,
-                    'project_id': r.project_id,
-                    'tags': r.tags,
-                    'created_at': r.created_at,
-                    'similarity_score': r.similarity_score,
-                    'source': r.source
+                    "id": r.id,
+                    "content": r.content,
+                    "category": r.category,
+                    "project_id": r.project_id,
+                    "tags": r.tags,
+                    "created_at": r.created_at,
+                    "similarity_score": r.similarity_score,
+                    "source": r.source,
                 }
                 for r in base_response.results
             ]
@@ -167,27 +175,27 @@ class EnhancedSearchService(SearchService):
             if self.enable_feedback and self.feedback_tracker:
                 for result in scored_results:
                     feedback_boost = self.feedback_tracker.get_result_boost(
-                        query, result['id']
+                        query, result["id"]
                     )
-                    result['quality_score'] += feedback_boost * 0.2
-                    result['feedback_boost'] = feedback_boost
+                    result["quality_score"] += feedback_boost * 0.2
+                    result["feedback_boost"] = feedback_boost
 
             # Filter by minimum quality score
             filtered_results = [
-                r for r in scored_results
-                if r.get('quality_score', 0) >= min_quality_score
+                r
+                for r in scored_results
+                if r.get("quality_score", 0) >= min_quality_score
             ]
 
             # Sort by chosen criteria
             if sort_by == "relevance" or sort_by == "quality":
                 filtered_results.sort(
-                    key=lambda x: x.get('quality_score', 0),
-                    reverse=True
+                    key=lambda x: x.get("quality_score", 0), reverse=True
                 )
             elif sort_by == "created_at":
                 filtered_results.sort(
-                    key=lambda x: x.get('created_at', ''),
-                    reverse=(sort_direction == "desc")
+                    key=lambda x: x.get("created_at", ""),
+                    reverse=(sort_direction == "desc"),
                 )
 
             # Limit results
@@ -197,19 +205,21 @@ class EnhancedSearchService(SearchService):
             enhanced_results = []
             for r in filtered_results:
                 result = SearchResult(
-                    id=r['id'],
-                    content=r['content'],
-                    category=r['category'],
-                    project_id=r['project_id'],
-                    tags=r['tags'],
-                    created_at=r['created_at'],
-                    updated_at=r.get('updated_at', r['created_at']),
-                    similarity_score=r.get('quality_score', r.get('similarity_score', 0)),
-                    source=r.get('source', 'unknown')
+                    id=r["id"],
+                    content=r["content"],
+                    category=r["category"],
+                    project_id=r["project_id"],
+                    tags=r["tags"],
+                    created_at=r["created_at"],
+                    updated_at=r.get("updated_at", r["created_at"]),
+                    similarity_score=r.get(
+                        "quality_score", r.get("similarity_score", 0)
+                    ),
+                    source=r.get("source", "unknown"),
                 )
                 # Add quality metadata
-                result.quality_score = r.get('quality_score', 0)
-                result.scoring_details = r.get('scoring_details', {})
+                result.quality_score = r.get("quality_score", 0)
+                result.scoring_details = r.get("scoring_details", {})
                 enhanced_results.append(result)
 
             # Update response
@@ -218,17 +228,17 @@ class EnhancedSearchService(SearchService):
         # Add search metadata
         search_time = (datetime.now() - start_time).total_seconds()
         base_response.metadata = {
-            'search_time': search_time,
-            'intent': {
-                'type': intent.intent_type,
-                'urgency': intent.urgency,
-                'specificity': intent.specificity,
-                'temporal_focus': intent.temporal_focus
+            "search_time": search_time,
+            "intent": {
+                "type": intent.intent_type,
+                "urgency": intent.urgency,
+                "specificity": intent.specificity,
+                "temporal_focus": intent.temporal_focus,
             },
-            'quality_scoring_enabled': self.enable_quality_scoring,
-            'feedback_enabled': self.enable_feedback,
-            'performance_mode': performance_mode,
-            'auto_adjusted': search_mode == "smart"
+            "quality_scoring_enabled": self.enable_quality_scoring,
+            "feedback_enabled": self.enable_feedback,
+            "performance_mode": performance_mode,
+            "auto_adjusted": search_mode == "smart",
         }
 
         # Log search analytics
@@ -237,30 +247,26 @@ class EnhancedSearchService(SearchService):
         return base_response
 
     def _auto_adjust_params(
-        self,
-        intent: Any,
-        search_mode: str,
-        limit: int,
-        category: Optional[str]
+        self, intent: Any, search_mode: str, limit: int, category: Optional[str]
     ) -> tuple:
         """Auto-adjust search parameters based on intent"""
 
         # Adjust search mode
-        if intent.intent_type == 'debug':
-            search_mode = 'exact'  # Prefer exact matches for debugging
-        elif intent.intent_type == 'explore':
-            search_mode = 'semantic'  # Prefer semantic for exploration
+        if intent.intent_type == "debug":
+            search_mode = "exact"  # Prefer exact matches for debugging
+        elif intent.intent_type == "explore":
+            search_mode = "semantic"  # Prefer semantic for exploration
         elif intent.specificity > 0.7:
-            search_mode = 'exact'  # High specificity → exact match
+            search_mode = "exact"  # High specificity → exact match
         else:
-            search_mode = 'hybrid'  # Default to hybrid
+            search_mode = "hybrid"  # Default to hybrid
 
         # Adjust limit based on urgency and specificity
         if intent.urgency > 0.8:
             limit = min(limit, 5)  # Urgent → fewer but better results
         elif intent.specificity > 0.8:
             limit = min(limit, 3)  # Very specific → few results expected
-        elif intent.intent_type == 'explore':
+        elif intent.intent_type == "explore":
             limit = max(limit, 10)  # Exploration → more results
 
         # Use predicted category if not specified
@@ -270,61 +276,50 @@ class EnhancedSearchService(SearchService):
         return search_mode, limit, category
 
     def _log_search_analytics(
-        self,
-        query: str,
-        intent: Any,
-        response: SearchResponse,
-        search_time: float
+        self, query: str, intent: Any, response: SearchResponse, search_time: float
     ):
         """Log search analytics for monitoring"""
-        logger.info(f"Search Analytics - "
-                   f"Query: '{query[:50]}...', "
-                   f"Intent: {intent.intent_type}, "
-                   f"Results: {len(response.results)}, "
-                   f"Time: {search_time:.3f}s, "
-                   f"Avg Quality: {self._avg_quality_score(response.results):.2f}")
+        logger.info(
+            f"Search Analytics - "
+            f"Query: '{query[:50]}...', "
+            f"Intent: {intent.intent_type}, "
+            f"Results: {len(response.results)}, "
+            f"Time: {search_time:.3f}s, "
+            f"Avg Quality: {self._avg_quality_score(response.results):.2f}"
+        )
 
     def _avg_quality_score(self, results: List[SearchResult]) -> float:
         """Calculate average quality score"""
         if not results:
             return 0.0
 
-        scores = [
-            getattr(r, 'quality_score', r.similarity_score)
-            for r in results
-        ]
+        scores = [getattr(r, "quality_score", r.similarity_score) for r in results]
         return sum(scores) / len(scores) if scores else 0.0
 
     async def record_feedback(
-        self,
-        query: str,
-        result_id: str,
-        feedback_type: str,
-        value: Any
+        self, query: str, result_id: str, feedback_type: str, value: Any
     ):
         """Record user feedback for result improvement"""
         if not self.enable_feedback or not self.feedback_tracker:
             return
 
-        if feedback_type == 'click':
+        if feedback_type == "click":
             self.feedback_tracker.record_click(
-                query, result_id,
-                position=value.get('position', 0),
-                dwell_time=value.get('dwell_time')
+                query,
+                result_id,
+                position=value.get("position", 0),
+                dwell_time=value.get("dwell_time"),
             )
-        elif feedback_type == 'rating':
-            self.feedback_tracker.record_rating(
-                query, result_id,
-                rating=value
-            )
+        elif feedback_type == "rating":
+            self.feedback_tracker.record_rating(query, result_id, rating=value)
 
-        logger.info(f"Feedback recorded - Query: '{query[:30]}...', "
-                   f"Result: {result_id[:8]}, Type: {feedback_type}")
+        logger.info(
+            f"Feedback recorded - Query: '{query[:30]}...', "
+            f"Result: {result_id[:8]}, Type: {feedback_type}"
+        )
 
     async def get_search_suggestions(
-        self,
-        partial_query: str,
-        limit: int = 5
+        self, partial_query: str, limit: int = 5
     ) -> List[str]:
         """Get search suggestions based on query history"""
         suggestions = []
@@ -338,58 +333,56 @@ class EnhancedSearchService(SearchService):
             f"{partial_query} error",
             f"{partial_query} implementation",
             f"{partial_query} fix",
-            f"{partial_query} optimization"
+            f"{partial_query} optimization",
         ]
 
         return [p for p in common_patterns if len(p) < 50][:limit]
 
     async def explain_results(
-        self,
-        query: str,
-        results: List[SearchResult]
+        self, query: str, results: List[SearchResult]
     ) -> Dict[str, Any]:
         """Explain why certain results were returned"""
         intent = self.intent_analyzer.analyze(query)
 
         explanations = []
         for i, result in enumerate(results[:3]):  # Explain top 3
-            explanation = {
-                'position': i + 1,
-                'id': result.id,
-                'reasons': []
-            }
+            explanation = {"position": i + 1, "id": result.id, "reasons": []}
 
             # Quality score explanation
-            if hasattr(result, 'quality_score'):
+            if hasattr(result, "quality_score"):
                 if result.quality_score > 0.8:
-                    explanation['reasons'].append("High quality match")
+                    explanation["reasons"].append("High quality match")
                 elif result.quality_score > 0.6:
-                    explanation['reasons'].append("Good quality match")
+                    explanation["reasons"].append("Good quality match")
 
             # Category match
-            if hasattr(result, 'category'):
+            if hasattr(result, "category"):
                 if result.category == intent.expected_category:
-                    explanation['reasons'].append(f"Matches expected category: {result.category}")
+                    explanation["reasons"].append(
+                        f"Matches expected category: {result.category}"
+                    )
 
             # Recency
-            if hasattr(result, 'created_at'):
+            if hasattr(result, "created_at"):
                 try:
-                    created = datetime.fromisoformat(result.created_at.replace('Z', '+00:00'))
+                    created = datetime.fromisoformat(
+                        result.created_at.replace("Z", "+00:00")
+                    )
                     age = (datetime.now() - created.replace(tzinfo=None)).days
                     if age <= 7:
-                        explanation['reasons'].append("Recently created")
-                except:
-                    pass
+                        explanation["reasons"].append("Recently created")
+                except Exception as e:
+                    logger.warning(f"Failed to generate explanation: {e}")
 
             explanations.append(explanation)
 
         return {
-            'query_intent': {
-                'type': intent.intent_type,
-                'focus': intent.temporal_focus,
-                'expected_category': intent.expected_category
+            "query_intent": {
+                "type": intent.intent_type,
+                "focus": intent.temporal_focus,
+                "expected_category": intent.expected_category,
             },
-            'result_explanations': explanations
+            "result_explanations": explanations,
         }
 
 

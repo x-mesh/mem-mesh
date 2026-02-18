@@ -10,7 +10,7 @@ from datetime import datetime
 import json
 
 from ..core.services.memory import MemoryService
-from ..core.services.search import SearchService
+from ..core.services.legacy.search import SearchService
 from ..core.embeddings.service import EmbeddingService
 from ..core.database.base import Database
 from ..core.services.cache_manager import get_cache_manager
@@ -29,7 +29,7 @@ class BatchOperationHandler:
         memory_service: MemoryService,
         search_service: SearchService,
         embedding_service: EmbeddingService,
-        db: Database
+        db: Database,
     ):
         """Initialize batch operation handler"""
         self.memory_service = memory_service
@@ -44,7 +44,7 @@ class BatchOperationHandler:
         project_id: Optional[str] = None,
         category: str = "task",
         source: str = "mcp_batch",
-        tags: Optional[List[str]] = None
+        tags: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Batch add multiple memories with single embedding generation
@@ -78,29 +78,37 @@ class BatchOperationHandler:
                         project_id=project_id,
                         category=category,
                         source=source,
-                        tags=tags
+                        tags=tags,
                     )
-                    results.append({
-                        'index': i,
-                        'id': memory.id,
-                        'content': content[:100] + '...' if len(content) > 100 else content,
-                        'status': 'success'
-                    })
+                    results.append(
+                        {
+                            "index": i,
+                            "id": memory.id,
+                            "content": content[:100] + "..."
+                            if len(content) > 100
+                            else content,
+                            "status": "success",
+                        }
+                    )
                 except Exception as e:
                     logger.error(f"Failed to add memory {i}: {e}")
-                    errors.append({
-                        'index': i,
-                        'content': content[:100] + '...' if len(content) > 100 else content,
-                        'error': str(e),
-                        'status': 'failed'
-                    })
+                    errors.append(
+                        {
+                            "index": i,
+                            "content": content[:100] + "..."
+                            if len(content) > 100
+                            else content,
+                            "error": str(e),
+                            "status": "failed",
+                        }
+                    )
 
         except Exception as e:
             logger.error(f"Batch embedding failed: {e}")
             return {
-                'status': 'failed',
-                'error': str(e),
-                'message': 'Batch embedding generation failed'
+                "status": "failed",
+                "error": str(e),
+                "message": "Batch embedding generation failed",
             }
 
         elapsed_time = (datetime.now() - start_time).total_seconds()
@@ -109,15 +117,15 @@ class BatchOperationHandler:
         tokens_saved = len(contents) * 10  # 각 개별 임베딩 요청당 약 10 토큰 절감
 
         return {
-            'status': 'success',
-            'total': len(contents),
-            'successful': len(results),
-            'failed': len(errors),
-            'results': results,
-            'errors': errors,
-            'elapsed_seconds': elapsed_time,
-            'tokens_saved': tokens_saved,
-            'average_time_per_memory': elapsed_time / len(contents) if contents else 0
+            "status": "success",
+            "total": len(contents),
+            "successful": len(results),
+            "failed": len(errors),
+            "results": results,
+            "errors": errors,
+            "elapsed_seconds": elapsed_time,
+            "tokens_saved": tokens_saved,
+            "average_time_per_memory": elapsed_time / len(contents) if contents else 0,
         }
 
     async def batch_search(
@@ -125,7 +133,7 @@ class BatchOperationHandler:
         queries: List[str],
         project_id: Optional[str] = None,
         category: Optional[str] = None,
-        limit: int = 5
+        limit: int = 5,
     ) -> Dict[str, Any]:
         """
         Batch search multiple queries with cached results
@@ -157,7 +165,9 @@ class BatchOperationHandler:
 
         # 캐시되지 않은 쿼리들에 대해 배치 임베딩 생성
         if uncached_queries:
-            logger.info(f"Generating batch embeddings for {len(uncached_queries)} uncached queries")
+            logger.info(
+                f"Generating batch embeddings for {len(uncached_queries)} uncached queries"
+            )
             new_embeddings = self.embedding_service.embed_batch(uncached_queries)
 
             # 캐시에 저장
@@ -170,17 +180,14 @@ class BatchOperationHandler:
             try:
                 # 캐시된 검색 결과 확인
                 cached_result = await self.cache_manager.get_cached_search(
-                    query=query,
-                    project_id=project_id,
-                    category=category,
-                    limit=limit
+                    query=query, project_id=project_id, category=category, limit=limit
                 )
 
                 if cached_result:
                     results[query] = {
-                        'status': 'success',
-                        'source': 'cache',
-                        'results': cached_result
+                        "status": "success",
+                        "source": "cache",
+                        "results": cached_result,
                     }
                     cache_hits += 1
                 else:
@@ -189,37 +196,33 @@ class BatchOperationHandler:
                         query=query,
                         project_id=project_id,
                         category=category,
-                        limit=limit
+                        limit=limit,
                     )
 
                     results[query] = {
-                        'status': 'success',
-                        'source': 'search',
-                        'results': search_result.dict()
+                        "status": "success",
+                        "source": "search",
+                        "results": search_result.dict(),
                     }
 
             except Exception as e:
                 logger.error(f"Search failed for query '{query}': {e}")
-                results[query] = {
-                    'status': 'failed',
-                    'error': str(e)
-                }
+                results[query] = {"status": "failed", "error": str(e)}
 
         elapsed_time = (datetime.now() - start_time).total_seconds()
         tokens_saved = cache_hits * 50  # 각 캐시 히트당 약 50 토큰 절감
 
         return {
-            'status': 'success',
-            'queries': len(queries),
-            'cache_hits': cache_hits,
-            'results': results,
-            'elapsed_seconds': elapsed_time,
-            'tokens_saved': tokens_saved
+            "status": "success",
+            "queries": len(queries),
+            "cache_hits": cache_hits,
+            "results": results,
+            "elapsed_seconds": elapsed_time,
+            "tokens_saved": tokens_saved,
         }
 
     async def batch_operations(
-        self,
-        operations: List[Dict[str, Any]]
+        self, operations: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
         Execute multiple mixed operations in batch
@@ -238,68 +241,72 @@ class BatchOperationHandler:
         search_operations = []
 
         for i, op in enumerate(operations):
-            op['index'] = i
-            if op['type'] == 'add':
+            op["index"] = i
+            if op["type"] == "add":
                 add_operations.append(op)
-            elif op['type'] == 'search':
+            elif op["type"] == "search":
                 search_operations.append(op)
 
         # 배치 추가 작업 처리
         if add_operations:
-            contents = [op.get('content', '') for op in add_operations]
+            contents = [op.get("content", "") for op in add_operations]
             batch_add_result = await self.batch_add_memories(
                 contents=contents,
-                project_id=add_operations[0].get('project_id'),
-                category=add_operations[0].get('category', 'task'),
-                source=add_operations[0].get('source', 'mcp_batch'),
-                tags=add_operations[0].get('tags')
+                project_id=add_operations[0].get("project_id"),
+                category=add_operations[0].get("category", "task"),
+                source=add_operations[0].get("source", "mcp_batch"),
+                tags=add_operations[0].get("tags"),
             )
 
             # 결과를 원래 인덱스에 매핑
             for i, op in enumerate(add_operations):
-                if i < len(batch_add_result.get('results', [])):
-                    results.append({
-                        'index': op['index'],
-                        'type': 'add',
-                        'result': batch_add_result['results'][i]
-                    })
+                if i < len(batch_add_result.get("results", [])):
+                    results.append(
+                        {
+                            "index": op["index"],
+                            "type": "add",
+                            "result": batch_add_result["results"][i],
+                        }
+                    )
 
         # 배치 검색 작업 처리
         if search_operations:
-            queries = [op.get('query', '') for op in search_operations]
+            queries = [op.get("query", "") for op in search_operations]
             batch_search_result = await self.batch_search(
                 queries=queries,
-                project_id=search_operations[0].get('project_id'),
-                category=search_operations[0].get('category'),
-                limit=search_operations[0].get('limit', 5)
+                project_id=search_operations[0].get("project_id"),
+                category=search_operations[0].get("category"),
+                limit=search_operations[0].get("limit", 5),
             )
 
             # 결과를 원래 인덱스에 매핑
             for op in search_operations:
-                query = op.get('query', '')
-                if query in batch_search_result.get('results', {}):
-                    results.append({
-                        'index': op['index'],
-                        'type': 'search',
-                        'result': batch_search_result['results'][query]
-                    })
+                query = op.get("query", "")
+                if query in batch_search_result.get("results", {}):
+                    results.append(
+                        {
+                            "index": op["index"],
+                            "type": "search",
+                            "result": batch_search_result["results"][query],
+                        }
+                    )
 
         # 인덱스 순으로 정렬
-        results.sort(key=lambda x: x['index'])
+        results.sort(key=lambda x: x["index"])
 
         elapsed_time = (datetime.now() - start_time).total_seconds()
         total_tokens_saved = len(add_operations) * 10 + len(search_operations) * 30
 
         return {
-            'status': 'success',
-            'total_operations': len(operations),
-            'results': results,
-            'elapsed_seconds': elapsed_time,
-            'tokens_saved': total_tokens_saved,
-            'batch_stats': {
-                'add_operations': len(add_operations),
-                'search_operations': len(search_operations)
-            }
+            "status": "success",
+            "total_operations": len(operations),
+            "results": results,
+            "elapsed_seconds": elapsed_time,
+            "tokens_saved": total_tokens_saved,
+            "batch_stats": {
+                "add_operations": len(add_operations),
+                "search_operations": len(search_operations),
+            },
         }
 
 
@@ -308,7 +315,7 @@ async def test_batch_operations():
     from ..core.database.base import Database
     from ..core.embeddings.service import EmbeddingService
     from ..core.services.memory import MemoryService
-    from ..core.services.search import SearchService
+    from ..core.services.legacy.search import SearchService
 
     # Initialize services
     db = Database()
@@ -320,7 +327,7 @@ async def test_batch_operations():
         memory_service=memory_service,
         search_service=search_service,
         embedding_service=embedding_service,
-        db=db
+        db=db,
     )
 
     # Test batch add
@@ -328,24 +335,18 @@ async def test_batch_operations():
     contents = [
         "Implement user authentication system",
         "Fix bug in payment processing",
-        "Add caching layer for API responses"
+        "Add caching layer for API responses",
     ]
 
     result = await handler.batch_add_memories(
-        contents=contents,
-        category="task",
-        source="test_batch"
+        contents=contents, category="task", source="test_batch"
     )
 
     print(f"Batch add result: {json.dumps(result, indent=2)}")
 
     # Test batch search
     print("\n=== Testing Batch Search ===")
-    queries = [
-        "authentication",
-        "payment",
-        "caching"
-    ]
+    queries = ["authentication", "payment", "caching"]
 
     result = await handler.batch_search(queries=queries)
     print(f"Batch search result: {json.dumps(result, indent=2)}")
@@ -356,7 +357,7 @@ async def test_batch_operations():
         {"type": "add", "content": "Deploy to production"},
         {"type": "search", "query": "deployment"},
         {"type": "add", "content": "Monitor system performance"},
-        {"type": "search", "query": "monitoring"}
+        {"type": "search", "query": "monitoring"},
     ]
 
     result = await handler.batch_operations(operations=operations)

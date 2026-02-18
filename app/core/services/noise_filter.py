@@ -6,7 +6,7 @@ Noise filtering for search results
 import re
 import logging
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from ..schemas.responses import SearchResult, SearchResponse
 
@@ -19,29 +19,29 @@ class NoiseFilter:
     def __init__(self):
         # 노이즈로 간주할 프로젝트 패턴
         self.noise_project_patterns = [
-            r'^kiro-',      # kiro 프로젝트들
-            r'^test-',      # 테스트 프로젝트
-            r'^tmp-',       # 임시 프로젝트
-            r'^temp-',      # 임시 프로젝트
-            r'^demo-',      # 데모 프로젝트
+            r"^kiro-",  # kiro 프로젝트들
+            r"^test-",  # 테스트 프로젝트
+            r"^tmp-",  # 임시 프로젝트
+            r"^temp-",  # 임시 프로젝트
+            r"^demo-",  # 데모 프로젝트
         ]
 
         # 노이즈로 간주할 콘텐츠 패턴
         self.noise_content_patterns = [
-            r'## Included Rules',  # 반복되는 규칙 텍스트
-            r'I am providing you',  # 반복되는 프롬프트
-            r'^\s*$',              # 빈 콘텐츠
-            r'^test\s+test',       # 테스트 데이터
-            r'^ok$',               # 단순 응답
-            r'^yes$',              # 단순 응답
-            r'^no$',               # 단순 응답
+            r"## Included Rules",  # 반복되는 규칙 텍스트
+            r"I am providing you",  # 반복되는 프롬프트
+            r"^\s*$",  # 빈 콘텐츠
+            r"^test\s+test",  # 테스트 데이터
+            r"^ok$",  # 단순 응답
+            r"^yes$",  # 단순 응답
+            r"^no$",  # 단순 응답
         ]
 
         # 유용한 프로젝트 (우선순위 높임)
         self.preferred_projects = [
-            'mem-mesh',  # 모든 mem-mesh 관련 메모리 통합
-            'mem-mesh-thread-summary-kr',
-            'mem-mesh-conversations',
+            "mem-mesh",  # 모든 mem-mesh 관련 메모리 통합
+            "mem-mesh-thread-summary-kr",
+            "mem-mesh-conversations",
         ]
 
         # 최소 콘텐츠 길이
@@ -55,7 +55,7 @@ class NoiseFilter:
         results: List[SearchResult],
         query: str,
         project_hint: Optional[str] = None,
-        aggressive: bool = False
+        aggressive: bool = False,
     ) -> List[SearchResult]:
         """
         노이즈 필터링
@@ -100,7 +100,7 @@ class NoiseFilter:
                     noise_count += 1
                     continue
                 # 중복 항목 점수 감소
-                result.similarity_score *= (0.8 ** seen_content_hashes[content_hash])
+                result.similarity_score *= 0.8 ** seen_content_hashes[content_hash]
             else:
                 seen_content_hashes[content_hash] = 1
 
@@ -129,7 +129,9 @@ class NoiseFilter:
         filtered.sort(key=lambda x: x.similarity_score, reverse=True)
 
         if noise_count > 0:
-            logger.info(f"Filtered {noise_count} noise results from {len(results)} total")
+            logger.info(
+                f"Filtered {noise_count} noise results from {len(results)} total"
+            )
 
         return filtered
 
@@ -172,10 +174,7 @@ class SmartSearchFilter:
         self.noise_filter = NoiseFilter()
 
     def apply(
-        self,
-        response: SearchResponse,
-        query: str,
-        context: Optional[dict] = None
+        self, response: SearchResponse, query: str, context: Optional[dict] = None
     ) -> SearchResponse:
         """
         스마트 필터 적용
@@ -197,9 +196,9 @@ class SmartSearchFilter:
         aggressive = False
 
         if context:
-            project_hint = context.get('project')
-            time_range = context.get('time_range', '30d')
-            aggressive = context.get('aggressive_filter', False)
+            project_hint = context.get("project")
+            time_range = context.get("time_range", "30d")
+            aggressive = context.get("aggressive_filter", False)
 
         # 시간 필터링
         if time_range:
@@ -207,14 +206,11 @@ class SmartSearchFilter:
 
         # 노이즈 필터링
         response.results = self.noise_filter.filter(
-            response.results,
-            query,
-            project_hint,
-            aggressive
+            response.results, query, project_hint, aggressive
         )
 
         # 결과 수 제한 (노이즈 감소)
-        max_results = context.get('max_results', 10) if context else 10
+        max_results = context.get("max_results", 10) if context else 10
         response.results = response.results[:max_results]
 
         # 총 개수 업데이트
@@ -223,18 +219,19 @@ class SmartSearchFilter:
         return response
 
     def _filter_by_time(
-        self,
-        results: List[SearchResult],
-        time_range: str
+        self, results: List[SearchResult], time_range: str
     ) -> List[SearchResult]:
         """시간 기준 필터링"""
 
+        # 현재 시간을 UTC로 설정
+        now = datetime.now(timezone.utc)
+
         # 시간 범위 파싱 (예: '7d', '30d', 'today')
-        if time_range == 'today':
-            cutoff = datetime.now().replace(hour=0, minute=0, second=0)
-        elif time_range.endswith('d'):
+        if time_range == "today":
+            cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif time_range.endswith("d"):
             days = int(time_range[:-1])
-            cutoff = datetime.now() - timedelta(days=days)
+            cutoff = now - timedelta(days=days)
         else:
             return results
 
@@ -244,19 +241,26 @@ class SmartSearchFilter:
                 # 문자열을 datetime으로 변환
                 try:
                     if isinstance(result.created_at, str):
-                        created = datetime.fromisoformat(result.created_at.replace('Z', '+00:00'))
+                        created = datetime.fromisoformat(
+                            result.created_at.replace("Z", "+00:00")
+                        )
                     else:
                         created = result.created_at
+
+                    # 시간대 정보가 없는 경우 UTC로 가정
+                    if created.tzinfo is None:
+                        created = created.replace(tzinfo=timezone.utc)
 
                     if created >= cutoff:
                         filtered.append(result)
                         # 최신 데이터 부스팅
-                        days_old = (datetime.now() - created).days
+                        days_old = (now - created).days
                         if days_old < 7:
                             result.similarity_score *= 1.2
                         elif days_old < 30:
                             result.similarity_score *= 1.1
-                except:
+                except Exception as e:
+                    logger.warning(f"Recency filter error: {e}")
                     # 날짜 파싱 실패 시 포함
                     filtered.append(result)
             else:

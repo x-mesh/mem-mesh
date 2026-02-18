@@ -85,11 +85,15 @@ class MCPToolHandlers:
             logger.info("Successfully added memory", memory_id=result.id)
             
             # 실시간 알림 전송 - 완전한 메모리 데이터 조회 후 전송
+            logger.debug(f"Checking notifier: {self._notifier is not None}")
             if self._notifier:
                 try:
                     # 생성된 메모리의 완전한 데이터 조회 (MemoryService 사용)
-                    if hasattr(self._storage, 'memory_service') and self._storage.memory_service:
+                    has_memory_service = hasattr(self._storage, 'memory_service') and self._storage.memory_service
+                    logger.debug(f"Has memory_service: {has_memory_service}")
+                    if has_memory_service:
                         memory = await self._storage.memory_service.get(result.id)
+                        logger.debug(f"Retrieved memory for notification: {memory is not None}")
                         if memory:
                             import json
                             memory_data = {
@@ -611,6 +615,232 @@ class MCPToolHandlers:
             return result.model_dump()
         except Exception as e:
             logger.error("Error in session_end", error=str(e))
+            raise
+    
+    # ===== Memory Relations Tools =====
+    
+    async def link(
+        self,
+        source_id: str,
+        target_id: str,
+        relation_type: str = "related",
+        strength: float = 1.0,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Create a relation between two memories
+        
+        Args:
+            source_id: Source memory ID
+            target_id: Target memory ID
+            relation_type: Type of relation (related, parent, child, supersedes, references, depends_on, similar)
+            strength: Relation strength (0.0-1.0)
+            metadata: Optional metadata for the relation
+            
+        Returns:
+            dict: Created relation info with 'created' flag
+        """
+        logger.info(
+            "Tool link called",
+            source_id=source_id,
+            target_id=target_id,
+            relation_type=relation_type
+        )
+        
+        try:
+            from ..core.services.relation import RelationService, MemoryNotFoundError
+            from ..core.schemas.relations import RelationCreate, RelationType
+            
+            db = self._get_database()
+            service = RelationService(db)
+            
+            # relation_type 검증
+            try:
+                rel_type = RelationType(relation_type)
+            except ValueError:
+                valid_types = [t.value for t in RelationType]
+                return {
+                    "error": f"Invalid relation_type. Must be one of: {valid_types}"
+                }
+            
+            data = RelationCreate(
+                source_id=source_id,
+                target_id=target_id,
+                relation_type=rel_type,
+                strength=min(max(strength, 0.0), 1.0),  # clamp to 0-1
+                metadata=metadata
+            )
+            
+            relation, created = await service.find_or_create_relation(data)
+            
+            logger.info(
+                "Successfully linked memories",
+                relation_id=relation.id,
+                created=created
+            )
+            
+            return {
+                "id": relation.id,
+                "source_id": relation.source_id,
+                "target_id": relation.target_id,
+                "relation_type": relation.relation_type.value,
+                "strength": relation.strength,
+                "created": created,
+                "message": "Relation created" if created else "Relation already exists"
+            }
+        except MemoryNotFoundError as e:
+            logger.warning("Memory not found for link", error=str(e))
+            return {"error": str(e)}
+        except Exception as e:
+            logger.error("Error in link", error=str(e))
+            raise
+    
+    async def unlink(
+        self,
+        source_id: str,
+        target_id: str,
+        relation_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Remove a relation between two memories
+        
+        Args:
+            source_id: Source memory ID
+            target_id: Target memory ID
+            relation_type: Optional - specific relation type to remove. If not provided, removes all relations between the two memories.
+            
+        Returns:
+            dict: Deletion result with count of removed relations
+        """
+        logger.info(
+            "Tool unlink called",
+            source_id=source_id,
+            target_id=target_id,
+            relation_type=relation_type
+        )
+        
+        try:
+            from ..core.schemas.relations import RelationType
+            
+            db = self._get_database()
+            
+            # 관계 조회 및 삭제
+            if relation_type:
+                # 특정 타입만 삭제
+                try:
+                    rel_type = RelationType(relation_type)
+                except ValueError:
+                    valid_types = [t.value for t in RelationType]
+                    return {
+                        "error": f"Invalid relation_type. Must be one of: {valid_types}"
+                    }
+                
+                cursor = await db.execute(
+                    """
+                    DELETE FROM memory_relations 
+                    WHERE source_id = ? AND target_id = ? AND relation_type = ?
+                    """,
+                    (source_id, target_id, relation_type)
+                )
+                deleted_count = cursor.rowcount
+            else:
+                # 모든 관계 삭제 (양방향)
+                cursor = await db.execute(
+                    """
+                    DELETE FROM memory_relations 
+                    WHERE (source_id = ? AND target_id = ?) 
+                       OR (source_id = ? AND target_id = ?)
+                    """,
+                    (source_id, target_id, target_id, source_id)
+                )
+                deleted_count = cursor.rowcount
+            
+            logger.info(
+                "Successfully unlinked memories",
+                deleted_count=deleted_count
+            )
+            
+            return {
+                "success": deleted_count > 0,
+                "deleted_count": deleted_count,
+                "source_id": source_id,
+                "target_id": target_id,
+                "message": f"Removed {deleted_count} relation(s)" if deleted_count > 0 else "No relations found"
+            }
+        except Exception as e:
+            logger.error("Error in unlink", error=str(e))
+            raise
+    
+    async def get_links(
+        self,
+        memory_id: str,
+        relation_type: Optional[str] = None,
+        direction: str = "both",
+        limit: int = 20
+    ) -> Dict[str, Any]:
+        """Get relations for a memory
+        
+        Args:
+            memory_id: Memory ID to get relations for
+            relation_type: Optional filter by relation type
+            direction: 'outgoing', 'incoming', or 'both'
+            limit: Maximum number of relations to return
+            
+        Returns:
+            dict: List of relations with memory info
+        """
+        logger.info(
+            "Tool get_links called",
+            memory_id=memory_id,
+            direction=direction
+        )
+        
+        try:
+            from ..core.services.relation import RelationService
+            from ..core.schemas.relations import RelationType
+            
+            db = self._get_database()
+            service = RelationService(db)
+            
+            rel_type = None
+            if relation_type:
+                try:
+                    rel_type = RelationType(relation_type)
+                except ValueError:
+                    valid_types = [t.value for t in RelationType]
+                    return {
+                        "error": f"Invalid relation_type. Must be one of: {valid_types}"
+                    }
+            
+            relations = await service.get_relations_for_memory(
+                memory_id=memory_id,
+                relation_type=rel_type,
+                direction=direction,
+                limit=limit
+            )
+            
+            result = []
+            for rel in relations:
+                result.append({
+                    "id": rel.id,
+                    "source_id": rel.source_id,
+                    "target_id": rel.target_id,
+                    "relation_type": rel.relation_type.value,
+                    "strength": rel.strength,
+                    "source_content": rel.source_content[:100] + "..." if rel.source_content and len(rel.source_content) > 100 else rel.source_content,
+                    "target_content": rel.target_content[:100] + "..." if rel.target_content and len(rel.target_content) > 100 else rel.target_content,
+                })
+            
+            logger.info(
+                "Successfully retrieved links",
+                count=len(result)
+            )
+            
+            return {
+                "memory_id": memory_id,
+                "relations": result,
+                "total": len(result)
+            }
+        except Exception as e:
+            logger.error("Error in get_links", error=str(e))
             raise
     
     def _get_database(self) -> "Database":

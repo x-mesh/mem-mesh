@@ -6,9 +6,9 @@ import logging
 from typing import Optional, List
 import re
 
-from ..database.base import Database
-from ..embeddings.service import EmbeddingService
-from ..schemas.responses import SearchResponse, SearchResult
+from ...database.base import Database
+from ...embeddings.service import EmbeddingService
+from ...schemas.responses import SearchResponse, SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +21,7 @@ class SimpleImprovedSearch:
         self.embedding_service = embedding_service
 
     async def search(
-        self,
-        query: str,
-        limit: int = 10,
-        project_filter: Optional[str] = None
+        self, query: str, limit: int = 10, project_filter: Optional[str] = None
     ) -> SearchResponse:
         """
         간단한 개선 검색
@@ -45,7 +42,7 @@ class SimpleImprovedSearch:
             "임베딩": "embedding",
             "배치": "batch",
             "의도": "intent",
-            "분석": "analysis analyze"
+            "분석": "analysis analyze",
         }
 
         # 쿼리 확장
@@ -90,20 +87,20 @@ class SimpleImprovedSearch:
                 for row in rows:
                     # 중복 제거를 위해 ID를 키로 사용
                     result_dict = {
-                        'id': row[0],
-                        'content': row[1],
-                        'category': row[2],
-                        'project_id': row[3],
-                        'tags': row[4].split(',') if row[4] else [],
-                        'created_at': row[5],
-                        'updated_at': row[6],
-                        'source': row[7],
-                        'term_match': term,
-                        'embedding': row[8]
+                        "id": row[0],
+                        "content": row[1],
+                        "category": row[2],
+                        "project_id": row[3],
+                        "tags": row[4].split(",") if row[4] else [],
+                        "created_at": row[5],
+                        "updated_at": row[6],
+                        "source": row[7],
+                        "term_match": term,
+                        "embedding": row[8],
                     }
 
                     # ID 기준 중복 제거
-                    if not any(r.get('id') == result_dict['id'] for r in all_results):
+                    if not any(r.get("id") == result_dict["id"] for r in all_results):
                         all_results.append(result_dict)
 
             # 벡터 유사도 계산 및 정렬
@@ -111,54 +108,66 @@ class SimpleImprovedSearch:
                 query_embedding = self.embedding_service.embed(query)
 
                 for result in all_results:
-                    if result['embedding']:
+                    if result["embedding"]:
                         try:
-                            mem_embedding = self.embedding_service.from_bytes(result['embedding'])
+                            mem_embedding = self.embedding_service.from_bytes(
+                                result["embedding"]
+                            )
 
                             # 코사인 유사도
                             import numpy as np
+
                             similarity = np.dot(query_embedding, mem_embedding) / (
-                                np.linalg.norm(query_embedding) * np.linalg.norm(mem_embedding)
+                                np.linalg.norm(query_embedding)
+                                * np.linalg.norm(mem_embedding)
                             )
 
                             # 프로젝트 보너스
-                            if project_filter and result['project_id'] == project_filter:
+                            if (
+                                project_filter
+                                and result["project_id"] == project_filter
+                            ):
                                 similarity *= 1.2
 
                             # 카테고리 보너스
-                            if 'optimization' in query.lower() and result['category'] == 'decision':
+                            if (
+                                "optimization" in query.lower()
+                                and result["category"] == "decision"
+                            ):
                                 similarity *= 1.1
-                            if 'search' in query.lower() and result['category'] == 'code_snippet':
+                            if (
+                                "search" in query.lower()
+                                and result["category"] == "code_snippet"
+                            ):
                                 similarity *= 1.1
 
-                            result['score'] = similarity
+                            result["score"] = similarity
                         except Exception as e:
-                            result['score'] = 0.0
+                            result["score"] = 0.0
                     else:
-                        result['score'] = 0.0
+                        result["score"] = 0.0
 
             # 점수 기준 정렬
-            all_results.sort(key=lambda x: x.get('score', 0), reverse=True)
+            all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
 
             # SearchResult 객체로 변환
             results = []
             for r in all_results[:limit]:
-                results.append(SearchResult(
-                    id=r['id'],
-                    content=r['content'],
-                    category=r['category'],
-                    project_id=r['project_id'],
-                    tags=r['tags'],
-                    created_at=r['created_at'],
-                    updated_at=r['updated_at'],
-                    similarity_score=r.get('score', 0.0),
-                    source=r['source']
-                ))
+                results.append(
+                    SearchResult(
+                        id=r["id"],
+                        content=r["content"],
+                        category=r["category"],
+                        project_id=r["project_id"],
+                        tags=r["tags"],
+                        created_at=r["created_at"],
+                        updated_at=r["updated_at"],
+                        similarity_score=r.get("score", 0.0),
+                        source=r["source"],
+                    )
+                )
 
-            return SearchResponse(
-                results=results,
-                total=len(results)
-            )
+            return SearchResponse(results=results, total=len(results))
 
         except Exception as e:
             logger.error(f"Search error: {e}")

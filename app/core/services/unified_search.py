@@ -12,6 +12,8 @@ Unified Search Service - 통합 검색 서비스
 
 import logging
 import time
+import urllib3
+import asyncio
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from datetime import datetime
 
@@ -177,6 +179,10 @@ class UnifiedSearchService:
             SearchResponse: 검색 결과
         """
         start_time = time.perf_counter()
+        
+        # URL 인코딩된 공백(+) 처리 및 정규화
+        # FastAPI는 '+'를 자동으로 공백으로 변환하지 않으므로 수동 처리
+        query = query.replace('+', ' ').strip() if query else ''
         original_query = query
         
         # 1. 의도 분석 (품질 기능 활성화 시)
@@ -225,10 +231,20 @@ class UnifiedSearchService:
         if tag:
             filters['tag'] = tag
         
+        # 빈 쿼리 여부 확인 (후처리 스킵 결정용)
+        is_empty_query = not query.strip()
+        
         # 5. 검색 모드에 따른 검색 수행
-        if not query.strip():
-            # 빈 쿼리: 최근 메모리 반환
+        if is_empty_query:
+            # 빈 쿼리: 최근 메모리 반환 (후처리 없이 바로 반환)
             result = await self._get_recent_memories(filters, limit, offset, sort_by, sort_direction)
+            # 빈 쿼리는 노이즈 필터링, 품질 스코어링, 점수 정규화 없이 바로 반환
+            search_time = time.perf_counter() - start_time
+            logger.info(
+                f"Recent memories returned in {search_time:.3f}s - "
+                f"results: {len(result.results)}"
+            )
+            return result
         elif search_mode == "exact":
             result = await self._exact_search(expanded_query, filters, limit)
         elif search_mode == "semantic":
@@ -324,8 +340,8 @@ class UnifiedSearchService:
             except Exception as e:
                 logger.warning(f"Query expander failed: {e}")
         
-        # 2. 한영 번역 추가
-        if self.enable_korean_optimization:
+        # 2. 한영 번역 추가 (한국어 쿼리인 경우에만)
+        if self.enable_korean_optimization and self._is_korean(query):
             words = query.lower().split()
             for word in words:
                 if word in self.korean_translations:
@@ -421,8 +437,10 @@ class UnifiedSearchService:
         limit: int,
         recency_weight: float
     ) -> SearchResponse:
-        """하이브리드 검색 (벡터 + 텍스트)"""
-        # 임베딩 생성 (캐시 활용)
+        """
+        RRF 기반 하이브리드 검색 (벡터 + 텍스트 병렬 수행)
+        """
+        # 1. 임베딩 생성 (캐시 활용)
         query_embedding_list = await self.cache_manager.get_cached_embedding(query)
         if query_embedding_list is None:
             query_embedding_list = self.embedding_service.embed(query)
@@ -430,63 +448,114 @@ class UnifiedSearchService:
         
         query_embedding = self.embedding_service.to_bytes(query_embedding_list)
         
-        # 벡터 검색
-        raw_results = await self.db.vector_search(
+        # 2. 병렬 검색 수행 (Vector + Text)
+        search_limit = limit * 2  # RRF를 위해 더 많은 후보군 확보
+        
+        # Vector Search Task
+        vector_task = self.db.vector_search(
             embedding=query_embedding,
-            limit=limit * 3,  # 스코어링 후 필터링 고려
+            limit=search_limit,
             filters=filters
         )
         
-        if not raw_results:
-            logger.info("No vector results, falling back to text search")
-            return await self._text_search(query, filters, limit)
+        # Text Search Task (Exact Match)
+        text_task = self._exact_search(query, filters, search_limit)
         
-        # 스코어링 파이프라인 적용
-        self.scoring_pipeline.set_recency_weight(recency_weight)
+        # Wait for both
+        raw_vector_results, text_response = await asyncio.gather(vector_task, text_task)
         
-        search_results = []
-        for row in raw_results:
-            # 벡터 점수 (Row 객체는 dict가 아니므로 직접 접근 또는 try-except 사용)
-            try:
-                distance = float(row['distance'])
-            except (KeyError, TypeError):
-                distance = 1.0
-            
-            vector_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
-            
-            # 스코어링 컨텍스트
-            context = ScoringContext(
-                query=query,
-                content=row['content'],
-                vector_score=vector_score,
-                category=row['category'],
-                project_id=row['project_id'],
-                tags=self._parse_tags(row),
-                metadata={'recency_score': 0.5}  # 필요시 계산
-            )
-            
-            # 스코어링
-            scoring_result = self.scoring_pipeline.calculate(context)
-            
-            if not scoring_result.should_include:
-                continue
-            
-            search_results.append(SearchResult(
-                id=row['id'],
-                content=row['content'],
-                similarity_score=scoring_result.final_score,
-                created_at=row['created_at'],
-                project_id=row['project_id'],
-                category=row['category'],
-                source=row['source'],
-                tags=self._parse_tags(row)
-            ))
+        # 3. Vector 결과 처리 (Score 계산)
+        vector_search_results = []
+        if raw_vector_results:
+            self.scoring_pipeline.set_recency_weight(recency_weight)
+            for row in raw_vector_results:
+                try:
+                    distance = float(row['distance'])
+                except (KeyError, TypeError):
+                    distance = 1.0
+                
+                vector_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
+                
+                context = ScoringContext(
+                    query=query,
+                    content=row['content'],
+                    vector_score=vector_score,
+                    category=row['category'],
+                    project_id=row['project_id'],
+                    tags=self._parse_tags(row),
+                    metadata={'recency_score': 0.5}
+                )
+                
+                scoring_result = self.scoring_pipeline.calculate(context)
+                if scoring_result.should_include:
+                    vector_search_results.append(SearchResult(
+                        id=row['id'],
+                        content=row['content'],
+                        similarity_score=scoring_result.final_score,
+                        created_at=row['created_at'],
+                        project_id=row['project_id'],
+                        category=row['category'],
+                        source=row['source'],
+                        tags=self._parse_tags(row)
+                    ))
         
-        # 정렬 및 제한
-        search_results.sort(key=lambda x: x.similarity_score, reverse=True)
-        search_results = search_results[:limit]
+        # 4. RRF 병합
+        if not vector_search_results and not text_response.results:
+            return SearchResponse(results=[])
+            
+        merged_results = self._apply_rrf(vector_search_results, text_response.results, limit)
         
-        return SearchResponse(results=search_results, total=len(search_results))
+        return SearchResponse(results=merged_results, total=len(merged_results))
+
+    def _is_korean(self, text: str) -> bool:
+        """쿼리에 한국어가 포함되어 있는지 확인"""
+        for char in text:
+            if '가' <= char <= '힣':
+                return True
+        return False
+
+    def _apply_rrf(
+        self, 
+        vector_results: List[SearchResult], 
+        text_results: List[SearchResult], 
+        limit: int, 
+        k: int = 60
+    ) -> List[SearchResult]:
+        """
+        Reciprocal Rank Fusion 알고리즘 적용
+        Score = 1 / (k + rank)
+        """
+        scores = {}
+        content_map = {}
+        
+        # Vector Results 점수 합산
+        for rank, item in enumerate(vector_results):
+            if item.id not in content_map:
+                content_map[item.id] = item
+            scores[item.id] = scores.get(item.id, 0) + (1.0 / (k + rank + 1))
+            
+        # Text Results 점수 합산
+        for rank, item in enumerate(text_results):
+            if item.id not in content_map:
+                content_map[item.id] = item
+            # 텍스트 매칭은 강력한 시그널이므로 동일한 가중치 적용
+            scores[item.id] = scores.get(item.id, 0) + (1.0 / (k + rank + 1))
+            
+        # RRF 점수 기준 정렬
+        sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
+        
+        final_results = []
+        # 상위 결과 추출 및 점수 정규화 (Rank-based Decay)
+        # 1등 1.0, 2등 0.98, ... 
+        for i, doc_id in enumerate(sorted_ids[:limit]):
+            item = content_map[doc_id]
+            # 순위에 따른 인위적인 점수 부여 (직관적인 UI 표시를 위함)
+            # RRF 점수는 사용자에게 의미가 없으므로 변환함
+            decay_score = 0.99 * (0.98 ** i) 
+            item.similarity_score = round(decay_score, 4)
+            final_results.append(item)
+            
+        return final_results
 
     async def _exact_search(
         self,
@@ -495,52 +564,54 @@ class UnifiedSearchService:
         limit: int
     ) -> SearchResponse:
         """정확한 텍스트 매칭 검색"""
-        base_query = "SELECT * FROM memories WHERE LOWER(content) LIKE LOWER(?)"
-        params = [f"%{query}%"]
+        # FTS Query 준비
+        clean = query.replace('"', '""')
+        tokens = clean.split()
+        if not tokens:
+            return SearchResponse(results=[])
+        fts_query = " AND ".join([f'"{t}"' for t in tokens])
+
+        # FTS 쿼리 실행
+        sql = """
+            SELECT m.id, m.content, m.created_at, m.project_id, m.category, m.source, m.tags
+            FROM memories_fts fts
+            JOIN memories m ON fts.id = m.id
+            WHERE fts.memories_fts MATCH ?
+        """
+        params = [fts_query]
         
         if filters:
             if filters.get('project_id'):
-                base_query += " AND project_id = ?"
+                sql += " AND m.project_id = ?"
                 params.append(filters['project_id'])
             if filters.get('category'):
-                base_query += " AND category = ?"
+                sql += " AND m.category = ?"
                 params.append(filters['category'])
-        
-        base_query += " ORDER BY created_at DESC LIMIT ?"
+                
+        sql += " ORDER BY fts.rank LIMIT ?"
         params.append(limit)
         
-        raw_results = await self.db.fetchall(base_query, tuple(params))
-        
-        if not raw_results:
+        try:
+            rows = await self.db.fetchall(sql, tuple(params))
+            
+            results = []
+            for row in rows:
+                results.append(SearchResult(
+                    id=row['id'],
+                    content=row['content'],
+                    similarity_score=1.0,
+                    created_at=row['created_at'],
+                    project_id=row['project_id'],
+                    category=row['category'],
+                    source=row['source'],
+                    tags=self._parse_tags(row)
+                ))
+                
+            return SearchResponse(results=results, total=len(results))
+            
+        except Exception as e:
+            # FTS 실패 시 (테이블 없음 등) 빈 결과 반환하여 Vector Search만 수행되도록 함
             return SearchResponse(results=[])
-        
-        search_results = []
-        query_lower = query.lower()
-        
-        for row in raw_results:
-            content_lower = row['content'].lower()
-            
-            # 정확한 매칭 점수
-            if query_lower in content_lower:
-                coverage = len(query) / len(row['content'])
-                occurrences = content_lower.count(query_lower)
-                similarity_score = min(1.0, 0.7 + (coverage * 0.2) + (occurrences * 0.05))
-            else:
-                similarity_score = 0.5
-            
-            search_results.append(SearchResult(
-                id=row['id'],
-                content=row['content'],
-                similarity_score=similarity_score,
-                created_at=row['created_at'],
-                project_id=row['project_id'],
-                category=row['category'],
-                source=row['source'],
-                tags=self._parse_tags(row)
-            ))
-        
-        search_results.sort(key=lambda x: x.similarity_score, reverse=True)
-        return SearchResponse(results=search_results, total=len(search_results))
 
     async def _semantic_search(
         self,
@@ -596,7 +667,8 @@ class UnifiedSearchService:
                 tags=self._parse_tags(row)
             ))
         
-        search_results.sort(key=lambda x: x.similarity_score, reverse=True)
+        # 1차: similarity_score 내림차순, 2차: created_at 내림차순 (안정적 정렬)
+        search_results.sort(key=lambda x: (x.similarity_score, x.created_at or ''), reverse=True)
         return SearchResponse(results=search_results, total=len(search_results))
 
     async def _fuzzy_search(
@@ -657,8 +729,8 @@ class UnifiedSearchService:
                 
                 scored_results.append((row, final_score))
         
-        # 정렬 및 제한
-        scored_results.sort(key=lambda x: x[1], reverse=True)
+        # 정렬 및 제한 (1차: score 내림차순, 2차: created_at 내림차순)
+        scored_results.sort(key=lambda x: (x[1], x[0]['created_at'] or ''), reverse=True)
         scored_results = scored_results[:limit]
         
         search_results = []
@@ -723,7 +795,8 @@ class UnifiedSearchService:
                 tags=self._parse_tags(row)
             ))
         
-        search_results.sort(key=lambda x: x.similarity_score, reverse=True)
+        # 1차: similarity_score 내림차순, 2차: created_at 내림차순 (안정적 정렬)
+        search_results.sort(key=lambda x: (x.similarity_score, x.created_at or ''), reverse=True)
         return SearchResponse(results=search_results, total=len(search_results))
 
     async def _apply_quality_scoring(
@@ -807,8 +880,8 @@ class UnifiedSearchService:
                     result.similarity_score *= 1.5  # 50% 부스팅
                     logger.debug(f"Partial project match boost: {result.project_id}")
         
-        # 점수 순으로 재정렬
-        response.results.sort(key=lambda x: x.similarity_score, reverse=True)
+        # 점수 순으로 재정렬 (1차: similarity_score, 2차: created_at)
+        response.results.sort(key=lambda x: (x.similarity_score, x.created_at or ''), reverse=True)
         
         return response
     
