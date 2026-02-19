@@ -127,8 +127,8 @@ class DashboardPage extends HTMLElement {
       this.recentMemories.unshift(memory);
       
       // 최대 개수 제한 (10개)
-      if (this.recentMemories.length > 10) {
-        this.recentMemories = this.recentMemories.slice(0, 10);
+      if (this.recentMemories.length > 20) {
+        this.recentMemories = this.recentMemories.slice(0, 20);
       }
       
       // UI 업데이트 - 애니메이션과 함께
@@ -758,7 +758,7 @@ class DashboardPage extends HTMLElement {
       // Load stats, recent memories, pin stats, and daily counts in parallel
       const [stats, recentResponse, pinStatsResponse, dailyResponse, healthResponse, projectsResponse] = await Promise.all([
         window.app.apiClient.getStats(),
-        window.app.apiClient.searchMemories(' ', { limit: 10 }),
+        window.app.apiClient.searchMemories(' ', { limit: 20 }),
         window.app.apiClient.get('/work/projects/default/stats').catch(() => null),
         window.app.apiClient.get(`/memories/daily-counts?days=${this.chartDays}`).catch(() => null),
         window.app.apiClient.get('/monitoring/dashboard/summary').catch(() => null),
@@ -1080,7 +1080,7 @@ class DashboardPage extends HTMLElement {
       `;
     }
     
-    const displayCount = this.getAttribute('recent-count') || 10;
+    const displayCount = this.getAttribute('recent-count') || 20;
     
     return `
       <div class="recent-list-compact">
@@ -1357,6 +1357,7 @@ class DashboardPage extends HTMLElement {
         </section>
         
         <!-- System Health & Top Tags Row -->
+        <!--
         <section class="chroma-dashboard-section">
           <div class="charts-grid">
             <div class="chart-card animate-on-scroll">
@@ -1377,8 +1378,10 @@ class DashboardPage extends HTMLElement {
             </div>
           </div>
         </section>
+        -->
 
         <!-- Search Performance Mini Dashboard -->
+        <!--
         <section class="chroma-dashboard-section">
           <div class="chart-card animate-on-scroll">
             <div class="chart-header">
@@ -1390,6 +1393,7 @@ class DashboardPage extends HTMLElement {
             </div>
           </div>
         </section>
+        -->
 
         <!-- Recent Activity Section -->
         <section class="chroma-dashboard-section activity-section">
@@ -1497,7 +1501,7 @@ class DashboardPage extends HTMLElement {
     
     return `
       <div class="enhanced-category-chart">
-        <div id="${chartId}" class="chart-placeholder" style="min-height: 300px;"></div>
+        <div id="${chartId}" class="chart-placeholder"></div>
       </div>
     `;
   }
@@ -1524,7 +1528,7 @@ class DashboardPage extends HTMLElement {
     
     return `
       <div class="enhanced-projects-chart">
-        <div id="${chartId}" class="chart-placeholder" style="min-height: 250px;"></div>
+        <div id="${chartId}" class="chart-placeholder"></div>
       </div>
     `;
   }
@@ -1537,7 +1541,7 @@ class DashboardPage extends HTMLElement {
     
     return `
       <div class="enhanced-weekly-chart">
-        <div id="${chartId}" class="chart-placeholder" style="min-height: 200px;"></div>
+        <div id="${chartId}" class="chart-placeholder"></div>
       </div>
     `;
   }

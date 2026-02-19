@@ -428,7 +428,7 @@
   background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  padding: var(--space-6);
+  padding: var(--space-4);
   transition: all 200ms ease;
   position: relative;
   overflow: hidden;
@@ -447,7 +447,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 .chart-header h3 {
@@ -666,7 +666,7 @@
   }
   
   .chart-card {
-    padding: var(--space-4);
+    padding: var(--space-3);
   }
 }
 
