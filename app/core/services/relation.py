@@ -125,10 +125,10 @@ class RelationService:
 
     async def delete_relation(self, relation_id: str) -> bool:
         """관계 삭제"""
-        result = await self.db.execute(
+        cursor = await self.db.execute(
             "DELETE FROM memory_relations WHERE id = ?", (relation_id,)
         )
-        return result > 0
+        return cursor.rowcount > 0
 
     async def get_relations_for_memory(
         self,
