@@ -52,6 +52,8 @@ class SearchResponse(BaseModel):
     """검색 응답"""
     results: List[SearchResult] = Field(description="검색 결과 목록")
     total: Optional[int] = Field(None, description="전체 결과 개수 (페이지네이션용)")
+    suggestions: Optional[List[str]] = Field(None, description="검색 결과 부족 시 제안 쿼리")
+    related_memories: Optional[List[SearchResult]] = Field(None, description="관계 그래프 기반 관련 메모리")
     
     model_config = {
         "json_schema_extra": {
@@ -67,7 +69,9 @@ class SearchResponse(BaseModel):
                         "source": "cursor"
                     }
                 ],
-                "total": 150
+                "total": 150,
+                "suggestions": None,
+                "related_memories": None
             }
         }
     }

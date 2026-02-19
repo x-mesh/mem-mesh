@@ -1047,7 +1047,8 @@ class TestBasicAuth:
         with patch("app.web.oauth.basic_auth.get_settings", return_value=mock_settings):
             assert verify_credentials("admin", "") is False
 
-    def test_session_lifecycle(self):
+    @pytest.mark.asyncio
+    async def test_session_lifecycle(self):
         """Test session creation, validation, and deletion."""
         from app.web.oauth.basic_auth import (
             create_session,
@@ -1056,26 +1057,27 @@ class TestBasicAuth:
         )
 
         # Create session
-        session_id = create_session("testuser")
+        session_id = await create_session("testuser")
         assert session_id is not None
         assert len(session_id) > 20
 
         # Validate session
-        session = validate_session(session_id)
+        session = await validate_session(session_id)
         assert session is not None
         assert session["username"] == "testuser"
 
         # Delete session
-        delete_session(session_id)
-        assert validate_session(session_id) is None
+        await delete_session(session_id)
+        assert await validate_session(session_id) is None
 
-    def test_validate_invalid_session(self):
+    @pytest.mark.asyncio
+    async def test_validate_invalid_session(self):
         """Test validation of invalid session."""
         from app.web.oauth.basic_auth import validate_session
 
-        assert validate_session(None) is None
-        assert validate_session("") is None
-        assert validate_session("invalid-session-id") is None
+        assert await validate_session(None) is None
+        assert await validate_session("") is None
+        assert await validate_session("invalid-session-id") is None
 
     def test_basic_auth_middleware_disabled(self):
         """Test middleware when basic auth is disabled."""

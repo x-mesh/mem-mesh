@@ -72,17 +72,7 @@ class ProjectDetailPage extends HTMLElement {
       // Load all memories to get project info and filter by project
       let searchResult;
       
-      if (window.app && window.app.apiClient) {
-        searchResult = await window.app.apiClient.searchMemories('', { 
-          limit: 1000 // Get all memories
-        });
-      } else {
-        const response = await fetch('/api/memories/search?query=&limit=1000');
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        searchResult = await response.json();
-      }
+      searchResult = await window.app.apiClient.searchMemories('', { limit: 1000 });
       
       if (searchResult && searchResult.results) {
         this.processProjectData(searchResult.results);
@@ -318,15 +308,15 @@ class ProjectDetailPage extends HTMLElement {
         </div>
       </div>
       
-      <div class="error-message" style="display: none; background: #fee; color: #c00; padding: 1rem; margin: 1rem 0; border-radius: 4px;"></div>
+      <div class="error-message" style="display: none;"></div>
       
-      <div class="loading-state" style="display: none; text-align: center; padding: 2rem;">
+      <div class="loading-state" style="display: none;">
         <p>Loading project data...</p>
       </div>
       
       <div class="project-content">
-        <div class="project-info" style="background: #f9f9f9; padding: 2rem; margin: 1rem 0; border-radius: 8px;"></div>
-        <div class="memories-list" style="margin: 2rem 0;"></div>
+        <div class="project-info"></div>
+        <div class="memories-list"></div>
       </div>
     `;
   }
@@ -342,28 +332,45 @@ style.textContent = `
     padding: 1rem;
     max-width: 1200px;
     margin: 0 auto;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--font-body);
+  }
+  
+  .project-detail-page .error-message {
+    background: var(--error-bg);
+    color: var(--error-color);
+    padding: 1rem;
+    margin: 1rem 0;
+    border-radius: 4px;
+    border: 1px solid var(--error-color);
+  }
+  
+  .project-detail-page .loading-state {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted);
   }
   
   .back-btn {
-    background: #f0f0f0;
-    border: 1px solid #ccc;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
     padding: 0.5rem 1rem;
     border-radius: 4px;
     cursor: pointer;
     margin-bottom: 1rem;
     font-size: 0.9rem;
+    color: var(--text-primary);
   }
   
   .back-btn:hover {
-    background: #e0e0e0;
+    background: var(--bg-tertiary);
   }
   
   .project-info {
-    background: #f9f9f9 !important;
+    background: var(--card-bg) !important;
     padding: 1.5rem !important;
     margin: 0.5rem 0 !important;
     border-radius: 8px !important;
+    border: 1px solid var(--border-color);
   }
   
   .project-header {
@@ -375,7 +382,7 @@ style.textContent = `
   
   .project-header h1 {
     margin: 0;
-    color: #333;
+    color: var(--text-primary);
     font-size: 1.75rem;
   }
   
@@ -391,7 +398,7 @@ style.textContent = `
   .stat-label {
     display: block;
     font-size: 0.7rem;
-    color: #666;
+    color: var(--text-secondary);
     margin-bottom: 0.25rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -401,7 +408,7 @@ style.textContent = `
     display: block;
     font-size: 1.25rem;
     font-weight: bold;
-    color: #007acc;
+    color: var(--primary-color);
   }
   
   .project-categories {
@@ -414,18 +421,18 @@ style.textContent = `
   
   .categories-label {
     font-size: 0.85rem;
-    color: #666;
+    color: var(--text-secondary);
     font-weight: 500;
   }
   
   .category-tag {
-    background: #f5f5f5;
-    color: #666 !important;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary) !important;
     padding: 0.2rem 0.6rem;
     border-radius: 12px;
     font-size: 0.7rem;
     font-weight: 500;
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--border-color);
   }
   
   .memories-list {
@@ -433,7 +440,7 @@ style.textContent = `
   }
   
   .memories-list h3 {
-    color: #333;
+    color: var(--text-primary);
     margin-bottom: 0.75rem;
     font-size: 1.1rem;
   }
@@ -446,8 +453,8 @@ style.textContent = `
   }
   
   .memory-card {
-    background: white;
-    border: 1px solid #e0e0e0;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     padding: 1.25rem;
     cursor: pointer;
@@ -459,8 +466,8 @@ style.textContent = `
   }
   
   .memory-card:hover {
-    border-color: #ccc;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    border-color: var(--border-hover);
+    box-shadow: var(--shadow-md);
   }
   
   .memory-header {
@@ -470,19 +477,19 @@ style.textContent = `
     margin-bottom: 0.75rem;
   }
   
-  .category-badge {U
-    background: #f8f9fa;
-    color: #6c757d !important;
+  .category-badge {
+    background: var(--status-item-bg);
+    color: var(--text-secondary) !important;
     padding: 0.25rem 0.6rem;
     border-radius: 4px;
     font-size: 0.7rem;
     font-weight: 500;
-    border: 1px solid #e9ecef;
+    border: 1px solid var(--border-color);
   }
   
   .memory-date {
     font-size: 0.7rem;
-    color: #999;
+    color: var(--text-muted);
     text-align: right;
   }
   
@@ -494,7 +501,7 @@ style.textContent = `
   
   .memory-content p {
     margin: 0;
-    color: #555;
+    color: var(--text-secondary);
     line-height: 1.5;
     font-size: 0.85rem;
     text-align: justify;
@@ -507,19 +514,19 @@ style.textContent = `
     justify-content: space-between;
     align-items: center;
     padding-top: 0.5rem;
-    border-top: 1px solid #f0f0f0;
+    border-top: 1px solid var(--border-color);
   }
   
   .memory-size {
     font-size: 0.7rem;
-    color: #999;
+    color: var(--text-muted);
     font-weight: 500;
   }
   
   .empty-state {
     text-align: center;
     padding: 2rem;
-    color: #999;
+    color: var(--text-muted);
   }
   
   .empty-state p {
@@ -533,8 +540,8 @@ style.textContent = `
   }
   
   .show-more-btn {
-    background: #007acc;
-    color: white;
+    background: var(--primary-color);
+    color: var(--bg-primary);
     border: none;
     padding: 0.6rem 1.2rem;
     border-radius: 4px;
@@ -543,7 +550,7 @@ style.textContent = `
   }
   
   .show-more-btn:hover {
-    background: #005a9e;
+    background: var(--primary-hover);
   }
   
   @media (max-width: 768px) {

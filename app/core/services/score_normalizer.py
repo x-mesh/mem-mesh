@@ -34,17 +34,23 @@ class ScoreNormalizer:
         self,
         method: str = "sigmoid",
         min_score: float = 0.0,
-        max_score: float = 1.0
+        max_score: float = 1.0,
+        sigmoid_k: float = 10.0,
+        sigmoid_threshold: float = 0.45,
     ):
         """
         Args:
             method: 정규화 방법 (minmax/zscore/sigmoid/percentile)
             min_score: 최소 점수 (minmax용)
             max_score: 최대 점수 (minmax용)
+            sigmoid_k: sigmoid 기울기 (클수록 가파름)
+            sigmoid_threshold: sigmoid 중심점 (모델 평균 유사도 근처)
         """
         self.method = method
         self.min_score = min_score
         self.max_score = max_score
+        self.sigmoid_k = sigmoid_k
+        self.sigmoid_threshold = sigmoid_threshold
         
         # 통계 캐시
         self._stats_cache: Optional[ScoreStats] = None
@@ -138,20 +144,17 @@ class ScoreNormalizer:
         """
         Sigmoid 정규화: S-curve 적용
         
-        낮은 점수를 더 높게, 높은 점수를 더 낮게 조정하여
-        점수 분포를 더 균등하게 만듦
+        점수 분포를 더 균등하게 만들어 차이를 명확하게 함
         
         Formula: 1 / (1 + exp(-k * (x - threshold)))
         """
         import math
         
-        # 파라미터 조정
-        k = 10.0  # 기울기 (클수록 가파름)
-        threshold = 0.15  # 중심점 (현재 평균 점수 근처)
+        k = self.sigmoid_k
+        threshold = self.sigmoid_threshold
         
         normalized = []
         for score in scores:
-            # Sigmoid 함수 적용
             sigmoid_score = 1 / (1 + math.exp(-k * (score - threshold)))
             normalized.append(sigmoid_score)
         
@@ -257,9 +260,28 @@ class ScoreNormalizer:
 _normalizer: Optional[ScoreNormalizer] = None
 
 
-def get_score_normalizer(method: str = "sigmoid") -> ScoreNormalizer:
-    """전역 ScoreNormalizer 인스턴스 반환"""
+def get_score_normalizer(
+    method: str = "sigmoid",
+    sigmoid_k: Optional[float] = None,
+    sigmoid_threshold: Optional[float] = None,
+) -> ScoreNormalizer:
+    """전역 ScoreNormalizer 인스턴스 반환 (config에서 기본값 로드)"""
     global _normalizer
+
+    if sigmoid_k is None or sigmoid_threshold is None:
+        try:
+            from ..config import get_settings
+            settings = get_settings()
+            sigmoid_k = sigmoid_k if sigmoid_k is not None else settings.sigmoid_k
+            sigmoid_threshold = sigmoid_threshold if sigmoid_threshold is not None else settings.sigmoid_threshold
+        except Exception:
+            sigmoid_k = sigmoid_k if sigmoid_k is not None else 10.0
+            sigmoid_threshold = sigmoid_threshold if sigmoid_threshold is not None else 0.45
+
     if _normalizer is None or _normalizer.method != method:
-        _normalizer = ScoreNormalizer(method=method)
+        _normalizer = ScoreNormalizer(
+            method=method,
+            sigmoid_k=sigmoid_k,
+            sigmoid_threshold=sigmoid_threshold,
+        )
     return _normalizer

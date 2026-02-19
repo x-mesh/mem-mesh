@@ -401,5 +401,6 @@ class TestLeadTimeStatistics:
         max_lt = max(lead_times)
         avg_lt = sum(lead_times) / len(lead_times)
         
-        # 검증
-        assert min_lt <= avg_lt <= max_lt
+        # 검증 (부동소수점 오차 허용)
+        eps = 1e-9
+        assert min_lt - eps <= avg_lt <= max_lt + eps

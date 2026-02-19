@@ -153,7 +153,7 @@ class SearchWarmupService:
         for query in common_queries:
             try:
                 # 임베딩 생성 및 캐싱
-                embedding = embedding_service.embed(query)
+                embedding = embedding_service.embed(query, is_query=True)
                 await cache_manager.cache_embedding(query, embedding)
                 await asyncio.sleep(0.01)
             except Exception as e:

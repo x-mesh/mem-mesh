@@ -272,10 +272,7 @@ export class OAuthPage extends HTMLElement {
         `;
         
         try {
-            const response = await fetch('/api/oauth/clients');
-            if (!response.ok) throw new Error('Failed to fetch clients');
-            
-            const data = await response.json();
+            const data = await window.app.apiClient.get('/oauth/clients');
             this.clients = data.clients || [];
             this.renderClients(container);
         } catch (error) {
@@ -351,20 +348,12 @@ export class OAuthPage extends HTMLElement {
         const redirectUris = redirectUrisText ? redirectUrisText.split('\n').map(u => u.trim()).filter(u => u) : [];
         
         try {
-            const response = await fetch('/api/oauth/clients', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    client_name: clientName,
-                    redirect_uris: redirectUris,
-                    scopes: ['read', 'write'],
-                    grant_types: ['authorization_code', 'refresh_token'],
-                }),
+            const client = await window.app.apiClient.post('/oauth/clients', {
+                client_name: clientName,
+                redirect_uris: redirectUris,
+                scopes: ['read', 'write'],
+                grant_types: ['authorization_code', 'refresh_token'],
             });
-            
-            if (!response.ok) throw new Error('Failed to create client');
-            
-            const client = await response.json();
             
             this.hideCreateModal();
             this.showSecretModal(client.client_id, client.client_secret);
@@ -389,8 +378,7 @@ export class OAuthPage extends HTMLElement {
         }
         
         try {
-            const response = await fetch(`/api/oauth/clients/${clientId}`, { method: 'DELETE' });
-            if (!response.ok) throw new Error('Failed to delete client');
+            await window.app.apiClient.delete(`/oauth/clients/${clientId}`);
             
             await this.loadClients();
             showToast('Client deleted successfully.', 'success');
@@ -406,10 +394,7 @@ export class OAuthPage extends HTMLElement {
         }
         
         try {
-            const response = await fetch(`/api/oauth/clients/${clientId}/regenerate-secret`, { method: 'POST' });
-            if (!response.ok) throw new Error('Failed to regenerate secret');
-            
-            const data = await response.json();
+            const data = await window.app.apiClient.post(`/oauth/clients/${clientId}/regenerate-secret`);
             this.showSecretModal(clientId, data.client_secret);
             showToast('Secret regenerated successfully.', 'success');
         } catch (error) {

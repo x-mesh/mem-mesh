@@ -35,10 +35,10 @@ _tool_handlers: Optional[MCPToolHandlers] = None
 _dispatcher: Optional[MCPDispatcher] = None
 
 
-def set_tool_handlers(handlers: MCPToolHandlers) -> None:
+def set_tool_handlers(handlers: MCPToolHandlers, batch_handler=None) -> None:
     global _tool_handlers, _dispatcher
     _tool_handlers = handlers
-    _dispatcher = MCPDispatcher(handlers)
+    _dispatcher = MCPDispatcher(handlers, batch_handler=batch_handler)
 
 
 def get_tool_handlers() -> MCPToolHandlers:

@@ -22,6 +22,7 @@ templates = Jinja2Templates(directory="templates")
 
 def create_dashboard_app() -> FastAPI:
     """Dashboard 전용 FastAPI 애플리케이션 생성"""
+    from app.core.config import get_settings
     
     app = FastAPI(
         title="mem-mesh Dashboard",
@@ -31,6 +32,14 @@ def create_dashboard_app() -> FastAPI:
     )
     
     setup_middleware(app)
+
+    settings = get_settings()
+    if settings.web_basic_auth_enabled:
+        from app.web.oauth.basic_auth import BasicAuthMiddleware
+        from app.web.oauth.login_routes import router as login_router
+        app.add_middleware(BasicAuthMiddleware)
+        app.include_router(login_router)
+
     setup_exception_handlers(app)
     
     # 정적 파일 서빙

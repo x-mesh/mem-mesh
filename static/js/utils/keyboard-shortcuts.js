@@ -41,28 +41,29 @@ export class KeyboardShortcuts {
    * Handle key down event
    */
   handleKeyDown(event) {
-    if (!this.isEnabled) return;
-    
     // Update modifier keys state
     this.updateModifierKeys(event);
-    
-    // Skip if typing in input fields
-    if (this.isTypingInInput(event.target)) return;
     
     // Generate shortcut key
     const shortcutKey = this.generateShortcutKey(event);
     
-    // Find and execute matching shortcut
+    // Find matching shortcut
     const shortcut = this.shortcuts.get(shortcutKey);
-    if (shortcut) {
-      event.preventDefault();
-      event.stopPropagation();
-      
-      try {
-        shortcut.callback(event);
-      } catch (error) {
-        console.error('Error executing keyboard shortcut:', error);
-      }
+    if (!shortcut) return;
+    
+    // Allow global shortcuts (Ctrl+K) even when typing in inputs
+    const isGlobal = shortcut.global === true;
+    
+    if (!isGlobal && !this.isEnabled) return;
+    if (!isGlobal && this.isTypingInInput(event.target)) return;
+    
+    event.preventDefault();
+    event.stopPropagation();
+    
+    try {
+      shortcut.callback(event);
+    } catch {
+      // Shortcut execution failed silently
     }
   }
   
@@ -136,14 +137,15 @@ export class KeyboardShortcuts {
   /**
    * Register a keyboard shortcut
    */
-  register(shortcut, callback, description = '') {
+  register(shortcut, callback, description = '', options = {}) {
     const normalizedShortcut = this.normalizeShortcut(shortcut);
     
     this.shortcuts.set(normalizedShortcut, {
       shortcut: normalizedShortcut,
       originalShortcut: shortcut,
       callback,
-      description
+      description,
+      global: options.global || false
     });
   }
   
@@ -184,12 +186,33 @@ export class KeyboardShortcuts {
   registerDefaultShortcuts() {
     // Navigation shortcuts
     this.register('ctrl+k', () => {
-      window.app?.router?.navigate('/search');
+      // If already on search/memories page, just focus the search input
+      const existingSearchInput = document.querySelector('.search-input') 
+        || document.querySelector('.chroma-search-input')
+        || document.querySelector('chroma-search-bar .chroma-search-input');
+      
+      if (existingSearchInput && document.activeElement !== existingSearchInput) {
+        existingSearchInput.focus();
+        existingSearchInput.select();
+        return;
+      }
+      
+      // Navigate to memories search view
+      if (window.app?.router) {
+        window.app.router.navigate('/memories?view=search');
+      } else {
+        window.location.href = '/memories?view=search';
+      }
+      
       setTimeout(() => {
-        const searchInput = document.querySelector('search-bar input');
-        if (searchInput) searchInput.focus();
-      }, 100);
-    }, 'Open search');
+        const searchInput = document.querySelector('.search-input')
+          || document.querySelector('.chroma-search-input');
+        if (searchInput) {
+          searchInput.focus();
+          searchInput.select();
+        }
+      }, 200);
+    }, 'Open search', { global: true });
     
     this.register('ctrl+n', () => {
       window.app?.router?.navigate('/create');
@@ -388,7 +411,7 @@ export class KeyboardShortcuts {
       <div class="shortcuts-help-content">
         <div class="shortcuts-help-header">
           <h2>Keyboard Shortcuts</h2>
-          <button class="close-btn" onclick="this.closest('.shortcuts-help-dialog').style.display='none'">×</button>
+          <button class="close-btn" data-action="close-shortcuts-help">×</button>
         </div>
         <div class="shortcuts-help-body">
           <div class="shortcuts-grid">
@@ -534,6 +557,13 @@ export class KeyboardShortcuts {
       style.id = 'shortcuts-help-styles';
       document.head.appendChild(style);
     }
+    
+    // Close button event
+    dialog.addEventListener('click', (e) => {
+      if (e.target.closest('[data-action="close-shortcuts-help"]') || e.target.closest('.shortcuts-help-overlay')) {
+        dialog.style.display = 'none';
+      }
+    });
     
     return dialog;
   }

@@ -13,28 +13,42 @@
       "title": "Core Rules",
       "path": "docs/rules/modules/core.md",
       "kind": "module",
-      "tags": ["core", "basics"]
-    },
-    {
-      "id": "memory-log",
-      "title": "Memory Logging Rules",
-      "path": "docs/rules/modules/memory-log.md",
-      "kind": "module",
-      "tags": ["memory", "logging"]
+      "tags": ["core", "basics", "workflow"]
     },
     {
       "id": "search",
       "title": "Search Rules",
       "path": "docs/rules/modules/search.md",
       "kind": "module",
-      "tags": ["search", "retrieval"]
+      "tags": ["search", "retrieval", "optimization"]
+    },
+    {
+      "id": "memory-log",
+      "title": "Memory Logging Rules",
+      "path": "docs/rules/modules/memory-log.md",
+      "kind": "module",
+      "tags": ["memory", "logging", "save"]
     },
     {
       "id": "pins",
       "title": "Session Pins Rules",
       "path": "docs/rules/modules/pins.md",
       "kind": "module",
-      "tags": ["pins", "session"]
+      "tags": ["pins", "session", "token"]
+    },
+    {
+      "id": "relations",
+      "title": "Relations Rules",
+      "path": "docs/rules/modules/relations.md",
+      "kind": "module",
+      "tags": ["relations", "link", "context"]
+    },
+    {
+      "id": "batch",
+      "title": "Batch Rules",
+      "path": "docs/rules/modules/batch.md",
+      "kind": "module",
+      "tags": ["batch", "optimization", "token"]
     },
     {
       "id": "security",
@@ -42,6 +56,20 @@
       "path": "docs/rules/modules/security.md",
       "kind": "module",
       "tags": ["security", "privacy"]
+    },
+    {
+      "id": "minimal",
+      "title": "Minimal Prompt",
+      "path": "docs/rules/modules/minimal.md",
+      "kind": "module",
+      "tags": ["minimal", "simple", "compact"]
+    },
+    {
+      "id": "quick-start",
+      "title": "Quick Start Guide",
+      "path": "docs/rules/modules/quick-start.md",
+      "kind": "module",
+      "tags": ["quick-start", "guide", "onboarding"]
     },
     {
       "id": "api-usage",
@@ -63,20 +91,6 @@
       "path": "docs/rules/modules/mcp-helper.md",
       "kind": "module",
       "tags": ["mcp", "helper", "api"]
-    },
-    {
-      "id": "quick-start",
-      "title": "Quick Start Guide",
-      "path": "docs/rules/modules/quick-start.md",
-      "kind": "module",
-      "tags": ["quick-start", "guide", "sse"]
-    },
-    {
-      "id": "minimal",
-      "title": "Minimal Prompt",
-      "path": "docs/rules/modules/minimal.md",
-      "kind": "module",
-      "tags": ["minimal", "simple", "sse"]
     }
   ]
 }

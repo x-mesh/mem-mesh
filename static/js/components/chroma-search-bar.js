@@ -218,8 +218,7 @@ class ChromaSearchBar extends HTMLElement {
       const suggestions = await this.getSuggestions(query);
       this.suggestions = suggestions;
       this.showSuggestions();
-    } catch (error) {
-      console.error('Failed to get suggestions:', error);
+    } catch {
       this.suggestions = [];
       this.showSuggestions();
     }
@@ -258,8 +257,8 @@ class ChromaSearchBar extends HTMLElement {
           });
         }
       }
-    } catch (error) {
-      console.warn('Failed to fetch API suggestions:', error);
+    } catch {
+      // Silently ignore API suggestion failures
     }
     
     // Add query variations as fallback
@@ -491,8 +490,8 @@ class ChromaSearchBar extends HTMLElement {
     
     try {
       localStorage.setItem('mem-mesh-recent-searches', JSON.stringify(this.recentSearches));
-    } catch (error) {
-      console.warn('Failed to save recent searches:', error);
+    } catch {
+      // localStorage may be unavailable
     }
   }
   
@@ -501,8 +500,8 @@ class ChromaSearchBar extends HTMLElement {
     
     try {
       localStorage.setItem('mem-mesh-recent-searches', JSON.stringify(this.recentSearches));
-    } catch (error) {
-      console.warn('Failed to save recent searches:', error);
+    } catch {
+      // localStorage may be unavailable
     }
     
     if (this.isOpen) {
@@ -514,8 +513,8 @@ class ChromaSearchBar extends HTMLElement {
     this.recentSearches = [];
     try {
       localStorage.removeItem('mem-mesh-recent-searches');
-    } catch (error) {
-      console.warn('Failed to clear recent searches:', error);
+    } catch {
+      // localStorage may be unavailable
     }
     
     if (this.isOpen) {

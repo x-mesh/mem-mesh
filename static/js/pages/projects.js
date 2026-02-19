@@ -70,12 +70,7 @@ class ProjectsPage extends HTMLElement {
       this.setLoading(true);
       
       // 서버에서 집계된 프로젝트 정보를 가져옴 (효율적)
-      const response = await fetch('/api/projects');
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
+      const data = await window.app.apiClient.get('/projects');
       
       if (data && data.projects) {
         this.projects = data.projects;
@@ -701,7 +696,7 @@ style.textContent = `
   
   .memory-count {
     background: var(--primary-color);
-    color: white;
+    color: var(--bg-primary);
     padding: 0.25rem 0.75rem;
     border-radius: var(--border-radius-sm);
     font-size: 0.875rem;
@@ -741,8 +736,8 @@ style.textContent = `
   }
   
   .category-tag {
-    background: var(--secondary-color);
-    color: white;
+    background: var(--primary-color);
+    color: var(--bg-primary);
     padding: 0.125rem 0.5rem;
     border-radius: var(--border-radius-sm);
     font-size: 0.75rem;
@@ -775,7 +770,7 @@ style.textContent = `
   
   .view-btn {
     background: var(--primary-color);
-    color: white;
+    color: var(--bg-primary);
     border: none;
     padding: 0.5rem 1rem;
     border-radius: var(--border-radius);
@@ -803,7 +798,7 @@ style.textContent = `
   
   .clear-search-btn {
     background: var(--primary-color);
-    color: white;
+    color: var(--bg-primary);
     border: none;
     padding: 0.5rem 1rem;
     border-radius: var(--border-radius);

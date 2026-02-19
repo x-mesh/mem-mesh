@@ -27,10 +27,18 @@ class DatabaseInitializer:
             raise RuntimeError("Database not connected")
 
         try:
+            # Step 1: Create core tables first (needed for migrations)
             await self._create_core_tables()
             await self._create_work_tracking_tables()
             await self._create_monitoring_tables()
             await self._create_oauth_tables()
+            
+            # Step 2: Run schema migrations to add missing columns
+            from .schema_migrator import SchemaMigrator
+            migrator = SchemaMigrator(self.connection)
+            await migrator.migrate()
+            
+            # Step 3: Create indexes (after columns exist)
             await self._create_indexes()
             await self._create_vector_tables()
             await self._create_fallback_tables()
@@ -90,7 +98,7 @@ class DatabaseInitializer:
             )
         """)
 
-        # sessions 테이블 생성
+        # sessions 테이블 생성 (context-token-optimization 컬럼 포함)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
@@ -100,12 +108,15 @@ class DatabaseInitializer:
                 ended_at TEXT,
                 status TEXT NOT NULL DEFAULT 'active',
                 summary TEXT,
+                initial_context_tokens INTEGER DEFAULT 0,
+                total_loaded_tokens INTEGER DEFAULT 0,
+                total_saved_tokens INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
         """)
 
-        # pins 테이블 생성
+        # pins 테이블 생성 (context-token-optimization 컬럼 포함)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS pins (
                 id TEXT PRIMARY KEY,
@@ -118,8 +129,42 @@ class DatabaseInitializer:
                 tags TEXT,
                 embedding BLOB,
                 completed_at TEXT,
+                estimated_tokens INTEGER DEFAULT 0,
+                promoted_to_memory_id TEXT,
+                auto_importance INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            )
+        """)
+
+        # session_stats 테이블 생성 (context-token-optimization)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_stats (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                tokens_loaded INTEGER NOT NULL,
+                tokens_saved INTEGER NOT NULL,
+                context_depth INTEGER,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            )
+        """)
+
+        # token_usage 테이블 생성 (context-token-optimization)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS token_usage (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                session_id TEXT,
+                operation_type TEXT NOT NULL,
+                query TEXT,
+                tokens_used INTEGER NOT NULL,
+                tokens_saved INTEGER DEFAULT 0,
+                optimization_applied INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
             )
         """)
 
@@ -256,6 +301,19 @@ class DatabaseInitializer:
             "CREATE INDEX IF NOT EXISTS idx_pins_project_status ON pins(project_id, status)",
             "CREATE INDEX IF NOT EXISTS idx_pins_importance ON pins(importance DESC)",
             "CREATE INDEX IF NOT EXISTS idx_pins_user ON pins(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_pins_promoted ON pins(promoted_to_memory_id)",
+            "CREATE INDEX IF NOT EXISTS idx_pins_auto_importance ON pins(auto_importance)",
+        ]
+
+        # Context-token-optimization indexes
+        token_optimization_indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_session_stats_session ON session_stats(session_id)",
+            "CREATE INDEX IF NOT EXISTS idx_session_stats_timestamp ON session_stats(timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_session_stats_event_type ON session_stats(event_type)",
+            "CREATE INDEX IF NOT EXISTS idx_token_usage_project ON token_usage(project_id)",
+            "CREATE INDEX IF NOT EXISTS idx_token_usage_session ON token_usage(session_id)",
+            "CREATE INDEX IF NOT EXISTS idx_token_usage_created ON token_usage(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_token_usage_operation ON token_usage(operation_type)",
         ]
 
         # Monitoring indexes
@@ -277,10 +335,15 @@ class DatabaseInitializer:
         ]
 
         all_indexes = (
-            core_indexes + work_tracking_indexes + monitoring_indexes + oauth_indexes
+            core_indexes + work_tracking_indexes + monitoring_indexes + oauth_indexes + token_optimization_indexes
         )
         for index_sql in all_indexes:
-            conn.execute(index_sql)
+            try:
+                conn.execute(index_sql)
+            except Exception as e:
+                # Skip index creation if column doesn't exist yet
+                # This can happen during initial setup before migrations run
+                logger.debug(f"Index creation skipped (may be created after migration): {e}")
 
         logger.info("Database indexes created")
 

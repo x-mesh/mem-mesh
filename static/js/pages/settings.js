@@ -113,10 +113,7 @@ class SettingsPage {
         statusContainer.innerHTML = '<div class="loading-spinner">Loading...</div>';
         
         try {
-            const response = await fetch('/api/embeddings/status');
-            if (!response.ok) throw new Error('Failed to fetch status');
-            
-            this.statusData = await response.json();
+            this.statusData = await window.app.apiClient.get('/embeddings/status');
             this.renderStatus(statusContainer);
             
             // 마이그레이션 진행 중이면 폴링 시작
@@ -193,13 +190,7 @@ class SettingsPage {
         progressSection.classList.remove('hidden');
         
         try {
-            const response = await fetch(`/api/embeddings/migrate?force=${force}&batch_size=${batchSize}`, {
-                method: 'POST'
-            });
-            
-            if (!response.ok) throw new Error('Failed to start migration');
-            
-            const result = await response.json();
+            const result = await window.app.apiClient.post('/embeddings/migrate', null, { force, batch_size: batchSize });
             
             if (result.skipped) {
                 showToast(result.message, 'info');
@@ -234,10 +225,7 @@ class SettingsPage {
 
     async updateProgress() {
         try {
-            const response = await fetch('/api/embeddings/migration/progress');
-            if (!response.ok) throw new Error('Failed to fetch progress');
-            
-            const progress = await response.json();
+            const progress = await window.app.apiClient.get('/embeddings/migration/progress');
             this.renderProgress(progress);
             
             if (!progress.in_progress && progress.status === 'completed') {

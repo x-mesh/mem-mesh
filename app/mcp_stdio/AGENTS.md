@@ -1,7 +1,9 @@
 # FastMCP stdio MCP Server
 
 ## Module Context
-FastMCP-based stdio server (`app.mcp_stdio.server`) is the entry point for the default mem-mesh MCP transport. It initializes logging, storage, tool handlers, and batch operations, then registers FastMCP tools (`add`, `search`, `context`, `update`, `delete`, `stats`, `batch_add_memories`, etc.) that delegate to `MCPToolHandlers`. Storage lifecycle is managed via `StorageManager`, embedding/search services, and `BatchOperationHandler` so MCP operations stay consistent with the rest of the platform.
+FastMCP-based stdio server (`app.mcp_stdio.server`) is the entry point for the default mem-mesh MCP transport. It initializes logging, storage, tool handlers, and batch operations, then registers FastMCP tools (`add`, `search`, `context`, `update`, `delete`, `stats`, `batch_operations`, `pin_add`, `pin_complete`, `pin_promote`, `session_resume`, `session_end`, `link`, `unlink`, `get_links`, `weekly_review`, `cache_stats`, `clear_cache`) that delegate to `MCPToolHandlers` and `BatchOperationHandler`. Storage lifecycle is managed via `StorageManager`, embedding/search services, and `BatchOperationHandler` so MCP operations stay consistent with the rest of the platform.
+
+**Note:** Tool parameter signatures in this file must stay in sync with `app/mcp_common/schemas.py`. FastMCP uses `@mcp.tool()` decorators (not shared JSON schemas), so any schema change requires updating both files.
 
 ## Tech Stack & Constraints
 - `fastmcp.FastMCP` for tool registration and JSON-RPC handling; each tool function is decorated with `@mcp.tool()`.

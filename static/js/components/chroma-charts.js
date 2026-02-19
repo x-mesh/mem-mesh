@@ -385,6 +385,7 @@ class ChromaCharts {
     const colors = this.getColors();
     const {
       title = 'Line Chart',
+      labels = [],
       showPoints = true,
       showGrid = true,
       animate = true,
@@ -474,7 +475,7 @@ class ChromaCharts {
       </div>
     `;
 
-    this.setupLineChartInteractions(container, points, containerId);
+    this.setupLineChartInteractions(container, points, containerId, labels);
   }
 
   /**
@@ -522,7 +523,7 @@ class ChromaCharts {
   /**
    * Setup line chart interactions
    */
-  setupLineChartInteractions(container, points, containerId) {
+  setupLineChartInteractions(container, points, containerId, labels = []) {
     const tooltip = container.querySelector(`#line-tooltip-${containerId}`);
     const pointElements = container.querySelectorAll('.line-point');
 
@@ -533,12 +534,22 @@ class ChromaCharts {
         // Highlight point
         e.target.style.r = '6';
         e.target.style.filter = 'brightness(1.2)';
+
+        // Format label: use date label if available
+        let labelText = `Point ${index + 1}`;
+        if (labels[index]) {
+          try {
+            const d = new Date(labels[index] + 'T00:00:00');
+            const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+            labelText = `${d.getMonth() + 1}/${d.getDate()} (${dayNames[d.getDay()]})`;
+          } catch { labelText = labels[index]; }
+        }
         
         // Show tooltip
         tooltip.innerHTML = `
           <div class="tooltip-content">
             <div class="tooltip-value">${value}</div>
-            <div class="tooltip-index">Point ${index + 1}</div>
+            <div class="tooltip-index">${labelText}</div>
           </div>
         `;
         tooltip.style.opacity = '1';

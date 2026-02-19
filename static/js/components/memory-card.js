@@ -574,19 +574,13 @@ style.textContent = `
   }
   
   .project-badge {
-    background: #f5f5f5 !important;
-    color: #171717 !important;
+    background: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
     padding: 0.25rem 0.5rem;
     border-radius: var(--radius-sm);
     font-size: 0.75rem;
     font-weight: 500;
-    border: 1px solid #e5e5e5;
-  }
-  
-  [data-theme="dark"] .project-badge {
-    background: #262626 !important;
-    color: #a3a3a3 !important;
-    border-color: #404040;
+    border: 1px solid var(--border-color);
   }
   
   .memory-actions {
@@ -782,8 +776,8 @@ style.textContent = `
   }
   
   .search-highlight {
-    background-color: #fef3c7;
-    color: #92400e;
+    background-color: var(--warning-bg);
+    color: var(--text-primary);
     padding: 0 0.125rem;
     border-radius: 2px;
     font-weight: 500;
