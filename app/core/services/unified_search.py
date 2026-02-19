@@ -89,11 +89,13 @@ class UnifiedSearchService:
         self.score_normalizer = get_score_normalizer(score_normalization_method) if enable_score_normalization else None
         
         # Load quality components if enabled
+        self.quality_scorer = None
         if enable_quality_features:
             try:
-                from .search_quality import SearchIntentAnalyzer
+                from .search_quality import SearchIntentAnalyzer, SearchQualityScorer
                 self.intent_analyzer = SearchIntentAnalyzer()
-                logger.info("Quality features enabled")
+                self.quality_scorer = SearchQualityScorer()
+                logger.info("Quality features enabled (intent analyzer + quality scorer)")
             except ImportError:
                 logger.warning("SearchIntentAnalyzer not available, quality features disabled")
                 self.enable_quality_features = False
@@ -330,6 +332,19 @@ class UnifiedSearchService:
         
         # 11. 메트릭 수집
         await self._collect_metrics(original_query, result, start_time, project_id, category)
+        
+        # 12. 빈 결과/저품질 결과 시 suggestions 생성
+        if original_query and (
+            not result.results
+            or (result.results and max(r.similarity_score for r in result.results) < 0.3)
+        ):
+            result.suggestions = self._generate_suggestions(original_query, project_id)
+        
+        # 13. 관계 그래프 확장 (상위 결과의 연결된 메모리 추가)
+        if result.results and len(result.results) > 0:
+            related = await self._expand_with_relations(result, limit=3)
+            if related:
+                result.related_memories = related
         
         logger.info(
             f"Search completed: query='{original_query[:50]}...', "
@@ -863,10 +878,138 @@ class UnifiedSearchService:
         min_quality_score: float,
         sort_by: str
     ) -> SearchResponse:
-        """품질 스코어링 적용"""
-        # 품질 스코어링 로직은 enhanced_search.py 참조
-        # 여기서는 간단화된 버전 구현
-        return result
+        """품질 스코어링 적용 - SearchQualityScorer 활용"""
+        if not self.quality_scorer or not result.results:
+            return result
+
+        try:
+            results_as_dicts = [
+                {
+                    "id": r.id,
+                    "content": r.content,
+                    "similarity_score": r.similarity_score,
+                    "created_at": r.created_at,
+                    "project_id": r.project_id,
+                    "category": r.category,
+                    "source": r.source,
+                    "tags": r.tags or [],
+                }
+                for r in result.results
+            ]
+
+            scored = self.quality_scorer.score_results(query, results_as_dicts)
+
+            reranked = []
+            for item in scored:
+                quality = item.get("quality_score", 0.0)
+                if quality < min_quality_score:
+                    continue
+                reranked.append(SearchResult(
+                    id=item["id"],
+                    content=item["content"],
+                    similarity_score=item.get("quality_score", item.get("similarity_score", 0.0)),
+                    created_at=item.get("created_at", ""),
+                    project_id=item.get("project_id"),
+                    category=item.get("category", ""),
+                    source=item.get("source", ""),
+                    tags=item.get("tags"),
+                ))
+
+            return SearchResponse(results=reranked, total=len(reranked))
+        except Exception as e:
+            logger.warning(f"Quality scoring failed, returning original results: {e}")
+            return result
+
+    def _generate_suggestions(self, query: str, project_id: Optional[str] = None) -> List[str]:
+        """빈 결과 또는 저품질 결과 시 검색 제안 생성"""
+        suggestions = []
+
+        if self.query_expander:
+            try:
+                terms = self.query_expander.suggest_terms(query)
+                suggestions.extend(terms)
+            except Exception:
+                pass
+
+        category_hints = ["bug", "decision", "task", "code_snippet", "incident"]
+        if self.intent_analyzer:
+            try:
+                intent = self.intent_analyzer.analyze(query)
+                if intent.expected_category and intent.expected_category in category_hints:
+                    category_hints.remove(intent.expected_category)
+                    category_hints.insert(0, intent.expected_category)
+            except Exception:
+                pass
+
+        if not suggestions:
+            suggestions.append(f"{query} (다른 검색 모드를 시도해보세요)")
+
+        return suggestions[:5]
+
+    async def _expand_with_relations(
+        self,
+        result: SearchResponse,
+        limit: int = 3,
+        top_n: int = 3,
+    ) -> Optional[List[SearchResult]]:
+        """검색 결과 상위 N개의 관계 그래프를 순회하여 관련 메모리를 확장 로드"""
+        try:
+            from .relation import RelationService
+
+            relation_service = RelationService(self.db)
+            existing_ids = {r.id for r in result.results}
+            related_memories = []
+
+            for item in result.results[:top_n]:
+                links = await relation_service.get_relations_for_memory(
+                    memory_id=item.id,
+                    direction="both",
+                    limit=5,
+                )
+                for link in links:
+                    linked_id = link.target_id if link.source_id == item.id else link.source_id
+                    if linked_id in existing_ids:
+                        continue
+                    existing_ids.add(linked_id)
+
+                    linked_content = link.target_content if link.source_id == item.id else link.source_content
+                    linked_project = link.target_project_id if link.source_id == item.id else link.source_project_id
+
+                    if not linked_content:
+                        continue
+
+                    row = await self.db.fetchone(
+                        "SELECT id, content, created_at, project_id, category, source, tags FROM memories WHERE id = ?",
+                        (linked_id,),
+                    )
+                    if not row:
+                        continue
+
+                    import json as _json
+                    tags_raw = row.get("tags")
+                    tags = _json.loads(tags_raw) if isinstance(tags_raw, str) else tags_raw
+
+                    related_memories.append(SearchResult(
+                        id=row["id"],
+                        content=row["content"],
+                        similarity_score=link.strength,
+                        created_at=row.get("created_at", ""),
+                        project_id=row.get("project_id"),
+                        category=row.get("category", ""),
+                        source=row.get("source", ""),
+                        tags=tags,
+                    ))
+
+                    if len(related_memories) >= limit:
+                        break
+
+                if len(related_memories) >= limit:
+                    break
+
+            return related_memories if related_memories else None
+        except Exception as e:
+            logger.warning(f"Relation expansion failed: {e}")
+            return None
 
     def _calculate_recency_score(
         self,

@@ -134,3 +134,61 @@ async def search_memories_post(
         search_mode=body.search_mode,
         service=service,
     )
+
+
+class ContextSearchRequest(BaseModel):
+    """POST context-optimized search request body."""
+
+    query: str = ""
+    project_id: Optional[str] = None
+    category: Optional[str] = None
+    limit: int = Field(default=25, ge=1, le=500)
+    optimize_context: bool = True
+
+
+class ContextSearchResponse(BaseModel):
+    """Context-optimized search response."""
+
+    search_results: SearchResponse
+    context: Optional[dict] = None
+
+
+@router.post("/search/optimized", response_model=ContextSearchResponse)
+async def search_with_context(
+    body: ContextSearchRequest,
+    service: UnifiedSearchService = Depends(get_search_service),
+) -> ContextSearchResponse:
+    """
+    Search with context optimization.
+
+    Analyzes search intent and loads optimized session context alongside
+    search results. Reduces token usage while providing relevant context.
+    """
+    try:
+        search_response, optimized_context = await service.search_with_context_optimization(
+            query=body.query,
+            project_id=body.project_id,
+            category=body.category,
+            limit=body.limit,
+            optimize_context=body.optimize_context,
+        )
+
+        context_dict = None
+        if optimized_context:
+            try:
+                context_dict = {
+                    "session_id": getattr(optimized_context, "session_id", None),
+                    "pins_count": len(optimized_context.pins) if hasattr(optimized_context, "pins") and optimized_context.pins else 0,
+                    "strategy": getattr(optimized_context, "strategy", None),
+                    "token_budget": getattr(optimized_context, "token_budget", None),
+                }
+            except Exception:
+                context_dict = {"raw": str(optimized_context)}
+
+        return ContextSearchResponse(
+            search_results=search_response,
+            context=context_dict,
+        )
+    except Exception as e:
+        logger.error(f"Context-optimized search error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

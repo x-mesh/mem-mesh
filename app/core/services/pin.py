@@ -284,12 +284,69 @@ class PinService:
 
         logger.info(f"Promoted pin {pin_id} to memory {memory_response.id}")
 
+        # 같은 세션 내 다른 promoted pin의 memory와 자동 관계 생성
+        auto_linked = await self._auto_link_session_memories(
+            pin.session_id, memory_response.id
+        )
+        if auto_linked > 0:
+            logger.info(
+                f"Auto-linked {auto_linked} related memories from session {pin.session_id}"
+            )
+
         return {
             "memory_id": memory_response.id,
             "pin_deleted": False,
             "message": f"Pin이 Memory로 승격되었습니다 (ID: {memory_response.id})",
             "already_promoted": False,
         }
+
+    async def _auto_link_session_memories(
+        self, session_id: str, new_memory_id: str
+    ) -> int:
+        """같은 세션에서 이미 promote된 다른 pin의 memory와 자동 related 관계 생성"""
+        try:
+            rows = await self.db.fetchall(
+                """
+                SELECT promoted_to_memory_id FROM pins
+                WHERE session_id = ?
+                AND promoted_to_memory_id IS NOT NULL
+                AND promoted_to_memory_id != ?
+                """,
+                (session_id, new_memory_id),
+            )
+
+            if not rows:
+                return 0
+
+            from app.core.services.relation import RelationService
+            from app.core.schemas.relations import RelationCreate, RelationType
+
+            relation_service = RelationService(self.db)
+            linked_count = 0
+
+            for row in rows:
+                existing_memory_id = row["promoted_to_memory_id"]
+                try:
+                    _, created = await relation_service.find_or_create_relation(
+                        RelationCreate(
+                            source_id=new_memory_id,
+                            target_id=existing_memory_id,
+                            relation_type=RelationType.RELATED,
+                            strength=0.8,
+                            metadata={"auto_linked": True, "session_id": session_id},
+                        )
+                    )
+                    if created:
+                        linked_count += 1
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to auto-link {new_memory_id} -> {existing_memory_id}: {e}"
+                    )
+
+            return linked_count
+        except Exception as e:
+            logger.warning(f"Auto-link session memories failed: {e}")
+            return 0
 
     async def delete_pin(self, pin_id: str) -> bool:
         """Pin 삭제"""

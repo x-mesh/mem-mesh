@@ -188,11 +188,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         mcp_storage = DirectStorageBackend(settings.database_path)
         await mcp_storage.initialize()
 
+        # BatchOperationHandler 초기화 (기존 db/embedding 재사용)
+        batch_handler = None
+        try:
+            from app.core.services.legacy.search import SearchService as LegacySearchService
+            from app.mcp_common.batch_tools import BatchOperationHandler
+
+            legacy_search = LegacySearchService(db, embedding_service)
+            batch_handler = BatchOperationHandler(
+                memory_service=memory_service,
+                search_service=legacy_search,
+                embedding_service=embedding_service,
+                db=db,
+            )
+            logger.info("BatchOperationHandler initialized for main web MCP")
+        except Exception as e:
+            logger.warning("BatchOperationHandler init failed, using fallback", error=str(e))
+
         # WebSocket notifier 가져오기
         from .websocket.realtime import notifier
 
         # MCP 도구 핸들러에 notifier 주입
-        sse.set_tool_handlers(MCPToolHandlers(mcp_storage, notifier))
+        sse.set_tool_handlers(MCPToolHandlers(mcp_storage, notifier), batch_handler=batch_handler)
 
         logger.info(
             "mem-mesh application initialized successfully",

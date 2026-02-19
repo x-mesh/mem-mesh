@@ -19,8 +19,9 @@ class MCPDispatcher:
     - app/web/mcp/sse.py
     """
 
-    def __init__(self, tool_handlers: MCPToolHandlers):
+    def __init__(self, tool_handlers: MCPToolHandlers, batch_handler=None):
         self._tool_handlers = tool_handlers
+        self._batch_handler = batch_handler
 
     @property
     def tool_handlers(self) -> MCPToolHandlers:
@@ -66,6 +67,8 @@ class MCPDispatcher:
                 return await self._dispatch_get_links(args)
             elif tool_name == "batch_operations":
                 return await self._dispatch_batch_operations(args)
+            elif tool_name == "weekly_review":
+                return await self._dispatch_weekly_review(args)
             else:
                 logger.warning(f"Unknown tool: {tool_name}")
                 return format_tool_error(f"Unknown tool: {tool_name}")
@@ -228,20 +231,39 @@ class MCPDispatcher:
         )
         return format_tool_response(result)
 
+    async def _dispatch_weekly_review(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if "project_id" not in args:
+            return format_tool_error("Missing required argument: project_id")
+
+        result = await self._tool_handlers.weekly_review(
+            project_id=args["project_id"],
+            days=args.get("days", 7),
+        )
+        return format_tool_response(result)
+
     async def _dispatch_batch_operations(self, args: Dict[str, Any]) -> Dict[str, Any]:
         if "operations" not in args:
             return format_tool_error("Missing required argument: operations")
 
+        operations = args["operations"]
+
+        # BatchOperationHandler가 있으면 사용 (배치 임베딩/캐시 최적화)
+        if self._batch_handler is not None:
+            try:
+                result = await self._batch_handler.batch_operations(operations=operations)
+                return format_tool_response(result)
+            except Exception as e:
+                logger.error(f"Batch operations failed: {e}")
+                return format_tool_error(f"Batch operations failed: {str(e)}")
+
+        # Fallback: 개별 도구 순차 호출 (BatchOperationHandler 미초기화 시)
         try:
-            operations = args["operations"]
             results = []
-            
-            # 각 작업을 순차적으로 처리
+
             for i, op in enumerate(operations):
                 op_type = op.get("type")
-                
+
                 if op_type == "add":
-                    # add 도구 호출
                     add_result = await self._dispatch_add({
                         "content": op.get("content"),
                         "project_id": op.get("project_id"),
@@ -249,66 +271,48 @@ class MCPDispatcher:
                         "source": op.get("source", "mcp_batch"),
                         "tags": op.get("tags"),
                     })
-                    
-                    # 결과 파싱
                     if not add_result.get("isError"):
                         content_text = add_result["content"][0]["text"]
-                        import json
                         parsed = json.loads(content_text)
                         results.append({
-                            "index": i,
-                            "type": "add",
-                            "success": True,
+                            "index": i, "type": "add", "success": True,
                             "memory_id": parsed.get("id"),
                         })
                     else:
                         results.append({
-                            "index": i,
-                            "type": "add",
-                            "success": False,
+                            "index": i, "type": "add", "success": False,
                             "error": add_result["content"][0]["text"],
                         })
-                        
+
                 elif op_type == "search":
-                    # search 도구 호출
                     search_result = await self._dispatch_search({
                         "query": op.get("query"),
                         "project_id": op.get("project_id"),
                         "category": op.get("category"),
                         "limit": op.get("limit", 5),
                     })
-                    
-                    # 결과 파싱
                     if not search_result.get("isError"):
                         content_text = search_result["content"][0]["text"]
-                        import json
                         parsed = json.loads(content_text)
                         results.append({
-                            "index": i,
-                            "type": "search",
-                            "success": True,
+                            "index": i, "type": "search", "success": True,
                             "results": parsed.get("results", []),
                             "total": parsed.get("total"),
                         })
                     else:
                         results.append({
-                            "index": i,
-                            "type": "search",
-                            "success": False,
+                            "index": i, "type": "search", "success": False,
                             "error": search_result["content"][0]["text"],
                         })
                 else:
                     results.append({
-                        "index": i,
-                        "type": op_type,
-                        "success": False,
+                        "index": i, "type": op_type, "success": False,
                         "error": f"Unknown operation type: {op_type}",
                     })
-            
-            # 통계 계산
+
             add_count = sum(1 for op in operations if op.get("type") == "add")
             search_count = sum(1 for op in operations if op.get("type") == "search")
-            
+
             batch_result = {
                 "status": "success",
                 "total_operations": len(operations),
@@ -319,11 +323,8 @@ class MCPDispatcher:
                 },
                 "tokens_saved": add_count * 10 + search_count * 30,
             }
-            
             return format_tool_response(batch_result)
-            
+
         except Exception as e:
             logger.error(f"Batch operations failed: {e}")
-            import traceback
-            traceback.print_exc()
             return format_tool_error(f"Batch operations failed: {str(e)}")

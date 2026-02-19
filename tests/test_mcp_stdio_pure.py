@@ -970,27 +970,24 @@ async def test_batch_operations_missing_operations(mock_dispatcher):
 
 
 @pytest.mark.asyncio
-async def test_batch_operations_handler_not_initialized(mock_dispatcher):
-    """batch_operations 핸들러 미초기화 테스트"""
+async def test_batch_operations_fallback_without_handler(mock_dispatcher):
+    """batch_operations BatchOperationHandler 없이 fallback 순차 처리 테스트"""
     import app.mcp_stdio_pure.server as server
 
     original_dispatcher = server.dispatcher
-    original_batch = server.batch_handler
     server.dispatcher = mock_dispatcher
-    server.batch_handler = None
 
     try:
         params = {"name": "batch_operations", "arguments": {"operations": []}}
 
         result = await call_tool(params)
 
-        assert result["isError"] is True
+        assert result["isError"] is False
         response_data = json.loads(result["content"][0]["text"])
-        assert response_data["success"] is False
-        assert "not initialized" in response_data["error"].lower()
+        assert response_data["status"] == "success"
+        assert response_data["total_operations"] == 0
     finally:
         server.dispatcher = original_dispatcher
-        server.batch_handler = original_batch
 
 
 @pytest.mark.asyncio

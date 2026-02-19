@@ -351,12 +351,15 @@ class BatchOperationHandler:
 async def test_batch_operations():
     """Test batch operations functionality"""
     from ..core.database.base import Database
+    from ..core.config import Settings
     from ..core.embeddings.service import EmbeddingService
     from ..core.services.memory import MemoryService
     from ..core.services.legacy.search import SearchService
 
     # Initialize services
-    db = Database()
+    test_settings = Settings()
+    db = Database(test_settings.database_path)
+    await db.connect()
     embedding_service = EmbeddingService(preload=False)
     memory_service = MemoryService(db, embedding_service)
     search_service = SearchService(db, embedding_service)

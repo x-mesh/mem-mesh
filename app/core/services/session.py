@@ -239,21 +239,9 @@ class SessionService:
 
         now = datetime.now(timezone.utc).isoformat()
 
-        # 요약이 없으면 간단한 자동 요약 생성
+        # 요약이 없으면 구조적 서사 요약 생성
         if not summary:
-            stats_row = await self.db.fetchone(
-                """
-                SELECT 
-                    COUNT(*) as total,
-                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed
-                FROM pins
-                WHERE session_id = ?
-                """,
-                (session_id,),
-            )
-            total = stats_row["total"] or 0
-            completed = stats_row["completed"] or 0
-            summary = f"세션 완료: {completed}/{total} pins 완료"
+            summary = await self._generate_narrative_summary(session_id)
 
         await self.db.execute(
             """
@@ -400,6 +388,89 @@ class SessionService:
             "importance": row["importance"],
             "status": row["status"],
         }
+
+    async def _generate_narrative_summary(self, session_id: str) -> str:
+        """
+        구조적 서사 요약 생성 (Rule-Based Narrative).
+
+        Pin의 메타데이터(생성 순서, importance, status, tags)로 인과관계를 추론하여
+        서사적 요약을 생성한다.
+        """
+        pin_rows = await self.db.fetchall(
+            """
+            SELECT id, content, importance, status, tags, 
+                   created_at, completed_at
+            FROM pins
+            WHERE session_id = ?
+            ORDER BY created_at ASC
+            """,
+            (session_id,),
+        )
+
+        if not pin_rows:
+            return "세션 완료: 작업 없음"
+
+        total = len(pin_rows)
+        completed = sum(1 for p in pin_rows if p["status"] == "completed")
+        incomplete = [p for p in pin_rows if p["status"] != "completed"]
+
+        # 프로젝트 ID 조회
+        session = await self.get_session(session_id)
+        project_label = f"[{session.project_id}]" if session else ""
+
+        # 주요 이벤트 감지
+        events = []
+
+        # 1. importance 변화 감지
+        high_importance_pins = [p for p in pin_rows if p["importance"] >= 4]
+        if high_importance_pins:
+            for hip in high_importance_pins:
+                content_preview = (hip["content"] or "")[:60]
+                events.append(f"중요 작업: {content_preview}")
+
+        # 2. category/tag 전환 감지 (bug 관련 태그가 있으면 문제 발생 추정)
+        had_bug = False
+        for p in pin_rows:
+            tags = []
+            if p["tags"]:
+                try:
+                    tags = json.loads(p["tags"]) if isinstance(p["tags"], str) else p["tags"]
+                except (json.JSONDecodeError, TypeError):
+                    tags = []
+            tag_lower = [t.lower() for t in tags]
+            if any(kw in tag_lower for kw in ["bug", "fix", "error", "hotfix", "debug"]):
+                had_bug = True
+                content_preview = (p["content"] or "")[:50]
+                events.append(f"버그/이슈 발견 후 해결: {content_preview}")
+                break
+
+        # 3. 완료 순서와 생성 순서 비교 (순서 역전 감지)
+        completed_pins = [p for p in pin_rows if p["completed_at"]]
+        if len(completed_pins) >= 2:
+            creation_order = [p["id"] for p in pin_rows if p["completed_at"]]
+            completion_order = sorted(
+                completed_pins, key=lambda x: x["completed_at"]
+            )
+            completion_ids = [p["id"] for p in completion_order]
+            if creation_order != completion_ids:
+                events.append("우선순위 재조정이 있었음")
+
+        # 서사 구성
+        parts = []
+        parts.append(f"{project_label} {total}개 작업 수행")
+
+        if events:
+            parts.append(". ".join(events[:3]))
+
+        parts.append(f"총 {completed}/{total} 완료")
+
+        if incomplete:
+            incomplete_previews = [
+                (p["content"] or "")[:40] for p in incomplete[:2]
+            ]
+            parts.append(f"미완료: {', '.join(incomplete_previews)}")
+
+        return ". ".join(parts)
 
     async def resume_with_token_tracking(
         self,
