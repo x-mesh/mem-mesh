@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Current schema version - increment when adding new migrations
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 
 class SchemaMigrator:
@@ -35,6 +35,7 @@ class SchemaMigrator:
         self._migrations: Dict[int, Callable[["SchemaMigrator"], Awaitable[None]]] = {
             1: self._migration_v1_initial,
             2: self._migration_v2_work_tracking_columns,
+            3: self._migration_v3_relation_tables,
         }
 
     async def migrate(self) -> None:
@@ -170,3 +171,24 @@ class SchemaMigrator:
         if await self._table_exists("projects"):
             await self._add_column_if_missing("projects", "global_rules", "TEXT", "NULL")
             await self._add_column_if_missing("projects", "global_context", "TEXT", "NULL")
+
+    async def _migration_v3_relation_tables(self, migrator: "SchemaMigrator") -> None:
+        """Add memory_relations table for existing databases."""
+        conn = self.connection.connection
+
+        if not await self._table_exists("memory_relations"):
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS memory_relations (
+                    id TEXT PRIMARY KEY,
+                    source_id TEXT NOT NULL,
+                    target_id TEXT NOT NULL,
+                    relation_type TEXT NOT NULL DEFAULT 'related',
+                    strength REAL NOT NULL DEFAULT 1.0,
+                    metadata TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (source_id) REFERENCES memories(id) ON DELETE CASCADE,
+                    FOREIGN KEY (target_id) REFERENCES memories(id) ON DELETE CASCADE
+                )
+            """)
+            logger.info("Created memory_relations table via migration v3")

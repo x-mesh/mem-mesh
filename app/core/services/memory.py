@@ -103,28 +103,7 @@ class MemoryService:
         # 5. DB 저장 (트랜잭션)
         try:
             async with self.db.transaction():
-                # memories 테이블에 저장
-                await self.db.execute(
-                    """
-                    INSERT INTO memories 
-                    (id, content, content_hash, project_id, category, source, embedding, tags, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        memory.id,
-                        memory.content,
-                        memory.content_hash,
-                        memory.project_id,
-                        memory.category,
-                        memory.source,
-                        memory.embedding,
-                        memory.tags,
-                        memory.created_at,
-                        memory.updated_at,
-                    ),
-                )
-
-                # 벡터 인덱스에 저장
+                await self.db.add_memory(memory.model_dump())
                 await self._save_to_vector_index(memory.id, embedding_bytes)
 
             logger.info(f"Memory created successfully: {memory.id}")
@@ -196,26 +175,7 @@ class MemoryService:
 
         try:
             async with self.db.transaction():
-                await self.db.execute(
-                    """
-                    INSERT INTO memories 
-                    (id, content, content_hash, project_id, category, source, embedding, tags, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        memory.id,
-                        memory.content,
-                        memory.content_hash,
-                        memory.project_id,
-                        memory.category,
-                        memory.source,
-                        memory.embedding,
-                        memory.tags,
-                        memory.created_at,
-                        memory.updated_at,
-                    ),
-                )
-
+                await self.db.add_memory(memory.model_dump())
                 await self._save_to_vector_index(memory.id, embedding_bytes)
 
             logger.info(f"Memory created with pre-computed embedding: {memory.id}")

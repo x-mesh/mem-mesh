@@ -272,6 +272,34 @@ class Database:
             logger.error(f"Count memories failed: {e}")
             raise
 
+    async def add_memory(self, data: Dict[str, Any]) -> None:
+        """memories 테이블에 메모리 레코드 삽입
+
+        Args:
+            data: Memory 모델의 dict (id, content, content_hash, project_id,
+                  category, source, embedding, tags, created_at, updated_at)
+        """
+        await self.execute(
+            """
+            INSERT INTO memories
+            (id, content, content_hash, project_id, category, source, embedding, tags, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                data["id"],
+                data["content"],
+                data["content_hash"],
+                data.get("project_id"),
+                data.get("category", "task"),
+                data.get("source", "unknown"),
+                data.get("embedding"),
+                data.get("tags"),
+                data["created_at"],
+                data["updated_at"],
+            ),
+        )
+
+
     @asynccontextmanager
     async def transaction(self):
         async with self._connection.transaction():
