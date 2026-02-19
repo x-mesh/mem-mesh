@@ -19,7 +19,7 @@ class TestNoiseFilter:
         results = [
             SearchResult(
                 id="1",
-                content="Valid content",
+                content="Valid content that is long enough to pass the minimum content length filter threshold",
                 similarity_score=0.9,
                 created_at=datetime.now().isoformat(),
                 project_id="mem-mesh",
@@ -28,7 +28,7 @@ class TestNoiseFilter:
             ),
             SearchResult(
                 id="2",
-                content="Test content",
+                content="Test content that is also long enough to pass the minimum content length filter threshold",
                 similarity_score=0.8,
                 created_at=datetime.now().isoformat(),
                 project_id="test-project",
@@ -37,7 +37,7 @@ class TestNoiseFilter:
             ),
             SearchResult(
                 id="3",
-                content="Kiro content",
+                content="Kiro content that is also long enough to pass the minimum content length filter threshold",
                 similarity_score=0.7,
                 created_at=datetime.now().isoformat(),
                 project_id="kiro-test",

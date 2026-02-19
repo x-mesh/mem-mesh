@@ -109,6 +109,12 @@ class Database:
                     embedding_array = np.frombuffer(embedding, dtype=np.float32)
                     embedding_json = json.dumps(embedding_array.tolist())
 
+                    has_filters = bool(
+                        filters
+                        and (filters.get("project_id") or filters.get("category"))
+                    )
+                    inner_limit = limit * 5 if has_filters else limit
+
                     base_query = """
                         SELECT m.*, ve.distance 
                         FROM memories m
@@ -120,7 +126,7 @@ class Database:
                             LIMIT ?
                         ) ve ON m.id = ve.memory_id
                     """
-                    params = [embedding_json, limit]
+                    params = [embedding_json, inner_limit]
 
                     if filters:
                         filter_conditions = []
@@ -134,7 +140,7 @@ class Database:
                         if filter_conditions:
                             base_query += f" WHERE {' AND '.join(filter_conditions)}"
 
-                    base_query += " ORDER BY ve.distance"
+                    base_query += f" ORDER BY ve.distance LIMIT {limit}"
 
                     cursor = await self.execute(base_query, tuple(params))
                     results = cursor.fetchall()

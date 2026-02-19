@@ -269,27 +269,16 @@ class MemoryDetailPage extends HTMLElement {
     try {
       console.log('Loading memory data via direct API calls...');
       
-      // 직접 메모리 ID로 조회
-      const memoryUrl = new URL(`/api/memories/${this.memoryId}`, window.location.origin);
-      const memoryResponse = await fetch(memoryUrl);
-      
-      if (!memoryResponse.ok) {
-        throw new Error(`Memory not found: ${memoryResponse.status}`);
-      }
-      
-      const memory = await memoryResponse.json();
-      
-      // 컨텍스트 데이터 로드
-      const contextUrl = new URL(`/api/memories/${this.memoryId}/context`, window.location.origin);
-      contextUrl.searchParams.append('depth', '2');
-      
-      const contextResponse = await fetch(contextUrl);
+      const api = window.app?.apiClient;
+      if (!api) throw new Error('APIClient not available');
+
+      const memory = await api.getMemory(this.memoryId);
+
       let contextData = [];
-      
-      if (contextResponse.ok) {
-        const contextResult = await contextResponse.json();
+      try {
+        const contextResult = await api.getContext(this.memoryId, 2);
         contextData = contextResult.related_memories || [];
-      } else {
+      } catch {
         console.warn('Context loading failed, continuing without context');
       }
       

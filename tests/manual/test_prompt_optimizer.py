@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.core.database.base import Database
+from app.core.config import Settings
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.memory import MemoryService
 from app.core.services.search import SearchService
@@ -25,7 +26,8 @@ async def test_response_compression():
     print("="*60)
     
     # 서비스 초기화
-    db = Database()
+    test_settings = Settings()
+    db = Database(test_settings.database_path)
     await db.connect()
     
     embedding_service = EmbeddingService(preload=False)

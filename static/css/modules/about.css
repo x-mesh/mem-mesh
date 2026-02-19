@@ -1,0 +1,298 @@
+/* ========================================
+   About Page Styles
+   ======================================== */
+
+.about-page {
+  padding: 0;
+  max-width: none;
+  margin: 0;
+}
+
+/* About 페이지의 Hero 섹션 전체 너비 */
+.about-page .hero-section {
+  margin-left: -40px;
+  margin-right: -40px;
+  padding-left: 40px;
+  padding-right: 40px;
+}
+
+/* About Content Section */
+.about-content {
+  padding: var(--space-20) var(--space-6);
+  background: var(--bg-secondary);
+}
+
+.about-content .container {
+  max-width: var(--container-xl);
+  margin: 0 auto;
+  padding: 0 var(--space-6);
+}
+
+.about-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-16);
+  align-items: center;
+}
+
+.about-text h2 {
+  font-size: var(--text-4xl);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  margin-bottom: var(--space-6);
+  line-height: 1.2;
+}
+
+.about-text p {
+  font-size: var(--text-lg);
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: var(--space-8);
+}
+
+.feature-highlights {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.highlight-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.highlight-icon {
+  width: 24px;
+  height: 24px;
+  color: var(--text-primary);
+  flex-shrink: 0;
+  margin-top: var(--space-1);
+}
+
+.highlight-item h3 {
+  font-size: var(--text-lg);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  margin: 0 0 var(--space-1) 0;
+}
+
+.highlight-item p {
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Visual Container */
+.about-visual {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.visual-container {
+  position: relative;
+  width: 300px;
+  height: 300px;
+}
+
+.floating-elements {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.memory-node {
+  position: absolute;
+  width: 60px;
+  height: 60px;
+  background: var(--bg-primary);
+  border: 2px solid var(--border-color);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  animation: aboutFloat 3s ease-in-out infinite;
+  animation-delay: var(--delay);
+}
+
+.memory-node:nth-child(1) {
+  top: 20%;
+  left: 10%;
+}
+
+.memory-node:nth-child(2) {
+  top: 60%;
+  right: 20%;
+}
+
+.memory-node:nth-child(3) {
+  bottom: 10%;
+  left: 40%;
+}
+
+.memory-node svg {
+  width: 24px;
+  height: 24px;
+}
+
+.connection-line {
+  position: absolute;
+  height: 2px;
+  background: linear-gradient(90deg, var(--border-color), transparent);
+  animation: aboutPulse 2s ease-in-out infinite;
+  animation-delay: var(--delay);
+}
+
+.connection-line:nth-child(4) {
+  top: 35%;
+  left: 15%;
+  width: 120px;
+  transform: rotate(25deg);
+}
+
+.connection-line:nth-child(5) {
+  bottom: 25%;
+  right: 25%;
+  width: 100px;
+  transform: rotate(-45deg);
+}
+
+@keyframes aboutFloat {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes aboutPulse {
+  0%, 100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+/* CTA Section */
+.cta-section {
+  padding: var(--space-20) var(--space-6);
+  background: var(--bg-primary);
+  text-align: center;
+}
+
+.cta-content {
+  max-width: var(--container-lg);
+  margin: 0 auto;
+
+}
+
+.cta-content h2 {
+  font-size: var(--text-4xl);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  margin-bottom: var(--space-4);
+}
+
+.cta-content p {
+  font-size: var(--text-lg);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-8);
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.cta-actions {
+  display: flex;
+  gap: var(--space-4);
+  justify-content: center;
+  align-items: center;
+}
+
+.cta-actions .btn-primary,
+.cta-actions .btn-secondary {
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--text-lg);
+  min-width: 180px;
+}
+
+/* About Page Responsive Design */
+@media (max-width: 768px) {
+  .about-page .hero-section {
+    margin-left: -16px;
+    margin-right: -16px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .about-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-12);
+    text-align: center;
+  }
+  
+  .about-text h2 {
+    font-size: var(--text-3xl);
+  }
+  
+  .visual-container {
+    width: 250px;
+    height: 250px;
+  }
+  
+  .memory-node {
+    width: 50px;
+    height: 50px;
+  }
+  
+  .memory-node svg {
+    width: 20px;
+    height: 20px;
+  }
+  
+  .cta-content h2 {
+    font-size: var(--text-3xl);
+  }
+  
+  .cta-actions {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .cta-actions .btn-primary,
+  .cta-actions .btn-secondary {
+    width: 100%;
+    max-width: 300px;
+  }
+  
+  .about-content .container {
+    padding: 0 var(--space-4);
+  }
+}
+
+@media (max-width: 480px) {
+  .about-content,
+  .cta-section {
+    padding: var(--space-16) var(--space-4);
+  }
+  
+  .about-text h2,
+  .cta-content h2 {
+    font-size: var(--text-2xl);
+  }
+  
+  .about-text p,
+  .cta-content p {
+    font-size: var(--text-base);
+  }
+  
+  .highlight-item {
+    text-align: left;
+  }
+}
+

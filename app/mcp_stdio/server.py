@@ -1,6 +1,17 @@
 """FastMCP 기반 MCP 서버 구현
 
 mcp_common 모듈을 사용하여 공통 로직을 공유합니다.
+
+IMPORTANT: Tool parameter signatures here must stay in sync with
+app/mcp_common/schemas.py. FastMCP uses @mcp.tool() decorators which
+define schemas independently from the shared JSON schemas used by
+SSE and Pure stdio servers. When adding/changing tool parameters,
+update BOTH this file AND schemas.py to prevent drift.
+
+Shared tools (16): add, search, context, update, delete, stats,
+    pin_add, pin_complete, pin_promote, session_resume, session_end,
+    batch_operations, link, unlink, get_links, weekly_review
+FastMCP-only (2): cache_stats, clear_cache
 """
 
 import os
@@ -17,8 +28,8 @@ from ..core.services.cache_manager import get_cache_manager
 setup_logging()
 logger = get_logger("mcp-stdio-server")
 
-log_level = os.getenv("MCP_LOG_LEVEL", "INFO")
-log_file = os.getenv("MCP_LOG_FILE", "")
+log_level = os.getenv("MEM_MESH_LOG_LEVEL") or os.getenv("MCP_LOG_LEVEL", "INFO")
+log_file = os.getenv("MEM_MESH_LOG_FILE") or os.getenv("MCP_LOG_FILE", "")
 
 logger.info(
     "Starting mem-mesh MCP server (FastMCP)",
@@ -49,7 +60,9 @@ async def initialize_storage(settings: Optional[Settings] = None) -> None:
     from ..core.services.memory import MemoryService
     from ..core.services.legacy.search import SearchService
 
-    db = Database()
+    batch_settings = settings or Settings()
+    db = Database(batch_settings.database_path)
+    await db.connect()
     embedding_service = EmbeddingService(preload=False)
     memory_service = MemoryService(db, embedding_service)
     search_service = SearchService(db, embedding_service)
@@ -66,8 +79,15 @@ async def initialize_storage(settings: Optional[Settings] = None) -> None:
 
 async def shutdown_storage() -> None:
     """스토리지 백엔드 종료"""
-    global tool_handlers
+    global tool_handlers, batch_handler
     await storage_manager.shutdown()
+    if batch_handler is not None:
+        try:
+            if hasattr(batch_handler, 'db') and batch_handler.db is not None:
+                await batch_handler.db.disconnect()
+        except Exception as e:
+            logger.warning("Error closing batch handler DB", error=str(e))
+        batch_handler = None
     tool_handlers = None
 
 
@@ -185,64 +205,6 @@ async def stats(
 
 
 @mcp.tool()
-async def batch_add_memories(
-    contents: list[str],
-    project_id: Optional[str] = None,
-    category: str = "task",
-    source: str = "mcp_batch",
-    tags: Optional[list[str]] = None,
-) -> dict:
-    """Batch add multiple memories with optimized embedding generation
-
-    Args:
-        contents: List of memory contents to add
-        project_id: Project identifier for all memories
-        category: Category for all memories
-        source: Source for all memories
-        tags: Tags for all memories
-
-    Returns:
-        Dictionary with batch operation results and token savings
-    """
-    if batch_handler is None:
-        return {"status": "error", "message": "Batch handler not initialized"}
-
-    return await batch_handler.batch_add_memories(
-        contents=contents,
-        project_id=project_id,
-        category=category,
-        source=source,
-        tags=tags,
-    )
-
-
-@mcp.tool()
-async def batch_search(
-    queries: list[str],
-    project_id: Optional[str] = None,
-    category: Optional[str] = None,
-    limit: int = 5,
-) -> dict:
-    """Batch search multiple queries with caching optimization
-
-    Args:
-        queries: List of search queries
-        project_id: Project filter for all queries
-        category: Category filter for all queries
-        limit: Maximum results per query (1-20)
-
-    Returns:
-        Dictionary with search results for each query and cache statistics
-    """
-    if batch_handler is None:
-        return {"status": "error", "message": "Batch handler not initialized"}
-
-    return await batch_handler.batch_search(
-        queries=queries, project_id=project_id, category=category, limit=limit
-    )
-
-
-@mcp.tool()
 async def batch_operations(operations: list[dict]) -> dict:
     """Execute multiple mixed operations in batch for maximum efficiency
 
@@ -261,6 +223,145 @@ async def batch_operations(operations: list[dict]) -> dict:
         return {"status": "error", "message": "Batch handler not initialized"}
 
     return await batch_handler.batch_operations(operations=operations)
+
+
+@mcp.tool()
+async def pin_add(
+    content: str,
+    project_id: str,
+    importance: Optional[int] = None,
+    tags: Optional[list[str]] = None,
+) -> dict:
+    """Add a new pin (short-term task) to the current session
+
+    Args:
+        content: Pin content describing the task or work item
+        project_id: Project identifier
+        importance: Importance score (1-5). Auto-determined if not provided.
+        tags: Pin tags
+    """
+    return await _get_handlers().pin_add(content, project_id, importance, tags)
+
+
+@mcp.tool()
+async def pin_complete(pin_id: str) -> dict:
+    """Mark a pin as completed. Returns promotion suggestion if importance >= 4.
+
+    Args:
+        pin_id: Pin ID to complete
+    """
+    return await _get_handlers().pin_complete(pin_id)
+
+
+@mcp.tool()
+async def pin_promote(pin_id: str) -> dict:
+    """Promote a completed pin to a permanent memory.
+
+    Args:
+        pin_id: Pin ID to promote to memory
+    """
+    return await _get_handlers().pin_promote(pin_id)
+
+
+@mcp.tool()
+async def session_resume(
+    project_id: str,
+    expand: bool = False,
+    limit: int = 10,
+) -> dict:
+    """Resume the last session for a project. Returns active pins and session context.
+
+    Args:
+        project_id: Project identifier
+        expand: If true, return full pin contents; if false, return summary only
+        limit: Maximum number of pins to return
+    """
+    return await _get_handlers().session_resume(project_id, expand, limit)
+
+
+@mcp.tool()
+async def session_end(
+    project_id: str,
+    summary: Optional[str] = None,
+) -> dict:
+    """End the current session for a project.
+
+    Args:
+        project_id: Project identifier
+        summary: Session summary (auto-generated if not provided)
+    """
+    return await _get_handlers().session_end(project_id, summary)
+
+
+@mcp.tool()
+async def link(
+    source_id: str,
+    target_id: str,
+    relation_type: str = "related",
+    strength: float = 1.0,
+    metadata: Optional[dict] = None,
+) -> dict:
+    """Create a relation between two memories.
+
+    Args:
+        source_id: Source memory ID
+        target_id: Target memory ID
+        relation_type: Relation type (related, parent, child, supersedes, references, depends_on, similar)
+        strength: Relation strength (0.0-1.0)
+        metadata: Optional metadata for the relation
+    """
+    return await _get_handlers().link(source_id, target_id, relation_type, strength, metadata)
+
+
+@mcp.tool()
+async def unlink(
+    source_id: str,
+    target_id: str,
+    relation_type: Optional[str] = None,
+) -> dict:
+    """Remove a relation between two memories.
+
+    Args:
+        source_id: Source memory ID
+        target_id: Target memory ID
+        relation_type: Specific relation type to remove (optional, removes all if not specified)
+    """
+    return await _get_handlers().unlink(source_id, target_id, relation_type)
+
+
+@mcp.tool()
+async def get_links(
+    memory_id: str,
+    relation_type: Optional[str] = None,
+    direction: str = "both",
+    limit: int = 20,
+) -> dict:
+    """Get relations for a memory.
+
+    Args:
+        memory_id: Memory ID to get relations for
+        relation_type: Filter by relation type (optional)
+        direction: Relation direction filter (outgoing, incoming, both)
+        limit: Maximum relations to return
+    """
+    return await _get_handlers().get_links(memory_id, relation_type, direction, limit)
+
+
+@mcp.tool()
+async def weekly_review(
+    project_id: str,
+    days: int = 7,
+) -> dict:
+    """Generate a weekly review report for a project.
+
+    Returns incomplete pins, recent memories, session summaries,
+    zero-result searches, and recommendations.
+
+    Args:
+        project_id: Project identifier
+        days: Number of days to review (default: 7)
+    """
+    return await _get_handlers().weekly_review(project_id, days)
 
 
 @mcp.tool()

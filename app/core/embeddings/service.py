@@ -55,7 +55,12 @@ if _ignore_ssl:
         # Silently ignore if huggingface_hub is not available or configuration fails
         pass
 
-from sentence_transformers import SentenceTransformer
+try:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
+    SentenceTransformer = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +91,16 @@ MODEL_ALIASES = {
 }
 
 
+# E5 계열 모델은 query/passage prefix가 필요
+_E5_MODEL_PATTERNS = ("e5-", "/e5-", "multilingual-e5-")
+
+
+def _is_e5_model(model_name: str) -> bool:
+    """E5 계열 모델 여부 판단"""
+    name_lower = model_name.lower()
+    return any(pat in name_lower for pat in _E5_MODEL_PATTERNS)
+
+
 class EmbeddingService:
     """임베딩 생성 서비스"""
 
@@ -103,6 +118,12 @@ class EmbeddingService:
             preload: True면 초기화 시 모델을 미리 로드 (기본값: True)
             metrics_collector: 메트릭 수집기 (선택적)
         """
+        if not SENTENCE_TRANSFORMERS_AVAILABLE:
+            raise ImportError(
+                "sentence-transformers is not installed. "
+                "Install it with: pip install sentence-transformers"
+            )
+        
         self.model: Optional[SentenceTransformer] = None
         self.metrics_collector = metrics_collector
 
@@ -118,6 +139,11 @@ class EmbeddingService:
         self.model_name = MODEL_ALIASES.get(model_name, model_name)
         if self.model_name != model_name:
             logger.info(f"Model alias resolved: {model_name} -> {self.model_name}")
+
+        # E5 모델 여부 (query/passage prefix 자동 적용)
+        self._is_e5 = _is_e5_model(self.model_name)
+        if self._is_e5:
+            logger.info(f"E5 model detected: query/passage prefix will be applied automatically")
 
         # 기본 차원 설정 (실제 모델 로드 후 업데이트됨)
         self.dimension: int = MODEL_DIMENSIONS.get(self.model_name, 384)
@@ -165,22 +191,34 @@ class EmbeddingService:
         if self.model is None:
             self._preload_model()
 
-    def embed(self, text: str) -> list[float]:
-        """단일 텍스트 임베딩"""
+    def _prepare_text(self, text: str, is_query: bool) -> str:
+        """E5 모델일 경우 query/passage prefix를 자동 적용"""
+        if not self._is_e5:
+            return text
+        prefix = "query: " if is_query else "passage: "
+        return prefix + text
+
+    def embed(self, text: str, is_query: bool = False) -> list[float]:
+        """
+        단일 텍스트 임베딩
+
+        Args:
+            text: 임베딩할 텍스트
+            is_query: True면 검색 쿼리용 임베딩 (E5 모델에서 "query:" prefix 적용)
+        """
         if self.model is None:
             self.load_model()
 
         assert self.model is not None, "Model should be loaded"
 
         start_time = time.perf_counter()
-        cache_hit = False  # 이 레벨에서는 캐시 히트 여부를 알 수 없음
+        cache_hit = False
 
         try:
-            # sentence-transformers는 numpy array를 반환하므로 list로 변환
-            embedding = self.model.encode(text, convert_to_tensor=False, normalize_embeddings=True)
+            prepared = self._prepare_text(text, is_query)
+            embedding = self.model.encode(prepared, convert_to_tensor=False, normalize_embeddings=True)
             result = embedding.tolist()
 
-            # 메트릭 수집
             self._collect_embedding_metric(
                 operation="generate",
                 count=1,
@@ -193,8 +231,14 @@ class EmbeddingService:
             logger.error(f"Failed to generate embedding for text: {e}")
             raise
 
-    def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """배치 임베딩"""
+    def embed_batch(self, texts: list[str], is_query: bool = False) -> list[list[float]]:
+        """
+        배치 임베딩
+
+        Args:
+            texts: 임베딩할 텍스트 리스트
+            is_query: True면 검색 쿼리용 임베딩 (E5 모델에서 "query:" prefix 적용)
+        """
         if self.model is None:
             self.load_model()
 
@@ -204,10 +248,10 @@ class EmbeddingService:
         cache_hit = False
 
         try:
-            embeddings = self.model.encode(texts, convert_to_tensor=False, normalize_embeddings=True)
+            prepared = [self._prepare_text(t, is_query) for t in texts]
+            embeddings = self.model.encode(prepared, convert_to_tensor=False, normalize_embeddings=True)
             result = [embedding.tolist() for embedding in embeddings]
 
-            # 메트릭 수집
             self._collect_embedding_metric(
                 operation="batch_generate",
                 count=len(texts),

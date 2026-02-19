@@ -23,6 +23,7 @@ from app.core.services.embedding_manager import EmbeddingManagerService
 from app.core.services.project import ProjectService
 from app.core.services.session import SessionService
 from app.core.services.pin import PinService
+from app.core.services.relation import RelationService
 from app.core.services.metrics_collector import MetricsCollector
 from app.core.storage.direct import DirectStorageBackend
 from app.mcp_common.tools import MCPToolHandlers
@@ -44,6 +45,7 @@ project_service: Optional[ProjectService] = None
 session_service: Optional[SessionService] = None
 pin_service: Optional[PinService] = None
 metrics_collector: Optional[MetricsCollector] = None
+relation_service: Optional[RelationService] = None
 mcp_storage: Optional[DirectStorageBackend] = None
 oauth_service: Optional[OAuthService] = None
 
@@ -63,6 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         session_service, \
         pin_service, \
         metrics_collector, \
+        relation_service, \
         mcp_storage, \
         oauth_service, \
         logger
@@ -169,22 +172,44 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         project_service = ProjectService(db)
         session_service = SessionService(db)
         pin_service = PinService(db)
+        relation_service = RelationService(db)
 
         # OAuth 서비스 초기화
         logger.info("Initializing OAuth service")
         oauth_service = OAuthService(db)
         app.state.oauth_service = oauth_service
 
+        # Basic Auth 세션 저장소에 DB 연결
+        from .oauth.basic_auth import session_store
+        session_store.set_database(db)
+
         # MCP SSE용 스토리지 및 핸들러 초기화
         logger.info("Initializing MCP SSE handlers")
         mcp_storage = DirectStorageBackend(settings.database_path)
         await mcp_storage.initialize()
 
+        # BatchOperationHandler 초기화 (기존 db/embedding 재사용)
+        batch_handler = None
+        try:
+            from app.core.services.legacy.search import SearchService as LegacySearchService
+            from app.mcp_common.batch_tools import BatchOperationHandler
+
+            legacy_search = LegacySearchService(db, embedding_service)
+            batch_handler = BatchOperationHandler(
+                memory_service=memory_service,
+                search_service=legacy_search,
+                embedding_service=embedding_service,
+                db=db,
+            )
+            logger.info("BatchOperationHandler initialized for main web MCP")
+        except Exception as e:
+            logger.warning("BatchOperationHandler init failed, using fallback", error=str(e))
+
         # WebSocket notifier 가져오기
         from .websocket.realtime import notifier
 
         # MCP 도구 핸들러에 notifier 주입
-        sse.set_tool_handlers(MCPToolHandlers(mcp_storage, notifier))
+        sse.set_tool_handlers(MCPToolHandlers(mcp_storage, notifier), batch_handler=batch_handler)
 
         logger.info(
             "mem-mesh application initialized successfully",
@@ -244,6 +269,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         session_service = None
         pin_service = None
         metrics_collector = None
+        relation_service = None
         mcp_storage = None
         oauth_service = None
 
@@ -264,6 +290,7 @@ def get_services() -> Dict[str, Any]:
         "session_service": session_service,
         "pin_service": pin_service,
         "metrics_collector": metrics_collector,
+        "relation_service": relation_service,
         "mcp_storage": mcp_storage,
         "oauth_service": oauth_service,
     }

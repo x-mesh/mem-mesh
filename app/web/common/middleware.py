@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.core.config import get_settings
 from app.core.schemas.responses import ErrorResponse
 
 logger = logging.getLogger(__name__)
@@ -32,13 +33,16 @@ class NoCacheStaticMiddleware(BaseHTTPMiddleware):
 
 def setup_middleware(app: FastAPI) -> None:
     """미들웨어 설정"""
+    settings = get_settings()
+
     # Static 파일 캐시 비활성화 미들웨어 (개발용)
     app.add_middleware(NoCacheStaticMiddleware)
-    
+
     # CORS 미들웨어 추가
+    origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # 개발용, 운영에서는 제한 필요
+        allow_origins=origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

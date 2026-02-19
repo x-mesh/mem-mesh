@@ -19,8 +19,9 @@ class MCPDispatcher:
     - app/web/mcp/sse.py
     """
 
-    def __init__(self, tool_handlers: MCPToolHandlers):
+    def __init__(self, tool_handlers: MCPToolHandlers, batch_handler=None):
         self._tool_handlers = tool_handlers
+        self._batch_handler = batch_handler
 
     @property
     def tool_handlers(self) -> MCPToolHandlers:
@@ -66,6 +67,8 @@ class MCPDispatcher:
                 return await self._dispatch_get_links(args)
             elif tool_name == "batch_operations":
                 return await self._dispatch_batch_operations(args)
+            elif tool_name == "weekly_review":
+                return await self._dispatch_weekly_review(args)
             else:
                 logger.warning(f"Unknown tool: {tool_name}")
                 return format_tool_error(f"Unknown tool: {tool_name}")
@@ -228,9 +231,100 @@ class MCPDispatcher:
         )
         return format_tool_response(result)
 
+    async def _dispatch_weekly_review(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if "project_id" not in args:
+            return format_tool_error("Missing required argument: project_id")
+
+        result = await self._tool_handlers.weekly_review(
+            project_id=args["project_id"],
+            days=args.get("days", 7),
+        )
+        return format_tool_response(result)
+
     async def _dispatch_batch_operations(self, args: Dict[str, Any]) -> Dict[str, Any]:
         if "operations" not in args:
             return format_tool_error("Missing required argument: operations")
 
-        # batch_operations는 tools.py에 아직 구현되지 않았으므로 에러 반환
-        return format_tool_error("batch_operations not yet implemented in tool handlers")
+        operations = args["operations"]
+
+        # BatchOperationHandler가 있으면 사용 (배치 임베딩/캐시 최적화)
+        if self._batch_handler is not None:
+            try:
+                result = await self._batch_handler.batch_operations(operations=operations)
+                return format_tool_response(result)
+            except Exception as e:
+                logger.error(f"Batch operations failed: {e}")
+                return format_tool_error(f"Batch operations failed: {str(e)}")
+
+        # Fallback: 개별 도구 순차 호출 (BatchOperationHandler 미초기화 시)
+        try:
+            results = []
+
+            for i, op in enumerate(operations):
+                op_type = op.get("type")
+
+                if op_type == "add":
+                    add_result = await self._dispatch_add({
+                        "content": op.get("content"),
+                        "project_id": op.get("project_id"),
+                        "category": op.get("category", "task"),
+                        "source": op.get("source", "mcp_batch"),
+                        "tags": op.get("tags"),
+                    })
+                    if not add_result.get("isError"):
+                        content_text = add_result["content"][0]["text"]
+                        parsed = json.loads(content_text)
+                        results.append({
+                            "index": i, "type": "add", "success": True,
+                            "memory_id": parsed.get("id"),
+                        })
+                    else:
+                        results.append({
+                            "index": i, "type": "add", "success": False,
+                            "error": add_result["content"][0]["text"],
+                        })
+
+                elif op_type == "search":
+                    search_result = await self._dispatch_search({
+                        "query": op.get("query"),
+                        "project_id": op.get("project_id"),
+                        "category": op.get("category"),
+                        "limit": op.get("limit", 5),
+                    })
+                    if not search_result.get("isError"):
+                        content_text = search_result["content"][0]["text"]
+                        parsed = json.loads(content_text)
+                        results.append({
+                            "index": i, "type": "search", "success": True,
+                            "results": parsed.get("results", []),
+                            "total": parsed.get("total"),
+                        })
+                    else:
+                        results.append({
+                            "index": i, "type": "search", "success": False,
+                            "error": search_result["content"][0]["text"],
+                        })
+                else:
+                    results.append({
+                        "index": i, "type": op_type, "success": False,
+                        "error": f"Unknown operation type: {op_type}",
+                    })
+
+            add_count = sum(1 for op in operations if op.get("type") == "add")
+            search_count = sum(1 for op in operations if op.get("type") == "search")
+
+            batch_result = {
+                "status": "success",
+                "total_operations": len(operations),
+                "results": results,
+                "batch_stats": {
+                    "add_operations": add_count,
+                    "search_operations": search_count,
+                },
+                "tokens_saved": add_count * 10 + search_count * 30,
+            }
+            return format_tool_response(batch_result)
+
+        except Exception as e:
+            logger.error(f"Batch operations failed: {e}")
+            return format_tool_error(f"Batch operations failed: {str(e)}")

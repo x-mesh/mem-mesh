@@ -219,8 +219,11 @@ class TestPinPromotion:
         # Then
         assert result is not None
         assert "memory_id" in result
-        assert result["pin_deleted"] is True
-        assert await pin_service.get_pin(pin.id) is None
+        assert result["pin_deleted"] is False
+        # pin은 삭제되지 않고 promoted_to_memory_id가 설정됨
+        promoted_pin = await pin_service.get_pin(pin.id)
+        assert promoted_pin is not None
+        assert promoted_pin.promoted_to_memory_id == result["memory_id"]
 
     @pytest.mark.asyncio
     async def test_should_suggest_promotion_high_importance(self, pin_service):

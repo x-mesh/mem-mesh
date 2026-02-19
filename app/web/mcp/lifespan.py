@@ -58,8 +58,33 @@ async def mcp_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         mcp_storage = DirectStorageBackend(settings.database_path)
         await mcp_storage.initialize()
         
+        # BatchOperationHandler 초기화
+        batch_handler = None
+        try:
+            from app.core.database.base import Database
+            from app.core.embeddings.service import EmbeddingService
+            from app.core.services.memory import MemoryService
+            from app.core.services.legacy.search import SearchService
+            from app.mcp_common.batch_tools import BatchOperationHandler
+
+            db = Database(settings.database_path)
+            await db.connect()
+            embedding_service = EmbeddingService(preload=False)
+            memory_service = MemoryService(db, embedding_service)
+            search_service = SearchService(db, embedding_service)
+
+            batch_handler = BatchOperationHandler(
+                memory_service=memory_service,
+                search_service=search_service,
+                embedding_service=embedding_service,
+                db=db,
+            )
+            logger.info("BatchOperationHandler initialized for MCP SSE")
+        except Exception as e:
+            logger.warning("BatchOperationHandler init failed, using fallback", error=str(e))
+
         # MCP 도구 핸들러 설정 (notifier 없이)
-        sse.set_tool_handlers(MCPToolHandlers(mcp_storage, notifier=None))
+        sse.set_tool_handlers(MCPToolHandlers(mcp_storage, notifier=None), batch_handler=batch_handler)
         
         logger.info("MCP SSE Server initialized successfully")
         
@@ -70,6 +95,14 @@ async def mcp_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         raise
     finally:
         logger.info("Shutting down MCP SSE Server...")
+        
+        if batch_handler is not None:
+            try:
+                if hasattr(batch_handler, 'db') and batch_handler.db is not None:
+                    await batch_handler.db.disconnect()
+                    logger.debug("Batch handler DB disconnected")
+            except Exception as e:
+                logger.warning("Error closing batch handler DB", error=str(e))
         
         if mcp_storage:
             try:

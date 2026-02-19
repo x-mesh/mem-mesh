@@ -5,6 +5,37 @@ from pydantic import BaseModel, Field, field_validator
 import re
 
 
+def normalize_project_id(v: Optional[str]) -> Optional[str]:
+    """project_id를 kebab-case로 정규화.
+
+    camelCase/PascalCase → kebab-case 변환 후 소문자화.
+    예: "jmonServerWeb" → "jmon-server-web"
+        "MyProject" → "my-project"
+        "already-kebab" → "already-kebab" (변경 없음)
+    """
+    if v is None:
+        return v
+    if not isinstance(v, str) or len(v) == 0:
+        raise ValueError("project_id must be a non-empty string")
+
+    # camelCase/PascalCase → kebab-case: 대문자 앞에 하이픈 삽입
+    normalized = re.sub(r"(?<=[a-z0-9])([A-Z])", r"-\1", v)
+    # 연속 대문자 처리: "HTMLParser" → "html-parser"
+    normalized = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1-\2", normalized)
+    normalized = normalized.lower()
+    # 공백/언더스코어를 하이픈으로
+    normalized = re.sub(r"[\s_]+", "-", normalized)
+    # 연속 하이픈 제거
+    normalized = re.sub(r"-+", "-", normalized).strip("-")
+
+    if not re.match(r"^[a-z0-9][a-z0-9_-]*$", normalized):
+        raise ValueError(
+            f"project_id '{v}' cannot be normalized to a valid format. "
+            "Must contain only letters, numbers, hyphens, and underscores"
+        )
+    return normalized
+
+
 class AddParams(BaseModel):
     """메모리 추가 요청 파라미터"""
 
@@ -17,14 +48,7 @@ class AddParams(BaseModel):
     @field_validator("project_id")
     @classmethod
     def validate_project_id(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None:
-            if not isinstance(v, str) or len(v) == 0:
-                raise ValueError("project_id must be a non-empty string")
-            if not re.match(r"^[a-z0-9_-]+$", v):
-                raise ValueError(
-                    "project_id must contain only lowercase letters, numbers, hyphens, and underscores"
-                )
-        return v
+        return normalize_project_id(v)
 
     @field_validator("category")
     @classmethod
@@ -68,14 +92,7 @@ class SearchParams(BaseModel):
     @field_validator("project_id")
     @classmethod
     def validate_project_id(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None:
-            if not isinstance(v, str) or len(v) == 0:
-                raise ValueError("project_id must be a non-empty string")
-            if not re.match(r"^[a-z0-9_-]+$", v):
-                raise ValueError(
-                    "project_id must contain only lowercase letters, numbers, hyphens, and underscores"
-                )
-        return v
+        return normalize_project_id(v)
 
     @field_validator("category")
     @classmethod
@@ -107,14 +124,7 @@ class ContextParams(BaseModel):
     @field_validator("project_id")
     @classmethod
     def validate_project_id(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None:
-            if not isinstance(v, str) or len(v) == 0:
-                raise ValueError("project_id must be a non-empty string")
-            if not re.match(r"^[a-z0-9_-]+$", v):
-                raise ValueError(
-                    "project_id must contain only lowercase letters, numbers, hyphens, and underscores"
-                )
-        return v
+        return normalize_project_id(v)
 
 
 class DeleteParams(BaseModel):
@@ -171,14 +181,7 @@ class StatsParams(BaseModel):
     @field_validator("project_id")
     @classmethod
     def validate_project_id(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None:
-            if not isinstance(v, str) or len(v) == 0:
-                raise ValueError("project_id must be a non-empty string")
-            if not re.match(r"^[a-z0-9_-]+$", v):
-                raise ValueError(
-                    "project_id must contain only lowercase letters, numbers, hyphens, and underscores"
-                )
-        return v
+        return normalize_project_id(v)
 
     @field_validator("start_date", "end_date")
     @classmethod

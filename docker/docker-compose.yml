@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # FastAPI Dashboard + REST API
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dashboard
+    container_name: mem-mesh-dashboard
+    ports:
+      - "8000:8000"  # Web Dashboard + REST API
+      - "8001:8001"  # MCP SSE endpoint
+    volumes:
+      - mem-mesh-data:/app/data
+      - ../app:/app/app:ro  # Mount source for development (read-only)
+      - ../static:/app/static:ro
+      - ../templates:/app/templates:ro
+    environment:
+      - DATABASE_PATH=/app/data/memories.db
+      - STORAGE_MODE=direct
+      - HOST=0.0.0.0
+      - PORT=8000
+      - LOG_LEVEL=info
+      - EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+      - EMBEDDING_DEVICE=cpu
+      - BUSY_TIMEOUT=30000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - mem-mesh-network
+
+  # MCP stdio Server (for CLI usage)
+  mcp-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.mcp
+    container_name: mem-mesh-mcp
+    volumes:
+      - mem-mesh-data:/app/data
+      - ../app:/app/app:ro  # Mount source for development (read-only)
+    environment:
+      - DATABASE_PATH=/app/data/memories.db
+      - STORAGE_MODE=direct
+      - MCP_LOG_FORMAT=text
+      - EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+      - EMBEDDING_DEVICE=cpu
+      - BUSY_TIMEOUT=30000
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    networks:
+      - mem-mesh-network
+    profiles:
+      - mcp  # Only start when explicitly requested
+
+volumes:
+  mem-mesh-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-./data}
+
+networks:
+  mem-mesh-network:
+    driver: bridge

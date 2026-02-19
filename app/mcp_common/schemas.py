@@ -394,8 +394,14 @@ EXAMPLES:
 
 
 def get_all_tool_schemas() -> List[Dict[str, Any]]:
-    """모든 MCP tool 스키마 반환 (memory + pin/session + batch + relations)"""
-    return get_tool_schemas() + get_pin_tool_schemas() + get_batch_tool_schemas() + get_relation_tool_schemas()
+    """모든 MCP tool 스키마 반환 (memory + pin/session + batch + relations + review)"""
+    return (
+        get_tool_schemas()
+        + get_pin_tool_schemas()
+        + get_batch_tool_schemas()
+        + get_relation_tool_schemas()
+        + get_review_tool_schemas()
+    )
 
 
 def get_batch_tool_schemas() -> List[Dict[str, Any]]:
@@ -426,8 +432,7 @@ def get_batch_tool_schemas() -> List[Dict[str, Any]]:
                                 },
                                 "query": {
                                     "type": "string",
-                                    "description": "Search query (for 'search' operations)",
-                                    "minLength": 3,
+                                    "description": "Search query (for 'search' operations). Use empty string for recent memories.",
                                     "maxLength": 500
                                 },
                                 "project_id": {
@@ -611,6 +616,36 @@ EXAMPLES:
                 },
                 "required": ["memory_id"],
                 "additionalProperties": False
+            },
+        },
+    ]
+
+
+def get_review_tool_schemas() -> List[Dict[str, Any]]:
+    """Weekly review MCP tool 스키마 반환"""
+    return [
+        {
+            "name": "weekly_review",
+            "description": "Generate a weekly review report for a project. Returns incomplete pins, recent memories, session summaries, zero-result searches, and recommendations.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project identifier",
+                        "maxLength": 100,
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "Number of days to review (default: 7)",
+                        "default": 7,
+                        "minimum": 1,
+                        "maximum": 90,
+                    },
+                },
+                "required": ["project_id"],
+                "additionalProperties": False,
             },
         },
     ]

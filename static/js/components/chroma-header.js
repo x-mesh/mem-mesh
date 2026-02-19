@@ -18,14 +18,13 @@ class ChromaHeader extends HTMLElement {
 
   async fetchVersion() {
     try {
-      const response = await fetch('/api/');
-      if (response.ok) {
-        const data = await response.json();
-        const versionBadge = this.querySelector('#version-badge');
-        if (versionBadge && data.version) {
-          versionBadge.textContent = `v${data.version}`;
-          versionBadge.classList.add('loaded');
-        }
+      const api = window.app?.apiClient;
+      if (!api) return;
+      const data = await api.get('/');
+      const versionBadge = this.querySelector('#version-badge');
+      if (versionBadge && data.version) {
+        versionBadge.textContent = `v${data.version}`;
+        versionBadge.classList.add('loaded');
       }
     } catch (error) {
       console.warn('Failed to fetch version:', error);
@@ -458,15 +457,18 @@ class ChromaHeader extends HTMLElement {
   }
 
   toggleTheme() {
-    const currentTheme = document.documentElement.getAttribute('data-theme');
-    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-    
-    document.documentElement.setAttribute('data-theme', newTheme);
-    localStorage.setItem('theme', newTheme);
-    
-    // Update theme icon
+    if (window.app?.themeManager) {
+      window.app.themeManager.toggle();
+    } else {
+      const currentTheme = document.documentElement.getAttribute('data-theme');
+      const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', newTheme);
+      localStorage.setItem('mem-mesh-theme', newTheme);
+    }
+
+    const effectiveTheme = document.documentElement.getAttribute('data-theme');
     const header = this.querySelector('.chroma-header');
-    header?.classList.toggle('dark-theme', newTheme === 'dark');
+    header?.classList.toggle('dark-theme', effectiveTheme === 'dark');
   }
 
   closeMobileMenu() {
@@ -497,7 +499,10 @@ class ChromaHeader extends HTMLElement {
     const currentPath = window.location.pathname;
     this.querySelectorAll('.nav-link, .mobile-nav-link').forEach(link => {
       const route = link.getAttribute('data-route');
-      link.classList.toggle('active', route === currentPath);
+      if (!route) return;
+      const isActive = currentPath === route || 
+        (route !== '/' && currentPath.startsWith(route + '/'));
+      link.classList.toggle('active', isActive);
     });
   }
 }

@@ -291,6 +291,8 @@ export class SettingsPage extends HTMLElement {
                     border: 1px solid var(--border-color, #ddd);
                     border-radius: 6px;
                     font-size: 1rem;
+                    background: var(--bg-tertiary, #f5f5f5);
+                    color: var(--text-primary, #333);
                 }
                 
                 .btn {
@@ -312,7 +314,7 @@ export class SettingsPage extends HTMLElement {
                 }
                 
                 .btn-primary:disabled {
-                    background: #ccc;
+                    background: var(--text-muted, #ccc);
                     cursor: not-allowed;
                 }
                 
@@ -501,6 +503,8 @@ export class SettingsPage extends HTMLElement {
                     padding: 0.75rem;
                     border: 1px solid var(--border-color, #e0e0e0);
                     border-radius: 8px;
+                    background: var(--code-bg, #f5f5f5);
+                    color: var(--text-primary, #333);
                     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
                     font-size: 0.9rem;
                     line-height: 1.4;
@@ -573,9 +577,7 @@ export class SettingsPage extends HTMLElement {
         `;
 
         try {
-            const response = await fetch('/api/rules');
-            if (!response.ok) throw new Error('Failed to fetch rules index');
-            const data = await response.json();
+            const data = await window.app.apiClient.get('/rules');
             this.rulesIndex = data.rules || [];
             this.renderRulesList();
             this.renderRulesTargets();
@@ -648,9 +650,7 @@ export class SettingsPage extends HTMLElement {
         if (this.rulesCache.has(ruleId)) {
             return this.rulesCache.get(ruleId);
         }
-        const response = await fetch(`/api/rules/${encodeURIComponent(ruleId)}`);
-        if (!response.ok) throw new Error(`Failed to fetch rule: ${ruleId}`);
-        const data = await response.json();
+        const data = await window.app.apiClient.get(`/rules/${encodeURIComponent(ruleId)}`);
         const content = data.content || '';
         this.rulesCache.set(ruleId, content);
         return content;
@@ -721,12 +721,7 @@ export class SettingsPage extends HTMLElement {
         }
         const ruleId = select.value;
         try {
-            const response = await fetch(`/api/rules/${encodeURIComponent(ruleId)}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content })
-            });
-            if (!response.ok) throw new Error('Failed to save rule');
+            await window.app.apiClient.put(`/rules/${encodeURIComponent(ruleId)}`, { content });
             showToast('rules를 저장했습니다.', 'success');
             this.rulesCache.set(ruleId, content);
         } catch (error) {
@@ -747,10 +742,7 @@ export class SettingsPage extends HTMLElement {
             `;
         
         try {
-            const response = await fetch('/api/embeddings/status');
-            if (!response.ok) throw new Error('Failed to fetch status');
-            
-            this.statusData = await response.json();
+            this.statusData = await window.app.apiClient.get('/embeddings/status');
             this.renderStatus(statusContainer);
             
             if (this.statusData.migration_in_progress) {
@@ -826,13 +818,7 @@ export class SettingsPage extends HTMLElement {
         progressSection.classList.remove('hidden');
         
         try {
-            const response = await fetch(`/api/embeddings/migrate?force=${force}&batch_size=${batchSize}`, {
-                method: 'POST'
-            });
-            
-            if (!response.ok) throw new Error('Failed to start migration');
-            
-            const result = await response.json();
+            const result = await window.app.apiClient.post('/embeddings/migrate', null, { force, batch_size: batchSize });
             
             if (result.skipped) {
                 showToast(result.message, 'info');
@@ -872,10 +858,7 @@ export class SettingsPage extends HTMLElement {
 
     async updateProgress() {
         try {
-            const response = await fetch('/api/embeddings/migration/progress');
-            if (!response.ok) throw new Error('Failed to fetch progress');
-            
-            const progress = await response.json();
+            const progress = await window.app.apiClient.get('/embeddings/migration/progress');
             this.renderProgress(progress);
             
             if (!progress.in_progress) {

@@ -89,15 +89,27 @@ class UnifiedSearchService:
         self.score_normalizer = get_score_normalizer(score_normalization_method) if enable_score_normalization else None
         
         # Load quality components if enabled
+        self.quality_scorer = None
         if enable_quality_features:
             try:
-                from .search_quality import SearchIntentAnalyzer
+                from .search_quality import SearchIntentAnalyzer, SearchQualityScorer
                 self.intent_analyzer = SearchIntentAnalyzer()
-                logger.info("Quality features enabled")
+                self.quality_scorer = SearchQualityScorer()
+                logger.info("Quality features enabled (intent analyzer + quality scorer)")
             except ImportError:
                 logger.warning("SearchIntentAnalyzer not available, quality features disabled")
                 self.enable_quality_features = False
         
+        # RRF weights from config
+        try:
+            from ..config import get_settings
+            _settings = get_settings()
+            self._rrf_vector_weight = _settings.rrf_vector_weight
+            self._rrf_text_weight = _settings.rrf_text_weight
+        except Exception:
+            self._rrf_vector_weight = 1.0
+            self._rrf_text_weight = 1.2
+
         # Korean translation dictionary
         self.korean_translations = self._init_korean_translations()
         
@@ -106,7 +118,8 @@ class UnifiedSearchService:
             f"Quality: {enable_quality_features}, "
             f"Korean: {enable_korean_optimization}, "
             f"NoiseFilter: {enable_noise_filter}, "
-            f"ScoreNorm: {enable_score_normalization} ({score_normalization_method})"
+            f"ScoreNorm: {enable_score_normalization} ({score_normalization_method}), "
+            f"RRF weights: vector={self._rrf_vector_weight}, text={self._rrf_text_weight}"
         )
 
     def _init_korean_translations(self) -> Dict[str, List[str]]:
@@ -320,6 +333,19 @@ class UnifiedSearchService:
         # 11. 메트릭 수집
         await self._collect_metrics(original_query, result, start_time, project_id, category)
         
+        # 12. 빈 결과/저품질 결과 시 suggestions 생성
+        if original_query and (
+            not result.results
+            or (result.results and max(r.similarity_score for r in result.results) < 0.3)
+        ):
+            result.suggestions = self._generate_suggestions(original_query, project_id)
+        
+        # 13. 관계 그래프 확장 (상위 결과의 연결된 메모리 추가)
+        if result.results and len(result.results) > 0:
+            related = await self._expand_with_relations(result, limit=3)
+            if related:
+                result.related_memories = related
+        
         logger.info(
             f"Search completed: query='{original_query[:50]}...', "
             f"results={len(result.results)}, time={search_time:.3f}s"
@@ -440,10 +466,10 @@ class UnifiedSearchService:
         """
         RRF 기반 하이브리드 검색 (벡터 + 텍스트 병렬 수행)
         """
-        # 1. 임베딩 생성 (캐시 활용)
+        # 1. 임베딩 생성 (캐시 활용, 검색 쿼리이므로 is_query=True)
         query_embedding_list = await self.cache_manager.get_cached_embedding(query)
         if query_embedding_list is None:
-            query_embedding_list = self.embedding_service.embed(query)
+            query_embedding_list = self.embedding_service.embed(query, is_query=True)
             await self.cache_manager.cache_embedding(query, query_embedding_list)
         
         query_embedding = self.embedding_service.to_bytes(query_embedding_list)
@@ -474,7 +500,7 @@ class UnifiedSearchService:
                 except (KeyError, TypeError):
                     distance = 1.0
                 
-                vector_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
+                vector_score = max(0.0, min(1.0, 1.0 - (distance ** 2 / 2.0)))
                 
                 context = ScoringContext(
                     query=query,
@@ -519,43 +545,73 @@ class UnifiedSearchService:
         vector_results: List[SearchResult], 
         text_results: List[SearchResult], 
         limit: int, 
-        k: int = 60
+        k: int = 60,
+        vector_weight: Optional[float] = None,
+        text_weight: Optional[float] = None,
     ) -> List[SearchResult]:
         """
         Reciprocal Rank Fusion 알고리즘 적용
-        Score = 1 / (k + rank)
+        Score = weight * (1 / (k + rank))
+        
+        RRF는 순위 결정에만 사용하고, 최종 점수는 원래 벡터 유사도를 유지.
+        text_weight > vector_weight 이면 키워드 정확 매칭을 우대 (작은 모델에 유리).
         """
-        scores = {}
-        content_map = {}
+        if vector_weight is None:
+            vector_weight = self._rrf_vector_weight
+        if text_weight is None:
+            text_weight = self._rrf_text_weight
+
+        rrf_scores: Dict[str, float] = {}
+        content_map: Dict[str, SearchResult] = {}
+        original_scores: Dict[str, float] = {}
         
         # Vector Results 점수 합산
         for rank, item in enumerate(vector_results):
             if item.id not in content_map:
                 content_map[item.id] = item
-            scores[item.id] = scores.get(item.id, 0) + (1.0 / (k + rank + 1))
+                original_scores[item.id] = item.similarity_score
+            rrf_scores[item.id] = rrf_scores.get(item.id, 0) + vector_weight * (1.0 / (k + rank + 1))
             
         # Text Results 점수 합산
         for rank, item in enumerate(text_results):
             if item.id not in content_map:
                 content_map[item.id] = item
-            # 텍스트 매칭은 강력한 시그널이므로 동일한 가중치 적용
-            scores[item.id] = scores.get(item.id, 0) + (1.0 / (k + rank + 1))
+                original_scores[item.id] = item.similarity_score
+            rrf_scores[item.id] = rrf_scores.get(item.id, 0) + text_weight * (1.0 / (k + rank + 1))
+            if item.id in original_scores:
+                original_scores[item.id] = min(1.0, original_scores[item.id] + 0.1)
             
         # RRF 점수 기준 정렬
-        sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
+        sorted_ids = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
         
         final_results = []
-        # 상위 결과 추출 및 점수 정규화 (Rank-based Decay)
-        # 1등 1.0, 2등 0.98, ... 
-        for i, doc_id in enumerate(sorted_ids[:limit]):
+        for doc_id in sorted_ids[:limit]:
             item = content_map[doc_id]
-            # 순위에 따른 인위적인 점수 부여 (직관적인 UI 표시를 위함)
-            # RRF 점수는 사용자에게 의미가 없으므로 변환함
-            decay_score = 0.99 * (0.98 ** i) 
-            item.similarity_score = round(decay_score, 4)
+            item.similarity_score = original_scores.get(doc_id, 0.5)
             final_results.append(item)
             
         return final_results
+
+    def _split_korean_compound(self, token: str) -> List[str]:
+        """
+        한국어 복합어를 가능한 서브토큰으로 분해.
+        
+        unicode61 토크나이저는 공백 없는 한국어 복합어를 하나의 토큰으로 처리하므로,
+        2~3음절 단위로 분해하여 OR 검색이 가능하게 함.
+        예: "토큰최적화" → ["토큰최적화", "토큰", "최적화", "토큰최", "적화"]
+        """
+        korean_chars = [c for c in token if '가' <= c <= '힣']
+        if len(korean_chars) < 4:
+            return [token]
+
+        sub_tokens = {token}
+        n = len(token)
+        for size in (2, 3):
+            for i in range(n - size + 1):
+                chunk = token[i:i + size]
+                if any('가' <= c <= '힣' for c in chunk) and len(chunk) >= 2:
+                    sub_tokens.add(chunk)
+        return list(sub_tokens)
 
     async def _exact_search(
         self,
@@ -569,7 +625,19 @@ class UnifiedSearchService:
         tokens = clean.split()
         if not tokens:
             return SearchResponse(results=[])
-        fts_query = " AND ".join([f'"{t}"' for t in tokens])
+
+        # 한국어 복합어 분해: 각 토큰을 서브토큰으로 확장
+        if self.enable_korean_optimization:
+            expanded_token_groups = []
+            for t in tokens:
+                subs = self._split_korean_compound(t)
+                if len(subs) > 1:
+                    expanded_token_groups.append("(" + " OR ".join(f'"{s}"' for s in subs) + ")")
+                else:
+                    expanded_token_groups.append(f'"{t}"')
+            fts_query = " AND ".join(expanded_token_groups)
+        else:
+            fts_query = " AND ".join([f'"{t}"' for t in tokens])
 
         # FTS 쿼리 실행
         sql = """
@@ -595,11 +663,14 @@ class UnifiedSearchService:
             rows = await self.db.fetchall(sql, tuple(params))
             
             results = []
-            for row in rows:
+            # FTS rank 기반 점수 계산 (순위에 따라 0.9 ~ 0.7 범위)
+            for i, row in enumerate(rows):
+                # 텍스트 매칭은 높은 점수지만 1.0은 아님
+                text_score = max(0.7, 0.9 - (i * 0.02))
                 results.append(SearchResult(
                     id=row['id'],
                     content=row['content'],
-                    similarity_score=1.0,
+                    similarity_score=text_score,
                     created_at=row['created_at'],
                     project_id=row['project_id'],
                     category=row['category'],
@@ -621,10 +692,10 @@ class UnifiedSearchService:
         recency_weight: float
     ) -> SearchResponse:
         """순수 의미 기반 벡터 검색"""
-        # 임베딩 생성
+        # 임베딩 생성 (검색 쿼리이므로 is_query=True)
         query_embedding_list = await self.cache_manager.get_cached_embedding(query)
         if query_embedding_list is None:
-            query_embedding_list = self.embedding_service.embed(query)
+            query_embedding_list = self.embedding_service.embed(query, is_query=True)
             await self.cache_manager.cache_embedding(query, query_embedding_list)
         
         query_embedding = self.embedding_service.to_bytes(query_embedding_list)
@@ -646,7 +717,7 @@ class UnifiedSearchService:
             except (KeyError, TypeError):
                 distance = 1.0
             
-            similarity_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
+            similarity_score = max(0.0, min(1.0, 1.0 - (distance ** 2 / 2.0)))
             
             # 최신성 가중치 적용
             if recency_weight > 0.0:
@@ -807,10 +878,138 @@ class UnifiedSearchService:
         min_quality_score: float,
         sort_by: str
     ) -> SearchResponse:
-        """품질 스코어링 적용"""
-        # 품질 스코어링 로직은 enhanced_search.py 참조
-        # 여기서는 간단화된 버전 구현
-        return result
+        """품질 스코어링 적용 - SearchQualityScorer 활용"""
+        if not self.quality_scorer or not result.results:
+            return result
+
+        try:
+            results_as_dicts = [
+                {
+                    "id": r.id,
+                    "content": r.content,
+                    "similarity_score": r.similarity_score,
+                    "created_at": r.created_at,
+                    "project_id": r.project_id,
+                    "category": r.category,
+                    "source": r.source,
+                    "tags": r.tags or [],
+                }
+                for r in result.results
+            ]
+
+            scored = self.quality_scorer.score_results(query, results_as_dicts)
+
+            reranked = []
+            for item in scored:
+                quality = item.get("quality_score", 0.0)
+                if quality < min_quality_score:
+                    continue
+                reranked.append(SearchResult(
+                    id=item["id"],
+                    content=item["content"],
+                    similarity_score=item.get("quality_score", item.get("similarity_score", 0.0)),
+                    created_at=item.get("created_at", ""),
+                    project_id=item.get("project_id"),
+                    category=item.get("category", ""),
+                    source=item.get("source", ""),
+                    tags=item.get("tags"),
+                ))
+
+            return SearchResponse(results=reranked, total=len(reranked))
+        except Exception as e:
+            logger.warning(f"Quality scoring failed, returning original results: {e}")
+            return result
+
+    def _generate_suggestions(self, query: str, project_id: Optional[str] = None) -> List[str]:
+        """빈 결과 또는 저품질 결과 시 검색 제안 생성"""
+        suggestions = []
+
+        if self.query_expander:
+            try:
+                terms = self.query_expander.suggest_terms(query)
+                suggestions.extend(terms)
+            except Exception:
+                pass
+
+        category_hints = ["bug", "decision", "task", "code_snippet", "incident"]
+        if self.intent_analyzer:
+            try:
+                intent = self.intent_analyzer.analyze(query)
+                if intent.expected_category and intent.expected_category in category_hints:
+                    category_hints.remove(intent.expected_category)
+                    category_hints.insert(0, intent.expected_category)
+            except Exception:
+                pass
+
+        if not suggestions:
+            suggestions.append(f"{query} (다른 검색 모드를 시도해보세요)")
+
+        return suggestions[:5]
+
+    async def _expand_with_relations(
+        self,
+        result: SearchResponse,
+        limit: int = 3,
+        top_n: int = 3,
+    ) -> Optional[List[SearchResult]]:
+        """검색 결과 상위 N개의 관계 그래프를 순회하여 관련 메모리를 확장 로드"""
+        try:
+            from .relation import RelationService
+
+            relation_service = RelationService(self.db)
+            existing_ids = {r.id for r in result.results}
+            related_memories = []
+
+            for item in result.results[:top_n]:
+                links = await relation_service.get_relations_for_memory(
+                    memory_id=item.id,
+                    direction="both",
+                    limit=5,
+                )
+                for link in links:
+                    linked_id = link.target_id if link.source_id == item.id else link.source_id
+                    if linked_id in existing_ids:
+                        continue
+                    existing_ids.add(linked_id)
+
+                    linked_content = link.target_content if link.source_id == item.id else link.source_content
+                    linked_project = link.target_project_id if link.source_id == item.id else link.source_project_id
+
+                    if not linked_content:
+                        continue
+
+                    row = await self.db.fetchone(
+                        "SELECT id, content, created_at, project_id, category, source, tags FROM memories WHERE id = ?",
+                        (linked_id,),
+                    )
+                    if not row:
+                        continue
+
+                    import json as _json
+                    tags_raw = row.get("tags")
+                    tags = _json.loads(tags_raw) if isinstance(tags_raw, str) else tags_raw
+
+                    related_memories.append(SearchResult(
+                        id=row["id"],
+                        content=row["content"],
+                        similarity_score=link.strength,
+                        created_at=row.get("created_at", ""),
+                        project_id=row.get("project_id"),
+                        category=row.get("category", ""),
+                        source=row.get("source", ""),
+                        tags=tags,
+                    ))
+
+                    if len(related_memories) >= limit:
+                        break
+
+                if len(related_memories) >= limit:
+                    break
+
+            return related_memories if related_memories else None
+        except Exception as e:
+            logger.warning(f"Relation expansion failed: {e}")
+            return None
 
     def _calculate_recency_score(
         self,
@@ -905,6 +1104,116 @@ class UnifiedSearchService:
         except Exception:
             return None
         return None
+
+    async def search_with_context_optimization(
+        self,
+        query: str,
+        project_id: Optional[str] = None,
+        category: Optional[str] = None,
+        limit: int = 25,
+        optimize_context: bool = True
+    ) -> tuple:
+        """
+        맥락 최적화와 함께 검색 수행
+        
+        검색 의도를 분석하여 세션 맥락을 최적화된 방식으로 로드합니다.
+        이를 통해 토큰 사용량을 절감하면서도 관련성 높은 정보를 제공합니다.
+        
+        Args:
+            query: 검색 쿼리
+            project_id: 프로젝트 ID
+            category: 카테고리 필터
+            limit: 결과 개수
+            optimize_context: 맥락 최적화 활성화 (False면 기본 검색만 수행)
+            
+        Returns:
+            (search_response, optimized_context)
+            - search_response: 검색 결과
+            - optimized_context: 최적화된 세션 맥락 (optimize_context=False이거나 세션이 없으면 None)
+            
+        Requirements: 6.1, 6.2, 6.3, 6.4, 6.5
+        """
+        start_time = time.perf_counter()
+        
+        # 1. 기본 검색 수행
+        search_response = await self.search(
+            query=query,
+            project_id=project_id,
+            category=category,
+            limit=limit,
+            search_mode="smart"  # 의도 기반 자동 조정 활성화
+        )
+        
+        # 2. 맥락 최적화가 비활성화되었거나 프로젝트 ID가 없으면 검색 결과만 반환
+        if not optimize_context or not project_id:
+            logger.info(
+                f"Context optimization skipped: "
+                f"optimize_context={optimize_context}, project_id={project_id}"
+            )
+            return search_response, None
+        
+        # 3. 의도 분석 (이미 search()에서 수행되었지만 명시적으로 다시 수행)
+        intent = None
+        if self.enable_quality_features and self.intent_analyzer and query:
+            intent = self.intent_analyzer.analyze(query)
+            logger.info(
+                f"Intent analyzed for context optimization: "
+                f"type={intent.intent_type}, urgency={intent.urgency:.2f}, "
+                f"specificity={intent.specificity:.2f}"
+            )
+        else:
+            # 의도 분석기가 없으면 기본 의도 생성
+            from .search_quality import SearchIntent
+            intent = SearchIntent(
+                intent_type='lookup',
+                urgency=0.5,
+                specificity=0.5,
+                temporal_focus='any',
+                expected_category=category,
+                key_entities=[]
+            )
+            logger.debug("Using default intent for context optimization")
+        
+        # 4. ContextOptimizer를 통한 맥락 로드
+        optimized_context = None
+        try:
+            # SessionService와 ContextOptimizer 초기화
+            from .session import SessionService
+            from .context_optimizer import ContextOptimizer
+            
+            session_service = SessionService(self.db)
+            context_optimizer = ContextOptimizer(session_service)
+            
+            # 의도 기반 맥락 로드
+            optimized_context = await context_optimizer.load_context_for_search(
+                query=query,
+                project_id=project_id,
+                intent=intent
+            )
+            
+            if optimized_context:
+                logger.info(
+                    f"Context loaded and optimized: "
+                    f"session={optimized_context.session_id}, "
+                    f"pins={len(optimized_context.pins) if optimized_context.pins else 0}"
+                )
+            else:
+                logger.info(f"No active session found for project: {project_id}")
+                
+        except Exception as e:
+            logger.error(f"Failed to load optimized context: {e}", exc_info=True)
+            # 맥락 로드 실패는 치명적이지 않으므로 검색 결과는 반환
+            optimized_context = None
+        
+        # 5. 검색 시간 로깅
+        search_time = time.perf_counter() - start_time
+        logger.info(
+            f"Search with context optimization completed in {search_time:.3f}s - "
+            f"results: {len(search_response.results)}, "
+            f"context_loaded: {optimized_context is not None}"
+        )
+        
+        return search_response, optimized_context
 
     async def _collect_metrics(
         self,

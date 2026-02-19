@@ -4,10 +4,11 @@ Enhanced structured logging module for mem-mesh server with file logging support
 This module provides structured logging with configurable format (JSON or text),
 configurable log levels, file logging, and performance monitoring capabilities.
 
-환경변수:
-- MCP_LOG_LEVEL: 로그 레벨 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-- MCP_LOG_FILE: 로그 파일 경로 (선택)
-- MCP_LOG_FORMAT: 로그 형식 (json 또는 text, 기본값: text)
+환경변수 (MEM_MESH_* 우선, MCP_* deprecated fallback):
+- MEM_MESH_LOG_LEVEL: 로그 레벨 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+- MEM_MESH_LOG_FILE: 로그 파일 경로 (선택)
+- MEM_MESH_LOG_FORMAT: 로그 형식 (json 또는 text, 기본값: text)
+- MEM_MESH_LOG_OUTPUT: 출력 대상 (console, file, both)
 
 사용법:
 ```python
@@ -103,9 +104,9 @@ class TextFormatter(logging.Formatter):
 
 def get_formatter() -> logging.Formatter:
     """환경변수에 따라 적절한 formatter 반환"""
-    # MCP_LOG_FORMAT 또는 MEM_MESH_LOG_FORMAT 지원
+    # MEM_MESH_LOG_FORMAT 우선, MCP_LOG_FORMAT deprecated fallback
     log_format = (
-        os.getenv("MCP_LOG_FORMAT") or os.getenv("MEM_MESH_LOG_FORMAT") or "text"
+        os.getenv("MEM_MESH_LOG_FORMAT") or os.getenv("MCP_LOG_FORMAT") or "text"
     ).lower()
 
     if log_format == "json":
@@ -184,17 +185,17 @@ class MemMeshLogger:
         self.logger.propagate = False
 
     def _get_log_level(self) -> str:
-        """로그 레벨 환경변수 조회 (MCP_LOG_LEVEL 또는 MEM_MESH_LOG_LEVEL)"""
-        return os.getenv("MCP_LOG_LEVEL") or os.getenv("MEM_MESH_LOG_LEVEL") or "INFO"
+        """로그 레벨 (MEM_MESH_LOG_LEVEL 우선, MCP_LOG_LEVEL deprecated fallback)"""
+        return os.getenv("MEM_MESH_LOG_LEVEL") or os.getenv("MCP_LOG_LEVEL") or "INFO"
 
     def _get_log_file(self) -> str:
-        """로그 파일 환경변수 조회 (MCP_LOG_FILE 또는 MEM_MESH_LOG_FILE)"""
-        return os.getenv("MCP_LOG_FILE") or os.getenv("MEM_MESH_LOG_FILE") or ""
+        """로그 파일 경로 (MEM_MESH_LOG_FILE 우선, MCP_LOG_FILE deprecated fallback)"""
+        return os.getenv("MEM_MESH_LOG_FILE") or os.getenv("MCP_LOG_FILE") or ""
 
     def _get_log_output(self) -> str:
-        """로그 출력 대상 환경변수 조회 (MCP_LOG_OUTPUT 또는 MEM_MESH_LOG_OUTPUT)"""
+        """로그 출력 대상 (MEM_MESH_LOG_OUTPUT 우선, MCP_LOG_OUTPUT deprecated fallback)"""
         return (
-            os.getenv("MCP_LOG_OUTPUT") or os.getenv("MEM_MESH_LOG_OUTPUT") or "console"
+            os.getenv("MEM_MESH_LOG_OUTPUT") or os.getenv("MCP_LOG_OUTPUT") or "console"
         )
 
     def info(self, message: str, **kwargs) -> None:
@@ -347,14 +348,14 @@ def setup_logging(
     """
     global logger, _initialized, _loggers
 
-    # 환경변수 읽기 (MCP_* 또는 MEM_MESH_* 지원)
-    log_level = os.getenv("MCP_LOG_LEVEL") or os.getenv("MEM_MESH_LOG_LEVEL") or "INFO"
-    log_file = os.getenv("MCP_LOG_FILE") or os.getenv("MEM_MESH_LOG_FILE") or ""
+    # 환경변수 읽기 (MEM_MESH_* 우선, MCP_* deprecated fallback)
+    log_level = os.getenv("MEM_MESH_LOG_LEVEL") or os.getenv("MCP_LOG_LEVEL") or "INFO"
+    log_file = os.getenv("MEM_MESH_LOG_FILE") or os.getenv("MCP_LOG_FILE") or ""
     log_format = (
-        os.getenv("MCP_LOG_FORMAT") or os.getenv("MEM_MESH_LOG_FORMAT") or "text"
+        os.getenv("MEM_MESH_LOG_FORMAT") or os.getenv("MCP_LOG_FORMAT") or "text"
     )
     log_output = (
-        os.getenv("MCP_LOG_OUTPUT") or os.getenv("MEM_MESH_LOG_OUTPUT") or "console"
+        os.getenv("MEM_MESH_LOG_OUTPUT") or os.getenv("MCP_LOG_OUTPUT") or "console"
     )
 
     # 파일 로깅이 설정된 경우 디렉토리 생성
@@ -403,19 +404,19 @@ def setup_simple_logger(name: str) -> logging.Logger:
     Returns:
         Standard logging.Logger instance
     """
-    # 환경변수 조회 (MCP_* 또는 MEM_MESH_* 지원)
+    # 환경변수 조회 (MEM_MESH_* 우선, MCP_* deprecated fallback)
     log_level_str = (
-        os.getenv("MCP_LOG_LEVEL") or os.getenv("MEM_MESH_LOG_LEVEL") or "INFO"
+        os.getenv("MEM_MESH_LOG_LEVEL") or os.getenv("MCP_LOG_LEVEL") or "INFO"
     ).upper()
 
-    log_file = os.getenv("MCP_LOG_FILE") or os.getenv("MEM_MESH_LOG_FILE") or ""
+    log_file = os.getenv("MEM_MESH_LOG_FILE") or os.getenv("MCP_LOG_FILE") or ""
 
     log_format = (
-        os.getenv("MCP_LOG_FORMAT") or os.getenv("MEM_MESH_LOG_FORMAT") or "text"
+        os.getenv("MEM_MESH_LOG_FORMAT") or os.getenv("MCP_LOG_FORMAT") or "text"
     )
 
     log_output = (
-        os.getenv("MCP_LOG_OUTPUT") or os.getenv("MEM_MESH_LOG_OUTPUT") or "console"
+        os.getenv("MEM_MESH_LOG_OUTPUT") or os.getenv("MCP_LOG_OUTPUT") or "console"
     ).lower()
 
     # 로그 레벨 매핑

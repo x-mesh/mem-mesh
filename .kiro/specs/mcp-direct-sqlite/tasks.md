@@ -106,28 +106,28 @@
     - **Property 6: Storage Backend Interface Consistency**
     - **Validates: Requirements 2.1-2.6, 3.1**
 
-- [ ] 9. Docker 설정 구현
-  - [ ] 9.1 Dockerfile.mcp 작성 (docker/Dockerfile.mcp)
+- [x] 9. Docker 설정 구현
+  - [x] 9.1 Dockerfile.mcp 작성 (docker/Dockerfile.mcp)
     - MCP 서버용 Docker 이미지
     - _Requirements: 5.2_
-  - [ ] 9.2 Dockerfile.dashboard 작성 (docker/Dockerfile.dashboard)
+  - [x] 9.2 Dockerfile.dashboard 작성 (docker/Dockerfile.dashboard)
     - FastAPI 대시보드용 Docker 이미지
     - _Requirements: 5.1_
-  - [ ] 9.3 docker-compose.yml 작성 (docker/docker-compose.yml)
+  - [x] 9.3 docker-compose.yml 작성 (docker/docker-compose.yml)
     - 볼륨 공유 설정
     - 환경변수 설정
     - _Requirements: 5.3, 5.4, 5.5_
 
-- [ ] 10. Makefile 작성
-  - [ ] 10.1 Makefile 생성
+- [x] 10. Makefile 작성
+  - [x] 10.1 Makefile 생성
     - install, run-api, run-mcp, test, docker-build, docker-up, clean 명령
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7_
 
-- [ ] 11. 문서 및 설정 파일 업데이트
-  - [ ] 11.1 .env.example 업데이트
+- [x] 11. 문서 및 설정 파일 업데이트
+  - [x] 11.1 .env.example 업데이트
     - 새로운 환경변수 추가
     - _Requirements: 7.4_
-  - [ ] 11.2 pyproject.toml 진입점 업데이트
+  - [x] 11.2 pyproject.toml 진입점 업데이트
     - mem-mesh-mcp, mem-mesh-dashboard 스크립트 추가
     - _Requirements: 8.5, 9.5, 9.6_
 

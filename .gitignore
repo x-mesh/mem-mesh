@@ -21,3 +21,4 @@ logs/
 **/data_bak/
 **/logs/
 **/data_bak_0122/
+.venv/

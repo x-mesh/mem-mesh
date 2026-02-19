@@ -117,21 +117,7 @@ async def call_tool(params: Dict[str, Any]) -> Dict[str, Any]:
         log.error("Dispatcher not initialized")
         return format_tool_error("Storage not initialized")
 
-    if name == "batch_operations":
-        return await _handle_batch_operations(args)
-
     return await dispatcher.dispatch(name, args)
-
-
-async def _handle_batch_operations(args: Dict[str, Any]) -> Dict[str, Any]:
-    if "operations" not in args:
-        return format_tool_error("Missing required argument: operations")
-
-    if batch_handler is None:
-        return format_tool_error("Batch handler not initialized")
-
-    result = await batch_handler.batch_operations(operations=args["operations"])
-    return {"content": [{"type": "text", "text": json.dumps(result)}], "isError": False}
 
 
 async def initialize_storage():
@@ -139,15 +125,17 @@ async def initialize_storage():
 
     storage = await storage_manager.initialize()
     tool_handlers = MCPToolHandlers(storage)
-    dispatcher = MCPDispatcher(tool_handlers)
 
     from ..core.database.base import Database
+    from ..core.config import Settings as PureSettings
     from ..core.embeddings.service import EmbeddingService
     from ..core.services.memory import MemoryService
     from ..core.services.legacy.search import SearchService
     from ..mcp_common.batch_tools import BatchOperationHandler
 
-    db = Database()
+    batch_settings = PureSettings()
+    db = Database(batch_settings.database_path)
+    await db.connect()
     embedding_service = EmbeddingService(preload=False)
     memory_service = MemoryService(db, embedding_service)
     search_service = SearchService(db, embedding_service)
@@ -158,6 +146,8 @@ async def initialize_storage():
         embedding_service=embedding_service,
         db=db,
     )
+
+    dispatcher = MCPDispatcher(tool_handlers, batch_handler=batch_handler)
 
     log.info("Tool handlers and batch handler initialized")
 
@@ -236,6 +226,13 @@ async def main():
             continue
 
     log.info("Performing cleanup...")
+    if batch_handler is not None:
+        try:
+            if hasattr(batch_handler, 'db') and batch_handler.db is not None:
+                await batch_handler.db.disconnect()
+                log.info("Batch handler DB disconnected")
+        except Exception as e:
+            log.warning(f"Error closing batch handler DB: {e}")
     await storage_manager.shutdown()
     log.info("Server shutdown completed")
 
