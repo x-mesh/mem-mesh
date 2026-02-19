@@ -17,12 +17,23 @@ class ChromaHeader extends HTMLElement {
   }
 
   async fetchVersion() {
+    const versionBadge = this.querySelector('#version-badge');
+    if (!versionBadge) return;
+
+    // 1. HTML data-version에서 즉시 표시 (서버 사이드 렌더링)
+    const ssrVersion = document.body.dataset.version;
+    if (ssrVersion) {
+      versionBadge.textContent = `v${ssrVersion}`;
+      versionBadge.classList.add('loaded');
+      return;
+    }
+
+    // 2. Fallback: API에서 가져오기
     try {
       const api = window.app?.apiClient;
       if (!api) return;
       const data = await api.get('/');
-      const versionBadge = this.querySelector('#version-badge');
-      if (versionBadge && data.version) {
+      if (data.version) {
         versionBadge.textContent = `v${data.version}`;
         versionBadge.classList.add('loaded');
       }
