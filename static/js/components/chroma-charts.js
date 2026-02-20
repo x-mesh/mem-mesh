@@ -545,11 +545,13 @@ class ChromaCharts {
         // Format label: use date label if available
         let labelText = `Point ${index + 1}`;
         if (labels[index]) {
-          try {
-            const d = new Date(labels[index] + 'T00:00:00');
+          const d = new Date(labels[index] + 'T00:00:00');
+          if (!isNaN(d.getTime())) {
             const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
             labelText = `${d.getMonth() + 1}/${d.getDate()} (${dayNames[d.getDay()]})`;
-          } catch { labelText = labels[index]; }
+          } else {
+            labelText = labels[index];
+          }
         }
         
         // Show tooltip

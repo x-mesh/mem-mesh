@@ -98,9 +98,7 @@ class DashboardPage extends HTMLElement {
     if (!status.isConnected) {
       try {
         await wsClient.connect();
-      } catch (error) {
-        // WebSocket connection failed silently
-      }
+      } catch (_) {}
     }
   }
 
@@ -115,33 +113,20 @@ class DashboardPage extends HTMLElement {
    * Handle memory created event
    */
   handleMemoryCreated(data) {
-    try {
-      const { memory } = data;
-      if (!memory) return;
-      
-      // 중복 체크
-      const existingIndex = this.recentMemories.findIndex(m => m.id === memory.id);
-      if (existingIndex !== -1) return;
-      
-      // 최근 메모리 목록에 추가 (맨 앞에)
-      this.recentMemories.unshift(memory);
-      
-      // 최대 개수 제한 (10개)
-      if (this.recentMemories.length > 20) {
-        this.recentMemories = this.recentMemories.slice(0, 20);
-      }
-      
-      // UI 업데이트 - 애니메이션과 함께
-      this.updateRecentMemoriesWithAnimation('created', memory);
-      
-      // 통계 새로고침 (비동기)
-      this.refreshStatsAsync();
-      
-      // 토스트 알림
-      this.showToast(`새 메모리가 생성되었습니다: ${memory.category}`, 'success');
-    } catch (error) {
-      // handleMemoryCreated error
+    const { memory } = data;
+    if (!memory) return;
+
+    const existingIndex = this.recentMemories.findIndex(m => m.id === memory.id);
+    if (existingIndex !== -1) return;
+
+    this.recentMemories.unshift(memory);
+    if (this.recentMemories.length > 20) {
+      this.recentMemories = this.recentMemories.slice(0, 20);
     }
+
+    this.updateRecentMemoriesWithAnimation('created', memory);
+    this.refreshStatsAsync();
+    this.showToast(`새 메모리가 생성되었습니다: ${memory.category}`, 'success');
   }
 
   /**
@@ -409,9 +394,7 @@ class DashboardPage extends HTMLElement {
         this.stats = stats;
         this.updateStatsSection();
       }
-    } catch (error) {
-      // stats refresh failed silently
-    }
+    } catch (_) {}
   }
   setupIntersectionObserver() {
     this.animationObserver = new IntersectionObserver((entries) => {
@@ -1356,45 +1339,6 @@ class DashboardPage extends HTMLElement {
           </div>
         </section>
         
-        <!-- System Health & Top Tags Row -->
-        <!--
-        <section class="chroma-dashboard-section">
-          <div class="charts-grid">
-            <div class="chart-card animate-on-scroll">
-              <div class="chart-header">
-                <h3>시스템 상태</h3>
-              </div>
-              <div class="chart-content">
-                ${this.createSystemHealthWidget()}
-              </div>
-            </div>
-            <div class="chart-card animate-on-scroll">
-              <div class="chart-header">
-                <h3>인기 태그</h3>
-              </div>
-              <div class="chart-content">
-                ${this.createTopTagsWidget()}
-              </div>
-            </div>
-          </div>
-        </section>
-        -->
-
-        <!-- Search Performance Mini Dashboard -->
-        <!--
-        <section class="chroma-dashboard-section">
-          <div class="chart-card animate-on-scroll">
-            <div class="chart-header">
-              <h3>검색 성능</h3>
-              <button class="view-all-btn" data-section="analytics">상세 보기</button>
-            </div>
-            <div class="chart-content">
-              ${this.createSearchPerfWidget()}
-            </div>
-          </div>
-        </section>
-        -->
-
         <!-- Recent Activity Section -->
         <section class="chroma-dashboard-section activity-section">
           <div class="section-header">
