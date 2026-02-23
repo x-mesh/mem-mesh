@@ -83,12 +83,17 @@ Before generating code or executing commands, you must perform a brief <Thinking
 ## Session Context Management
 ### Session Start
 ```
-mcp_mem_mesh_session_resume(project_id="mem-mesh", expand=false, limit=10)
+mcp_mem_mesh_session_resume(project_id="mem-mesh", expand="smart", limit=10)
 ```
 Report: `pins_count`, `open_pins`, `completed_pins`
 
-**Token Optimization:**
-- `expand=false`: Summary only (no pin content) - saves ~90% tokens
+**Token Optimization — expand 모드:**
+- `expand="smart"` (권장): status × importance 4-Tier 매트릭스
+  - T1: active + important(≥4) → full content + tags + created_at
+  - T2: active + normal(<4) → content[:200] + tags
+  - T3: completed + important → content[:80]
+  - T4: completed + normal → id + importance + status only
+- `expand=false`: All pins as 80-char compact summary — saves ~90% tokens
 - `expand=true`: Full pin content loaded
 - `token_info` shows: `loaded_tokens`, `unloaded_tokens`, `estimated_total`
 

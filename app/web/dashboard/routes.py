@@ -7,6 +7,7 @@ Provides API endpoints for memory management, search, statistics, embedding mana
 import json
 import logging
 from pathlib import Path
+from typing import Union
 from fastapi import APIRouter, HTTPException, Depends
 
 from app.core.services.memory import MemoryService
@@ -316,7 +317,7 @@ async def get_work_project_stats(
 @router.get("/work/sessions/resume/{project_id}")
 async def resume_session(
     project_id: str,
-    expand: bool = False,
+    expand: Union[bool, str] = False,
     limit: int = 10,
     user_id: str = None,
     session_service: SessionService = Depends(get_session_service),

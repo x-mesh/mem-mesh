@@ -47,9 +47,9 @@ class SessionContext(BaseModel):
     pins_count: int
     open_pins: int
     completed_pins: int
-    pins: List[Union[PinResponse, PinCompact, dict]] = Field(
+    pins: List[Union[dict, PinResponse, PinCompact]] = Field(
         default_factory=list,
-        description="expand=true: PinResponse 전체, expand=false: PinCompact 요약"
+        description="expand=true: PinResponse 전체, expand=false: PinCompact 요약, expand='smart': dict (4-Tier)"
     )
 
 
@@ -57,8 +57,20 @@ class SessionResumeParams(BaseModel):
     """세션 재개 파라미터"""
     project_id: str
     user_id: Optional[str] = Field(default=None)
-    expand: bool = Field(default=False)
+    expand: Union[bool, str] = Field(
+        default=False,
+        description="false=compact, true=full, 'smart'=open/in_progress만 full"
+    )
     limit: int = Field(default=10, ge=1, le=100)
+
+    @field_validator("expand", mode="before")
+    @classmethod
+    def validate_expand(cls, v: Any) -> Union[bool, str]:
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str) and v == "smart":
+            return v
+        raise ValueError("expand must be bool or 'smart'")
 
 
 class SessionEndParams(BaseModel):
