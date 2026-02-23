@@ -549,36 +549,42 @@ class MCPToolHandlers:
     async def session_resume(
         self,
         project_id: str,
-        expand: bool = False,
+        expand: Any = False,
         limit: int = 10
     ) -> Dict[str, Any]:
         """Resume the last session for a project
-        
+
         Args:
             project_id: Project identifier
-            expand: If True, return full pin contents; if False, return summary only
+            expand: false=compact, true=full, "smart"=4-tier matrix (status×importance, recommended)
             limit: Maximum number of pins to return (default 10)
-            
+
         Returns:
             dict: Session context with pins and token tracking information
         """
+        # expand 값 정규화: bool 또는 "smart"
+        if isinstance(expand, str) and expand.lower() == "smart":
+            normalized_expand = "smart"
+        else:
+            normalized_expand = bool(expand) if not isinstance(expand, bool) else expand
+
         logger.info(
             "Tool session_resume called",
             project_id=project_id,
-            expand=expand,
+            expand=normalized_expand,
             limit=limit
         )
-        
+
         try:
             from ..core.services.session import SessionService
-            
+
             db = self._get_database()
             session_service = SessionService(db)
-            
+
             # resume_with_token_tracking 메서드 사용
             session_context, token_info = await session_service.resume_with_token_tracking(
                 project_id=project_id,
-                expand=expand,
+                expand=normalized_expand,
                 limit=limit
             )
             
@@ -593,8 +599,8 @@ class MCPToolHandlers:
             response = session_context.model_dump()
             response["token_info"] = token_info
             
-            # expand=false일 때 토큰 제한 경고
-            if not expand and token_info["loaded_tokens"] > 100:
+            # expand=false일 때 토큰 제한 경고 (smart 모드는 의도적이므로 제외)
+            if normalized_expand is False and token_info["loaded_tokens"] > 100:
                 response["token_warning"] = (
                     f"요약 모드에서 {token_info['loaded_tokens']} 토큰이 로드되었습니다. "
                     "100 토큰 이하를 권장합니다."
