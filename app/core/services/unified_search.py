@@ -10,6 +10,7 @@ Unified Search Service - 통합 검색 서비스
 - simple_improved_search.py: 간단한 한영 변환
 """
 
+import json
 import logging
 import time
 import urllib3
@@ -340,8 +341,8 @@ class UnifiedSearchService:
         ):
             result.suggestions = self._generate_suggestions(original_query, project_id)
         
-        # 13. 관계 그래프 확장 (상위 결과의 연결된 메모리 추가)
-        if result.results and len(result.results) > 0:
+        # 13. 관계 그래프 확장 (결과가 적을 때만 보충)
+        if result.results and len(result.results) < 3:
             related = await self._expand_with_relations(result, limit=3)
             if related:
                 result.related_memories = related
@@ -500,7 +501,7 @@ class UnifiedSearchService:
                 except (KeyError, TypeError):
                     distance = 1.0
                 
-                vector_score = max(0.0, min(1.0, 1.0 - (distance ** 2 / 2.0)))
+                vector_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
                 
                 context = ScoringContext(
                     query=query,
@@ -717,7 +718,7 @@ class UnifiedSearchService:
             except (KeyError, TypeError):
                 distance = 1.0
             
-            similarity_score = max(0.0, min(1.0, 1.0 - (distance ** 2 / 2.0)))
+            similarity_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
             
             # 최신성 가중치 적용
             if recency_weight > 0.0:
@@ -958,55 +959,48 @@ class UnifiedSearchService:
 
             relation_service = RelationService(self.db)
             existing_ids = {r.id for r in result.results}
-            related_memories = []
 
+            # 1단계: 상위 결과의 관계에서 후보 ID 수집
+            candidate_ids: Dict[str, float] = {}  # id -> strength
             for item in result.results[:top_n]:
                 links = await relation_service.get_relations_for_memory(
-                    memory_id=item.id,
-                    direction="both",
-                    limit=5,
+                    memory_id=item.id, direction="both", limit=5,
                 )
                 for link in links:
                     linked_id = link.target_id if link.source_id == item.id else link.source_id
-                    if linked_id in existing_ids:
-                        continue
-                    existing_ids.add(linked_id)
-
-                    linked_content = link.target_content if link.source_id == item.id else link.source_content
-                    linked_project = link.target_project_id if link.source_id == item.id else link.source_project_id
-
-                    if not linked_content:
-                        continue
-
-                    row = await self.db.fetchone(
-                        "SELECT id, content, created_at, project_id, category, source, tags FROM memories WHERE id = ?",
-                        (linked_id,),
-                    )
-                    if not row:
-                        continue
-
-                    import json as _json
-                    tags_raw = row.get("tags")
-                    tags = _json.loads(tags_raw) if isinstance(tags_raw, str) else tags_raw
-
-                    related_memories.append(SearchResult(
-                        id=row["id"],
-                        content=row["content"],
-                        similarity_score=link.strength,
-                        created_at=row.get("created_at", ""),
-                        project_id=row.get("project_id"),
-                        category=row.get("category", ""),
-                        source=row.get("source", ""),
-                        tags=tags,
-                    ))
-
-                    if len(related_memories) >= limit:
+                    if linked_id not in existing_ids and linked_id not in candidate_ids:
+                        candidate_ids[linked_id] = link.strength
+                    if len(candidate_ids) >= limit:
                         break
-
-                if len(related_memories) >= limit:
+                if len(candidate_ids) >= limit:
                     break
 
-            return related_memories if related_memories else None
+            if not candidate_ids:
+                return None
+
+            # 2단계: 배치 조회로 N+1 제거
+            placeholders = ",".join("?" for _ in candidate_ids)
+            rows = await self.db.fetchall(
+                f"SELECT id, content, created_at, project_id, category, source, tags FROM memories WHERE id IN ({placeholders})",
+                tuple(candidate_ids.keys()),
+            )
+
+            related_memories = []
+            for row in rows:
+                tags_raw = row.get("tags")
+                tags = json.loads(tags_raw) if isinstance(tags_raw, str) else tags_raw
+                related_memories.append(SearchResult(
+                    id=row["id"],
+                    content=row["content"],
+                    similarity_score=candidate_ids.get(row["id"], 0.5),
+                    created_at=row.get("created_at", ""),
+                    project_id=row.get("project_id"),
+                    category=row.get("category", ""),
+                    source=row.get("source", ""),
+                    tags=tags,
+                ))
+
+            return related_memories[:limit] if related_memories else None
         except Exception as e:
             logger.warning(f"Relation expansion failed: {e}")
             return None

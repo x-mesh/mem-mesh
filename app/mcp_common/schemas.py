@@ -341,6 +341,7 @@ Call this at the START of any work session to see what was in progress.
 
 EXAMPLES:
 - Quick summary: {"project_id": "my-project", "expand": false}
+- Smart resume (recommended): {"project_id": "my-project", "expand": "smart"}
 - Full details: {"project_id": "my-project", "expand": true, "limit": 5}""",
             "inputSchema": {
                 "type": "object",
@@ -352,9 +353,12 @@ EXAMPLES:
                         "maxLength": 100
                     },
                     "expand": {
-                        "type": "boolean",
-                        "description": "If true, return full pin contents; if false, return summary only",
-                        "default": False
+                        "description": "Expand mode: false=compact(80 chars), true=full content, 'smart'=4-tier matrix based on status×importance (recommended). Smart tiers: T1(active+important)=full, T2(active+normal)=200chars, T3(completed+important)=80chars, T4(completed+normal)=id only",
+                        "default": False,
+                        "oneOf": [
+                            {"type": "boolean"},
+                            {"type": "string", "enum": ["smart"]}
+                        ]
                     },
                     "limit": {
                         "type": "integer",

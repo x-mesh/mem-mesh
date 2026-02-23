@@ -16,7 +16,7 @@ FastMCP-only (2): cache_stats, clear_cache
 
 import os
 from fastmcp import FastMCP
-from typing import Optional
+from typing import Optional, Union
 from ..core.config import Settings
 from ..core.utils.logger import get_logger, setup_logging
 from ..mcp_common.storage import StorageManager
@@ -266,14 +266,14 @@ async def pin_promote(pin_id: str) -> dict:
 @mcp.tool()
 async def session_resume(
     project_id: str,
-    expand: bool = False,
+    expand: Union[bool, str] = False,
     limit: int = 10,
 ) -> dict:
     """Resume the last session for a project. Returns active pins and session context.
 
     Args:
         project_id: Project identifier
-        expand: If true, return full pin contents; if false, return summary only
+        expand: false=compact, true=full, "smart"=full for open/in_progress only (recommended)
         limit: Maximum number of pins to return
     """
     return await _get_handlers().session_resume(project_id, expand, limit)

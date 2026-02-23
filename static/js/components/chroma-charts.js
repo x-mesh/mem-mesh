@@ -393,13 +393,20 @@ class ChromaCharts {
       width = 500
     } = options;
 
+    if (!data || data.length === 0) {
+      container.innerHTML = '<div class="no-data">No data available</div>';
+      return;
+    }
+
     const maxValue = Math.max(...data);
     const minValue = Math.min(...data);
     const range = maxValue - minValue || 1;
 
-    // Create SVG path
+    const pointCount = data.length;
     const points = data.map((value, index) => {
-      const x = (index / (data.length - 1)) * (width - 60) + 30;
+      const x = pointCount === 1
+        ? (width - 60) / 2 + 30
+        : (index / (pointCount - 1)) * (width - 60) + 30;
       const y = height - 40 - ((value - minValue) / range) * (height - 80);
       return { x, y, value };
     });
@@ -538,11 +545,13 @@ class ChromaCharts {
         // Format label: use date label if available
         let labelText = `Point ${index + 1}`;
         if (labels[index]) {
-          try {
-            const d = new Date(labels[index] + 'T00:00:00');
+          const d = new Date(labels[index] + 'T00:00:00');
+          if (!isNaN(d.getTime())) {
             const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
             labelText = `${d.getMonth() + 1}/${d.getDate()} (${dayNames[d.getDay()]})`;
-          } catch { labelText = labels[index]; }
+          } else {
+            labelText = labels[index];
+          }
         }
         
         // Show tooltip

@@ -3,7 +3,7 @@
 import logging
 import json
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Union
 from uuid import uuid4
 
 from app.core.database.base import Database
@@ -106,7 +106,7 @@ class SessionService:
         self,
         project_id: str,
         user_id: Optional[str] = None,
-        expand: bool = False,
+        expand: Union[bool, str] = False,
         limit: int = 10,
     ) -> Optional[SessionContext]:
         """
@@ -115,7 +115,7 @@ class SessionService:
         Args:
             project_id: 프로젝트 ID
             user_id: 사용자 ID
-            expand: True면 전체 pin 내용 반환
+            expand: True=전체, False=compact, "smart"=open/in_progress만 전체
             limit: 반환할 pin 개수 (기본 10개)
 
         Returns:
@@ -178,7 +178,14 @@ class SessionService:
             (session.id, limit),
         )
         
-        if expand:
+        if expand == "smart":
+            # expand="smart": status × importance 2축 4-Tier 매트릭스
+            # Tier 1: active + important(≥4) → full content
+            # Tier 2: active + normal(<4)    → content[:200] + tags
+            # Tier 3: completed + important  → content[:80]
+            # Tier 4: completed + normal     → id + status만
+            pins = [self._pin_row_to_smart(r) for r in pin_rows]
+        elif expand:
             # expand=true: 전체 핀 정보 반환
             pins = [self._pin_row_to_response(r) for r in pin_rows]
         else:
@@ -389,105 +396,131 @@ class SessionService:
             "status": row["status"],
         }
 
-    async def _generate_narrative_summary(self, session_id: str) -> str:
+    def _pin_row_to_smart(self, row) -> Dict[str, Any]:
         """
-        구조적 서사 요약 생성 (Rule-Based Narrative).
+        DB row를 Smart Expand 규칙에 따라 변환.
 
-        Pin의 메타데이터(생성 순서, importance, status, tags)로 인과관계를 추론하여
-        서사적 요약을 생성한다.
+        status × importance 2축 매트릭스:
+        - Tier 1: active + important(≥4) → full content + tags + created_at
+        - Tier 2: active + normal(<4)    → content[:200] + tags
+        - Tier 3: completed + important  → content[:80]
+        - Tier 4: completed + normal     → id + importance + status만
         """
-        pin_rows = await self.db.fetchall(
+        status = row["status"]
+        importance = row["importance"] or 3
+        content = row["content"] or ""
+        is_active = status in ("open", "in_progress")
+        is_important = importance >= 4
+
+        if is_active and is_important:
+            # Tier 1: 진행 중 + 중요 → 전체 맥락 필요
+            tags = json.loads(row["tags"]) if row["tags"] else []
+            return {
+                "id": row["id"],
+                "content": content,
+                "importance": importance,
+                "status": status,
+                "tags": tags,
+                "created_at": row["created_at"],
+                "_tier": 1,
+            }
+
+        if is_active:
+            # Tier 2: 진행 중 + 일반 → 대략적 내용만
+            tags = json.loads(row["tags"]) if row["tags"] else []
+            return {
+                "id": row["id"],
+                "content": content[:200] + ("..." if len(content) > 200 else ""),
+                "importance": importance,
+                "status": status,
+                "tags": tags,
+                "_tier": 2,
+            }
+
+        if is_important:
+            # Tier 3: 완료 + 중요 → 힌트 수준 내용
+            return {
+                "id": row["id"],
+                "content": content[:80] + ("..." if len(content) > 80 else ""),
+                "importance": importance,
+                "status": status,
+                "_tier": 3,
+            }
+
+        # Tier 4: 완료 + 일반 → 존재 여부만
+        return self._pin_row_to_minimal(row)
+
+    def _pin_row_to_minimal(self, row) -> Dict[str, Any]:
+        """
+        DB row를 최소 핀 정보로 변환 (smart expand에서 completed + 낮은 중요도 핀용).
+
+        content를 포함하지 않아 토큰을 최대한 절약.
+        """
+        return {
+            "id": row["id"],
+            "importance": row["importance"],
+            "status": row["status"],
+            "_tier": 4,
+        }
+
+    async def _generate_narrative_summary(self, session_id: str) -> str:
+        """세션 요약 생성 — 통계 + 주요 작업 미리보기"""
+        stats_row = await self.db.fetchone(
             """
-            SELECT id, content, importance, status, tags, 
-                   created_at, completed_at
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN importance >= 4 THEN 1 ELSE 0 END) as high_importance
             FROM pins
             WHERE session_id = ?
-            ORDER BY created_at ASC
             """,
             (session_id,),
         )
 
-        if not pin_rows:
+        total = stats_row["total"] or 0
+        completed = stats_row["completed"] or 0
+        high_importance = stats_row["high_importance"] or 0
+
+        if total == 0:
             return "세션 완료: 작업 없음"
 
-        total = len(pin_rows)
-        completed = sum(1 for p in pin_rows if p["status"] == "completed")
-        incomplete = [p for p in pin_rows if p["status"] != "completed"]
+        summary = f"세션 완료: {completed}/{total} pins 완료"
+        if high_importance > 0:
+            summary += f" (중요 작업 {high_importance}건 포함)"
 
-        # 프로젝트 ID 조회
-        session = await self.get_session(session_id)
-        project_label = f"[{session.project_id}]" if session else ""
-
-        # 주요 이벤트 감지
-        events = []
-
-        # 1. importance 변화 감지
-        high_importance_pins = [p for p in pin_rows if p["importance"] >= 4]
-        if high_importance_pins:
-            for hip in high_importance_pins:
-                content_preview = (hip["content"] or "")[:60]
-                events.append(f"중요 작업: {content_preview}")
-
-        # 2. category/tag 전환 감지 (bug 관련 태그가 있으면 문제 발생 추정)
-        had_bug = False
-        for p in pin_rows:
-            tags = []
-            if p["tags"]:
-                try:
-                    tags = json.loads(p["tags"]) if isinstance(p["tags"], str) else p["tags"]
-                except (json.JSONDecodeError, TypeError):
-                    tags = []
-            tag_lower = [t.lower() for t in tags]
-            if any(kw in tag_lower for kw in ["bug", "fix", "error", "hotfix", "debug"]):
-                had_bug = True
-                content_preview = (p["content"] or "")[:50]
-                events.append(f"버그/이슈 발견 후 해결: {content_preview}")
-                break
-
-        # 3. 완료 순서와 생성 순서 비교 (순서 역전 감지)
-        completed_pins = [p for p in pin_rows if p["completed_at"]]
-        if len(completed_pins) >= 2:
-            creation_order = [p["id"] for p in pin_rows if p["completed_at"]]
-            completion_order = sorted(
-                completed_pins, key=lambda x: x["completed_at"]
+        # 미완료 작업이 있으면 첫 번째만 표시
+        if completed < total:
+            incomplete_row = await self.db.fetchone(
+                """
+                SELECT content FROM pins
+                WHERE session_id = ? AND status != 'completed'
+                ORDER BY importance DESC
+                LIMIT 1
+                """,
+                (session_id,),
             )
-            completion_ids = [p["id"] for p in completion_order]
-            if creation_order != completion_ids:
-                events.append("우선순위 재조정이 있었음")
+            if incomplete_row and incomplete_row["content"]:
+                preview = incomplete_row["content"][:50]
+                summary += f". 미완료: {preview}"
 
-        # 서사 구성
-        parts = []
-        parts.append(f"{project_label} {total}개 작업 수행")
-
-        if events:
-            parts.append(". ".join(events[:3]))
-
-        parts.append(f"총 {completed}/{total} 완료")
-
-        if incomplete:
-            incomplete_previews = [
-                (p["content"] or "")[:40] for p in incomplete[:2]
-            ]
-            parts.append(f"미완료: {', '.join(incomplete_previews)}")
-
-        return ". ".join(parts)
+        return summary
 
     async def resume_with_token_tracking(
         self,
         project_id: str,
         user_id: Optional[str] = None,
-        expand: bool = False,
+        expand: Union[bool, str] = False,
         limit: int = 10
     ) -> Tuple[Optional[SessionContext], Dict[str, int]]:
         """
         토큰 추적과 함께 세션 재개
-        
+
         Args:
             project_id: 프로젝트 ID
             user_id: 사용자 ID
-            expand: True면 전체 pin 내용 반환
+            expand: True=전체, False=compact, "smart"=open/in_progress만 전체
             limit: 반환할 pin 개수
-            
+
         Returns:
             (session_context, token_info)
             token_info = {
@@ -495,8 +528,6 @@ class SessionService:
                 "unloaded_tokens": int,
                 "estimated_total": int
             }
-            
-        Requirements: 1.1, 1.2, 1.3, 1.5, 7.1, 7.2
         """
         from app.core.services.token_tracker import TokenTracker
         
@@ -526,27 +557,71 @@ class SessionService:
         if session_context.summary:
             loaded_tokens += await token_tracker.estimate_tokens(session_context.summary)
         
-        # expand=true일 때 핀 내용 토큰
-        if expand and session_context.pins:
+        # 핀 내용 토큰 계산 (expand 모드에 따라 다름)
+        if expand == "smart" and session_context.pins:
+            # smart: 각 Tier의 반환된 content 기준으로 loaded 토큰 계산
+            for pin in session_context.pins:
+                if isinstance(pin, dict):
+                    content = pin.get("content", "")
+                    if content:
+                        loaded_tokens += await token_tracker.estimate_tokens(content)
+                else:
+                    loaded_tokens += await token_tracker.estimate_tokens(pin.content)
+        elif expand and session_context.pins:
             for pin in session_context.pins:
                 loaded_tokens += await token_tracker.estimate_tokens(pin.content)
-        
+
         # 로드되지 않은 핀들의 예상 토큰 수 계산
         unloaded_tokens = 0
-        if not expand and session_context.pins_count > 0:
-            # 로드되지 않은 핀들의 내용 조회
-            unloaded_pin_rows = await self.db.fetchall(
-                """
-                SELECT content FROM pins
-                WHERE session_id = ?
-                ORDER BY importance DESC, created_at DESC
-                LIMIT -1 OFFSET ?
-                """,
-                (session_context.session_id, limit if expand else 0)
-            )
-            
-            for row in unloaded_pin_rows:
-                unloaded_tokens += await token_tracker.estimate_tokens(row["content"])
+        is_optimized = expand != True  # noqa: E712 — smart와 False 모두 최적화 적용
+
+        if is_optimized and session_context.pins_count > 0:
+            if expand == "smart":
+                # smart: 각 핀의 full content에서 실제 반환된 content를 뺀 차이를 unloaded로 카운트
+                all_pin_rows = await self.db.fetchall(
+                    """
+                    SELECT content, status, importance FROM pins
+                    WHERE session_id = ?
+                    ORDER BY importance DESC, created_at DESC
+                    """,
+                    (session_context.session_id,)
+                )
+                for row in all_pin_rows:
+                    full_content = row["content"] or ""
+                    is_active = row["status"] in ("open", "in_progress")
+                    is_important = (row["importance"] or 3) >= 4
+
+                    # Tier 1(active+important)은 full 반환이므로 unloaded 없음
+                    if is_active and is_important:
+                        continue
+
+                    full_tokens = await token_tracker.estimate_tokens(full_content)
+
+                    if is_active:
+                        # Tier 2: content[:200] 반환 → 나머지가 unloaded
+                        loaded_part = full_content[:200]
+                    elif is_important:
+                        # Tier 3: content[:80] 반환 → 나머지가 unloaded
+                        loaded_part = full_content[:80]
+                    else:
+                        # Tier 4: content 없음 → 전체가 unloaded
+                        loaded_part = ""
+
+                    loaded_part_tokens = await token_tracker.estimate_tokens(loaded_part) if loaded_part else 0
+                    unloaded_tokens += max(0, full_tokens - loaded_part_tokens)
+            else:
+                # expand=false: 모든 핀의 full content를 unloaded로 카운트
+                unloaded_pin_rows = await self.db.fetchall(
+                    """
+                    SELECT content FROM pins
+                    WHERE session_id = ?
+                    ORDER BY importance DESC, created_at DESC
+                    LIMIT -1 OFFSET ?
+                    """,
+                    (session_context.session_id, 0)
+                )
+                for row in unloaded_pin_rows:
+                    unloaded_tokens += await token_tracker.estimate_tokens(row["content"])
         
         estimated_total = loaded_tokens + unloaded_tokens
         
@@ -566,7 +641,7 @@ class SessionService:
             tokens_used=loaded_tokens,
             session_id=session_context.session_id,
             tokens_saved=unloaded_tokens,
-            optimization_applied=(not expand)
+            optimization_applied=is_optimized
         )
         
         token_info = {

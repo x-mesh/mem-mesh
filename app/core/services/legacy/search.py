@@ -386,7 +386,7 @@ class SearchService:
                     # Vector 검색에서는 distance가 제공됨 (낮을수록 유사)
                     if "distance" in row.keys():
                         distance = float(row["distance"])
-                        vector_score = max(0.0, min(1.0, 1.0 - (distance ** 2 / 2.0)))
+                        vector_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
                     else:
                         vector_score = 0.8
 
@@ -677,7 +677,7 @@ class SearchService:
                     # Vector 검색에서는 distance가 제공됨
                     if "distance" in row.keys():
                         distance = float(row["distance"])
-                        similarity_score = max(0.0, min(1.0, 1.0 - (distance ** 2 / 2.0)))
+                        similarity_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
                     else:
                         similarity_score = 0.8
 

@@ -30,6 +30,7 @@ class DatabaseInitializer:
             # Step 1: Create core tables first (needed for migrations)
             await self._create_core_tables()
             await self._create_work_tracking_tables()
+            await self._create_relation_tables()
             await self._create_monitoring_tables()
             await self._create_oauth_tables()
             
@@ -165,6 +166,25 @@ class DatabaseInitializer:
                 optimization_applied INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
+            )
+        """)
+
+    async def _create_relation_tables(self) -> None:
+        """Create memory relations table."""
+        conn = self.connection.connection
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS memory_relations (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                relation_type TEXT NOT NULL DEFAULT 'related',
+                strength REAL NOT NULL DEFAULT 1.0,
+                metadata TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (source_id) REFERENCES memories(id) ON DELETE CASCADE,
+                FOREIGN KEY (target_id) REFERENCES memories(id) ON DELETE CASCADE
             )
         """)
 
@@ -325,6 +345,15 @@ class DatabaseInitializer:
             "CREATE INDEX IF NOT EXISTS idx_alerts_status_timestamp ON alerts(status, timestamp)",
         ]
 
+        # Relation indexes
+        relation_indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_relations_source ON memory_relations(source_id)",
+            "CREATE INDEX IF NOT EXISTS idx_relations_target ON memory_relations(target_id)",
+            "CREATE INDEX IF NOT EXISTS idx_relations_type ON memory_relations(relation_type)",
+            "CREATE INDEX IF NOT EXISTS idx_relations_source_type ON memory_relations(source_id, relation_type)",
+            "CREATE INDEX IF NOT EXISTS idx_relations_target_type ON memory_relations(target_id, relation_type)",
+        ]
+
         oauth_indexes = [
             "CREATE INDEX IF NOT EXISTS idx_oauth_clients_client_id ON oauth_clients(client_id)",
             "CREATE INDEX IF NOT EXISTS idx_oauth_tokens_client_id ON oauth_tokens(client_id)",
@@ -335,7 +364,8 @@ class DatabaseInitializer:
         ]
 
         all_indexes = (
-            core_indexes + work_tracking_indexes + monitoring_indexes + oauth_indexes + token_optimization_indexes
+            core_indexes + work_tracking_indexes + monitoring_indexes
+            + relation_indexes + oauth_indexes + token_optimization_indexes
         )
         for index_sql in all_indexes:
             try:
