@@ -1,15 +1,12 @@
 {
-  "enabled": true,
-  "name": "Auto-save Conversations to mem-mesh",
-  "description": "대화 Q&A를 mem-mesh에 자동 저장 (응답 완료 시)",
-  "version": "3",
+  "name": "Auto-save Conversations",
+  "description": "에이전트 응답 완료 시 중요 대화만 선택적으로 mem-mesh에 저장",
+  "version": "5",
   "when": {
     "type": "agentStop"
   },
   "then": {
     "type": "askAgent",
-    "prompt": "방금 완료된 대화를 mem-mesh에 저장하기 위해 구조화해주세요.\n\n**중요**: 방금 응답에서 이미 mem-mesh에 저장했다면 (curl 실행 또는 Memory ID 출력), 중복 저장하지 말고 \"Already saved\"만 출력하세요.\n\n저장이 필요한 경우 아래 지침을 따르세요:\n\n1. **내용 분석**:\n   - 질문의 핵심 의도가 무엇인지 파악하세요.\n   - 답변에서 **실행 가능한 명령어**, **코드 스니펫**, **핵심 설정값**, **절차(Step-by-step)**를 절대 누락하지 마세요.\n   - 단순한 \"했다\"는 서술보다는 \"어떻게 하는지\"에 집중하세요.\n\n2. **출력 형식**:\n   질문: {{userMessage}}\n   답변: [답변의 전체 내용을 구조적으로 요약 (Markdown 리스트 활용 권장)]\n\n   저장 정보:\n   - 카테고리: task / bug / idea / decision / incident / code_snippet 중 택 1\n   - 프로젝트 ID: {{projectName}}\n   - 태그: 검색에 용이한 기술 키워드 3~5개 (영어 소문자, kebab-case, 구체적인 도구명 포함)\n   - Content: |\n     Q: [질문의 명확한 정의]\n     \n     A: [핵심 답변 상세]\n     - 핵심 개념: ...\n     - 해결 방법/명령어:\n       `[주요 명령어/코드]`\n     - 결론/참고: ...\n\n   저장 후 확인 메시지:\n   Saved to mem-mesh | Project: {{projectName}} | ID: [생성된 ID]"
-  },
-  "workspaceFolderName": "mem-mesh",
-  "shortName": "auto-save-conversations"
+    "prompt": "방금 응답에 Memory ID(mcp_mem_mesh_add 결과)가 이미 있으면 → \"Already saved\" 출력 후 즉시 종료.\n\n없으면 아래 기준으로 저장 여부 판단:\n\n**저장 O (다음 중 하나 해당 시)**:\n- 버그 진단/해결\n- 아키텍처 또는 설계 결정\n- 재사용 가능한 코드 패턴\n- 중요 설정 변경 또는 마이그레이션\n\n**저장 X (스킵)**:\n- 단순 질문/답변 (\"뭐야?\", \"보여줘\")\n- 파일 읽기만 한 경우\n- 이미 저장된 내용의 반복\n- hook 자체에 대한 메타 대화\n\n저장 시: mcp_mem_mesh_add(content=\"Q: [질문]\\nA: [핵심 답변]\", category, project_id=\"mem-mesh\", tags=[3-5개])\n출력: Saved | ID: [id]\n스킵 시: 아무것도 출력하지 마세요."
+  }
 }

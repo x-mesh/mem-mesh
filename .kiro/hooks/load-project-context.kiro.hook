@@ -1,5 +1,4 @@
 {
-  "enabled": true,
   "name": "Load Project Context",
   "description": "새 세션 시작 시 프로젝트별 컨텍스트 로드 (동적 필터링)",
   "version": "3",

@@ -1,13 +1,12 @@
 {
-  "enabled": true,
   "name": "Auto Create Pin on Task Start",
-  "description": "작업 시작 시 자동으로 Pin 생성 (MANDATORY)",
-  "version": "1",
+  "description": "명확한 작업 요청 시에만 Pin 생성",
+  "version": "3",
   "when": {
-    "type": "onMessage"
+    "type": "promptSubmit"
   },
   "then": {
     "type": "askAgent",
-    "prompt": "**CRITICAL WORKFLOW CHECK:**\n\n사용자가 작업을 요청했습니다. 다음 절차를 MANDATORY로 따르세요:\n\n1. **작업 유형 감지:**\n   - 버그 수정, 기능 개발, 리팩토링, 조사, 문서 작성 등\n   - 단순 질문이나 정보 요청은 제외\n\n2. **Pin 생성 (MANDATORY):**\n   ```\n   IF 작업 요청이 감지되면:\n     mcp_mem_mesh_pin_add(\n       project_id: [현재 프로젝트],\n       content: [1줄 작업 설명],\n       importance: [1-5, 기본값 3],\n       tags: [관련 기술 키워드]\n     )\n   ```\n\n3. **Pin ID 보고:**\n   - 생성된 pin_id를 사용자에게 명시적으로 알림\n   - 예: \"Pin [abc-123] 생성: 로그인 버그 수정\"\n\n4. **작업 진행:**\n   - Pin 생성 후에만 작업 시작\n\n5. **작업 완료 시:**\n   - mcp_mem_mesh_pin_complete(pin_id)\n   - importance >= 4이면 승격 제안\n\n**Importance 가이드:**\n- 5: 아키텍처 결정, 중요 기능\n- 4: 중요 버그, 주요 기능\n- 3: 일반 작업 (기본값)\n- 2: 소규모 개선\n- 1: 사소한 수정\n\n**예외:**\n- 단순 질문/정보 요청\n- 메모리 검색만 하는 경우\n- 이미 Pin이 생성된 작업\n\n**위반 시:**\n- Pin 없이 작업 시작 → STOP, Pin 먼저 생성\n- Pin 완료 없이 종료 → STOP, Pin 완료 처리"
+    "prompt": "사용자 메시지가 구체적 작업 요청인지 판단하세요.\n\n**Pin 생성 O**: 코드 수정/구현/버그 수정/리팩토링 등 실제 코드 변경이 필요한 요청\n**Pin 생성 X**: 질문, 설명 요청, 분석 요청, 점검, 리뷰, 단순 확인, hook 자체 논의\n\n생성 시: mcp_mem_mesh_pin_add(content=\"[1줄 요약]\", project_id=\"mem-mesh\", importance=3, tags=[...])\n출력: Pin [id] | [설명]\n아니면: 무시 (아무것도 출력하지 마세요)"
   }
 }
