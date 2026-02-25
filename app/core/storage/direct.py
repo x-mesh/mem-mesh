@@ -233,6 +233,10 @@ class DirectStorageBackend(StorageBackend):
                 limit=params.limit,
                 recency_weight=params.recency_weight,
                 search_mode="smart",  # 기본값으로 smart 모드 사용
+                time_range=params.time_range,
+                date_from=params.date_from,
+                date_to=params.date_to,
+                temporal_mode=params.temporal_mode,
             )
 
             logger.info(

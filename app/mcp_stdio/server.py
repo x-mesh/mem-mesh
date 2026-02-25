@@ -126,19 +126,36 @@ async def search(
     limit: int = 5,
     recency_weight: float = 0.0,
     response_format: str = "standard",
+    time_range: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    temporal_mode: str = "boost",
 ) -> dict:
     """Search memories using hybrid search (vector + metadata)
 
     Args:
-        query: Search query (min 3 characters)
+        query: Search query. Korean time expressions (이번주, 지난달) are auto-detected.
         project_id: Project filter
         category: Category filter
         limit: Maximum results (1-20)
         recency_weight: Recency weight (0.0-1.0)
         response_format: Response format (minimal/compact/standard/full)
+        time_range: Time range shortcut (today/yesterday/this_week/last_week/this_month/last_month/this_quarter)
+        date_from: Start date (YYYY-MM-DD)
+        date_to: End date (YYYY-MM-DD)
+        temporal_mode: Temporal mode: filter (only in range), boost (prioritize in range), decay (score decreases with age)
     """
     return await _get_handlers().search(
-        query, project_id, category, limit, recency_weight, response_format
+        query,
+        project_id,
+        category,
+        limit,
+        recency_weight,
+        response_format,
+        time_range=time_range,
+        date_from=date_from,
+        date_to=date_to,
+        temporal_mode=temporal_mode,
     )
 
 

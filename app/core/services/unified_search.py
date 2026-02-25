@@ -12,11 +12,12 @@ Unified Search Service - 통합 검색 서비스
 
 import json
 import logging
+import math
 import time
 import urllib3
 import asyncio
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from ..database.base import Database
 from ..embeddings.service import EmbeddingService
@@ -170,11 +171,15 @@ class UnifiedSearchService:
         sort_direction: str = "desc",
         recency_weight: float = 0.0,
         search_mode: str = "smart",
-        min_quality_score: float = 0.3
+        min_quality_score: float = 0.3,
+        time_range: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        temporal_mode: str = "boost",
     ) -> SearchResponse:
         """
         통합 검색 수행
-        
+
         Args:
             query: 검색 쿼리
             project_id: 프로젝트 필터
@@ -188,7 +193,11 @@ class UnifiedSearchService:
             recency_weight: 최신성 가중치 (0.0-1.0)
             search_mode: 검색 모드 (smart/hybrid/exact/semantic/fuzzy)
             min_quality_score: 최소 품질 점수
-            
+            time_range: 시간 범위 단축어 (today/this_week/this_month 등)
+            date_from: 시작 날짜 (YYYY-MM-DD)
+            date_to: 종료 날짜 (YYYY-MM-DD)
+            temporal_mode: 시간 모드 (filter/boost/decay)
+
         Returns:
             SearchResponse: 검색 결과
         """
@@ -269,7 +278,13 @@ class UnifiedSearchService:
             # hybrid 또는 smart (기본)
             result = await self._hybrid_search(expanded_query, filters, limit, recency_weight)
         
-        # 6. 품질 스코어링 및 재정렬 (품질 기능 활성화 시)
+        # 6. 시간 인식 필터/부스트/감쇠 (Temporal-Aware Search)
+        if result.results and (time_range or date_from or date_to or temporal_mode == "decay"):
+            result = self._apply_temporal(
+                result, time_range, date_from, date_to, temporal_mode
+            )
+
+        # 7. 품질 스코어링 및 재정렬 (품질 기능 활성화 시)
         if self.enable_quality_features and result.results and intent:
             result = await self._apply_quality_scoring(
                 result, original_query, intent, min_quality_score, sort_by
@@ -1042,6 +1057,145 @@ class UnifiedSearchService:
         except Exception:
             return 0.5
 
+    # --- Temporal-Aware Search ---
+
+    _TIME_RANGE_DELTAS: Dict[str, timedelta] = {
+        "today": timedelta(days=1),
+        "yesterday": timedelta(days=2),
+        "this_week": timedelta(days=7),
+        "last_week": timedelta(days=14),
+        "this_month": timedelta(days=30),
+        "last_month": timedelta(days=60),
+        "this_quarter": timedelta(days=90),
+    }
+
+    def _resolve_time_range(
+        self,
+        time_range: Optional[str],
+        date_from: Optional[str],
+        date_to: Optional[str],
+    ) -> tuple[Optional[datetime], Optional[datetime]]:
+        """time_range 단축어 또는 date_from/date_to를 datetime 쌍으로 변환"""
+        now = datetime.now(timezone.utc)
+
+        if time_range and time_range in self._TIME_RANGE_DELTAS:
+            delta = self._TIME_RANGE_DELTAS[time_range]
+            return (now - delta, now)
+
+        dt_from: Optional[datetime] = None
+        dt_to: Optional[datetime] = None
+        if date_from:
+            try:
+                dt_from = datetime.strptime(date_from, "%Y-%m-%d").replace(
+                    tzinfo=timezone.utc
+                )
+            except ValueError:
+                pass
+        if date_to:
+            try:
+                dt_to = datetime.strptime(date_to, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=timezone.utc
+                )
+            except ValueError:
+                pass
+
+        return (dt_from, dt_to)
+
+    @staticmethod
+    def _parse_created_at(created_at_str: Optional[str]) -> Optional[datetime]:
+        """created_at 문자열을 datetime 객체로 파싱"""
+        if not created_at_str:
+            return None
+        try:
+            # ISO 8601 포맷 처리 (timezone aware/naive 모두)
+            dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except (ValueError, AttributeError):
+            return None
+
+    def _apply_temporal(
+        self,
+        response: SearchResponse,
+        time_range: Optional[str],
+        date_from: Optional[str],
+        date_to: Optional[str],
+        temporal_mode: str,
+    ) -> SearchResponse:
+        """시간 인식 검색 적용 (filter/boost/decay)
+
+        Args:
+            response: 기존 검색 결과
+            time_range: 시간 범위 단축어
+            date_from: 시작 날짜
+            date_to: 종료 날짜
+            temporal_mode: filter|boost|decay
+        """
+        now = datetime.now(timezone.utc)
+        dt_from, dt_to = self._resolve_time_range(time_range, date_from, date_to)
+        has_range = dt_from is not None or dt_to is not None
+
+        if temporal_mode == "filter" and has_range:
+            # 범위 내 결과만 남기기
+            filtered = []
+            for r in response.results:
+                created = self._parse_created_at(r.created_at)
+                if created is None:
+                    continue
+                if dt_from and created < dt_from:
+                    continue
+                if dt_to and created > dt_to:
+                    continue
+                filtered.append(r)
+            response.results = filtered
+            response.total = len(filtered)
+            logger.debug(
+                f"Temporal filter applied: {len(filtered)} results remain "
+                f"(range: {dt_from} ~ {dt_to})"
+            )
+
+        elif temporal_mode == "boost" and has_range:
+            # 범위 내 결과에 점수 부스트 (범위 밖도 유지)
+            boost_factor = 1.5
+            for r in response.results:
+                created = self._parse_created_at(r.created_at)
+                if created is None:
+                    continue
+                in_range = True
+                if dt_from and created < dt_from:
+                    in_range = False
+                if dt_to and created > dt_to:
+                    in_range = False
+                if in_range and r.similarity_score is not None:
+                    r.similarity_score = min(1.0, r.similarity_score * boost_factor)
+            # 부스트 후 재정렬
+            response.results.sort(
+                key=lambda x: x.similarity_score or 0.0, reverse=True
+            )
+            logger.debug(
+                f"Temporal boost applied: {boost_factor}x for range "
+                f"{dt_from} ~ {dt_to}"
+            )
+
+        elif temporal_mode == "decay":
+            # 시간 감쇠: 오래될수록 점수 감소
+            decay_rate = 0.01  # 100일 → ~37%
+            for r in response.results:
+                created = self._parse_created_at(r.created_at)
+                if created is None or r.similarity_score is None:
+                    continue
+                age_days = max(0.0, (now - created).total_seconds() / 86400.0)
+                decay_factor = math.exp(-decay_rate * age_days)
+                r.similarity_score = r.similarity_score * decay_factor
+            # 감쇠 후 재정렬
+            response.results.sort(
+                key=lambda x: x.similarity_score or 0.0, reverse=True
+            )
+            logger.debug("Temporal decay applied to search results")
+
+        return response
+
     def _boost_project_name_match(
         self,
         query: str,
@@ -1049,7 +1203,7 @@ class UnifiedSearchService:
     ) -> SearchResponse:
         """
         프로젝트명 정확 매칭 시 점수 부스팅
-        
+
         Args:
             query: 검색 쿼리
             response: 검색 결과

@@ -104,6 +104,10 @@ class MCPDispatcher:
             limit=args.get("limit", 5),
             recency_weight=args.get("recency_weight", 0.0),
             response_format=args.get("response_format", "standard"),
+            time_range=args.get("time_range"),
+            date_from=args.get("date_from"),
+            date_to=args.get("date_to"),
+            temporal_mode=args.get("temporal_mode", "boost"),
         )
         return format_tool_response(result)
 

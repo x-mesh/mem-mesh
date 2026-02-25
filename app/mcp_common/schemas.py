@@ -81,17 +81,22 @@ USAGE PATTERNS:
 - Keyword search: Use query="keyword" for semantic + text search
 - Project filter: Add project_id to filter by project
 - Recency boost: Set recency_weight=0.5 to prioritize recent results
+- Temporal search: Use time_range to search within a time window
+- Korean time expressions: "이번주 결정사항" auto-detects time range
 
 EXAMPLES:
 - Get 5 most recent memories: {"query": "", "limit": 5}
 - Search in project: {"query": "bug fix", "project_id": "my-project"}
-- Recent + relevant: {"query": "search", "recency_weight": 0.3}""",
+- Recent + relevant: {"query": "search", "recency_weight": 0.3}
+- This week's decisions: {"query": "decision", "time_range": "this_week"}
+- Date range: {"query": "migration", "date_from": "2026-02-01", "date_to": "2026-02-15"}
+- Time decay: {"query": "architecture", "temporal_mode": "decay"}""",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query. Use empty string '' to get recent memories without search.",
+                        "description": "Search query. Use empty string '' to get recent memories without search. Korean time expressions (이번주, 지난달) are auto-detected.",
                         "maxLength": 500
                     },
                     "project_id": {
@@ -124,6 +129,27 @@ EXAMPLES:
                         "description": "Response format: minimal (IDs only), compact (summaries), standard (full), full (complete)",
                         "default": "standard",
                         "enum": ["minimal", "compact", "standard", "full"]
+                    },
+                    "time_range": {
+                        "type": "string",
+                        "description": "Time range shortcut: today, yesterday, this_week, last_week, this_month, last_month, this_quarter",
+                        "enum": ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_quarter"]
+                    },
+                    "date_from": {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "pattern": r"^\d{4}-\d{2}-\d{2}$"
+                    },
+                    "date_to": {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "pattern": r"^\d{4}-\d{2}-\d{2}$"
+                    },
+                    "temporal_mode": {
+                        "type": "string",
+                        "description": "Temporal mode: filter (only in range), boost (prioritize in range, default), decay (score decreases with age)",
+                        "default": "boost",
+                        "enum": ["filter", "boost", "decay"]
                     },
                 },
                 "required": ["query"],
