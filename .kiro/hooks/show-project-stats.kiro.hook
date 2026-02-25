@@ -1,5 +1,4 @@
 {
-  "enabled": true,
   "name": "Show Project Statistics",
   "description": "프로젝트의 mem-mesh 통계 조회",
   "version": "1",
