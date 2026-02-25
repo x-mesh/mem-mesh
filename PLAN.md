@@ -370,6 +370,45 @@ Google Antigravity는 자체 영속 메모리(Knowledge Items)를 내장. 자동
 | 한국어 | 최적화 | 미지원 |
 | 세션/핀 | 고유 워크플로우 | 미지원 |
 
+#### 시간 인식 검색 (Temporal-Aware Search)
+
+검색에 시간을 1급 차원으로 도입. Zep의 Temporal Knowledge Graph 접근과 달리,
+기존 SQLite 인덱스 + RRF 파이프라인 확장으로 구현하여 Zero-infrastructure 유지.
+
+**경쟁자 비교:**
+
+| | mem-mesh | Zep | scanadi/mcp-ai-memory |
+|--|---------|-----|---------|
+| 접근법 | 검색 파이프라인 통합 (filter/boost/decay) | Temporal Knowledge Graph | Memory lifecycle states |
+| 복잡성 | 낮음 (기존 아키텍처 확장) | 높음 (Neo4j 필요) | 중간 (상태 머신) |
+| 인프라 | SQLite only | Neo4j + 추가 DB | SQLite |
+| 한국어 시간 표현 | **O** | X | X |
+| MCP 네이티브 | O | X | O |
+
+**사용 예시:**
+
+```python
+# 시간 범위 필터
+search(query="DB 스키마", time_range="this_week")
+
+# 시간 부스트 (범위 내 우선, 밖도 포함)
+search(query="버그 수정", time_range="today", temporal_mode="boost")
+
+# 감쇠 모드 (최근일수록 높은 점수)
+search(query="아키텍처 결정", temporal_mode="decay")
+
+# ISO 날짜 범위
+search(query="마이그레이션", date_from="2026-02-01", date_to="2026-02-15")
+```
+
+**파라미터:**
+
+- `time_range`: `today` | `yesterday` | `this_week` | `last_week` | `this_month` | `last_month` | `this_quarter`
+- `date_from` / `date_to`: ISO8601 날짜 (YYYY-MM-DD)
+- `temporal_mode`: `filter` (범위 내만) | `boost` (가중치, 기본값) | `decay` (시간 감쇠)
+
+**핵심 차별점:** LLM이 `time_range="this_week"` 같은 단축어를 자연스럽게 생성. ISO 날짜 정확도 문제 회피.
+
 ---
 
 ## 6. AI 도구별 통합 전략

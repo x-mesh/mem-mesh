@@ -4,7 +4,64 @@ Query Expander - 한국어/영어 검색어 확장
 """
 
 import re
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Optional, Tuple
+
+
+KOREAN_TIME_EXPRESSIONS: Dict[str, str] = {
+    "오늘": "today",
+    "어제": "yesterday",
+    "이번주": "this_week",
+    "이번 주": "this_week",
+    "지난주": "last_week",
+    "지난 주": "last_week",
+    "이번달": "this_month",
+    "이번 달": "this_month",
+    "지난달": "last_month",
+    "지난 달": "last_month",
+    "이번분기": "this_quarter",
+    "이번 분기": "this_quarter",
+}
+
+ENGLISH_TIME_EXPRESSIONS: Dict[str, str] = {
+    "today": "today",
+    "yesterday": "yesterday",
+    "this week": "this_week",
+    "last week": "last_week",
+    "this month": "this_month",
+    "last month": "last_month",
+    "this quarter": "this_quarter",
+}
+
+
+def extract_time_expression(query: str) -> Tuple[Optional[str], str]:
+    """쿼리에서 시간 표현을 추출하고 제거된 쿼리를 반환.
+
+    Args:
+        query: 원본 쿼리 문자열
+
+    Returns:
+        (time_range, cleaned_query) 튜플.
+        time_range가 None이면 시간 표현이 감지되지 않은 것.
+    """
+    lower = query.strip()
+
+    # 한국어 시간 표현 (길이 순 내림차 — 긴 패턴 우선)
+    for expr in sorted(KOREAN_TIME_EXPRESSIONS, key=len, reverse=True):
+        if expr in lower:
+            time_range = KOREAN_TIME_EXPRESSIONS[expr]
+            cleaned = lower.replace(expr, "").strip()
+            # 남은 쿼리가 비어있으면 원본 유지
+            return (time_range, cleaned if cleaned else query)
+
+    # 영어 시간 표현
+    for expr in sorted(ENGLISH_TIME_EXPRESSIONS, key=len, reverse=True):
+        if expr in lower.lower():
+            time_range = ENGLISH_TIME_EXPRESSIONS[expr]
+            # 대소문자 무시하여 제거
+            cleaned = re.sub(re.escape(expr), "", lower, flags=re.IGNORECASE).strip()
+            return (time_range, cleaned if cleaned else query)
+
+    return (None, query)
 
 
 class QueryExpander:

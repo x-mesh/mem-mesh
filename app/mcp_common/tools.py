@@ -123,10 +123,14 @@ class MCPToolHandlers:
         limit: int = 5,
         recency_weight: float = 0.0,
         response_format: str = "standard",
-        enable_noise_filter: bool = True
+        enable_noise_filter: bool = True,
+        time_range: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        temporal_mode: str = "boost",
     ) -> Dict[str, Any]:
         """Search memories using hybrid search (vector + metadata)
-        
+
         Args:
             query: Search query (min 3 characters)
             project_id: Project filter
@@ -135,26 +139,56 @@ class MCPToolHandlers:
             recency_weight: Recency weight (0.0-1.0)
             response_format: Response format (minimal/compact/standard/full)
             enable_noise_filter: Enable noise filtering (default: True)
-            
+            time_range: Time range shortcut (today/this_week/this_month etc.)
+            date_from: Start date (YYYY-MM-DD)
+            date_to: End date (YYYY-MM-DD)
+            temporal_mode: Temporal mode (filter/boost/decay)
+
         Returns:
             dict: 검색 결과 (압축 가능)
         """
         logger.info_with_details(
             "Tool search called",
-            details={"query_text": query, "recency_weight": recency_weight, "format": response_format, "noise_filter": enable_noise_filter},
+            details={
+                "query_text": query,
+                "recency_weight": recency_weight,
+                "format": response_format,
+                "noise_filter": enable_noise_filter,
+                "time_range": time_range,
+                "date_from": date_from,
+                "date_to": date_to,
+                "temporal_mode": temporal_mode,
+            },
             project_id=project_id,
             category=category,
             limit=limit,
-            query_length=len(query) if query else 0
+            query_length=len(query) if query else 0,
         )
-        
+
         try:
+            # 쿼리에서 한국어/영어 시간 표현 자동 추출
+            if not time_range:
+                from ..core.services.query_expander import extract_time_expression
+
+                detected_range, cleaned_query = extract_time_expression(query)
+                if detected_range:
+                    time_range = detected_range
+                    query = cleaned_query
+                    logger.info(
+                        f"Temporal expression detected: '{detected_range}' "
+                        f"from query, cleaned: '{query}'"
+                    )
+
             params = SearchParams(
                 query=query,
                 project_id=project_id,
                 category=category,
                 limit=limit * 2 if enable_noise_filter else limit,  # 필터링 고려하여 더 많이 가져옴
-                recency_weight=recency_weight
+                recency_weight=recency_weight,
+                time_range=time_range,
+                date_from=date_from,
+                date_to=date_to,
+                temporal_mode=temporal_mode,
             )
             result = await self._storage.search_memories(params)
             

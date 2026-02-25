@@ -1,6 +1,6 @@
 """요청 스키마 정의"""
 
-from typing import Optional, List
+from typing import Optional, List, Literal
 from pydantic import BaseModel, Field, field_validator
 import re
 
@@ -69,6 +69,19 @@ class AddParams(BaseModel):
         return v
 
 
+VALID_TIME_RANGES = {
+    "today",
+    "yesterday",
+    "this_week",
+    "last_week",
+    "this_month",
+    "last_month",
+    "this_quarter",
+}
+
+VALID_TEMPORAL_MODES = {"filter", "boost", "decay"}
+
+
 class SearchParams(BaseModel):
     """메모리 검색 요청 파라미터"""
 
@@ -80,6 +93,23 @@ class SearchParams(BaseModel):
     search_mode: str = Field(
         default="hybrid", description="검색 모드: hybrid, exact, semantic, fuzzy"
     )
+    # 시간 인식 검색 (Temporal-Aware Search)
+    time_range: Optional[str] = Field(
+        default=None,
+        description="시간 범위 단축어: today, yesterday, this_week, last_week, this_month, last_month, this_quarter",
+    )
+    date_from: Optional[str] = Field(
+        default=None,
+        description="시작 날짜 (YYYY-MM-DD)",
+    )
+    date_to: Optional[str] = Field(
+        default=None,
+        description="종료 날짜 (YYYY-MM-DD)",
+    )
+    temporal_mode: str = Field(
+        default="boost",
+        description="시간 모드: filter (범위 내만), boost (가중치), decay (시간 감쇠)",
+    )
 
     @field_validator("search_mode")
     @classmethod
@@ -87,6 +117,32 @@ class SearchParams(BaseModel):
         valid_modes = {"hybrid", "exact", "semantic", "fuzzy"}
         if v not in valid_modes:
             raise ValueError(f"Invalid search_mode: {v}. Must be one of {valid_modes}")
+        return v
+
+    @field_validator("time_range")
+    @classmethod
+    def validate_time_range(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in VALID_TIME_RANGES:
+            raise ValueError(
+                f"Invalid time_range: {v}. Must be one of {VALID_TIME_RANGES}"
+            )
+        return v
+
+    @field_validator("date_from", "date_to")
+    @classmethod
+    def validate_date_format(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+                raise ValueError("Date must be in YYYY-MM-DD format")
+        return v
+
+    @field_validator("temporal_mode")
+    @classmethod
+    def validate_temporal_mode(cls, v: str) -> str:
+        if v not in VALID_TEMPORAL_MODES:
+            raise ValueError(
+                f"Invalid temporal_mode: {v}. Must be one of {VALID_TEMPORAL_MODES}"
+            )
         return v
 
     @field_validator("project_id")
