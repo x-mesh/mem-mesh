@@ -5,6 +5,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: mem-mesh:latest
+    entrypoint: tail -f /dev/null
     container_name: mem-mesh-prod
     network_mode: host
     volumes:
