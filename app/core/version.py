@@ -5,7 +5,7 @@ mem-mesh 버전 및 서버 정보 중앙 관리 모듈.
 """
 
 # 버전 정보
-__VERSION__ = "1.0.5"
+__VERSION__ = "1.0.6"
 
 # MCP 프로토콜 버전 (Streamable HTTP transport 지원)
 MCP_PROTOCOL_VERSION = "2025-03-26"
