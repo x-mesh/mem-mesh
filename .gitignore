@@ -22,3 +22,4 @@ logs/
 **/logs/
 **/data_bak_0122/
 .venv/
+**/results/
