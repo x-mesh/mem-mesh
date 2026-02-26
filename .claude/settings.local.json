@@ -7,7 +7,10 @@
       "WebFetch(domain:arxiv.org)",
       "Bash(head:*)",
       "Bash(tail:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "mcp__mem-mesh__session_resume",
+      "mcp__mem-mesh__stats",
+      "mcp__mem-mesh__batch_operations"
     ]
   }
 }
