@@ -124,6 +124,26 @@
 - `smart-pin-workflow`: 작업 패턴 추가/제외
 - `tool-based-auto-save`: 파일 타입 필터 조정
 
+## 🔄 Cursor Hooks 지원
+
+Cursor IDE에서도 동일한 mem-mesh 연동이 가능합니다. `.cursor/hooks.json`과 `.cursor/hooks/` 디렉토리에 구성되어 있습니다.
+
+### Kiro vs Cursor 이벤트 매핑
+
+| 기능 | Kiro 이벤트 | Cursor 이벤트 | 방식 |
+|------|------------|--------------|------|
+| 세션 시작 컨텍스트 | `userTriggered` (수동) | `sessionStart` (자동) | `additional_context` 반환 |
+| 대화 자동 저장 | `agentStop` + `askAgent` | `stop` + `command` | `followup_message` 반환 |
+| 세션 종료 | — | `sessionEnd` + `command` | Python 스크립트 실행 |
+| Pin 자동 생성 | `promptSubmit` + `askAgent` | `sessionStart` 규칙 주입 | agent가 규칙에 따라 MCP 호출 |
+
+### 주요 차이점
+
+- **Kiro**: `askAgent` 타입으로 LLM이 직접 MCP 도구 호출 가능
+- **Cursor**: `command` 타입 shell 스크립트만 지원. MCP 호출은 `additional_context`/`followup_message`를 통해 agent에 위임
+
+자세한 설정은 [Cursor MCP 프롬프트 가이드](../../../docs/cursor-rules-mcp-prompt.md)를 참조하세요.
+
 ## 🐛 문제 해결
 
 Hook이 작동하지 않는 경우:

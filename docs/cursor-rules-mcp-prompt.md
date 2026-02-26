@@ -74,6 +74,40 @@ python -m app.mcp
 "이번 주에 저장한 메모리들의 카테고리별 분포를 알려줘"
 ```
 
+### 🪝 Cursor Hooks 설정
+
+Cursor 1.7+의 [Hooks](https://cursor.com/docs/agent/hooks) 기능을 활용하여 mem-mesh를 자동으로 연동할 수 있습니다.
+
+프로젝트 루트의 `.cursor/hooks.json`을 통해 다음 기능이 자동 활성화됩니다:
+
+| Hook | 이벤트 | 기능 |
+|------|--------|------|
+| `mem-mesh-session-start.sh` | `sessionStart` | 이전 세션 핀 복원 + mem-mesh 사용 규칙 주입 |
+| `mem-mesh-session-end.sh` | `sessionEnd` | 세션 종료 시 자동 마감 |
+| `mem-mesh-auto-save.sh` | `stop` | 코드 변경 후 중요 대화 저장 제안 |
+
+#### 설치 방법
+
+```bash
+# mem-mesh 프로젝트에 이미 포함되어 있습니다
+ls .cursor/hooks.json          # hook 설정
+ls .cursor/hooks/*.sh          # hook 스크립트
+
+# 실행 권한 확인
+chmod +x .cursor/hooks/*.sh
+```
+
+#### Kiro Hooks와의 비교
+
+| 기능 | Kiro | Cursor |
+|------|------|--------|
+| 자동 Pin 생성 | `askAgent` (LLM 판단) | `sessionStart`에서 규칙 주입 |
+| 대화 자동 저장 | `askAgent` (LLM 판단) | `stop`에서 `followup_message` |
+| 세션 복원 | 수동 트리거 | `sessionStart` 자동 실행 |
+| 세션 종료 | — | `sessionEnd` 자동 실행 |
+
+> **참고**: Cursor의 `prompt` 타입 hook은 허용/차단 결정만 가능하므로, MCP 도구 호출이 필요한 기능은 `command` 타입 + `additional_context` 방식으로 구현했습니다.
+
 ### 🔧 고급 설정
 
 #### API 모드 사용 (웹 UI와 함께)
