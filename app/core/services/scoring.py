@@ -110,8 +110,11 @@ class ContentQualityScorer(BaseScorer):
         super().__init__(weight, enabled)
         self.min_length = min_length
         self.simple_responses = simple_responses or {
-            "understood", "ok", "yes", "no", "done", 
-            "확인", "알겠습니다", "네", "예"
+            "understood", "ok", "okay", "yes", "no", "done", "sure", "thanks",
+            "got it", "noted", "ack", "roger", "yep", "nope", "fine",
+            "확인", "알겠습니다", "네", "예", "아니오", "아니요",
+            "감사합니다", "알겠어요", "좋아", "좋아요",
+            "넵", "완료", "확인했습니다", "오케이",
         }
         self.simple_response_penalty = simple_response_penalty
     
@@ -230,7 +233,7 @@ class ScoringPipeline:
         return [
             ExactMatchScorer(weight=1.0),
             ContentQualityScorer(weight=1.0),
-            RecencyScorer(weight=0.0),  # 기본적으로 비활성화
+            RecencyScorer(weight=0.1),  # 최소 가중치로 시간 인식 활성화
             CategoryBoostScorer(weight=1.0),
             TagMatchScorer(weight=1.0),
         ]

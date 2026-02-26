@@ -59,6 +59,7 @@ mem-mesh-mcp = "src.__main__:main"
 mem-mesh-mcp-stdio = "app.mcp_stdio.__main__:main"
 mem-mesh-mcp-pure = "app.mcp_stdio_pure.__main__:main"
 mem-mesh-web = "app.web.__main__:main"
+mem-mesh-hooks = "app.cli.install_hooks:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -12,5 +12,32 @@
       "mcp__mem-mesh__stats",
       "mcp__mem-mesh__batch_operations"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mem-mesh-track.sh",
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mem-mesh-stop.sh",
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
+    ]
   }
 }

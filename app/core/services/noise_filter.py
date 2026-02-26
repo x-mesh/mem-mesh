@@ -44,8 +44,8 @@ class NoiseFilter:
             "mem-mesh-conversations",
         ]
 
-        # 최소 콘텐츠 길이
-        self.min_content_length = 50
+        # 최소 콘텐츠 길이 (config.py default=10과 일관성 유지, 합리적 중간값)
+        self.min_content_length = 30
 
         # 최대 중복 허용 수
         self.max_duplicates = 3

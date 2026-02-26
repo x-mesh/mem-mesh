@@ -525,7 +525,7 @@ class UnifiedSearchService:
                     category=row['category'],
                     project_id=row['project_id'],
                     tags=self._parse_tags(row),
-                    metadata={'recency_score': 0.5}
+                    metadata={'recency_score': self._absolute_recency_score(row.get('created_at'))}
                 )
                 
                 scoring_result = self.scoring_pipeline.calculate(context)
@@ -548,6 +548,19 @@ class UnifiedSearchService:
         merged_results = self._apply_rrf(vector_search_results, text_response.results, limit)
         
         return SearchResponse(results=merged_results, total=len(merged_results))
+
+    def _absolute_recency_score(self, created_at: Optional[str]) -> float:
+        """created_at 기반 절대 최신성 점수 (지수 감쇠: 오늘=1.0, 7일≈0.79, 30일≈0.37)"""
+        if not created_at:
+            return 0.5
+        try:
+            created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age_days = (datetime.now(timezone.utc) - created).days
+            return max(0.0, min(1.0, math.exp(-age_days / 30.0)))
+        except Exception:
+            return 0.5
 
     def _is_korean(self, text: str) -> bool:
         """쿼리에 한국어가 포함되어 있는지 확인"""
@@ -737,7 +750,7 @@ class UnifiedSearchService:
             
             # 최신성 가중치 적용
             if recency_weight > 0.0:
-                recency_score = 0.5  # 간단화
+                recency_score = self._absolute_recency_score(row.get('created_at'))
                 similarity_score = (
                     similarity_score * (1.0 - recency_weight) +
                     recency_score * recency_weight
