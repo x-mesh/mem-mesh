@@ -513,7 +513,7 @@ class UnifiedSearchService:
             for row in raw_vector_results:
                 try:
                     distance = float(row['distance'])
-                except (KeyError, TypeError):
+                except (KeyError, IndexError, TypeError):
                     distance = 1.0
                 
                 vector_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
@@ -743,9 +743,9 @@ class UnifiedSearchService:
         for row in raw_results:
             try:
                 distance = float(row['distance'])
-            except (KeyError, TypeError):
+            except (KeyError, IndexError, TypeError):
                 distance = 1.0
-            
+
             similarity_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
             
             # 최신성 가중치 적용
@@ -1015,16 +1015,16 @@ class UnifiedSearchService:
 
             related_memories = []
             for row in rows:
-                tags_raw = row.get("tags")
+                tags_raw = row["tags"]
                 tags = json.loads(tags_raw) if isinstance(tags_raw, str) else tags_raw
                 related_memories.append(SearchResult(
                     id=row["id"],
                     content=row["content"],
                     similarity_score=candidate_ids.get(row["id"], 0.5),
-                    created_at=row.get("created_at", ""),
-                    project_id=row.get("project_id"),
-                    category=row.get("category", ""),
-                    source=row.get("source", ""),
+                    created_at=row["created_at"] or "",
+                    project_id=row["project_id"],
+                    category=row["category"] or "",
+                    source=row["source"] or "",
                     tags=tags,
                 ))
 
