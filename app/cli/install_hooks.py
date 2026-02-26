@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""mem-mesh-hooks: Install/uninstall mem-mesh hooks for Claude Code, Kiro, and Cursor."""
+"""mem-mesh-hooks: Install/uninstall mem-mesh hooks for Claude Code, Kiro, and Cursor.
+
+Prompts and behavioral rules are defined in app.cli.prompts.behaviors (single
+source of truth).  IDE-specific renderers in app.cli.prompts.renderers transform
+those canonical definitions into each IDE's native format.
+
+Bump PROMPT_VERSION in behaviors.py when rules change, then re-run:
+    mem-mesh-hooks install --target all
+    mem-mesh-hooks sync-project
+"""
 
 import argparse
 import json
@@ -7,15 +16,32 @@ import os
 import stat
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
+
+from app.cli.prompts.behaviors import PROMPT_VERSION
+from app.cli.prompts.renderers import (
+    VERSION_MARKER,
+    extract_prompt_version,
+    render_cursor_context,
+    render_cursor_followup,
+    render_kiro_auto_create_pin,
+    render_kiro_auto_save,
+    render_kiro_load_context,
+    render_rules_text,
+)
 
 DEFAULT_URL = "https://meme.24x365.online"
 
 # ---------------------------------------------------------------------------
-# Hook script templates
+# Hook script templates — bash boilerplate only; prompt text comes from renderers
 # ---------------------------------------------------------------------------
 
+# The __RULES_TEXT__ placeholder is replaced with render_rules_text() output.
+# The __FOLLOWUP_MSG__ placeholder is replaced with render_cursor_followup().
+# The __DEFAULT_URL__ / __MEM_MESH_PATH__ are replaced at install time.
+
 TRACK_HOOK_TEMPLATE = r"""#!/bin/bash
+__VERSION_MARKER__
 # PostToolUse hook: track code changes to mem-mesh
 # stdin: {"tool_name":"Write|Edit","tool_input":{...}} JSON
 
@@ -36,9 +62,9 @@ case "$FILE_PATH" in
   *) exit 0 ;;
 esac
 
-# Exclude .claude/ internal files
+# Exclude internal files
 case "$FILE_PATH" in
-  */.claude/*) exit 0 ;;
+  */.cursor/*|*/.claude/*|*/.kiro/*) exit 0 ;;
 esac
 
 # Extract project ID from directory name
@@ -65,7 +91,7 @@ EXT="${FILE_PATH##*.}"
 PAYLOAD=$(jq -n \
   --arg content "$CONTENT" \
   --arg project_id "$PROJECT_DIR" \
-  --arg source "claude-code-hook" \
+  --arg source "__SOURCE_TAG__" \
   --arg ext "$EXT" \
   '{
     content: $content,
@@ -84,6 +110,7 @@ exit 0
 """
 
 STOP_HOOK_TEMPLATE = r"""#!/bin/bash
+__VERSION_MARKER__
 # Stop hook: save conversation summary to mem-mesh
 # stdin: {"stop_hook_active":bool,"last_assistant_message":"..."} JSON
 
@@ -110,13 +137,13 @@ PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 PAYLOAD=$(jq -n \
   --arg content "[conversation summary] $SUMMARY" \
   --arg project_id "$PROJECT_DIR" \
-  --arg source "claude-code-hook" \
+  --arg source "__SOURCE_TAG__" \
   '{
     content: $content,
     project_id: $project_id,
     category: "git-history",
     source: $source,
-    tags: ["auto-save", "conversation"]
+    tags: ["auto-save", "conversation", "__IDE_TAG__"]
   }')
 
 curl -s -o /dev/null --max-time 5 \
@@ -128,6 +155,7 @@ exit 0
 """
 
 KIRO_STOP_HOOK_TEMPLATE = r"""#!/bin/bash
+__VERSION_MARKER__
 # Kiro agentResponse hook: save conversation summary to mem-mesh
 
 set -euo pipefail
@@ -162,7 +190,10 @@ curl -s -o /dev/null --max-time 5 \
 exit 0
 """
 
+# Cursor sessionStart: injects rules via additional_context.
+# __RULES_CONTEXT__ is replaced with render_cursor_context() output.
 CURSOR_SESSION_START_TEMPLATE = r"""#!/bin/bash
+__VERSION_MARKER__
 # Cursor sessionStart hook: load mem-mesh session context
 # Returns additional_context JSON for the agent
 
@@ -183,122 +214,53 @@ RESUME_DATA=$(curl -s --max-time 5 \
   "${API_URL}/api/pins/session/resume?project_id=${PROJECT_DIR}&expand=smart" \
   2>/dev/null) || RESUME_DATA='{"error": "mem-mesh API not available"}'
 
-CONTEXT="## mem-mesh Memory Integration (Auto-loaded by Cursor Hook)
+CONTEXT="## mem-mesh Memory Integration (Auto-loaded)
 
-### Session Resume
+### 세션 복원 결과
 ${RESUME_DATA}
 
-### Rules
-1. Pin tracking: pin_add(content, project_id=\"${PROJECT_DIR}\", importance=3) for tasks, pin_complete when done.
-2. Selective save: Use add() only for decisions, bugs, incidents, ideas, code_snippets.
-3. Context search: Use search() before coding when past decisions are referenced.
-4. Session end: Call session_end(project_id=\"${PROJECT_DIR}\") when user says done."
+### 작업 규칙
+__RULES_TEXT__"
 
 jq -n --arg ctx "$CONTEXT" '{ additional_context: $ctx }'
 """
 
-CURSOR_TRACK_TEMPLATE = r"""#!/bin/bash
-# Cursor postToolUse hook: track code changes to mem-mesh
-# stdin: {"tool_name":"Write|Edit","tool_input":{...}} JSON
-
-set -euo pipefail
-command -v jq >/dev/null 2>&1 || exit 0
-
-API_URL="${MEM_MESH_API_URL:-__DEFAULT_URL__}"
-
-INPUT=$(cat)
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
-
-[ -z "$FILE_PATH" ] && exit 0
-
-# Only track known file types
-case "$FILE_PATH" in
-  *.py|*.ts|*.js|*.jsx|*.tsx|*.json|*.md|*.yaml|*.yml|*.toml|*.sh) ;;
-  *) exit 0 ;;
-esac
-
-# Exclude internal files
-case "$FILE_PATH" in
-  */.cursor/*|*/.claude/*|*/.kiro/*) exit 0 ;;
-esac
-
-PROJECT_DIR=$(basename "$(cd "$(dirname "$FILE_PATH")" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || dirname "$FILE_PATH")")
-[ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
-
-if [ "$TOOL_NAME" = "Write" ]; then
-  PREVIEW=$(echo "$INPUT" | jq -r '.tool_input.content // empty' | head -c 300)
-  CONTENT="file: ${FILE_PATH}\nchange: new file or overwrite\ncontent: ${PREVIEW}"
-elif [ "$TOOL_NAME" = "Edit" ]; then
-  OLD=$(echo "$INPUT" | jq -r '.tool_input.old_string // empty' | head -c 150)
-  NEW=$(echo "$INPUT" | jq -r '.tool_input.new_string // empty' | head -c 150)
-  CONTENT="file: ${FILE_PATH}\nchange: '${OLD}' -> '${NEW}'"
-else
-  exit 0
-fi
-
-[ ${#CONTENT} -lt 15 ] && exit 0
-
-EXT="${FILE_PATH##*.}"
-
-PAYLOAD=$(jq -n \
-  --arg content "$CONTENT" \
-  --arg project_id "$PROJECT_DIR" \
-  --arg source "cursor-hook" \
-  --arg ext "$EXT" \
-  '{
-    content: $content,
-    project_id: $project_id,
-    category: "code_snippet",
-    source: $source,
-    tags: ["auto-save", "file-change", $ext]
-  }')
-
-curl -s -o /dev/null --max-time 5 \
-  -X POST "${API_URL}/api/memories" \
-  -H "Content-Type: application/json" \
-  -d "$PAYLOAD" 2>/dev/null || true
-
-exit 0
-"""
-
+# Cursor stop hook with followup_message.
+# __FOLLOWUP_MSG__ is replaced with render_cursor_followup() output.
 CURSOR_STOP_TEMPLATE = r"""#!/bin/bash
-# Cursor stop hook: save conversation summary to mem-mesh
-# stdin: {"last_assistant_message":"...",...} JSON
+__VERSION_MARKER__
+# Cursor stop hook: conditionally suggest saving to mem-mesh
+# stdin: {"last_assistant_message":"...", "transcript":[...]} JSON
 
 set -euo pipefail
-command -v jq >/dev/null 2>&1 || exit 0
-
-API_URL="${MEM_MESH_API_URL:-__DEFAULT_URL__}"
 
 INPUT=$(cat)
 
-# Extract message + minimum length filter
-MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
-[ ${#MESSAGE} -lt 50 ] && exit 0
+# Check if there were meaningful tool uses (file edits, code changes)
+HAS_TOOL_USE=$(echo "$INPUT" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    transcript = data.get('transcript', [])
+    meaningful = any(
+        msg.get('type') == 'tool_use' and
+        msg.get('tool_name', '') in ('Edit', 'Write', 'Bash', 'NotebookEdit')
+        for msg in transcript
+        if isinstance(msg, dict)
+    )
+    print('true' if meaningful else 'false')
+except Exception:
+    print('false')
+" 2>/dev/null) || HAS_TOOL_USE="false"
 
-SUMMARY=$(echo "$MESSAGE" | head -c 500)
-
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
-
-PAYLOAD=$(jq -n \
-  --arg content "[conversation summary] $SUMMARY" \
-  --arg project_id "$PROJECT_DIR" \
-  --arg source "cursor-hook" \
-  '{
-    content: $content,
-    project_id: $project_id,
-    category: "git-history",
-    source: $source,
-    tags: ["auto-save", "conversation", "cursor"]
-  }')
-
-curl -s -o /dev/null --max-time 5 \
-  -X POST "${API_URL}/api/memories" \
-  -H "Content-Type: application/json" \
-  -d "$PAYLOAD" 2>/dev/null || true
-
-exit 0
+if [ "$HAS_TOOL_USE" = "true" ]; then
+    python3 -c "
+import json
+print(json.dumps({'followup_message': '''__FOLLOWUP_MSG__'''}))
+"
+else
+    echo '{}'
+fi
 """
 
 # ---------------------------------------------------------------------------
@@ -306,6 +268,7 @@ exit 0
 # ---------------------------------------------------------------------------
 
 LOCAL_TRACK_HOOK_TEMPLATE = r"""#!/bin/bash
+__VERSION_MARKER__
 # PostToolUse hook: track code changes to mem-mesh (local mode)
 # Writes directly to local SQLite via Python
 
@@ -369,6 +332,7 @@ exit 0
 """
 
 LOCAL_STOP_HOOK_TEMPLATE = r"""#!/bin/bash
+__VERSION_MARKER__
 # Stop hook: save conversation summary to mem-mesh (local mode)
 
 set -euo pipefail
@@ -409,7 +373,7 @@ exit 0
 # Claude Code hooks settings patch
 # ---------------------------------------------------------------------------
 
-CLAUDE_HOOKS_SETTINGS: Dict = {
+CLAUDE_HOOKS_SETTINGS: Dict[str, Any] = {
     "hooks": {
         "PostToolUse": [
             {
@@ -445,14 +409,33 @@ CLAUDE_HOOKS_SETTINGS: Dict = {
 # ---------------------------------------------------------------------------
 
 
-def _render_template(template: str, url: str) -> str:
-    """Replace __DEFAULT_URL__ placeholder with the actual URL."""
-    return template.replace("__DEFAULT_URL__", url)
+def _render_template(
+    template: str,
+    url: str,
+    *,
+    source_tag: str = "claude-code-hook",
+    ide_tag: str = "claude",
+    project_id: str = "mem-mesh",
+) -> str:
+    """Replace all placeholders in a template string."""
+    result = template.replace("__DEFAULT_URL__", url)
+    result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
+    result = result.replace("__SOURCE_TAG__", source_tag)
+    result = result.replace("__IDE_TAG__", ide_tag)
+    # Inject renderer-generated text
+    result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
+    result = result.replace("__FOLLOWUP_MSG__", render_cursor_followup(project_id))
+    return result
 
 
-def _render_local_template(template: str, mem_mesh_path: str) -> str:
-    """Replace __MEM_MESH_PATH__ placeholder with the project path."""
-    return template.replace("__MEM_MESH_PATH__", mem_mesh_path)
+def _render_local_template(
+    template: str,
+    mem_mesh_path: str,
+) -> str:
+    """Replace placeholders for local mode templates."""
+    result = template.replace("__MEM_MESH_PATH__", mem_mesh_path)
+    result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
+    return result
 
 
 def _write_script(path: Path, content: str) -> None:
@@ -462,9 +445,9 @@ def _write_script(path: Path, content: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def _merge_json_settings(path: Path, patch: Dict) -> None:
+def _merge_json_settings(path: Path, patch: Dict[str, Any]) -> None:
     """Merge patch into an existing JSON file, preserving other keys."""
-    existing: Dict = {}
+    existing: Dict[str, Any] = {}
     if path.exists():
         try:
             existing = json.loads(path.read_text(encoding="utf-8"))
@@ -507,7 +490,7 @@ def _remove_kiro_mem_mesh_hooks(path: Path) -> None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return
-    hooks: List = data.get("hooks", [])
+    hooks: List[Any] = data.get("hooks", [])
     data["hooks"] = [h for h in hooks if not h.get("name", "").startswith("mem-mesh:")]
     path.write_text(
         json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -529,7 +512,7 @@ KIRO_SETTINGS = HOME / ".kiro" / "settings" / "hooks.json"
 CURSOR_HOOKS_DIR = HOME / ".cursor" / "hooks"
 CURSOR_SETTINGS = HOME / ".cursor" / "hooks.json"
 
-CURSOR_HOOKS_SETTINGS: Dict = {
+CURSOR_HOOKS_SETTINGS: Dict[str, Any] = {
     "version": 1,
     "hooks": {
         "sessionStart": [
@@ -581,8 +564,20 @@ def _install_claude(url: str, mode: str = "api", path: str = "") -> None:
         _write_script(track_script, _render_local_template(LOCAL_TRACK_HOOK_TEMPLATE, path))
         _write_script(stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path))
     else:
-        _write_script(track_script, _render_template(TRACK_HOOK_TEMPLATE, url))
-        _write_script(stop_script, _render_template(STOP_HOOK_TEMPLATE, url))
+        _write_script(
+            track_script,
+            _render_template(
+                TRACK_HOOK_TEMPLATE, url,
+                source_tag="claude-code-hook", ide_tag="claude",
+            ),
+        )
+        _write_script(
+            stop_script,
+            _render_template(
+                STOP_HOOK_TEMPLATE, url,
+                source_tag="claude-code-hook", ide_tag="claude",
+            ),
+        )
     print(f"  -> {track_script}")
     print(f"  -> {stop_script}")
 
@@ -601,7 +596,13 @@ def _install_kiro(url: str, mode: str = "api", path: str = "") -> None:
     if mode == "local":
         _write_script(stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path))
     else:
-        _write_script(stop_script, _render_template(KIRO_STOP_HOOK_TEMPLATE, url))
+        _write_script(
+            stop_script,
+            _render_template(
+                KIRO_STOP_HOOK_TEMPLATE, url,
+                source_tag="kiro-hook", ide_tag="kiro",
+            ),
+        )
     print(f"  -> {stop_script}")
 
     print("[kiro] Updating hooks.json...")
@@ -614,14 +615,14 @@ def _install_kiro(url: str, mode: str = "api", path: str = "") -> None:
     }
 
     # Load existing or create new
-    existing: Dict = {"hooks": []}
+    existing: Dict[str, Any] = {"hooks": []}
     if KIRO_SETTINGS.exists():
         try:
             existing = json.loads(KIRO_SETTINGS.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             existing = {"hooks": []}
 
-    hooks: List = existing.get("hooks", [])
+    hooks: List[Any] = existing.get("hooks", [])
 
     # Remove existing mem-mesh hooks, then add new
     hooks = [h for h in hooks if not h.get("name", "").startswith("mem-mesh:")]
@@ -655,10 +656,25 @@ def _install_cursor(url: str, mode: str = "api", path: str = "") -> None:
     else:
         _write_script(
             session_start_script,
-            _render_template(CURSOR_SESSION_START_TEMPLATE, url),
+            _render_template(
+                CURSOR_SESSION_START_TEMPLATE, url,
+                source_tag="cursor-hook", ide_tag="cursor",
+            ),
         )
-        _write_script(track_script, _render_template(CURSOR_TRACK_TEMPLATE, url))
-        _write_script(stop_script, _render_template(CURSOR_STOP_TEMPLATE, url))
+        _write_script(
+            track_script,
+            _render_template(
+                TRACK_HOOK_TEMPLATE, url,
+                source_tag="cursor-hook", ide_tag="cursor",
+            ),
+        )
+        _write_script(
+            stop_script,
+            _render_template(
+                CURSOR_STOP_TEMPLATE, url,
+                source_tag="cursor-hook", ide_tag="cursor",
+            ),
+        )
     print(f"  -> {session_start_script}")
     print(f"  -> {track_script}")
     print(f"  -> {stop_script}")
@@ -719,7 +735,7 @@ def _uninstall_cursor() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Status command
+# Status command (with version detection)
 # ---------------------------------------------------------------------------
 
 
@@ -732,6 +748,20 @@ def _check_script(path: Path) -> str:
     return "installed"
 
 
+def _check_script_version(path: Path) -> str:
+    """Check script status including prompt version."""
+    base = _check_script(path)
+    if base != "installed":
+        return base
+    content = path.read_text(encoding="utf-8")
+    version = extract_prompt_version(content)
+    if version == 0:
+        return "installed (no version marker)"
+    if version < PROMPT_VERSION:
+        return f"installed (prompt-version: {version} -> outdated)"
+    return f"installed (prompt-version: {version})"
+
+
 def _extract_url_from_script(path: Path) -> Optional[str]:
     """Extract the default URL from an installed script."""
     if not path.exists():
@@ -739,7 +769,6 @@ def _extract_url_from_script(path: Path) -> Optional[str]:
     content = path.read_text(encoding="utf-8")
     for line in content.splitlines():
         if "MEM_MESH_API_URL:-" in line:
-            # Extract URL from: API_URL="${MEM_MESH_API_URL:-https://...}"
             start = line.find(":-") + 2
             end = line.find("}", start)
             if start > 1 and end > start:
@@ -748,16 +777,35 @@ def _extract_url_from_script(path: Path) -> Optional[str]:
     return None
 
 
+def _check_kiro_hook_version(path: Path) -> str:
+    """Check prompt version in a .kiro.hook JSON file."""
+    if not path.exists():
+        return "not found"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return "parse error"
+    version_str = data.get("version", "0")
+    try:
+        version = int(version_str)
+    except ValueError:
+        return f"installed (version: {version_str})"
+    if version < PROMPT_VERSION:
+        return f"installed (prompt-version: {version} -> outdated)"
+    return f"installed (prompt-version: {version})"
+
+
 def cmd_status() -> None:
     """Print installation status."""
-    print("=== mem-mesh hooks status ===\n")
+    print("=== mem-mesh hooks status ===")
+    print(f"Prompt version: {PROMPT_VERSION} (current)\n")
 
     # Claude Code
     print("[Claude Code]")
     track = CLAUDE_HOOKS_DIR / "mem-mesh-track.sh"
     stop = CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh"
-    print(f"  track hook:  {_check_script(track)}")
-    print(f"  stop hook:   {_check_script(stop)}")
+    print(f"  track hook:  {_check_script_version(track)}")
+    print(f"  stop hook:   {_check_script_version(stop)}")
 
     url = _extract_url_from_script(track) or _extract_url_from_script(stop)
     if url:
@@ -778,7 +826,7 @@ def cmd_status() -> None:
     # Kiro
     print("[Kiro]")
     kiro_stop = KIRO_HOOKS_DIR / "mem-mesh-stop.sh"
-    print(f"  stop hook:   {_check_script(kiro_stop)}")
+    print(f"  stop hook:   {_check_script_version(kiro_stop)}")
 
     url = _extract_url_from_script(kiro_stop)
     if url:
@@ -804,9 +852,9 @@ def cmd_status() -> None:
     cursor_session = CURSOR_HOOKS_DIR / "mem-mesh-session-start.sh"
     cursor_track = CURSOR_HOOKS_DIR / "mem-mesh-track.sh"
     cursor_stop = CURSOR_HOOKS_DIR / "mem-mesh-stop.sh"
-    print(f"  session hook: {_check_script(cursor_session)}")
-    print(f"  track hook:   {_check_script(cursor_track)}")
-    print(f"  stop hook:    {_check_script(cursor_stop)}")
+    print(f"  session hook: {_check_script_version(cursor_session)}")
+    print(f"  track hook:   {_check_script_version(cursor_track)}")
+    print(f"  stop hook:    {_check_script_version(cursor_stop)}")
 
     url = (
         _extract_url_from_script(cursor_track)
@@ -827,6 +875,228 @@ def cmd_status() -> None:
     else:
         print("  hooks.json:   not found")
 
+    # Project-local hooks
+    project_root = _find_project_root()
+    if project_root:
+        print()
+        print("[Project Local]")
+
+        # Kiro hooks
+        kiro_dir = project_root / ".kiro" / "hooks"
+        for name in ("auto-save-conversations", "auto-create-pin-on-task", "load-project-context"):
+            hook_file = kiro_dir / f"{name}.kiro.hook"
+            print(f"  {name}: {_check_kiro_hook_version(hook_file)}")
+
+        # Cursor hooks
+        cursor_dir = project_root / ".cursor" / "hooks"
+        for name in ("mem-mesh-session-start.sh", "mem-mesh-auto-save.sh"):
+            script = cursor_dir / name
+            print(f"  {name}: {_check_script_version(script)}")
+
+    print()
+    print(f"Run 'mem-mesh-hooks install --target all' to update global hooks.")
+    print(f"Run 'mem-mesh-hooks sync-project' to update project-local hooks.")
+
+
+# ---------------------------------------------------------------------------
+# Sync-project command
+# ---------------------------------------------------------------------------
+
+
+def _find_project_root() -> Optional[Path]:
+    """Find the mem-mesh project root (where CLAUDE.md exists)."""
+    # First try: relative to this file
+    candidate = Path(__file__).resolve().parent.parent.parent
+    if (candidate / "CLAUDE.md").exists() or (candidate / "pyproject.toml").exists():
+        return candidate
+    # Second try: CWD
+    cwd = Path.cwd()
+    if (cwd / "CLAUDE.md").exists() or (cwd / "pyproject.toml").exists():
+        return cwd
+    return None
+
+
+def cmd_sync_project(target: str = "all", project_id: str = "mem-mesh") -> None:
+    """Regenerate project-local hooks from shared prompt definitions."""
+    project_root = _find_project_root()
+    if not project_root:
+        print("Error: Could not find project root. Run from the mem-mesh directory.")
+        sys.exit(1)
+
+    print(f"=== sync-project (prompt-version: {PROMPT_VERSION}) ===")
+    print(f"Project root: {project_root}\n")
+
+    if target in ("kiro", "all"):
+        _sync_kiro_hooks(project_root, project_id)
+
+    if target in ("cursor", "all"):
+        _sync_cursor_hooks(project_root, project_id)
+
+    print("\nSync complete.")
+
+
+def _sync_kiro_hooks(project_root: Path, project_id: str) -> None:
+    """Regenerate behavioral .kiro.hook files from shared prompts."""
+    kiro_dir = project_root / ".kiro" / "hooks"
+    kiro_dir.mkdir(parents=True, exist_ok=True)
+
+    hooks = {
+        "auto-save-conversations": render_kiro_auto_save(project_id),
+        "auto-create-pin-on-task": render_kiro_auto_create_pin(project_id),
+        "load-project-context": render_kiro_load_context(project_id),
+    }
+
+    print("[kiro] Regenerating behavioral hooks...")
+    for name, hook_data in hooks.items():
+        hook_file = kiro_dir / f"{name}.kiro.hook"
+        hook_file.write_text(
+            json.dumps(hook_data, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        print(f"  -> {hook_file}")
+
+    print("[kiro] Done. (manual-* hooks untouched)")
+
+
+def _sync_cursor_hooks(project_root: Path, project_id: str) -> None:
+    """Regenerate project-local Cursor hooks from shared prompts."""
+    cursor_dir = project_root / ".cursor" / "hooks"
+    cursor_dir.mkdir(parents=True, exist_ok=True)
+
+    # session-start: uses Python direct import (project-local)
+    session_start_content = f"""#!/bin/bash
+{VERSION_MARKER}
+# mem-mesh Session Start Hook for Cursor (project-local)
+# Injects mem-mesh usage instructions into the session context.
+
+set -euo pipefail
+
+INPUT=$(cat)
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+RESUME_OUTPUT=""
+RESUME_OUTPUT=$(python3 -c "
+import sys, json
+sys.path.insert(0, '$PROJECT_ROOT')
+try:
+    from app.core.services.pin_service import PinService
+    from app.core.storage.direct import DirectStorageManager
+    import asyncio
+
+    async def get_resume():
+        storage = DirectStorageManager()
+        await storage.initialize()
+        pin_svc = PinService(storage)
+        result = await pin_svc.session_resume('{project_id}', expand='smart')
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    print(asyncio.run(get_resume()))
+except Exception as e:
+    print(json.dumps({{'error': str(e)}}))
+" 2>/dev/null) || RESUME_OUTPUT='{{"error": "mem-mesh not available"}}'
+
+RULES_TEXT="{render_rules_text(project_id)}"
+
+CONTEXT="## mem-mesh Memory Integration (Auto-loaded)
+
+### 세션 복원 결과
+\\`\\`\\`json
+${{RESUME_OUTPUT}}
+\\`\\`\\`
+
+### 작업 규칙
+$RULES_TEXT"
+
+python3 -c "
+import json, sys
+ctx = sys.stdin.read()
+print(json.dumps({{'additional_context': ctx}}))
+" <<< "$CONTEXT"
+"""
+
+    # auto-save (stop event)
+    followup_msg = render_cursor_followup(project_id)
+    auto_save_content = f"""#!/bin/bash
+{VERSION_MARKER}
+# mem-mesh Auto-Save Hook for Cursor (stop event, project-local)
+
+set -euo pipefail
+
+INPUT=$(cat)
+
+HAS_TOOL_USE=$(echo "$INPUT" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    transcript = data.get('transcript', [])
+    meaningful = any(
+        msg.get('type') == 'tool_use' and
+        msg.get('tool_name', '') in ('Edit', 'Write', 'Bash', 'NotebookEdit')
+        for msg in transcript
+        if isinstance(msg, dict)
+    )
+    print('true' if meaningful else 'false')
+except Exception:
+    print('false')
+" 2>/dev/null) || HAS_TOOL_USE="false"
+
+if [ "$HAS_TOOL_USE" = "true" ]; then
+    python3 -c "
+import json
+print(json.dumps({{'followup_message': '''{followup_msg}'''}}))
+"
+else
+    echo '{{}}'
+fi
+"""
+
+    # session-end
+    session_end_content = f"""#!/bin/bash
+{VERSION_MARKER}
+# mem-mesh Session End Hook for Cursor (project-local)
+
+set -euo pipefail
+
+INPUT=$(cat)
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+python3 -c "
+import sys, json
+sys.path.insert(0, '$PROJECT_ROOT')
+try:
+    from app.core.services.pin_service import PinService
+    from app.core.storage.direct import DirectStorageManager
+    import asyncio
+
+    async def end_session():
+        storage = DirectStorageManager()
+        await storage.initialize()
+        pin_svc = PinService(storage)
+        result = await pin_svc.session_end('{project_id}')
+        return result
+
+    asyncio.run(end_session())
+except Exception:
+    pass
+" 2>/dev/null || true
+"""
+
+    print("[cursor] Regenerating project-local hooks...")
+    scripts = {
+        "mem-mesh-session-start.sh": session_start_content,
+        "mem-mesh-auto-save.sh": auto_save_content,
+        "mem-mesh-session-end.sh": session_end_content,
+    }
+    for name, content in scripts.items():
+        _write_script(cursor_dir / name, content)
+        print(f"  -> {cursor_dir / name}")
+
+    print("[cursor] Done.")
+
 
 # ---------------------------------------------------------------------------
 # Top-level commands
@@ -842,10 +1112,12 @@ def cmd_install(
     """Install hooks for the specified target."""
     if mode == "local":
         resolved = path or str(Path(__file__).resolve().parent.parent.parent)
-        print(f"Installing mem-mesh hooks (mode: local, path: {resolved})\n")
+        print(f"Installing mem-mesh hooks (mode: local, path: {resolved})")
+        print(f"Prompt version: {PROMPT_VERSION}\n")
     else:
         resolved = ""
-        print(f"Installing mem-mesh hooks (mode: api, url: {url})\n")
+        print(f"Installing mem-mesh hooks (mode: api, url: {url})")
+        print(f"Prompt version: {PROMPT_VERSION}\n")
 
     if target in ("claude", "all"):
         _install_claude(url, mode, resolved)
@@ -885,7 +1157,7 @@ def _prompt_choice(prompt: str, options: List[str], default: int = 0) -> int:
         marker = " (default)" if i - 1 == default else ""
         print(f"  {i}) {opt}{marker}")
     while True:
-        raw = input(f"  Select [{ default + 1}]: ").strip()
+        raw = input(f"  Select [{default + 1}]: ").strip()
         if not raw:
             return default
         try:
@@ -998,6 +1270,23 @@ def main(argv: Optional[List[str]] = None) -> None:
     # status
     subparsers.add_parser("status", help="Show installation status")
 
+    # sync-project
+    sync_parser = subparsers.add_parser(
+        "sync-project",
+        help="Regenerate project-local hooks from shared prompts",
+    )
+    sync_parser.add_argument(
+        "--target",
+        choices=["kiro", "cursor", "all"],
+        default="all",
+        help="Target to sync (default: all)",
+    )
+    sync_parser.add_argument(
+        "--project-id",
+        default="mem-mesh",
+        help="Project ID for hook prompts (default: mem-mesh)",
+    )
+
     args = parser.parse_args(argv)
 
     # No subcommand or install -i → interactive mode
@@ -1013,6 +1302,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         cmd_uninstall(args.target)
     elif args.command == "status":
         cmd_status()
+    elif args.command == "sync-project":
+        cmd_sync_project(args.target, args.project_id)
 
 
 if __name__ == "__main__":

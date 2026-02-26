@@ -1,12 +1,12 @@
 {
   "name": "Load Project Context",
   "description": "새 세션 시작 시 프로젝트별 컨텍스트 로드 (동적 필터링)",
-  "version": "3",
+  "version": "1",
   "when": {
     "type": "userTriggered"
   },
   "then": {
     "type": "askAgent",
-    "prompt": "새 세션이 시작되었습니다. 현재 프로젝트의 컨텍스트를 로드해주세요:\n\n**프로젝트 식별:**\n- 현재 작업 중인 프로젝트를 자동으로 감지하세요\n- 열려있는 파일들의 경로에서 프로젝트 이름 추출 (예: app/core → mem-mesh, static/js → mem-mesh-web-ui)\n- 프로젝트 이름이 불명확하면 'mem-mesh'를 기본값으로 사용\n\n**필터링 기준:**\n- project_id: 감지된 프로젝트만 검색\n- 최근 30일 내 작업만 포함\n- 해당 프로젝트 관련 작업만 수집\n\n**수집 항목:**\n1. 감지된 프로젝트의 최근 작업 (task, bug, decision)\n2. 진행 중인 작업 (in_progress 상태)\n3. 미해결 이슈 (open, blocked 상태)\n4. 프로젝트 상태 요약\n5. 다음 우선순위 작업 제안\n\n**프로젝트 매핑:**\n- app/core, app/web, app/mcp_* → 'mem-mesh'\n- static/js, static/css → 'mem-mesh-web-ui'\n- 기타 프로젝트는 폴더명 기반으로 식별\n\n**주의:** 다른 프로젝트의 컨텍스트는 제외하고, 현재 프로젝트에만 집중하세요."
+    "prompt": "새 세션 시작 시 이전 맥락을 확인하고, 미완료 핀이 있으면 사용자에게 간략히 알린다.\n\n**실행**: session_resume(project_id=\"mem-mesh\", expand=\"smart\")\n\n**수집 항목**:\n1. 프로젝트의 최근 작업 (task, bug, decision)\n2. 진행 중인 작업 (in_progress 상태)\n3. 미해결 이슈 (open, blocked 상태)\n4. 프로젝트 상태 요약\n5. 다음 우선순위 작업 제안\n\n**프로젝트 식별**:\n- 현재 작업 중인 프로젝트를 자동으로 감지하세요\n- 프로젝트 이름이 불명확하면 'mem-mesh'를 기본값으로 사용\n\n**필터링**: project_id 기준, 최근 30일 내 작업만 포함"
   }
 }

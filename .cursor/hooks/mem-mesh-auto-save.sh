@@ -1,19 +1,15 @@
 #!/bin/bash
-# mem-mesh Auto-Save Hook for Cursor (stop event)
-# After the agent finishes responding, suggests saving important conversations.
-# Uses Cursor's followup_message to trigger a new agent turn if needed.
+# mem-mesh-hooks prompt-version: 1
+# mem-mesh Auto-Save Hook for Cursor (stop event, project-local)
 
 set -euo pipefail
 
 INPUT=$(cat)
 
-# Extract conversation transcript length/content indicators
-# Only suggest saving for substantial conversations (not simple Q&A)
 HAS_TOOL_USE=$(echo "$INPUT" | python3 -c "
 import json, sys
 try:
     data = json.load(sys.stdin)
-    # Check if there were meaningful tool uses (file edits, code changes)
     transcript = data.get('transcript', [])
     meaningful = any(
         msg.get('type') == 'tool_use' and
@@ -27,14 +23,16 @@ except Exception:
 " 2>/dev/null) || HAS_TOOL_USE="false"
 
 if [ "$HAS_TOOL_USE" = "true" ]; then
-    # Suggest the agent save the conversation
     python3 -c "
 import json
-print(json.dumps({
-    'followup_message': '방금 완료한 작업이 중요하다면, mem-mesh에 기록해주세요: 버그 수정은 category=\"bug\", 설계 결정은 category=\"decision\", 코드 패턴은 category=\"code_snippet\"으로 add()를 호출하세요. 일상적 작업이었다면 무시하세요.'
-}))
+print(json.dumps({'followup_message': '''방금 완료한 작업이 중요하다면, mem-mesh에 기록해주세요.
+
+**저장 기준**: 버그 진단/해결, 아키텍처 또는 설계 결정, 재사용 가능한 코드 패턴, 중요 설정 변경 또는 마이그레이션
+**스킵 기준**: 단순 질문/답변 ("뭐야?", "보여줘"), 파일 읽기만 한 경우, 이미 저장된 내용의 반복, hook 자체에 대한 메타 대화
+
+저장 시: 버그 수정은 category="bug", 설계 결정은 category="decision", 코드 패턴은 category="code_snippet"으로 add(project_id="mem-mesh")를 호출하세요.
+일상적 작업이었다면 무시하세요.'''}))
 "
 else
-    # No meaningful changes, skip
     echo '{}'
 fi

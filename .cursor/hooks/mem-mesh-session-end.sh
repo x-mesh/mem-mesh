@@ -1,6 +1,6 @@
 #!/bin/bash
-# mem-mesh Session End Hook for Cursor
-# Ends the mem-mesh session and saves any pending state.
+# mem-mesh-hooks prompt-version: 1
+# mem-mesh Session End Hook for Cursor (project-local)
 
 set -euo pipefail
 
