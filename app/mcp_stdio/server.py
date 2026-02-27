@@ -61,7 +61,7 @@ async def initialize_storage(settings: Optional[Settings] = None) -> None:
     from ..core.services.search import SearchService
 
     batch_settings = settings or Settings()
-    db = Database(batch_settings.database_path)
+    db = Database(batch_settings.database_path, embedding_dim=batch_settings.embedding_dim)
     await db.connect()
     embedding_service = EmbeddingService(preload=False)
     memory_service = MemoryService(db, embedding_service)

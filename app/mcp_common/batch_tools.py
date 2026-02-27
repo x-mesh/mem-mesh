@@ -409,7 +409,7 @@ async def test_batch_operations():
 
     # Initialize services
     test_settings = Settings()
-    db = Database(test_settings.database_path)
+    db = Database(test_settings.database_path, embedding_dim=test_settings.embedding_dim)
     await db.connect()
     embedding_service = EmbeddingService(preload=False)
     memory_service = MemoryService(db, embedding_service)

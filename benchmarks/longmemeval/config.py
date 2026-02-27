@@ -26,8 +26,10 @@ class BenchmarkConfig:
 
     # Retrieval
     search_mode: str = "hybrid"
-    topk: int = 5
+    topk: int = 15
     enable_korean_optimization: bool = False
+    enable_reranking: bool = False
+    reranking_model: Optional[str] = None
 
     # Generation
     claude_model: str = "sonnet"

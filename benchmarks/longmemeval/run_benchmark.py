@@ -181,6 +181,16 @@ def parse_args() -> BenchmarkConfig:
         action="store_true",
         help="Retry questions that previously had generation failures",
     )
+    parser.add_argument(
+        "--enable-reranking",
+        action="store_true",
+        help="Enable cross-encoder reranking for search results",
+    )
+    parser.add_argument(
+        "--reranking-model",
+        default=None,
+        help="Cross-encoder model for reranking (default: ms-marco-multilingual-MiniLM-L6-v2)",
+    )
 
     args = parser.parse_args()
 
@@ -195,6 +205,8 @@ def parse_args() -> BenchmarkConfig:
         resume=args.resume,
         report_only=args.report_only,
         retry_failed=args.retry_failed,
+        enable_reranking=args.enable_reranking,
+        reranking_model=args.reranking_model,
     )
 
 
@@ -276,6 +288,7 @@ async def run_benchmark(config: BenchmarkConfig) -> None:
         "search_mode": config.search_mode,
         "use_cot": config.use_cot,
         "claude_model": config.claude_model,
+        "enable_reranking": config.enable_reranking,
     }
 
     # Determine which questions to process
@@ -292,7 +305,11 @@ async def run_benchmark(config: BenchmarkConfig) -> None:
         _log(f"\nLongMemEval Benchmark")
         _log(f"  Total: {len(questions)} | Completed: {len(completed_set)} | Remaining: {len(remaining)}")
 
-    _log(f"  Config: variant={config.variant} topk={config.topk} mode={config.search_mode} cot={config.use_cot}")
+    _log(
+        f"  Config: variant={config.variant} topk={config.topk} "
+        f"mode={config.search_mode} cot={config.use_cot} "
+        f"reranking={config.enable_reranking}"
+    )
     _log("")
 
     if not remaining:

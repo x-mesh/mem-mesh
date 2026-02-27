@@ -132,7 +132,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
 
         # 데이터베이스 연결
-        db = Database(settings.database_path)
+        db = Database(settings.database_path, embedding_dim=settings.embedding_dim)
         await db.connect()
 
         logger.info("Database connected successfully")

@@ -45,10 +45,10 @@ class Settings(BaseSettings):
 
     # Embedding configuration
     embedding_model: str = Field(
-        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        default="intfloat/multilingual-e5-large",
         description="Sentence-transformers model name",
     )
-    embedding_dim: int = Field(default=384, description="Embedding vector dimensions")
+    embedding_dim: int = Field(default=1024, description="Embedding vector dimensions")
 
     # Search configuration
     search_threshold: float = Field(
@@ -109,6 +109,22 @@ class Settings(BaseSettings):
     )
     enable_search_warmup: bool = Field(
         default=True, description="Enable search warmup on server startup"
+    )
+
+    # Reranking configuration
+    enable_reranking: bool = Field(
+        default=False,
+        description="Enable cross-encoder reranking for search results (opt-in)",
+    )
+    reranking_model: str = Field(
+        default="cross-encoder/ms-marco-multilingual-MiniLM-L6-v2",
+        description="Cross-encoder model for reranking",
+    )
+    reranking_top_k_multiplier: int = Field(
+        default=3,
+        ge=2,
+        le=10,
+        description="Retrieve topk * multiplier candidates, rerank, return topk",
     )
 
     # Cache TTL settings (in seconds)
