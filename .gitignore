@@ -22,3 +22,7 @@ logs/
 **/logs/
 **/data_bak_0122/
 .venv/
+
+# Benchmark
+benchmarks/longmemeval/dbs/
+benchmarks/longmemeval/results_v1_backup/
