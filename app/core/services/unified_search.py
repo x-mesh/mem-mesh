@@ -525,7 +525,7 @@ class UnifiedSearchService:
                     category=row['category'],
                     project_id=row['project_id'],
                     tags=self._parse_tags(row),
-                    metadata={'recency_score': self._absolute_recency_score(row.get('created_at'))}
+                    metadata={'recency_score': self._absolute_recency_score(row['created_at'])}
                 )
                 
                 scoring_result = self.scoring_pipeline.calculate(context)
@@ -750,7 +750,7 @@ class UnifiedSearchService:
             
             # 최신성 가중치 적용
             if recency_weight > 0.0:
-                recency_score = self._absolute_recency_score(row.get('created_at'))
+                recency_score = self._absolute_recency_score(row['created_at'])
                 similarity_score = (
                     similarity_score * (1.0 - recency_weight) +
                     recency_score * recency_weight
