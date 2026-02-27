@@ -1,5 +1,7 @@
 # MCP Common: Shared Protocol Implementation
 
+> Golden Rules, 세션 관리, 보안 정책, Anti-Patterns 등 프로젝트 공통 표준은 root [AGENTS.md](../../AGENTS.md) 참조.
+
 ## Module Context
 
 MCP (Model Context Protocol) 서버 구현체들이 공유하는 핵심 로직. 비즈니스 로직과 스키마 정의를 중앙 집중화하여 일관성 보장.

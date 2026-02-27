@@ -1,5 +1,7 @@
 # FastMCP stdio MCP Server
 
+> Golden Rules, 세션 관리, 보안 정책, Anti-Patterns 등 프로젝트 공통 표준은 root [AGENTS.md](../../AGENTS.md) 참조.
+
 ## Module Context
 FastMCP-based stdio server (`app.mcp_stdio.server`) is the entry point for the default mem-mesh MCP transport. It initializes logging, storage, tool handlers, and batch operations, then registers FastMCP tools (`add`, `search`, `context`, `update`, `delete`, `stats`, `batch_operations`, `pin_add`, `pin_complete`, `pin_promote`, `session_resume`, `session_end`, `link`, `unlink`, `get_links`, `weekly_review`, `cache_stats`, `clear_cache`) that delegate to `MCPToolHandlers` and `BatchOperationHandler`. Storage lifecycle is managed via `StorageManager`, embedding/search services, and `BatchOperationHandler` so MCP operations stay consistent with the rest of the platform.
 

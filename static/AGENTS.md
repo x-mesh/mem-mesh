@@ -1,5 +1,7 @@
 # Frontend Static Assets
 
+> Golden Rules, 세션 관리, 보안 정책, Anti-Patterns 등 프로젝트 공통 표준은 root [AGENTS.md](../AGENTS.md) 참조.
+
 ## Module Context
 `static/` holds the standalone single-page application that the FastAPI dashboard serves. `static/js/main.js` wires the SPA, components, pages, API client, router, and WebSocket/SSE services as ES modules. `static/css/main.css` defines shared styling, while subfolders (`components`, `pages`, `services`, `utils`) encapsulate UI widgets, content layouts, API helpers, and cross-cutting utilities. `static/test-api.js` plus files in `static/tests/` provide lightweight smoke checks against backend endpoints and SSE streams.
 

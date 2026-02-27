@@ -1,5 +1,7 @@
 # Testing & Quality Layer
 
+> Golden Rules, 세션 관리, 보안 정책, Anti-Patterns 등 프로젝트 공통 표준은 root [AGENTS.md](../AGENTS.md) 참조.
+
 ## Module Context
 The `tests/` suite covers the mem-mesh memory services, search, metrics, MCP transports, API, CLI tooling, and UI helpers. It includes unit test modules (e.g., `test_memory_service.py`, `test_search_service.py`, `test_metrics_collector.py`), integration suites (`test_fastapi_app.py`, `test_mcp.py`, `test_mcp_stdio.py`, `test_mcp_stdio_pure.py`), and browser/HTML artifacts (`test_web_ui.html`, `test_web_ui`-related fixtures) for manual QA.
 

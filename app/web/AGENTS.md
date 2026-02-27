@@ -1,5 +1,7 @@
 # Web API & Dashboard Layer
 
+> Golden Rules, 세션 관리, 보안 정책, Anti-Patterns 등 프로젝트 공통 표준은 root [AGENTS.md](../../AGENTS.md) 참조.
+
 ## Module Context
 FastAPI application (`app.web.app`) assembles middleware, routers, and lifecycle hooks for the dashboard, monitoring, SSE MCP, and WebSocket transports. `lifespan` orchestrates Settings, Database, embedding/search services, metrics collector, MCP SSE storage, MCP tool handlers, and project/session/pin services. `common.dependencies` exposes service providers, while `websocket.realtime` and `monitoring.routes` publish real-time notifications and observability APIs. Static files and templates serve the single-page application assets alongside the API endpoints.
 
