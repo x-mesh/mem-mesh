@@ -1,5 +1,7 @@
 # Pure MCP stdio Implementation
 
+> Golden Rules, 세션 관리, 보안 정책, Anti-Patterns 등 프로젝트 공통 표준은 root [AGENTS.md](../../AGENTS.md) 참조.
+
 ## Module Context
 `app.mcp_stdio_pure.server` is the fallback stdio transport that implements the Model Context Protocol directly instead of relying on FastMCP. It reads NDJSON from stdin, parses JSON-RPC 2.0 requests, dispatches them through `MCPDispatcher`, and writes responses to stdout. Shared services (`StorageManager`, `MCPToolHandlers`, `BatchOperationHandler`, metrics, and embedding services) are wired via `initialize_storage`, ensuring parity with other transports.
 

@@ -18,85 +18,56 @@ python -c "from app.web.app import app" # import check
 uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 ```
 
-아키텍처, Golden Rules, Context Map 등 상세 규칙은 **[AGENTS.md](./AGENTS.md)** 참조.
+아키텍처, Golden Rules, Context Map, API 상세는 **[AGENTS.md](./AGENTS.md)** 참조.
 
 ---
 
-## mem-mesh 도구 활용 규칙
+## mem-mesh 도구 Checklist
 
-이 프로젝트에는 `mem-mesh` MCP 서버가 연결되어 있다. 아래 규칙에 따라 작업 맥락을 관리한다.
-
-### 원칙 1: 코딩 응답 우선
-
-사용자의 코딩 요청에는 **코드와 답변을 먼저 출력**한다. mem-mesh 도구 호출은 답변 완료 후 수행한다. 응답 서두에 "메모리를 검색하겠습니다" 같은 안내를 넣지 않는다.
-
-### 원칙 2: 세션 자동 복원
-
-새 대화의 첫 응답 직후, `session_resume`을 호출하여 이전 맥락을 확인한다.
+> 매 세션에서 아래 흐름을 따른다. 상세 API/예시는 [AGENTS.md § Session Context Management](./AGENTS.md) 참조.
 
 ```
-session_resume(project_id="mem-mesh", expand="smart")
+1. 세션 시작  → session_resume(project_id, expand="smart")
+2. 과거 맥락  → 이전 결정/작업 언급 시 search() 후 코딩
+3. 작업 추적  → pin_add → pin_complete → (중요시 pin_promote)
+4. 영구 저장  → decision / bug / incident / idea / code_snippet 만
+5. 세션 종료  → 지식 보존 판단 + session_end()
+6. 보안 금지  → API키 / 토큰 / 비밀번호 / PII 절대 저장 금지
 ```
 
-- `expand="smart"` (권장): status × importance 4-Tier 매트릭스로 핀 반환
-  - Tier 1: active + 중요(≥4) → 전체 content + tags + created_at
-  - Tier 2: active + 일반(<4) → content 200자 + tags
-  - Tier 3: completed + 중요 → content 80자
-  - Tier 4: completed + 일반 → id + importance + status만
-- `expand=false`: 모든 핀을 80자 요약으로 (최소 토큰)
-- `expand=true`: 모든 핀 전체 내용 (토큰 많음)
-- 미완료 핀이 있으면 사용자에게 간략히 알린다
+---
 
-### 원칙 3: 작업 추적은 Pin으로
+## MUST (반드시)
 
-진행 중인 작업은 **pin**으로 추적한다. 일반 메모리(`add`)로 저장하지 않는다.
+**M1. 세션 복원** — 새 대화의 첫 응답 직후 `session_resume` 호출. 미완료 핀이 있으면 사용자에게 알린다.
 
-| 시점 | 동작 | 비고 |
-|------|------|------|
-| 작업 시작 | `pin_add(content, project_id="mem-mesh", importance=3)` | 3: 일반, 4: 중요, 5: 아키텍처 |
-| 작업 완료 | `pin_complete(pin_id)` | — |
-| 중요 작업 완료 | `pin_complete` → `pin_promote` | importance >= 4일 때 영구 메모리로 승격 |
+**M2. 세션 종료와 지식 보존** — 작업 완료 명시 시("오늘 끝", "PR 올려줘" 등), 요청 처리 후:
+1. 영구 저장 가치 판단 (decision/bug/code_snippet → `add`, Pin → `pin_complete`/`pin_promote`)
+2. `session_end`로 마감. 저장 시 **WHY 포함** 필수.
 
-### 원칙 4: 영구 메모리는 선별적으로
+비정상 종료(사용자가 그냥 나감) 시 다음 세션의 `session_resume`이 미완료 Pin을 복원한다.
 
-아래 상황에서**만** `add`로 영구 저장한다. 일상적 작업 상태는 pin으로 충분하다.
+**M3. 영구 메모리 카테고리 제한** — `add`는 `decision` / `bug` / `incident` / `idea` / `code_snippet`에서만. 일상 작업은 pin. (`git-history` / `task`는 시스템 전용, 직접 사용 지양)
 
-| 카테고리 | 저장 시점 | 예시 |
-|---------|---------|------|
-| `decision` | 기술 스택, DB 스키마, 아키텍처 결정 합의 시 | "SQLite + sqlite-vec을 유일한 벡터 저장소로 확정" |
-| `bug` | 복잡한 버그 원인과 해결책 도출 시 | "sqlite-vec INSERT OR REPLACE 금지 — DELETE+INSERT 필요" |
-| `incident` | 시스템 장애 복구 후 | "포트 8000 충돌로 서버 이중 기동 발생" |
-| `idea` | 향후 개선 아이디어 기록 시 | "한국어 검색에 E5 prefix encoding 적용 검토" |
-| `code_snippet` | 재사용 가능한 패턴 발견 시 | batch_operations 사용 패턴 |
+**M4. 보안** — API키, 토큰, PII, `.env` 내용 **절대 저장 금지**. 코드 스니펫의 민감 값은 `<REDACTED>`.
 
-### 원칙 5: 맥락 검색 활용
+---
 
-사용자가 과거 결정, 이전 작업, 기존 설계를 언급하면 코드 작성 전에 `search`로 기존 맥락을 확인한다.
+## SHOULD (권장)
 
-```
-search(query="관련 키워드", project_id="mem-mesh", limit=5)
-search(query="", category="decision", limit=5)          # 최근 결정 조회
-search(query="검색어", recency_weight=0.3)               # 최신 결과 부스트
-```
+**S1. 코딩 응답 우선** — 코드와 답변 먼저, mem-mesh 호출은 후. 단, 과거 맥락 언급 시 `search()` 후 코딩 (S2).
 
-### 원칙 6: 세션 종료
+**S2. 맥락 검색** — 과거 결정/설계 언급 시 `search`로 확인 후 코딩.
 
-사용자가 작업 완료를 명시하면("오늘 끝", "여기까지", "PR 올려줘" 등), 요청을 먼저 처리한 뒤 마지막에 세션을 마감한다.
+**S3. Pin 추적** — 진행 중 작업은 `pin_add` → `pin_complete` → (importance ≥ 4 시 `pin_promote`).
 
-```
-session_end(project_id="mem-mesh")
-```
+**S4. 토큰 효율** — 여러 메모리 작업은 `batch_operations`로 묶기.
 
-### 원칙 7: 토큰 효율
+---
 
-여러 메모리 작업이 필요하면 `batch_operations`로 묶어 호출한다 (30-50% 토큰 절감).
+## MAY (선택)
 
-```
-batch_operations(operations=[
-  {"type": "add", "content": "...", "project_id": "mem-mesh", "category": "decision"},
-  {"type": "search", "query": "...", "limit": 5}
-])
-```
+- `recency_weight=0.3` 최신 부스트 / `category` 필터 / `link()` 관계 설정
 
 ---
 
@@ -109,3 +80,5 @@ batch_operations(operations=[
 - **sqlite-vec**: `INSERT OR REPLACE` 금지 → DELETE + INSERT
 - **버전 정보**: `app.core.version` 단일 소스
 - **커밋 메시지**: `type: description` (feat, fix, refactor, docs, test, chore)
+
+> Hook 기반 자동 저장은 사용하지 않는다. 메모리 저장은 AI가 MCP 도구로 직접 수행한다.

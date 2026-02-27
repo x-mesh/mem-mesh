@@ -1,91 +1,111 @@
-"""LLM 답변 생성 (litellm 기반)"""
+"""Generate answers using claude CLI."""
 
 import logging
-from typing import List, Optional
+import os
+import subprocess
+import time
 
-from app.core.schemas.responses import SearchResult
-
-from .config import GenerationConfig
+from .config import BenchmarkConfig
+from .dataset import LongMemEvalQuestion
+from .prompts import get_generation_prompt
+from .retriever import RetrievalResult
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a helpful assistant that answers questions based on the provided conversation history.
-Answer the question using ONLY the information from the provided context.
-If the context does not contain enough information to answer, say "I don't know" or "I cannot answer based on the available information."
-Be concise and direct in your answer."""
 
-USER_PROMPT_TEMPLATE = """Based on the following conversation history, answer the question.
+def generate_answer(
+    question: LongMemEvalQuestion,
+    retrieval: RetrievalResult,
+    config: BenchmarkConfig,
+) -> tuple[str, float]:
+    """Generate an answer using claude CLI.
 
-## Conversation History
-{context}
-
-## Question
-{question}
-
-{date_context}
-
-## Answer"""
-
-
-def build_context(results: List[SearchResult]) -> str:
-    """검색 결과를 LLM 입력 컨텍스트로 변환"""
-    parts: List[str] = []
-    for i, result in enumerate(results):
-        parts.append(f"--- Context {i + 1} (score: {result.similarity_score:.3f}) ---")
-        parts.append(result.content)
-        parts.append("")
-    return "\n".join(parts)
-
-
-async def generate_answer(
-    question: str,
-    results: List[SearchResult],
-    config: GenerationConfig,
-    question_date: Optional[str] = None,
-) -> str:
-    """LLM을 사용하여 답변 생성
-
-    Args:
-        question: 질문 텍스트
-        results: 검색 결과
-        config: 생성 설정
-        question_date: 질문 시점 날짜
-
-    Returns:
-        생성된 답변
+    Returns (answer_text, generation_time_seconds).
     """
-    try:
-        import litellm
-    except ImportError:
-        raise ImportError(
-            "litellm 패키지가 필요합니다: pip install litellm"
-        )
+    # Build context from retrieved contents (chronologically sorted)
+    sorted_items = retrieval.sorted_contents_with_dates
+    context_parts: list[str] = []
+    for i, (content, date) in enumerate(sorted_items, 1):
+        date_label = f" ({date})" if date else ""
+        context_parts.append(f"--- Excerpt {i}{date_label} ---\n{content}")
+    context = "\n\n".join(context_parts) if context_parts else "(No relevant context found)"
 
-    context = build_context(results)
-    date_context = (
-        f"Note: The question is being asked on {question_date}."
-        if question_date
-        else ""
-    )
-
-    user_prompt = USER_PROMPT_TEMPLATE.format(
+    prompt = get_generation_prompt(
+        question=question.question,
+        question_date=question.question_date,
         context=context,
-        question=question,
-        date_context=date_context,
+        use_cot=config.use_cot,
     )
 
-    try:
-        response = await litellm.acompletion(
-            model=config.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=config.temperature,
-            max_tokens=config.max_tokens,
-        )
-        answer = response.choices[0].message.content.strip()
-        return answer
-    except Exception as e:
-        logger.error(f"LLM generation failed: {e}")
-        raise
+    return _call_claude(prompt, config)
+
+
+def _call_claude(
+    prompt: str,
+    config: BenchmarkConfig,
+) -> tuple[str, float]:
+    """Call claude CLI and return (response_text, elapsed_seconds).
+
+    Uses stdin pipe for prompt delivery and exponential backoff on retries.
+    """
+    start = time.time()
+
+    # Remove CLAUDECODE env var to avoid nested session restriction
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
+    max_attempts = 1 + config.generation_retries
+    for attempt in range(max_attempts):
+        try:
+            result = subprocess.run(
+                [
+                    "claude",
+                    "-p",
+                    "-",
+                    "--model",
+                    config.claude_model,
+                    "--output-format",
+                    "text",
+                    "--max-turns",
+                    "1",
+                ],
+                input=prompt,
+                capture_output=True,
+                text=True,
+                timeout=config.generation_timeout,
+                env=env,
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                elapsed = time.time() - start
+                response = result.stdout.strip()
+                logger.debug(
+                    "Claude response (%d chars) in %.1fs",
+                    len(response),
+                    elapsed,
+                )
+                return response, elapsed
+
+            logger.warning(
+                "Claude CLI returned code %d (attempt %d/%d): %s",
+                result.returncode,
+                attempt + 1,
+                max_attempts,
+                result.stderr[:200] if result.stderr else "(no stderr)",
+            )
+
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "Claude CLI timed out after %ds (attempt %d/%d)",
+                config.generation_timeout,
+                attempt + 1,
+                max_attempts,
+            )
+
+        # Exponential backoff before retry (2s, 4s, 8s, ...)
+        if attempt < max_attempts - 1:
+            backoff = 2 ** (attempt + 1)
+            logger.info("Backing off %ds before retry...", backoff)
+            time.sleep(backoff)
+
+    elapsed = time.time() - start
+    return "(generation failed)", elapsed

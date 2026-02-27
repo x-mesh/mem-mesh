@@ -1,94 +1,66 @@
-"""LongMemEval 벤치마크 설정"""
+"""Benchmark configuration."""
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-import yaml
-from pydantic import BaseModel, Field
+
+BENCH_DIR = Path(__file__).parent
+DEFAULT_DATA_DIR = BENCH_DIR / "data"
+DEFAULT_RESULTS_DIR = BENCH_DIR / "results"
+DEFAULT_DBS_DIR = BENCH_DIR / "dbs"
 
 
-class DatasetConfig(BaseModel):
-    """데이터셋 설정"""
+@dataclass
+class BenchmarkConfig:
+    """Configuration for LongMemEval benchmark run."""
 
-    name: str = "xiaowu0162/longmemeval-cleaned"
-    split: str = "test"
-    language: str = "en"
+    # Dataset
+    variant: str = "s"  # "s" (small ~53 sessions) or "m" (medium ~500)
+    data_dir: Path = field(default_factory=lambda: DEFAULT_DATA_DIR)
 
-
-class IndexingConfig(BaseModel):
-    """인덱싱 설정"""
-
-    strategy: str = "session"
-    window_size: int = 5
-    window_overlap: int = 1
-    include_date_in_content: bool = True
-    max_content_length: int = 9500
-
-
-class RetrievalConfig(BaseModel):
-    """검색 설정"""
-
-    top_k: int = Field(default=10, ge=1, le=20)
-    search_mode: str = "hybrid"
-    recency_weight: float = 0.0
-
-
-class GenerationConfig(BaseModel):
-    """LLM 생성 설정"""
-
-    model: str = "claude-sonnet-4-20250514"
-    temperature: float = 0.0
-    max_tokens: int = 256
-
-
-class EvaluationConfig(BaseModel):
-    """평가 설정"""
-
-    judge_model: str = "gpt-4o"
-    temperature: float = 0.0
-
-
-class ExecutionConfig(BaseModel):
-    """실행 설정"""
-
-    db_path: str = "benchmarks/longmemeval/data/benchmark_lme.db"
-    checkpoint_interval: int = 50
+    # Filtering
     max_questions: Optional[int] = None
-    resume_from_checkpoint: bool = True
-    results_dir: str = "benchmarks/longmemeval/results"
+    question_types: Optional[list[str]] = None
+    question_ids: Optional[list[str]] = None
 
+    # Retrieval
+    search_mode: str = "hybrid"
+    topk: int = 5
+    enable_korean_optimization: bool = False
 
-class BenchmarkConfig(BaseModel):
-    """전체 벤치마크 설정"""
+    # Generation
+    claude_model: str = "sonnet"
+    use_cot: bool = False
+    generation_timeout: int = 120
+    generation_retries: int = 3
 
-    experiment_name: str = "mem-mesh-longmemeval"
-    dataset: DatasetConfig = Field(default_factory=DatasetConfig)
-    indexing: IndexingConfig = Field(default_factory=IndexingConfig)
-    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
-    generation: GenerationConfig = Field(default_factory=GenerationConfig)
-    evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
-    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
+    # Paths
+    dbs_dir: Path = field(default_factory=lambda: DEFAULT_DBS_DIR)
+    results_dir: Path = field(default_factory=lambda: DEFAULT_RESULTS_DIR)
 
+    # Checkpoint
+    resume: bool = False
+    retry_failed: bool = False
 
-def load_config(config_path: Optional[str] = None) -> BenchmarkConfig:
-    """YAML 설정 파일 로드
+    # Report
+    report_only: bool = False
 
-    Args:
-        config_path: 설정 파일 경로. None이면 기본 config.yaml 사용.
+    @property
+    def dataset_filename(self) -> str:
+        return f"longmemeval_{self.variant}_cleaned.json"
 
-    Returns:
-        BenchmarkConfig 인스턴스
-    """
-    if config_path is None:
-        config_path = str(
-            Path(__file__).parent / "config.yaml"
-        )
+    @property
+    def dataset_path(self) -> Path:
+        return self.data_dir / self.dataset_filename
 
-    path = Path(config_path)
-    if not path.exists():
-        return BenchmarkConfig()
+    @property
+    def checkpoint_path(self) -> Path:
+        return self.results_dir / "progress.json"
 
-    with open(path, encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
+    @property
+    def report_path(self) -> Path:
+        return self.results_dir / "report.json"
 
-    return BenchmarkConfig(**raw)
+    def db_path_for(self, question_id: str) -> Path:
+        return self.dbs_dir / f"{question_id}.db"

@@ -1,5 +1,7 @@
 # Migration & Utility Scripts
 
+> Golden Rules, 세션 관리, 보안 정책, Anti-Patterns 등 프로젝트 공통 표준은 root [AGENTS.md](../AGENTS.md) 참조.
+
 ## Module Context
 The `scripts/` directory contains Python entry points for migrations (`migrate_embeddings.py`, `migrate_monitoring_tables.py`, etc.), debugging helpers (`debug_mcp_sse_search.py`, `debug_summarization.py`), import/export utilities, benchmarks, and verification tooling. Each script typically initializes the same `Settings`, `Database`, and embedding services as the main app so that migrations and diagnostics operate on a consistent environment.
 

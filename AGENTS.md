@@ -81,6 +81,22 @@ Before generating code or executing commands, you must perform a brief <Thinking
 - **[Web Dashboard Pages](./app/web/dashboard/AGENTS.md)** — 대시보드 라우트, 페이지 템플릿, SSE MCP endpoint 고도화 시.
 
 ## Session Context Management
+
+> CLAUDE.md의 Checklist와 MUST/SHOULD/MAY 규칙에 대한 상세 구현 가이드.
+
+### Session Lifecycle
+
+```
+세션 시작 ──→ 작업 추적 ──→ 세션 종료
+   │              │              │
+   ▼              ▼              ▼
+session_resume  pin_add       지식 보존 판단
+   │            pin_complete     │
+   │            pin_promote    session_end
+   │              │
+   └──── search (과거 맥락) ────┘
+```
+
 ### Session Start
 ```
 mcp_mem_mesh_session_resume(project_id="mem-mesh", expand="smart", limit=10)
@@ -110,10 +126,32 @@ mcp_mem_mesh_pin_complete(pin_id="<pin_id>")
 ```
 If importance ≥ 4: `mcp_mem_mesh_pin_promote(pin_id)`
 
-### Session End
+### Session End & Knowledge Preservation
 ```
 mcp_mem_mesh_session_end(project_id="mem-mesh")
 ```
+
+**세션 종료 시 지식 보존 판단 기준:**
+
+| 세션에서 발생한 일 | 저장 방법 | 예시 |
+|-----------------|---------|------|
+| 아키텍처 결정 합의 | `add(category="decision")` | "SQLite + sqlite-vec 유일 벡터 저장소 확정" |
+| 복잡한 버그 해결 | `add(category="bug")` | "sqlite-vec INSERT OR REPLACE 금지 — DELETE+INSERT" |
+| 시스템 장애 복구 | `add(category="incident")` | "포트 8000 충돌로 서버 이중 기동 발생" |
+| 개선 아이디어 | `add(category="idea")` | "한국어 검색에 E5 prefix encoding 검토" |
+| 재사용 패턴 발견 | `add(category="code_snippet")` | batch_operations 사용 패턴 |
+| Pin으로 추적 중인 작업 | `pin_complete` + 필요시 `pin_promote` | — |
+
+**저장하지 않는 것**: 단순 Q&A, 파일 읽기, 이미 저장된 내용 반복, 모든 코드 변경 기록.
+저장 시 반드시 **변경 이유(WHY)** 포함.
+
+### Security — 민감 정보 저장 금지
+
+메모리(`add`, `pin_add`)에 아래 정보를 **절대 저장하지 않는다**:
+- API 키, 토큰, 시크릿, 비밀번호
+- 개인식별정보(PII): 이메일, 전화번호, 주민등록번호
+- `.env` 파일 내용, 인증 정보
+- 코드 스니펫 저장 시 민감 값은 `<REDACTED>`로 치환
 
 ### Batch Operations (30-50% token savings)
 ```
@@ -136,3 +174,9 @@ mcp_mem_mesh_batch_operations(operations=[
 
 ### Categories
 `task` | `bug` | `idea` | `decision` | `incident` | `code_snippet` | `git-history`
+
+### Anti-Patterns (하지 말 것)
+- Hook 기반 자동 저장 — 바이트 절단으로 63.4% truncation, 검색 오염 20-30%
+- 모든 파일 변경을 메모리에 기록 — 검색 슬롯 낭비
+- 세션 요약을 head -c로 잘라 저장 — UTF-8 깨짐
+- 맥락 없이 코드 조각만 저장 — WHY 없으면 나중에 무의미

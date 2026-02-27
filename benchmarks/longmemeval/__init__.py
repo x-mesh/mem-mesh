@@ -1,1 +1,1 @@
-"""LongMemEval benchmark for mem-mesh search quality evaluation."""
+"""LongMemEval benchmark for mem-mesh hybrid search evaluation."""

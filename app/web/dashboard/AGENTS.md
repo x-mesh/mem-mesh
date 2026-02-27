@@ -1,5 +1,7 @@
 # Web Dashboard & API
 
+> Golden Rules, 세션 관리, 보안 정책, Anti-Patterns 등 프로젝트 공통 표준은 root [AGENTS.md](../../../AGENTS.md) 참조.
+
 ## Module Context
 
 FastAPI 기반 웹 대시보드와 REST API. 메모리 관리를 위한 웹 인터페이스와 HTTP 엔드포인트 제공.

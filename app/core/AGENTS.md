@@ -1,5 +1,7 @@
 # Core Services & Database Layer
 
+> Golden Rules, 세션 관리, 보안 정책, Anti-Patterns 등 프로젝트 공통 표준은 root [AGENTS.md](../../AGENTS.md) 참조.
+
 ## Module Context
 
 핵심 비즈니스 로직과 데이터 계층을 담당하는 모듈. 데이터베이스 연결, 임베딩 생성, 메모리 관리 서비스의 중앙 집중식 구현.

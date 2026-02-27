@@ -1,5 +1,7 @@
 # SSE MCP Transport Layer
 
+> Golden Rules, 세션 관리, 보안 정책, Anti-Patterns 등 프로젝트 공통 표준은 root [AGENTS.md](../../../AGENTS.md) 참조.
+
 ## Module Context
 Streamable HTTP transport implementation for MCP 2025-03-26. `app.web.mcp.sse` exposes `/mcp/sse` and `/mcp/message` endpoints, dispatches JSON-RPC payloads to `MCPDispatcher`, manages session queues, and optionally emits SSE events back to the client or returns immediate JSON. Session IDs live in `_sessions`, while `_tool_handlers` and `_dispatcher` share the same `MCPToolHandlers` injected from `app.web.lifespan`. Error formatting and schema lookups reuse `mcp_common.transport` and `mcp_common.schemas`.
 

@@ -1,109 +1,128 @@
-"""LongMemEval 데이터셋 로더"""
+"""LongMemEval dataset download and parsing."""
 
 import json
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
+
+from huggingface_hub import hf_hub_download
 
 from .config import BenchmarkConfig
-from .models import BenchmarkItem
 
 logger = logging.getLogger(__name__)
 
+HF_REPO_ID = "xiaowu0162/longmemeval-cleaned"
 
-def load_dataset(config: BenchmarkConfig) -> List[BenchmarkItem]:
-    """HuggingFace 데이터셋 로드 또는 한국어 번역본 로드
 
-    Args:
-        config: 벤치마크 설정
+@dataclass
+class Session:
+    """A single conversation session from the haystack."""
 
-    Returns:
-        BenchmarkItem 리스트
+    session_id: str
+    date: str
+    turns: list[dict[str, str]]  # [{"role": "user"/"assistant", "content": "..."}]
+
+
+@dataclass
+class LongMemEvalQuestion:
+    """A single LongMemEval benchmark question."""
+
+    question_id: str
+    question_type: str
+    question: str
+    question_date: str
+    answer: str  # always str (int answers converted)
+    answer_session_ids: list[str]
+    sessions: list[Session]
+
+    @property
+    def is_abstention(self) -> bool:
+        return "_abs" in self.question_id
+
+
+def download_dataset(config: BenchmarkConfig) -> Path:
+    """Download the LongMemEval dataset from HuggingFace Hub."""
+    if config.dataset_path.exists():
+        logger.info("Dataset already exists at %s", config.dataset_path)
+        return config.dataset_path
+
+    config.data_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("Downloading %s from %s ...", config.dataset_filename, HF_REPO_ID)
+
+    downloaded = hf_hub_download(
+        repo_id=HF_REPO_ID,
+        filename=config.dataset_filename,
+        repo_type="dataset",
+        local_dir=str(config.data_dir),
+    )
+    logger.info("Downloaded to %s", downloaded)
+    return Path(downloaded)
+
+
+def _parse_sessions(
+    haystack_session_ids: list[str],
+    haystack_dates: list[str],
+    haystack_sessions: list[list[dict[str, str]]],
+) -> list[Session]:
+    """Parse raw haystack data into Session objects."""
+    sessions: list[Session] = []
+    for sid, date, turns in zip(
+        haystack_session_ids, haystack_dates, haystack_sessions
+    ):
+        # Strip has_answer field if present (oracle split)
+        clean_turns = [
+            {"role": t["role"], "content": t["content"]} for t in turns
+        ]
+        sessions.append(Session(session_id=sid, date=date, turns=clean_turns))
+    return sessions
+
+
+def load_questions(
+    config: BenchmarkConfig,
+) -> list[LongMemEvalQuestion]:
+    """Load and parse questions from the dataset JSON file.
+
+    Applies filtering by question_type, max_count, and question_ids.
     """
-    if config.dataset.language == "ko":
-        return _load_korean_dataset(config)
-    return _load_hf_dataset(config)
+    path = config.dataset_path
+    if not path.exists():
+        path = download_dataset(config)
 
+    logger.info("Loading questions from %s ...", path)
+    with open(path, "r", encoding="utf-8") as f:
+        raw_data: list[dict] = json.load(f)
 
-def _load_hf_dataset(config: BenchmarkConfig) -> List[BenchmarkItem]:
-    """HuggingFace 데이터셋 로드"""
-    try:
-        from datasets import load_dataset as hf_load
-    except ImportError:
-        raise ImportError(
-            "datasets 패키지가 필요합니다: pip install datasets"
+    questions: list[LongMemEvalQuestion] = []
+    for item in raw_data:
+        q = LongMemEvalQuestion(
+            question_id=item["question_id"],
+            question_type=item["question_type"],
+            question=item["question"],
+            question_date=item["question_date"],
+            answer=str(item["answer"]),  # int → str conversion
+            answer_session_ids=item["answer_session_ids"],
+            sessions=_parse_sessions(
+                item["haystack_session_ids"],
+                item["haystack_dates"],
+                item["haystack_sessions"],
+            ),
         )
+        questions.append(q)
 
-    logger.info(f"Loading dataset: {config.dataset.name} ({config.dataset.split})")
-    ds = hf_load(config.dataset.name, split=config.dataset.split)
+    # Apply filters
+    if config.question_ids:
+        id_set = set(config.question_ids)
+        questions = [q for q in questions if q.question_id in id_set]
 
-    items: List[BenchmarkItem] = []
-    for i, row in enumerate(ds):
-        item = _row_to_item(row, i)
-        if item is not None:
-            items.append(item)
+    if config.question_types:
+        type_set = set(config.question_types)
+        questions = [q for q in questions if q.question_type in type_set]
 
-    if config.execution.max_questions is not None:
-        items = items[: config.execution.max_questions]
+    if config.max_questions is not None:
+        questions = questions[: config.max_questions]
 
-    logger.info(f"Loaded {len(items)} benchmark items")
-    return items
-
-
-def _load_korean_dataset(config: BenchmarkConfig) -> List[BenchmarkItem]:
-    """한국어 번역본 로드 (data/longmemeval_ko.json)"""
-    ko_path = Path(__file__).parent / "data" / "longmemeval_ko.json"
-    if not ko_path.exists():
-        raise FileNotFoundError(
-            f"한국어 데이터셋이 없습니다: {ko_path}\n"
-            "먼저 번역을 실행하세요: python -m benchmarks.longmemeval translate"
-        )
-
-    logger.info(f"Loading Korean dataset from {ko_path}")
-    with open(ko_path, encoding="utf-8") as f:
-        data = json.load(f)
-
-    items: List[BenchmarkItem] = []
-    for row in data:
-        item = BenchmarkItem(**row)
-        items.append(item)
-
-    if config.execution.max_questions is not None:
-        items = items[: config.execution.max_questions]
-
-    logger.info(f"Loaded {len(items)} Korean benchmark items")
-    return items
-
-
-def _row_to_item(row: dict, index: int) -> Optional[BenchmarkItem]:
-    """HuggingFace 데이터셋 행을 BenchmarkItem으로 변환"""
-    try:
-        # LongMemEval 데이터셋 필드 매핑
-        question_id = row.get("question_id", f"q_{index:03d}")
-        question_type = row.get("question_type", "unknown")
-        question = row.get("question", "")
-        answer = row.get("answer", "")
-        question_date = row.get("question_date")
-
-        # haystack_sessions: 대화 세션 리스트
-        haystack_sessions = row.get("haystack_sessions", [])
-        haystack_dates = row.get("haystack_dates", [])
-        answer_session_ids = row.get("answer_session_ids", [])
-
-        if not question or not haystack_sessions:
-            logger.warning(f"Skipping item {index}: missing question or sessions")
-            return None
-
-        return BenchmarkItem(
-            question_id=question_id,
-            question_type=question_type,
-            question=question,
-            answer=answer,
-            question_date=question_date,
-            haystack_sessions=haystack_sessions,
-            haystack_dates=haystack_dates,
-            answer_session_ids=answer_session_ids,
-        )
-    except Exception as e:
-        logger.warning(f"Failed to parse item {index}: {e}")
-        return None
+    logger.info(
+        "Loaded %d questions (filtered from %d total)", len(questions), len(raw_data)
+    )
+    return questions
