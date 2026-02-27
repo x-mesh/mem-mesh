@@ -518,13 +518,63 @@ class MemoryCard extends HTMLElement {
    */
   formatContent(content) {
     if (!content) return '';
-    
-    return content
+
+    let formatted = content;
+
+    // 마크다운 테이블 처리 (HTML 변환 전)
+    const tableBlocks = [];
+    formatted = formatted.replace(
+      /(?:^|\n)((?:\|[^\n]+\|\n?)+)/g,
+      (match, tableText) => {
+        const rows = tableText.trim().split('\n').filter(r => r.trim());
+        if (rows.length < 2) return match;
+        const sepIdx = rows.findIndex(r => {
+          const cells = r.split('|').slice(1, -1);
+          return cells.length > 0 && cells.every(c => /^[\s:-]+$/.test(c));
+        });
+        if (sepIdx < 0) return match;
+
+        const parseRow = (row) => row.split('|').slice(1, -1).map(c => c.trim());
+        const headerCells = parseRow(rows[sepIdx - 1] || rows[0]);
+        const bodyRows = rows.slice(sepIdx + 1);
+
+        let html = '<table class="md-table"><thead><tr>';
+        headerCells.forEach(c => {
+          const escaped = this.escapeHtml(c).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+          html += `<th>${escaped}</th>`;
+        });
+        html += '</tr></thead><tbody>';
+        bodyRows.forEach(row => {
+          html += '<tr>';
+          parseRow(row).forEach(c => {
+            const escaped = this.escapeHtml(c)
+              .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+              .replace(/`([^`]+)`/g, '<code>$1</code>');
+            html += `<td>${escaped}</td>`;
+          });
+          html += '</tr>';
+        });
+        html += '</tbody></table>';
+
+        const placeholder = `__TABLE_BLOCK_${tableBlocks.length}__`;
+        tableBlocks.push(html);
+        return `\n${placeholder}\n`;
+      }
+    );
+
+    formatted = formatted
       .replace(/\n/g, '<br>')
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.*?)\*/g, '<em>$1</em>')
       .replace(/`(.*?)`/g, '<code>$1</code>')
       .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+    // 테이블 플레이스홀더 복원
+    tableBlocks.forEach((block, index) => {
+      formatted = formatted.replace(`__TABLE_BLOCK_${index}__`, block);
+    });
+
+    return formatted;
   }
 }
 
@@ -632,7 +682,32 @@ style.textContent = `
   .content-full a:hover {
     text-decoration: underline;
   }
-  
+
+  .content-full .md-table,
+  .qa-text .md-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.5rem 0;
+    font-size: 0.8125rem;
+  }
+  .content-full .md-table th,
+  .content-full .md-table td,
+  .qa-text .md-table th,
+  .qa-text .md-table td {
+    border: 1px solid var(--border-color, #e0e0e0);
+    padding: 0.375rem 0.5rem;
+    text-align: left;
+  }
+  .content-full .md-table th,
+  .qa-text .md-table th {
+    background: var(--bg-secondary, #f5f5f5);
+    font-weight: 600;
+  }
+  .content-full .md-table tr:hover,
+  .qa-text .md-table tr:hover {
+    background: var(--bg-hover, rgba(0,0,0,0.02));
+  }
+
   .content-meta {
     display: flex;
     justify-content: flex-end;
