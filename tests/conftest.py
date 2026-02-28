@@ -7,6 +7,12 @@
 import os
 import tempfile
 from pathlib import Path
+
+# manual/과 benchmarks/ 하위 테스트는 자동 수집에서 제외 (수동 실행용)
+collect_ignore = [
+    str(Path(__file__).parent / "manual"),
+    str(Path(__file__).parent / "benchmarks"),
+]
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, Mock
 
@@ -88,7 +94,7 @@ async def memory_service_mocked(temp_db, mock_embedding_service):
 @pytest.fixture
 async def search_service(temp_db, embedding_service):
     """SearchService 인스턴스 (legacy)"""
-    from app.core.services.legacy.search import SearchService
+    from app.core.services.search import SearchService
 
     return SearchService(temp_db, embedding_service)
 

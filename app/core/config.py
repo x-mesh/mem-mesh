@@ -7,7 +7,7 @@ Supports storage_mode for direct SQLite access or API mode.
 """
 
 from typing import Literal, Optional
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -260,6 +260,15 @@ class Settings(BaseSettings):
         if not v.strip():
             raise ValueError("embedding_model cannot be empty")
         return v.strip()
+
+    @model_validator(mode="after")
+    def validate_basic_auth_password(self) -> "Settings":
+        """Ensure admin_password is set when basic auth is enabled."""
+        if self.web_basic_auth_enabled and not self.admin_password:
+            raise ValueError(
+                "admin_password must be set when web_basic_auth_enabled is True"
+            )
+        return self
 
     model_config = {
         "env_file": ".env",

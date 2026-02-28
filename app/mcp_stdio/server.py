@@ -58,7 +58,7 @@ async def initialize_storage(settings: Optional[Settings] = None) -> None:
     from ..core.database.base import Database
     from ..core.embeddings.service import EmbeddingService
     from ..core.services.memory import MemoryService
-    from ..core.services.legacy.search import SearchService
+    from ..core.services.search import SearchService
 
     batch_settings = settings or Settings()
     db = Database(batch_settings.database_path)
@@ -227,10 +227,11 @@ async def batch_operations(operations: list[dict]) -> dict:
 
     Args:
         operations: List of operation dictionaries with 'type' and parameters
-                   Supported types: 'add', 'search'
+                   Supported types: 'add', 'search', 'pin_add'
                    Example: [
                        {"type": "add", "content": "Task content"},
-                       {"type": "search", "query": "bug fix"}
+                       {"type": "search", "query": "bug fix"},
+                       {"type": "pin_add", "content": "Pin content", "project_id": "my-project"}
                    ]
 
     Returns:
@@ -271,13 +272,14 @@ async def pin_complete(pin_id: str) -> dict:
 
 
 @mcp.tool()
-async def pin_promote(pin_id: str) -> dict:
+async def pin_promote(pin_id: str, category: str = "task") -> dict:
     """Promote a completed pin to a permanent memory.
 
     Args:
         pin_id: Pin ID to promote to memory
+        category: Memory category (task, decision, bug, incident, idea, code_snippet)
     """
-    return await _get_handlers().pin_promote(pin_id)
+    return await _get_handlers().pin_promote(pin_id, category=category)
 
 
 @mcp.tool()

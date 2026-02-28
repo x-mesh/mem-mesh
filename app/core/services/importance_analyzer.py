@@ -127,12 +127,16 @@ class ImportanceAnalyzer:
         for importance, keywords in self.keywords.items():
             for keyword in keywords:
                 keyword_lower = keyword.lower()
-                
-                # 단어 경계를 고려한 매칭 (부분 문자열이 아닌 완전한 단어)
-                # 예: "test"는 "testing"과 매칭되지만 "latest"와는 매칭되지 않음
-                pattern = r'\b' + re.escape(keyword_lower) + r'\w*\b'
-                matches = re.findall(pattern, full_text)
-                
+
+                # 영어: 단어 경계(\b) 사용 — "test"는 "testing"과 매칭, "latest"와는 불매칭
+                # 한국어: \b가 동작하지 않으므로 공백/문자열 경계 기반 포함 검사
+                if keyword_lower.isascii():
+                    pattern = r'\b' + re.escape(keyword_lower) + r'\w*\b'
+                    matches = re.findall(pattern, full_text)
+                else:
+                    tokens = full_text.split()
+                    matches = [t for t in tokens if keyword_lower in t]
+
                 if matches:
                     # 매칭된 횟수만큼 점수 증가
                     scores[importance] += len(matches)

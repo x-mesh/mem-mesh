@@ -10,7 +10,7 @@ from datetime import datetime
 import json
 
 from ..core.services.memory import MemoryService
-from ..core.services.legacy.search import SearchService
+from ..core.services.search import SearchService
 from ..core.embeddings.service import EmbeddingService
 from ..core.database.base import Database
 from ..core.services.cache_manager import get_cache_manager
@@ -239,6 +239,7 @@ class BatchOperationHandler:
         # 작업 타입별로 분류
         add_operations = []
         search_operations = []
+        pin_add_operations = []
 
         for i, op in enumerate(operations):
             op["index"] = i
@@ -246,6 +247,8 @@ class BatchOperationHandler:
                 add_operations.append(op)
             elif op["type"] == "search":
                 search_operations.append(op)
+            elif op["type"] == "pin_add":
+                pin_add_operations.append(op)
 
         # 배치 추가 작업 처리
         if add_operations:
@@ -329,11 +332,58 @@ class BatchOperationHandler:
                         }
                     )
 
+        # 배치 pin_add 작업 처리
+        if pin_add_operations:
+            from ..core.services.pin import PinService
+            from ..core.services.importance_analyzer import ImportanceAnalyzer
+
+            pin_service = PinService(self.db)
+            analyzer = ImportanceAnalyzer()
+
+            for op in pin_add_operations:
+                try:
+                    content = op.get("content", "")
+                    project_id = op.get("project_id", "")
+                    importance = op.get("importance")
+                    tags = op.get("tags")
+
+                    auto_importance = False
+                    if importance is None:
+                        importance = analyzer.analyze(content, tags)
+                        auto_importance = True
+
+                    pin_result = await pin_service.create_pin(
+                        project_id=project_id,
+                        content=content,
+                        importance=importance,
+                        tags=tags,
+                        auto_importance=auto_importance,
+                    )
+                    results.append({
+                        "index": op["index"],
+                        "type": "pin_add",
+                        "success": True,
+                        "pin_id": pin_result.id,
+                        "importance": pin_result.importance,
+                        "auto_importance": auto_importance,
+                    })
+                except Exception as e:
+                    results.append({
+                        "index": op["index"],
+                        "type": "pin_add",
+                        "success": False,
+                        "error": str(e),
+                    })
+
         # 인덱스 순으로 정렬
         results.sort(key=lambda x: x["index"])
 
         elapsed_time = (datetime.now() - start_time).total_seconds()
-        total_tokens_saved = len(add_operations) * 10 + len(search_operations) * 30
+        total_tokens_saved = (
+            len(add_operations) * 10
+            + len(search_operations) * 30
+            + len(pin_add_operations) * 5
+        )
 
         return {
             "status": "success",
@@ -344,6 +394,7 @@ class BatchOperationHandler:
             "batch_stats": {
                 "add_operations": len(add_operations),
                 "search_operations": len(search_operations),
+                "pin_add_operations": len(pin_add_operations),
             },
         }
 
@@ -354,7 +405,7 @@ async def test_batch_operations():
     from ..core.config import Settings
     from ..core.embeddings.service import EmbeddingService
     from ..core.services.memory import MemoryService
-    from ..core.services.legacy.search import SearchService
+    from ..core.services.search import SearchService
 
     # Initialize services
     test_settings = Settings()

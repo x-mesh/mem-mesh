@@ -86,7 +86,7 @@ class UnifiedSearchService:
         
         # Optional components
         self.noise_filter = SmartSearchFilter() if enable_noise_filter else None
-        self.query_expander = get_query_expander() if get_query_expander else None
+        self.query_expander = get_query_expander() if enable_korean_optimization else None
         self.intent_analyzer = None
         self.score_normalizer = get_score_normalizer(score_normalization_method) if enable_score_normalization else None
         

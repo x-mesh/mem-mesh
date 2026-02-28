@@ -11,6 +11,7 @@ IDE system prompt, rules 파일, 또는 API로 주입.
 
 | 파일 | 용도 | 토큰 |
 |------|------|------|
+| **`DEFAULT_PROMPT.md`** | **기본 행동 규칙 — 프로젝트에 복사하여 사용** | **~600** |
 | `all-tools-full.md` | 전체 규칙 (15개 도구, 검색/저장/세션/관계/배치) | ~1500 |
 | `mem-mesh-ide-prompt.md` | IDE용 컴팩트 프롬프트 | ~300 |
 | `mem-mesh-session-rules.md` | 세션 라이프사이클 상세 | ~200 |

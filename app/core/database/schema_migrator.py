@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Current schema version - increment when adding new migrations
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 
 class SchemaMigrator:
@@ -36,6 +36,7 @@ class SchemaMigrator:
             1: self._migration_v1_initial,
             2: self._migration_v2_work_tracking_columns,
             3: self._migration_v3_relation_tables,
+            4: self._migration_v4_pin_columns_integrity,
         }
 
     async def migrate(self) -> None:
@@ -92,8 +93,11 @@ class SchemaMigrator:
     async def _set_version(self, version: int, description: str = "") -> None:
         """Record migration version."""
         await self.connection.execute(
+            "DELETE FROM _schema_migrations WHERE version = ?", (version,)
+        )
+        await self.connection.execute(
             """
-            INSERT OR REPLACE INTO _schema_migrations (version, applied_at, description)
+            INSERT INTO _schema_migrations (version, applied_at, description)
             VALUES (?, ?, ?)
             """,
             (version, datetime.now(timezone.utc).isoformat(), description)
@@ -192,3 +196,13 @@ class SchemaMigrator:
                 )
             """)
             logger.info("Created memory_relations table via migration v3")
+
+    async def _migration_v4_pin_columns_integrity(self, migrator: "SchemaMigrator") -> None:
+        """Ensure all pin columns exist for databases that skipped earlier migrations."""
+        if await self._table_exists("pins"):
+            await self._add_column_if_missing("pins", "auto_importance", "INTEGER", "0")
+            await self._add_column_if_missing("pins", "estimated_tokens", "INTEGER", "0")
+            await self._add_column_if_missing("pins", "promoted_to_memory_id", "TEXT", "NULL")
+            await self._add_column_if_missing("pins", "embedding", "BLOB", "NULL")
+            await self._add_column_if_missing("pins", "user_id", "TEXT", "'default'")
+            logger.info("Pin columns integrity check completed via migration v4")

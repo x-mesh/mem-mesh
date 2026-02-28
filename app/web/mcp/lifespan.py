@@ -64,7 +64,7 @@ async def mcp_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             from app.core.database.base import Database
             from app.core.embeddings.service import EmbeddingService
             from app.core.services.memory import MemoryService
-            from app.core.services.legacy.search import SearchService
+            from app.core.services.search import SearchService
             from app.mcp_common.batch_tools import BatchOperationHandler
 
             db = Database(settings.database_path)

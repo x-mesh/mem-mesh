@@ -476,7 +476,7 @@ class MCPToolHandlers:
             from ..core.services.importance_analyzer import ImportanceAnalyzer
             
             db = self._get_database()
-            pin_service = PinService(db)
+            pin_service = PinService(db, getattr(self._storage, 'embedding_service', None))
             
             # importance가 명시되지 않으면 ImportanceAnalyzer로 자동 추정
             effective_importance = importance
@@ -494,12 +494,11 @@ class MCPToolHandlers:
                 project_id=project_id,
                 content=content,
                 importance=effective_importance,
-                tags=tags
+                tags=tags,
+                auto_importance=auto_importance,
             )
-            
-            # 응답에 auto_importance 플래그 추가
+
             response = result.model_dump()
-            response["auto_importance"] = auto_importance
             if auto_importance:
                 response["importance_note"] = (
                     f"중요도가 자동으로 {effective_importance}점으로 설정되었습니다. "
@@ -527,7 +526,7 @@ class MCPToolHandlers:
             from ..core.services.pin import PinService, PinAlreadyCompletedError
             
             db = self._get_database()
-            pin_service = PinService(db)
+            pin_service = PinService(db, getattr(self._storage, 'embedding_service', None))
             
             try:
                 result = await pin_service.complete_pin(pin_id)
@@ -555,24 +554,25 @@ class MCPToolHandlers:
             logger.error("Error in pin_complete", error=str(e))
             raise
     
-    async def pin_promote(self, pin_id: str) -> Dict[str, Any]:
+    async def pin_promote(self, pin_id: str, category: str = "task") -> Dict[str, Any]:
         """Promote a pin to a permanent memory
-        
+
         Args:
             pin_id: Pin ID to promote
-            
+            category: Memory category (task, decision, bug, incident, idea, code_snippet)
+
         Returns:
             dict: Promotion result with memory_id
         """
-        logger.info("Tool pin_promote called", pin_id=pin_id)
-        
+        logger.info("Tool pin_promote called", pin_id=pin_id, category=category)
+
         try:
             from ..core.services.pin import PinService
-            
+
             db = self._get_database()
-            pin_service = PinService(db)
-            
-            result = await pin_service.promote_to_memory(pin_id)
+            pin_service = PinService(db, getattr(self._storage, 'embedding_service', None))
+
+            result = await pin_service.promote_to_memory(pin_id, category=category)
             
             logger.info("Successfully promoted pin to memory", pin_id=pin_id, memory_id=result["memory_id"])
             return result
@@ -669,10 +669,11 @@ class MCPToolHandlers:
         
         try:
             from ..core.services.session import SessionService
-            
+
             db = self._get_database()
-            session_service = SessionService(db)
-            
+            embedding_svc = getattr(self._storage, 'embedding_service', None)
+            session_service = SessionService(db, embedding_service=embedding_svc)
+
             # 현재 활성 세션 찾기
             sessions = await session_service.list_sessions(
                 project_id=project_id,
@@ -686,13 +687,35 @@ class MCPToolHandlers:
                     "message": f"프로젝트 '{project_id}'에 활성 세션이 없습니다."
                 }
             
-            result = await session_service.end_session(
+            result = await session_service.end_with_auto_promotion(
                 session_id=sessions[0].id,
-                summary=summary
+                summary=summary,
+                auto_promote_threshold=4
             )
-            
-            logger.info("Successfully ended session", session_id=result.id)
-            return result.model_dump()
+
+            session = result.get("session")
+            promoted_pins = result.get("promoted_pins", [])
+
+            if session is None:
+                return {
+                    "status": "error",
+                    "message": f"세션 종료 실패: {sessions[0].id}"
+                }
+
+            response = session.model_dump()
+            response["promoted_pins"] = promoted_pins
+            response["promotion_count"] = len(promoted_pins)
+            if promoted_pins:
+                response["promotion_message"] = (
+                    f"{len(promoted_pins)}개의 중요 Pin이 자동 승격되었습니다."
+                )
+
+            logger.info(
+                "Successfully ended session with auto-promotion",
+                session_id=session.id,
+                promoted_count=len(promoted_pins)
+            )
+            return response
         except Exception as e:
             logger.error("Error in session_end", error=str(e))
             raise

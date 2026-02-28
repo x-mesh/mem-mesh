@@ -170,8 +170,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         # Work Tracking 서비스들 초기화
         project_service = ProjectService(db)
-        session_service = SessionService(db)
-        pin_service = PinService(db)
+        session_service = SessionService(db, embedding_service=embedding_service)
+        pin_service = PinService(db, embedding_service)
         relation_service = RelationService(db)
 
         # OAuth 서비스 초기화
@@ -191,7 +191,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # BatchOperationHandler 초기화 (기존 db/embedding 재사용)
         batch_handler = None
         try:
-            from app.core.services.legacy.search import SearchService as LegacySearchService
+            from app.core.services.search import SearchService as LegacySearchService
             from app.mcp_common.batch_tools import BatchOperationHandler
 
             legacy_search = LegacySearchService(db, embedding_service)

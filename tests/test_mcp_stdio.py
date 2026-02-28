@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.memory import MemoryService
-from app.core.services.legacy.search import SearchService
+from app.core.services.search import SearchService
 from app.core.services.context import ContextService
 from app.core.services.stats import StatsService
 from app.core.config import Settings

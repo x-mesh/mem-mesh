@@ -7,7 +7,7 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.core.services.legacy.search import SearchService
+from app.core.services.search import SearchService
 from app.core.services.metrics_collector import MetricsCollector
 from app.core.embeddings.service import EmbeddingService
 from app.core.schemas.responses import SearchResponse, SearchResult

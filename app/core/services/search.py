@@ -11,19 +11,19 @@ from typing import Optional, List, TYPE_CHECKING
 from datetime import datetime
 from difflib import SequenceMatcher
 
-from ...database.base import Database
-from ...embeddings.service import EmbeddingService
-from ...schemas.responses import SearchResult, SearchResponse
+from ..database.base import Database
+from ..embeddings.service import EmbeddingService
+from ..schemas.responses import SearchResult, SearchResponse
 
 try:
-    from ..query_expander import get_query_expander
+    from .query_expander import get_query_expander
 except ImportError:
     # QueryExpander가 없으면 None
     get_query_expander = None
-from ..cache_manager import get_cache_manager
+from .cache_manager import get_cache_manager
 
 if TYPE_CHECKING:
-    from ..metrics_collector import MetricsCollector
+    from .metrics_collector import MetricsCollector
 
 logger = logging.getLogger(__name__)
 

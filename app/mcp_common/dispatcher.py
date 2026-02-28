@@ -173,7 +173,10 @@ class MCPDispatcher:
         if "pin_id" not in args:
             return format_tool_error("Missing required argument: pin_id")
 
-        result = await self._tool_handlers.pin_promote(pin_id=args["pin_id"])
+        result = await self._tool_handlers.pin_promote(
+            pin_id=args["pin_id"],
+            category=args.get("category", "task"),
+        )
         return format_tool_response(result)
 
     async def _dispatch_session_resume(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -308,6 +311,25 @@ class MCPDispatcher:
                             "index": i, "type": "search", "success": False,
                             "error": search_result["content"][0]["text"],
                         })
+                elif op_type == "pin_add":
+                    pin_result = await self._dispatch_pin_add({
+                        "content": op.get("content"),
+                        "project_id": op.get("project_id"),
+                        "importance": op.get("importance"),
+                        "tags": op.get("tags"),
+                    })
+                    if not pin_result.get("isError"):
+                        content_text = pin_result["content"][0]["text"]
+                        parsed = json.loads(content_text)
+                        results.append({
+                            "index": i, "type": "pin_add", "success": True,
+                            "pin_id": parsed.get("id"),
+                        })
+                    else:
+                        results.append({
+                            "index": i, "type": "pin_add", "success": False,
+                            "error": pin_result["content"][0]["text"],
+                        })
                 else:
                     results.append({
                         "index": i, "type": op_type, "success": False,
@@ -316,6 +338,7 @@ class MCPDispatcher:
 
             add_count = sum(1 for op in operations if op.get("type") == "add")
             search_count = sum(1 for op in operations if op.get("type") == "search")
+            pin_add_count = sum(1 for op in operations if op.get("type") == "pin_add")
 
             batch_result = {
                 "status": "success",
@@ -324,8 +347,9 @@ class MCPDispatcher:
                 "batch_stats": {
                     "add_operations": add_count,
                     "search_operations": search_count,
+                    "pin_add_operations": pin_add_count,
                 },
-                "tokens_saved": add_count * 10 + search_count * 30,
+                "tokens_saved": add_count * 10 + search_count * 30 + pin_add_count * 5,
             }
             return format_tool_response(batch_result)
 

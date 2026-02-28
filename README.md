@@ -260,6 +260,7 @@ mem-mesh/
 
 | 문서 | 용도 |
 |------|------|
+| [DEFAULT_PROMPT.md](./docs/rules/DEFAULT_PROMPT.md) | **기본 행동 규칙** — 프로젝트 CLAUDE.md/Cursor rules에 복사하여 사용 |
 | [all-tools-full.md](./docs/rules/all-tools-full.md) | 전체 규칙 (15개 도구, 검색/저장/세션/관계/배치) |
 | [mem-mesh-ide-prompt.md](./docs/rules/mem-mesh-ide-prompt.md) | IDE용 컴팩트 프롬프트 (~300 토큰) |
 | [modules/quick-start.md](./docs/rules/modules/quick-start.md) | 5분 빠른 시작 |

@@ -9,7 +9,7 @@ import os
 from unittest.mock import Mock
 from datetime import datetime, timezone
 
-from app.core.services.legacy.search import SearchService
+from app.core.services.search import SearchService
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.memory import MemoryService

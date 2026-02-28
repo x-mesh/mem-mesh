@@ -40,8 +40,11 @@ class DatabaseMigrator:
         """Set embedding metadata value."""
         try:
             await self.connection.execute(
+                "DELETE FROM embedding_metadata WHERE key = ?", (key,)
+            )
+            await self.connection.execute(
                 """
-                INSERT OR REPLACE INTO embedding_metadata (key, value, updated_at)
+                INSERT INTO embedding_metadata (key, value, updated_at)
                 VALUES (?, ?, ?)
                 """,
                 (key, value, datetime.utcnow().isoformat() + "Z"),

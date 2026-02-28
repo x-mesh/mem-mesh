@@ -295,8 +295,8 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
                     "content": {
                         "type": "string",
                         "description": "Pin content describing the task or work item",
-                        "minLength": 1,
-                        "maxLength": 1000
+                        "minLength": 10,
+                        "maxLength": 10000
                     },
                     "project_id": {
                         "type": "string",
@@ -353,6 +353,12 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
                         "description": "Pin ID to promote to memory",
                         "pattern": "^[a-zA-Z0-9_-]+$",
                         "maxLength": 100
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Memory category (default: task)",
+                        "enum": ["task", "bug", "idea", "decision", "incident", "code_snippet"],
+                        "default": "task"
                     },
                 },
                 "required": ["pin_id"],
@@ -452,11 +458,11 @@ def get_batch_tool_schemas() -> List[Dict[str, Any]]:
                                 "type": {
                                     "type": "string",
                                     "description": "Operation type",
-                                    "enum": ["add", "search"]
+                                    "enum": ["add", "search", "pin_add"]
                                 },
                                 "content": {
                                     "type": "string",
-                                    "description": "Memory content (for 'add' operations)",
+                                    "description": "Memory content (for 'add' operations) or Pin content (for 'pin_add')",
                                     "minLength": 10,
                                     "maxLength": 10000
                                 },
@@ -492,6 +498,12 @@ def get_batch_tool_schemas() -> List[Dict[str, Any]]:
                                     "default": 5,
                                     "minimum": 1,
                                     "maximum": 20
+                                },
+                                "importance": {
+                                    "type": "integer",
+                                    "description": "Importance score (for 'pin_add' operations). Auto-determined if not provided.",
+                                    "minimum": 1,
+                                    "maximum": 5
                                 },
                             },
                             "required": ["type"],

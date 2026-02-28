@@ -130,7 +130,7 @@ async def initialize_storage():
     from ..core.config import Settings as PureSettings
     from ..core.embeddings.service import EmbeddingService
     from ..core.services.memory import MemoryService
-    from ..core.services.legacy.search import SearchService
+    from ..core.services.search import SearchService
     from ..mcp_common.batch_tools import BatchOperationHandler
 
     batch_settings = PureSettings()

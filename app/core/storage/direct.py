@@ -1,5 +1,6 @@
 """Direct SQLite 스토리지 백엔드 구현"""
 
+import json
 import logging
 from typing import Optional
 
@@ -7,7 +8,7 @@ from .base import StorageBackend
 from ..database.base import Database
 from ..embeddings.service import EmbeddingService
 from ..services.memory import MemoryService
-from ..services.legacy.search import SearchService
+from ..services.search import SearchService
 from ..services.unified_search import UnifiedSearchService
 from ..services.search_warmup import get_warmup_service
 from ..services.context import ContextService
@@ -474,7 +475,7 @@ class DirectStorageBackend(StorageBackend):
                         "category": row[2],
                         "project_id": row[3],
                         "source": row[4],
-                        "tags": row[5].split(",") if row[5] else [],
+                        "tags": json.loads(row[5]) if row[5] else [],
                         "created_at": row[6],
                         "updated_at": row[7],
                     },

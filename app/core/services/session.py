@@ -28,9 +28,10 @@ class NoActiveSessionError(Exception):
 class SessionService:
     """세션 관리 서비스"""
 
-    def __init__(self, db: Database, project_service: Optional[ProjectService] = None):
+    def __init__(self, db: Database, project_service: Optional[ProjectService] = None, embedding_service=None):
         self.db = db
         self.project_service = project_service or ProjectService(db)
+        self._embedding_service = embedding_service
 
     async def get_or_create_active_session(
         self, project_id: str, user_id: Optional[str] = None
@@ -571,57 +572,44 @@ class SessionService:
             for pin in session_context.pins:
                 loaded_tokens += await token_tracker.estimate_tokens(pin.content)
 
-        # 로드되지 않은 핀들의 예상 토큰 수 계산
+        # 로드되지 않은 핀들의 예상 토큰 수 계산 (SQL 기반, 재쿼리 없음)
         unloaded_tokens = 0
         is_optimized = expand != True  # noqa: E712 — smart와 False 모두 최적화 적용
 
         if is_optimized and session_context.pins_count > 0:
             if expand == "smart":
-                # smart: 각 핀의 full content에서 실제 반환된 content를 뺀 차이를 unloaded로 카운트
-                all_pin_rows = await self.db.fetchall(
+                # SQL로 tier별 unloaded 문자 수 집계 (개별 row fetch 없이)
+                row = await self.db.fetchone(
                     """
-                    SELECT content, status, importance FROM pins
-                    WHERE session_id = ?
-                    ORDER BY importance DESC, created_at DESC
+                    SELECT SUM(
+                        CASE
+                            WHEN status IN ('open','in_progress') AND COALESCE(importance,3) >= 4
+                                THEN 0
+                            WHEN status IN ('open','in_progress')
+                                THEN MAX(0, LENGTH(content) - 200)
+                            WHEN COALESCE(importance,3) >= 4
+                                THEN MAX(0, LENGTH(content) - 80)
+                            ELSE LENGTH(content)
+                        END
+                    ) as unloaded_chars
+                    FROM pins WHERE session_id = ?
                     """,
                     (session_context.session_id,)
                 )
-                for row in all_pin_rows:
-                    full_content = row["content"] or ""
-                    is_active = row["status"] in ("open", "in_progress")
-                    is_important = (row["importance"] or 3) >= 4
-
-                    # Tier 1(active+important)은 full 반환이므로 unloaded 없음
-                    if is_active and is_important:
-                        continue
-
-                    full_tokens = await token_tracker.estimate_tokens(full_content)
-
-                    if is_active:
-                        # Tier 2: content[:200] 반환 → 나머지가 unloaded
-                        loaded_part = full_content[:200]
-                    elif is_important:
-                        # Tier 3: content[:80] 반환 → 나머지가 unloaded
-                        loaded_part = full_content[:80]
-                    else:
-                        # Tier 4: content 없음 → 전체가 unloaded
-                        loaded_part = ""
-
-                    loaded_part_tokens = await token_tracker.estimate_tokens(loaded_part) if loaded_part else 0
-                    unloaded_tokens += max(0, full_tokens - loaded_part_tokens)
+                unloaded_chars = row["unloaded_chars"] if row and row["unloaded_chars"] else 0
+                # 문자 → 토큰 근사 (영문 ~4 chars/token, 한국어 ~2 chars/token, 혼합 ~3)
+                unloaded_tokens = max(0, unloaded_chars // 3)
             else:
                 # expand=false: 모든 핀의 full content를 unloaded로 카운트
-                unloaded_pin_rows = await self.db.fetchall(
+                row = await self.db.fetchone(
                     """
-                    SELECT content FROM pins
-                    WHERE session_id = ?
-                    ORDER BY importance DESC, created_at DESC
-                    LIMIT -1 OFFSET ?
+                    SELECT SUM(LENGTH(content)) as total_chars
+                    FROM pins WHERE session_id = ?
                     """,
-                    (session_context.session_id, 0)
+                    (session_context.session_id,)
                 )
-                for row in unloaded_pin_rows:
-                    unloaded_tokens += await token_tracker.estimate_tokens(row["content"])
+                total_chars = row["total_chars"] if row and row["total_chars"] else 0
+                unloaded_tokens = max(0, total_chars // 3)
         
         estimated_total = loaded_tokens + unloaded_tokens
         
@@ -713,7 +701,7 @@ class SessionService:
         )
         
         # 핀 승격 처리
-        pin_service = PinService(self.db)
+        pin_service = PinService(self.db, self._embedding_service)
         promoted_pins = []
         
         for candidate in promotion_candidates:
