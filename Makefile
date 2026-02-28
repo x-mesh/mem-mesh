@@ -1,4 +1,4 @@
-.PHONY: help install test clean run-api run-mcp run-dashboard docker-build docker-up docker-down docker-logs format lint
+.PHONY: help install test test-live test-live-api test-live-mcp test-live-realdata test-all clean run-api run-mcp run-dashboard docker-build docker-up docker-down docker-logs format lint
 
 # Default target
 .DEFAULT_GOAL := help
@@ -26,9 +26,23 @@ install-dev: ## Install development dependencies
 	$(PIP) install pytest pytest-asyncio pytest-cov hypothesis black ruff
 	@echo "✓ Development dependencies installed"
 
-test: ## Run all tests
+test: ## Run unit tests (no server needed)
+	$(PYTEST) tests/ --ignore=tests/integration -v
+
+test-live: ## Run live integration tests (requires localhost:8000)
+	$(PYTEST) tests/integration/ -v
+
+test-live-api: ## Live tests — REST API only
+	$(PYTEST) tests/integration/test_api_live.py -v
+
+test-live-mcp: ## Live tests — MCP SSE only
+	$(PYTEST) tests/integration/test_mcp_sse_live.py -v
+
+test-live-realdata: ## Live tests — real data scenarios only
+	$(PYTEST) tests/integration/test_realdata_scenarios.py -v
+
+test-all: ## Run all tests (unit + live)
 	$(PYTEST) tests/ -v
-	@echo "✓ All tests passed"
 
 test-cov: ## Run tests with coverage
 	$(PYTEST) tests/ -v --cov=app --cov-report=html --cov-report=term
