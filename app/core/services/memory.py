@@ -343,18 +343,14 @@ class MemoryService:
 
         try:
             async with self.db.transaction():
-                # 2. SQLite에서 삭제
+                # 2. FTS5 인덱스에서 명시적 삭제 (트리거가 비동기 컨텍스트에서 실패할 수 있음)
+                await self._delete_from_fts_index(memory_id)
+
+                # 3. SQLite에서 삭제
                 await self.db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
 
-                # 3. 벡터 인덱스에서 삭제
+                # 4. 벡터 인덱스에서 삭제
                 await self._delete_from_vector_index(memory_id)
-
-                # 4. related_memory_ids 참조 정리
-                # 현재 스키마에는 related_memory_ids 필드가 없으므로
-                # Context 서비스에서 동적으로 관계를 계산함
-                logger.debug(
-                    f"Memory {memory_id} deleted, no related_memory_ids cleanup needed"
-                )
 
             logger.info(f"Memory deleted successfully: {memory_id}")
             return DeleteResponse(id=memory_id, status="deleted")
@@ -491,6 +487,23 @@ class MemoryService:
         except Exception as e:
             logger.error(f"Failed to update vector index: {e}")
             raise
+
+    async def _delete_from_fts_index(self, memory_id: str) -> None:
+        """FTS5 인덱스에서 명시적 삭제"""
+        try:
+            cursor = await self.db.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='memories_fts'
+            """)
+
+            if cursor.fetchone():
+                await self.db.execute(
+                    "DELETE FROM memories_fts WHERE id = ?", (memory_id,)
+                )
+                logger.debug(f"Deleted from FTS index: {memory_id}")
+
+        except Exception as e:
+            logger.warning(f"Failed to delete from FTS index (non-fatal): {e}")
 
     async def _delete_from_vector_index(self, memory_id: str) -> None:
         """벡터 인덱스에서 삭제"""
