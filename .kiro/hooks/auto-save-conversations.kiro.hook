@@ -1,7 +1,7 @@
 {
   "name": "Auto-save Conversations",
   "description": "에이전트 응답 완료 시 중요 대화만 선택적으로 mem-mesh에 저장",
-  "version": "1",
+  "version": "2",
   "when": {
     "type": "agentStop"
   },

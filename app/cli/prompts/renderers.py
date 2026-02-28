@@ -16,6 +16,7 @@ from app.cli.prompts.behaviors import (
     CORE_RULES,
     PIN_CRITERIA,
     PROMPT_VERSION,
+    REFLECT_CONFIG,
     SAVE_CRITERIA,
     SESSION_CONFIG,
 )
@@ -194,6 +195,43 @@ def render_cursor_followup(project_id: str = "mem-mesh") -> str:
 
 
 VERSION_MARKER = f"# mem-mesh-hooks prompt-version: {PROMPT_VERSION}"
+
+
+def render_reflect_prompt() -> str:
+    """Render the LLM reflection prompt for the Enhanced profile.
+
+    This prompt is sent to Haiku to analyze conversation content and extract
+    structured insights (decisions, patterns, problems, open items).
+    Single source of truth for both API and Local reflect hooks.
+    """
+    return (
+        "You are an AI memory analyst. Analyze the following conversation excerpt "
+        "and extract structured insights.\n\n"
+        "## Instructions\n"
+        "Extract the following categories from the conversation:\n"
+        "1. **Decisions**: Architecture choices, technology selections, design patterns chosen\n"
+        "2. **Patterns**: Reusable code patterns, conventions, or best practices discovered\n"
+        "3. **Problems**: Bugs found, errors diagnosed, issues identified\n"
+        "4. **Open Items**: Unresolved questions, TODOs, future work mentioned\n\n"
+        "## Output Format\n"
+        "Respond in markdown with these exact section headers:\n"
+        "### Decisions\n"
+        "### Patterns\n"
+        "### Problems\n"
+        "### Open Items\n\n"
+        "Use bullet points under each section. If a section has no items, write '- None'.\n"
+        "Be concise — each bullet should be 1-2 sentences max.\n"
+        "Write in the same language as the conversation (Korean or English)."
+    )
+
+
+def render_reflect_config_json() -> str:
+    """Return REFLECT_CONFIG values as a JSON-friendly dict string for templates."""
+    return (
+        f'{{"model": "{REFLECT_CONFIG.model}", '
+        f'"max_tokens": {REFLECT_CONFIG.max_tokens}, '
+        f'"timeout": {REFLECT_CONFIG.timeout_seconds}}}'
+    )
 
 
 def extract_prompt_version(content: str) -> int:

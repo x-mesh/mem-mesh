@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.cli.prompts.behaviors import PROMPT_VERSION
+from app.cli.prompts.behaviors import PROMPT_VERSION, REFLECT_CONFIG
 from app.cli.prompts.renderers import (
     VERSION_MARKER,
     extract_prompt_version,
@@ -27,6 +27,7 @@ from app.cli.prompts.renderers import (
     render_kiro_auto_create_pin,
     render_kiro_auto_save,
     render_kiro_load_context,
+    render_reflect_prompt,
     render_rules_text,
 )
 
@@ -73,11 +74,11 @@ PROJECT_DIR=$(basename "$(cd "$(dirname "$FILE_PATH")" 2>/dev/null && git rev-pa
 
 # Build change summary
 if [ "$TOOL_NAME" = "Write" ]; then
-  PREVIEW=$(echo "$INPUT" | jq -r '.tool_input.content // empty' | head -c 300)
+  PREVIEW=$(echo "$INPUT" | jq -r '.tool_input.content // empty' | head -c 8000)
   CONTENT="file: ${FILE_PATH}\nchange: new file or overwrite\ncontent: ${PREVIEW}"
 elif [ "$TOOL_NAME" = "Edit" ]; then
-  OLD=$(echo "$INPUT" | jq -r '.tool_input.old_string // empty' | head -c 150)
-  NEW=$(echo "$INPUT" | jq -r '.tool_input.new_string // empty' | head -c 150)
+  OLD=$(echo "$INPUT" | jq -r '.tool_input.old_string // empty' | head -c 3000)
+  NEW=$(echo "$INPUT" | jq -r '.tool_input.new_string // empty' | head -c 3000)
   CONTENT="file: ${FILE_PATH}\nchange: '${OLD}' -> '${NEW}'"
 else
   exit 0
@@ -129,7 +130,7 @@ ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
 [ ${#MESSAGE} -lt 50 ] && exit 0
 
-SUMMARY=$(echo "$MESSAGE" | head -c 500)
+SUMMARY=$(echo "$MESSAGE" | head -c 9500)
 
 # Extract project ID from CWD
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
@@ -166,7 +167,7 @@ API_URL="${MEM_MESH_API_URL:-__DEFAULT_URL__}"
 RESPONSE="${KIRO_RESULT:-}"
 [ ${#RESPONSE} -lt 50 ] && exit 0
 
-SUMMARY=$(echo "$RESPONSE" | head -c 500)
+SUMMARY=$(echo "$RESPONSE" | head -c 9500)
 
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
@@ -297,11 +298,11 @@ PROJECT_DIR=$(basename "$(cd "$(dirname "$FILE_PATH")" 2>/dev/null && git rev-pa
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 
 if [ "$TOOL_NAME" = "Write" ]; then
-  PREVIEW=$(echo "$INPUT" | jq -r '.tool_input.content // empty' | head -c 300)
+  PREVIEW=$(echo "$INPUT" | jq -r '.tool_input.content // empty' | head -c 8000)
   CONTENT="file: ${FILE_PATH}\nchange: new file or overwrite\ncontent: ${PREVIEW}"
 elif [ "$TOOL_NAME" = "Edit" ]; then
-  OLD=$(echo "$INPUT" | jq -r '.tool_input.old_string // empty' | head -c 150)
-  NEW=$(echo "$INPUT" | jq -r '.tool_input.new_string // empty' | head -c 150)
+  OLD=$(echo "$INPUT" | jq -r '.tool_input.old_string // empty' | head -c 3000)
+  NEW=$(echo "$INPUT" | jq -r '.tool_input.new_string // empty' | head -c 3000)
   CONTENT="file: ${FILE_PATH}\nchange: '${OLD}' -> '${NEW}'"
 else
   exit 0
@@ -345,7 +346,7 @@ INPUT=$(cat)
 MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
 [ ${#MESSAGE} -lt 50 ] && exit 0
 
-SUMMARY=$(echo "$MESSAGE" | head -c 500)
+SUMMARY=$(echo "$MESSAGE" | head -c 9500)
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
 python3 -c "
@@ -370,12 +371,222 @@ exit 0
 
 
 # ---------------------------------------------------------------------------
+# Reflect hook templates (Enhanced profile — LLM analysis via Haiku)
+# ---------------------------------------------------------------------------
+
+# __REFLECT_PROMPT__ is replaced with render_reflect_prompt() output.
+# __REFLECT_MODEL__, __REFLECT_MAX_TOKENS__, __REFLECT_TIMEOUT__ from REFLECT_CONFIG.
+
+REFLECT_HOOK_TEMPLATE = r"""#!/bin/bash
+__VERSION_MARKER__
+# Stop hook (enhanced): LLM reflection — analyze conversation and save structured insights
+# Requires ANTHROPIC_API_KEY env var
+# stdin: {"stop_hook_active":bool,"last_assistant_message":"..."} JSON
+
+set -euo pipefail
+command -v jq >/dev/null 2>&1 || exit 0
+
+[ -z "${ANTHROPIC_API_KEY:-}" ] && exit 0
+
+API_URL="${MEM_MESH_API_URL:-__DEFAULT_URL__}"
+
+INPUT=$(cat)
+
+# Prevent infinite loop
+ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
+[ "$ACTIVE" = "true" ] && exit 0
+
+# Extract message + minimum length filter
+MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
+[ ${#MESSAGE} -lt 100 ] && exit 0
+
+# Truncate to fit within API limits (leave room for prompt + analysis output)
+CONVERSATION=$(echo "$MESSAGE" | head -c 6000)
+
+PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+
+# Call Haiku for reflection analysis
+ANALYSIS=$(python3 -c "
+import json, urllib.request, urllib.error, os, sys
+
+api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+if not api_key:
+    sys.exit(0)
+
+conversation = sys.stdin.read()
+prompt = '''__REFLECT_PROMPT__'''
+
+payload = json.dumps({
+    'model': '__REFLECT_MODEL__',
+    'max_tokens': __REFLECT_MAX_TOKENS__,
+    'messages': [{'role': 'user', 'content': f'{prompt}\n\n---\n\n{conversation}'}],
+}).encode()
+
+req = urllib.request.Request(
+    'https://api.anthropic.com/v1/messages',
+    data=payload,
+    headers={
+        'Content-Type': 'application/json',
+        'x-api-key': api_key,
+        'anthropic-version': '2023-06-01',
+    },
+)
+
+try:
+    with urllib.request.urlopen(req, timeout=__REFLECT_TIMEOUT__) as resp:
+        result = json.loads(resp.read())
+        text = result.get('content', [{}])[0].get('text', '')
+        print(text)
+except Exception:
+    sys.exit(0)
+" <<< "$CONVERSATION" 2>/dev/null) || exit 0
+
+[ -z "$ANALYSIS" ] && exit 0
+
+# Build combined content: raw context + LLM analysis
+RAW_SUMMARY=$(echo "$CONVERSATION" | head -c 3000)
+CONTENT="## Raw Context
+${RAW_SUMMARY}
+
+## LLM Analysis
+${ANALYSIS}"
+
+# Limit to API max (10000 chars)
+CONTENT=$(echo "$CONTENT" | head -c 9500)
+
+PAYLOAD=$(jq -n \
+  --arg content "$CONTENT" \
+  --arg project_id "$PROJECT_DIR" \
+  '{
+    content: $content,
+    project_id: $project_id,
+    category: "decision",
+    source: "hook-reflect",
+    tags: ["auto-save", "llm-reflection", "enhanced"]
+  }')
+
+curl -s -o /dev/null --max-time 10 \
+  -X POST "${API_URL}/api/memories" \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD" 2>/dev/null || true
+
+exit 0
+"""
+
+LOCAL_REFLECT_HOOK_TEMPLATE = r"""#!/bin/bash
+__VERSION_MARKER__
+# Stop hook (enhanced, local): LLM reflection — analyze conversation and save structured insights
+# Requires ANTHROPIC_API_KEY env var
+# Writes directly to local SQLite via Python
+
+set -euo pipefail
+command -v python3 >/dev/null 2>&1 || exit 0
+command -v jq >/dev/null 2>&1 || exit 0
+
+[ -z "${ANTHROPIC_API_KEY:-}" ] && exit 0
+
+MEM_MESH_PATH="__MEM_MESH_PATH__"
+
+INPUT=$(cat)
+MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
+[ ${#MESSAGE} -lt 100 ] && exit 0
+
+CONVERSATION=$(echo "$MESSAGE" | head -c 6000)
+PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+
+python3 -c "
+import sys, asyncio, json, urllib.request, urllib.error, os
+
+api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+if not api_key:
+    sys.exit(0)
+
+conversation = sys.stdin.read()
+prompt = '''__REFLECT_PROMPT__'''
+
+# Call Haiku for analysis
+payload = json.dumps({
+    'model': '__REFLECT_MODEL__',
+    'max_tokens': __REFLECT_MAX_TOKENS__,
+    'messages': [{'role': 'user', 'content': f'{prompt}\n\n---\n\n{conversation}'}],
+}).encode()
+
+req = urllib.request.Request(
+    'https://api.anthropic.com/v1/messages',
+    data=payload,
+    headers={
+        'Content-Type': 'application/json',
+        'x-api-key': api_key,
+        'anthropic-version': '2023-06-01',
+    },
+)
+
+try:
+    with urllib.request.urlopen(req, timeout=__REFLECT_TIMEOUT__) as resp:
+        result = json.loads(resp.read())
+        analysis = result.get('content', [{}])[0].get('text', '')
+except Exception:
+    sys.exit(0)
+
+if not analysis:
+    sys.exit(0)
+
+raw_summary = conversation[:3000]
+content = f'## Raw Context\n{raw_summary}\n\n## LLM Analysis\n{analysis}'
+content = content[:9500]
+
+sys.path.insert(0, '$MEM_MESH_PATH')
+from app.core.storage.direct import DirectStorageManager
+
+async def save():
+    s = DirectStorageManager()
+    await s.initialize()
+    await s.add_memory(
+        content=content,
+        project_id='$PROJECT_DIR',
+        category='decision',
+        source='hook-reflect',
+        tags=['auto-save', 'llm-reflection', 'enhanced'],
+    )
+
+asyncio.run(save())
+" <<< "$CONVERSATION" 2>/dev/null || true
+
+exit 0
+"""
+
+
+# ---------------------------------------------------------------------------
+# Hook profiles
+# ---------------------------------------------------------------------------
+
+HOOK_PROFILES = {
+    "standard": {
+        "description": "Full content storage (no truncation)",
+        "hooks": ["track", "stop"],
+    },
+    "enhanced": {
+        "description": "Standard + LLM reflection (requires ANTHROPIC_API_KEY)",
+        "hooks": ["track", "stop", "reflect"],
+    },
+    "minimal": {
+        "description": "Conversation summary only (stop hook)",
+        "hooks": ["stop"],
+    },
+}
+
+
+# ---------------------------------------------------------------------------
 # Claude Code hooks settings patch
 # ---------------------------------------------------------------------------
 
-CLAUDE_HOOKS_SETTINGS: Dict[str, Any] = {
-    "hooks": {
-        "PostToolUse": [
+
+def _build_claude_hooks_settings(profile: str = "standard") -> Dict[str, Any]:
+    """Build Claude Code hooks settings dynamically based on profile."""
+    settings: Dict[str, Any] = {"hooks": {}}
+
+    if profile != "minimal":
+        settings["hooks"]["PostToolUse"] = [
             {
                 "matcher": "Write|Edit",
                 "hooks": [
@@ -387,21 +598,33 @@ CLAUDE_HOOKS_SETTINGS: Dict[str, Any] = {
                     }
                 ],
             }
-        ],
-        "Stop": [
+        ]
+
+    stop_hooks: List[Dict[str, Any]] = [
+        {
+            "type": "command",
+            "command": "~/.claude/hooks/mem-mesh-stop.sh",
+            "timeout": 10,
+            "async": True,
+        }
+    ]
+
+    if profile == "enhanced":
+        stop_hooks.append(
             {
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "~/.claude/hooks/mem-mesh-stop.sh",
-                        "timeout": 10,
-                        "async": True,
-                    }
-                ]
+                "type": "command",
+                "command": "~/.claude/hooks/mem-mesh-reflect.sh",
+                "timeout": 30,
+                "async": True,
             }
-        ],
-    }
-}
+        )
+
+    settings["hooks"]["Stop"] = [{"hooks": stop_hooks}]
+
+    return settings
+
+
+CLAUDE_HOOKS_SETTINGS: Dict[str, Any] = _build_claude_hooks_settings("standard")
 
 
 # ---------------------------------------------------------------------------
@@ -425,6 +648,11 @@ def _render_template(
     # Inject renderer-generated text
     result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
     result = result.replace("__FOLLOWUP_MSG__", render_cursor_followup(project_id))
+    # Reflect hook placeholders
+    result = result.replace("__REFLECT_PROMPT__", render_reflect_prompt())
+    result = result.replace("__REFLECT_MODEL__", REFLECT_CONFIG.model)
+    result = result.replace("__REFLECT_MAX_TOKENS__", str(REFLECT_CONFIG.max_tokens))
+    result = result.replace("__REFLECT_TIMEOUT__", str(REFLECT_CONFIG.timeout_seconds))
     return result
 
 
@@ -435,6 +663,11 @@ def _render_local_template(
     """Replace placeholders for local mode templates."""
     result = template.replace("__MEM_MESH_PATH__", mem_mesh_path)
     result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
+    # Reflect hook placeholders
+    result = result.replace("__REFLECT_PROMPT__", render_reflect_prompt())
+    result = result.replace("__REFLECT_MODEL__", REFLECT_CONFIG.model)
+    result = result.replace("__REFLECT_MAX_TOKENS__", str(REFLECT_CONFIG.max_tokens))
+    result = result.replace("__REFLECT_TIMEOUT__", str(REFLECT_CONFIG.timeout_seconds))
     return result
 
 
@@ -553,24 +786,44 @@ CURSOR_HOOKS_SETTINGS: Dict[str, Any] = {
 }
 
 
-def _install_claude(url: str, mode: str = "api", path: str = "") -> None:
+def _install_claude(
+    url: str, mode: str = "api", path: str = "", profile: str = "standard"
+) -> None:
     """Install mem-mesh hooks for Claude Code."""
-    print("[claude] Installing hook scripts...")
+    profile_info = HOOK_PROFILES[profile]
+    print(f"[claude] Installing hook scripts (profile: {profile})...")
 
     track_script = CLAUDE_HOOKS_DIR / "mem-mesh-track.sh"
     stop_script = CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh"
+    reflect_script = CLAUDE_HOOKS_DIR / "mem-mesh-reflect.sh"
 
-    if mode == "local":
-        _write_script(track_script, _render_local_template(LOCAL_TRACK_HOOK_TEMPLATE, path))
-        _write_script(stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path))
+    # Track hook (skip for minimal profile)
+    if "track" in profile_info["hooks"]:
+        if mode == "local":
+            _write_script(
+                track_script, _render_local_template(LOCAL_TRACK_HOOK_TEMPLATE, path)
+            )
+        else:
+            _write_script(
+                track_script,
+                _render_template(
+                    TRACK_HOOK_TEMPLATE, url,
+                    source_tag="claude-code-hook", ide_tag="claude",
+                ),
+            )
+        print(f"  -> {track_script}")
     else:
+        # Remove track script if switching to minimal
+        if track_script.exists():
+            track_script.unlink()
+            print(f"  removed {track_script} (not in {profile} profile)")
+
+    # Stop hook (always included)
+    if mode == "local":
         _write_script(
-            track_script,
-            _render_template(
-                TRACK_HOOK_TEMPLATE, url,
-                source_tag="claude-code-hook", ide_tag="claude",
-            ),
+            stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path)
         )
+    else:
         _write_script(
             stop_script,
             _render_template(
@@ -578,12 +831,42 @@ def _install_claude(url: str, mode: str = "api", path: str = "") -> None:
                 source_tag="claude-code-hook", ide_tag="claude",
             ),
         )
-    print(f"  -> {track_script}")
     print(f"  -> {stop_script}")
 
+    # Reflect hook (enhanced profile only)
+    if "reflect" in profile_info["hooks"]:
+        if mode == "local":
+            _write_script(
+                reflect_script,
+                _render_local_template(LOCAL_REFLECT_HOOK_TEMPLATE, path),
+            )
+        else:
+            _write_script(
+                reflect_script,
+                _render_template(
+                    REFLECT_HOOK_TEMPLATE, url,
+                    source_tag="claude-code-hook", ide_tag="claude",
+                ),
+            )
+        print(f"  -> {reflect_script}")
+    else:
+        # Remove reflect script if switching from enhanced
+        if reflect_script.exists():
+            reflect_script.unlink()
+            print(f"  removed {reflect_script} (not in {profile} profile)")
+
     print("[claude] Updating settings.json...")
-    _merge_json_settings(CLAUDE_SETTINGS, CLAUDE_HOOKS_SETTINGS)
+    hooks_settings = _build_claude_hooks_settings(profile)
+    _merge_json_settings(CLAUDE_SETTINGS, hooks_settings)
     print(f"  -> {CLAUDE_SETTINGS}")
+
+    if profile == "enhanced":
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if api_key:
+            print("  ANTHROPIC_API_KEY: set")
+        else:
+            print("  WARNING: ANTHROPIC_API_KEY not set — reflect hook will be inactive")
+            print("  Set it in your shell profile: export ANTHROPIC_API_KEY=sk-...")
 
     print("[claude] Done.")
 
@@ -638,9 +921,11 @@ def _install_kiro(url: str, mode: str = "api", path: str = "") -> None:
     print("[kiro] Done.")
 
 
-def _install_cursor(url: str, mode: str = "api", path: str = "") -> None:
+def _install_cursor(
+    url: str, mode: str = "api", path: str = "", profile: str = "standard"
+) -> None:
     """Install mem-mesh hooks for Cursor."""
-    print("[cursor] Installing hook scripts...")
+    print(f"[cursor] Installing hook scripts (profile: {profile})...")
 
     session_start_script = CURSOR_HOOKS_DIR / "mem-mesh-session-start.sh"
     track_script = CURSOR_HOOKS_DIR / "mem-mesh-track.sh"
@@ -689,7 +974,7 @@ def _install_cursor(url: str, mode: str = "api", path: str = "") -> None:
 def _uninstall_claude() -> None:
     """Remove mem-mesh hooks for Claude Code."""
     print("[claude] Removing hook scripts...")
-    for name in ("mem-mesh-track.sh", "mem-mesh-stop.sh"):
+    for name in ("mem-mesh-track.sh", "mem-mesh-stop.sh", "mem-mesh-reflect.sh"):
         script = CLAUDE_HOOKS_DIR / name
         if script.exists():
             script.unlink()
@@ -795,6 +1080,21 @@ def _check_kiro_hook_version(path: Path) -> str:
     return f"installed (prompt-version: {version})"
 
 
+def _detect_profile(hooks_dir: Path) -> str:
+    """Detect installed profile based on which hook scripts exist."""
+    has_track = (hooks_dir / "mem-mesh-track.sh").exists()
+    has_reflect = (hooks_dir / "mem-mesh-reflect.sh").exists()
+    has_stop = (hooks_dir / "mem-mesh-stop.sh").exists()
+
+    if has_reflect:
+        return "enhanced"
+    if has_track and has_stop:
+        return "standard"
+    if has_stop and not has_track:
+        return "minimal"
+    return "unknown"
+
+
 def cmd_status() -> None:
     """Print installation status."""
     print("=== mem-mesh hooks status ===")
@@ -804,12 +1104,20 @@ def cmd_status() -> None:
     print("[Claude Code]")
     track = CLAUDE_HOOKS_DIR / "mem-mesh-track.sh"
     stop = CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh"
-    print(f"  track hook:  {_check_script_version(track)}")
-    print(f"  stop hook:   {_check_script_version(stop)}")
+    reflect = CLAUDE_HOOKS_DIR / "mem-mesh-reflect.sh"
+    print(f"  track hook:   {_check_script_version(track)}")
+    print(f"  stop hook:    {_check_script_version(stop)}")
+    print(f"  reflect hook: {_check_script_version(reflect)}")
+
+    detected = _detect_profile(CLAUDE_HOOKS_DIR)
+    print(f"  profile:      {detected}")
 
     url = _extract_url_from_script(track) or _extract_url_from_script(stop)
     if url:
-        print(f"  target URL:  {url}")
+        print(f"  target URL:   {url}")
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    print(f"  ANTHROPIC_API_KEY: {'set' if api_key else 'not set'}")
 
     if CLAUDE_SETTINGS.exists():
         try:
@@ -1108,25 +1416,26 @@ def cmd_install(
     url: str,
     mode: str = "api",
     path: str = "",
+    profile: str = "standard",
 ) -> None:
     """Install hooks for the specified target."""
     if mode == "local":
         resolved = path or str(Path(__file__).resolve().parent.parent.parent)
         print(f"Installing mem-mesh hooks (mode: local, path: {resolved})")
-        print(f"Prompt version: {PROMPT_VERSION}\n")
     else:
         resolved = ""
         print(f"Installing mem-mesh hooks (mode: api, url: {url})")
-        print(f"Prompt version: {PROMPT_VERSION}\n")
+
+    print(f"Prompt version: {PROMPT_VERSION} | Profile: {profile}\n")
 
     if target in ("claude", "all"):
-        _install_claude(url, mode, resolved)
+        _install_claude(url, mode, resolved, profile)
         print()
     if target in ("kiro", "all"):
         _install_kiro(url, mode, resolved)
         print()
     if target in ("cursor", "all"):
-        _install_cursor(url, mode, resolved)
+        _install_cursor(url, mode, resolved, profile)
         print()
     print("Installation complete. Run 'mem-mesh-hooks status' to verify.")
 
@@ -1177,15 +1486,35 @@ def cmd_interactive() -> None:
     print()
 
     # Step 1: target
-    print("[1/3] Select target IDE:")
+    print("[1/4] Select target IDE:")
     targets = ["Claude Code", "Kiro", "Cursor", "All"]
     target_keys = ["claude", "kiro", "cursor", "all"]
     idx = _prompt_choice("", targets, default=3)
     target = target_keys[idx]
     print()
 
-    # Step 2: storage mode
-    print("[2/3] Select storage mode:")
+    # Step 2: hook profile
+    print("[2/4] Select hook profile:")
+    profile_options = [
+        f"Standard — {HOOK_PROFILES['standard']['description']}",
+        f"Enhanced — {HOOK_PROFILES['enhanced']['description']}",
+        f"Minimal  — {HOOK_PROFILES['minimal']['description']}",
+    ]
+    profile_keys = ["standard", "enhanced", "minimal"]
+    profile_idx = _prompt_choice("", profile_options, default=0)
+    profile = profile_keys[profile_idx]
+    print()
+
+    if profile == "enhanced":
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            print("  NOTE: Enhanced profile requires ANTHROPIC_API_KEY.")
+            print("  The reflect hook will be inactive until the key is set.")
+            print("  Set it with: export ANTHROPIC_API_KEY=sk-ant-...")
+            print()
+
+    # Step 3: storage mode
+    print("[3/4] Select storage mode:")
     modes = [
         f"API  — Send to remote server ({DEFAULT_URL})",
         "Local — Save directly to local SQLite",
@@ -1194,22 +1523,22 @@ def cmd_interactive() -> None:
     mode = "api" if mode_idx == 0 else "local"
     print()
 
-    # Step 3: mode-specific config
+    # Step 4: mode-specific config
     url = DEFAULT_URL
     mem_path = ""
     if mode == "api":
-        print(f"[3/3] API URL [{DEFAULT_URL}]:")
+        print(f"[4/4] API URL [{DEFAULT_URL}]:")
         raw = input("  > ").strip()
         if raw:
             url = raw
     else:
         default_path = str(Path(__file__).resolve().parent.parent.parent)
-        print(f"[3/3] mem-mesh project path [{default_path}]:")
+        print(f"[4/4] mem-mesh project path [{default_path}]:")
         raw = input("  > ").strip()
         mem_path = raw if raw else default_path
     print()
 
-    cmd_install(target, url, mode, mem_path)
+    cmd_install(target, url, mode, mem_path, profile)
 
 
 # ---------------------------------------------------------------------------
@@ -1250,6 +1579,12 @@ def main(argv: Optional[List[str]] = None) -> None:
         "--path",
         default="",
         help="mem-mesh project path (required for local mode)",
+    )
+    install_parser.add_argument(
+        "--profile",
+        choices=["standard", "enhanced", "minimal"],
+        default="standard",
+        help="Hook profile: standard (full content), enhanced (+LLM reflection), minimal (stop only)",
     )
     install_parser.add_argument(
         "-i",
@@ -1297,7 +1632,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         return
 
     if args.command == "install":
-        cmd_install(args.target, args.url, args.mode, args.path)
+        cmd_install(args.target, args.url, args.mode, args.path, args.profile)
     elif args.command == "uninstall":
         cmd_uninstall(args.target)
     elif args.command == "status":

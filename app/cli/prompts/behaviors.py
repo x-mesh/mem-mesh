@@ -15,7 +15,7 @@ from typing import List
 # Prompt schema version — bump on ANY behavioral rule change
 # ---------------------------------------------------------------------------
 
-PROMPT_VERSION: int = 1
+PROMPT_VERSION: int = 2
 
 
 # ---------------------------------------------------------------------------
@@ -145,4 +145,25 @@ SESSION_CONFIG = SessionConfig(
         "미완료 핀이 있으면 사용자에게 간략히 알린다."
     ),
     end_triggers=["오늘 끝", "여기까지", "PR 올려줘"],
+)
+
+
+# ---------------------------------------------------------------------------
+# LLM Reflection configuration (Enhanced profile)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ReflectConfig:
+    """Configuration for LLM reflection hook (Enhanced profile)."""
+
+    model: str
+    max_tokens: int
+    timeout_seconds: int
+
+
+REFLECT_CONFIG = ReflectConfig(
+    model="claude-haiku-4-5-20251001",
+    max_tokens=1024,
+    timeout_seconds=20,
 )

@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 1
+# mem-mesh-hooks prompt-version: 2
 # mem-mesh Session Start Hook for Cursor (project-local)
 # Injects mem-mesh usage instructions into the session context.
 
