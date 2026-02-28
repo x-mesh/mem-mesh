@@ -18,8 +18,9 @@ class DatabaseInitializer:
     Creates all required tables and indexes for mem-mesh.
     """
 
-    def __init__(self, connection: "DatabaseConnection"):
+    def __init__(self, connection: "DatabaseConnection", embedding_dim: int = 384):
         self.connection = connection
+        self.embedding_dim = embedding_dim
 
     async def initialize_schema(self) -> None:
         """Initialize all tables and indexes."""
@@ -389,10 +390,10 @@ class DatabaseInitializer:
             test_result = conn.execute("SELECT vec_version()").fetchone()
             if test_result:
                 # 실제 vector 검색용 테이블 생성
-                conn.execute("""
+                conn.execute(f"""
                     CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings USING vec0(
                         memory_id TEXT PRIMARY KEY,
-                        embedding FLOAT[384]
+                        embedding FLOAT[{self.embedding_dim}]
                     )
                 """)
                 logger.info(

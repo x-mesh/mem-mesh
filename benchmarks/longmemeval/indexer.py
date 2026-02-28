@@ -47,7 +47,7 @@ async def index_question(
         return 0.0
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    db = Database(str(db_path))
+    db = Database(str(db_path), embedding_dim=embedding_service.dimension)
     await db.connect()
 
     try:

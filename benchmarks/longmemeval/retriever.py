@@ -89,7 +89,7 @@ async def retrieve_for_question(
     db_path = config.db_path_for(question.question_id)
     project_id = f"lme-{question.question_id}"
 
-    db = Database(str(db_path))
+    db = Database(str(db_path), embedding_dim=embedding_service.dimension)
     await db.connect()
 
     try:
@@ -99,6 +99,8 @@ async def retrieve_for_question(
             enable_korean_optimization=config.enable_korean_optimization,
             enable_quality_features=False,
             enable_noise_filter=False,
+            enable_reranking=config.enable_reranking,
+            reranking_model=config.reranking_model,
         )
 
         response = await search_service.search(

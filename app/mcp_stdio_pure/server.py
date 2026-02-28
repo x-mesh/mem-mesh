@@ -134,7 +134,7 @@ async def initialize_storage():
     from ..mcp_common.batch_tools import BatchOperationHandler
 
     batch_settings = PureSettings()
-    db = Database(batch_settings.database_path)
+    db = Database(batch_settings.database_path, embedding_dim=batch_settings.embedding_dim)
     await db.connect()
     embedding_service = EmbeddingService(preload=False)
     memory_service = MemoryService(db, embedding_service)

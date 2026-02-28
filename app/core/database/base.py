@@ -39,11 +39,12 @@ class Database:
     - 4.4: busy_timeout configuration
     """
 
-    def __init__(self, db_path: str, busy_timeout: int = 5000):
+    def __init__(self, db_path: str, busy_timeout: int = 5000, embedding_dim: int = 384):
         self.db_path = db_path
         self.busy_timeout = busy_timeout
+        self.embedding_dim = embedding_dim
         self._connection = DatabaseConnection(db_path, busy_timeout)
-        self._initializer = DatabaseInitializer(self._connection)
+        self._initializer = DatabaseInitializer(self._connection, embedding_dim)
         self._migrator = DatabaseMigrator(self._connection)
 
     @property

@@ -50,7 +50,10 @@ class UnifiedSearchService:
         score_normalization_method: str = "sigmoid",
         cache_embedding_ttl: Optional[int] = None,
         cache_search_ttl: Optional[int] = None,
-        cache_context_ttl: Optional[int] = None
+        cache_context_ttl: Optional[int] = None,
+        enable_reranking: bool = False,
+        reranking_model: Optional[str] = None,
+        reranking_top_k_multiplier: int = 3,
     ):
         """
         Args:
@@ -102,6 +105,22 @@ class UnifiedSearchService:
                 logger.warning("SearchIntentAnalyzer not available, quality features disabled")
                 self.enable_quality_features = False
         
+        # Reranking
+        self.enable_reranking = enable_reranking
+        self.reranking_top_k_multiplier = reranking_top_k_multiplier
+        self.reranker = None
+        if enable_reranking:
+            try:
+                from .reranker import RerankerService
+                self.reranker = RerankerService(
+                    model_name=reranking_model or "cross-encoder/ms-marco-MiniLM-L6-v2",
+                    preload=True,
+                )
+                logger.info("Reranking enabled with %s", reranking_model or "default model")
+            except Exception as e:
+                logger.warning("Failed to initialize reranker: %s", e)
+                self.enable_reranking = False
+
         # RRF weights from config
         try:
             from ..config import get_settings
@@ -277,7 +296,11 @@ class UnifiedSearchService:
         else:
             # hybrid 또는 smart (기본)
             result = await self._hybrid_search(expanded_query, filters, limit, recency_weight)
-        
+
+        # 5.5 Reranking (리랭킹 활성화 시 — 정밀 점수 재산정)
+        if self.reranker and result.results:
+            result = self._apply_reranking(result, original_query, limit)
+
         # 6. 시간 인식 필터/부스트/감쇠 (Temporal-Aware Search)
         if result.results and (time_range or date_from or date_to or temporal_mode == "decay"):
             result = self._apply_temporal(
@@ -491,7 +514,11 @@ class UnifiedSearchService:
         query_embedding = self.embedding_service.to_bytes(query_embedding_list)
         
         # 2. 병렬 검색 수행 (Vector + Text)
-        search_limit = limit * 2  # RRF를 위해 더 많은 후보군 확보
+        # 리랭킹 활성화 시 더 넓은 후보군 확보 (topk * multiplier)
+        if self.reranker:
+            search_limit = limit * self.reranking_top_k_multiplier
+        else:
+            search_limit = limit * 2  # RRF를 위해 기본 2배 후보군
         
         # Vector Search Task
         vector_task = self.db.vector_search(
@@ -618,8 +645,41 @@ class UnifiedSearchService:
             item = content_map[doc_id]
             item.similarity_score = original_scores.get(doc_id, 0.5)
             final_results.append(item)
-            
+
         return final_results
+
+    def _apply_reranking(
+        self,
+        response: SearchResponse,
+        query: str,
+        limit: int,
+    ) -> SearchResponse:
+        """Cross-Encoder 리랭킹 적용.
+
+        1단계 검색(bi-encoder + RRF)의 후보를 Cross-Encoder로 정밀 재점수화한 뒤
+        상위 limit개만 반환한다.
+        """
+        if not self.reranker or not response.results:
+            return response
+
+        documents = [r.content for r in response.results]
+        rerank_results = self.reranker.rerank(query, documents, top_k=limit)
+
+        reranked: List[SearchResult] = []
+        for rr in rerank_results:
+            item = response.results[rr.original_index]
+            # Cross-Encoder 점수를 최종 similarity_score로 사용
+            item.similarity_score = rr.score
+            reranked.append(item)
+
+        logger.info(
+            "Reranking applied: %d candidates → %d results (top=%.3f)",
+            len(documents),
+            len(reranked),
+            reranked[0].similarity_score if reranked else 0,
+        )
+
+        return SearchResponse(results=reranked, total=len(reranked))
 
     def _split_korean_compound(self, token: str) -> List[str]:
         """

@@ -63,7 +63,8 @@ class DirectStorageBackend(StorageBackend):
         """
         try:
             # 데이터베이스 연결
-            self.db = Database(self.db_path, busy_timeout=self.busy_timeout)
+            settings = get_settings()
+            self.db = Database(self.db_path, busy_timeout=self.busy_timeout, embedding_dim=settings.embedding_dim)
             await self.db.connect()
 
             # 임베딩 서비스 초기화 (MCP 서버에서는 preload 하지 않음)

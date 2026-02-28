@@ -7,6 +7,8 @@ FastMCP는 자동으로 스키마를 생성하지만, 일관성을 위해 여기
 
 from typing import List, Dict, Any
 
+from .descriptions import TOOL_DESCRIPTIONS
+
 # 유효한 카테고리 목록
 VALID_CATEGORIES = ["task", "bug", "idea", "decision", "incident", "code_snippet", "git-history"]
 
@@ -22,14 +24,7 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
     return [
         {
             "name": "add",
-            "description": """Add a new memory to the memory store.
-
-Use this to save important information, decisions, code snippets, or learnings for future reference.
-
-EXAMPLES:
-- Save a bug fix: {"content": "Fixed login bug by...", "category": "bug", "project_id": "my-app"}
-- Save a decision: {"content": "Decided to use PostgreSQL because...", "category": "decision"}
-- Save code snippet: {"content": "```python\\ndef helper()...```", "category": "code_snippet", "tags": ["python", "utility"]}""",
+            "description": TOOL_DESCRIPTIONS["add"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -74,23 +69,7 @@ EXAMPLES:
         },
         {
             "name": "search",
-            "description": """Search memories using hybrid search (vector + metadata).
-
-USAGE PATTERNS:
-- Recent memories: Use query="" (empty string) to get most recent memories sorted by date
-- Keyword search: Use query="keyword" for semantic + text search
-- Project filter: Add project_id to filter by project
-- Recency boost: Set recency_weight=0.5 to prioritize recent results
-- Temporal search: Use time_range to search within a time window
-- Korean time expressions: "이번주 결정사항" auto-detects time range
-
-EXAMPLES:
-- Get 5 most recent memories: {"query": "", "limit": 5}
-- Search in project: {"query": "bug fix", "project_id": "my-project"}
-- Recent + relevant: {"query": "search", "recency_weight": 0.3}
-- This week's decisions: {"query": "decision", "time_range": "this_week"}
-- Date range: {"query": "migration", "date_from": "2026-02-01", "date_to": "2026-02-15"}
-- Time decay: {"query": "architecture", "temporal_mode": "decay"}""",
+            "description": TOOL_DESCRIPTIONS["search"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -158,7 +137,7 @@ EXAMPLES:
         },
         {
             "name": "context",
-            "description": "Get context around a specific memory",
+            "description": TOOL_DESCRIPTIONS["context"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -194,7 +173,7 @@ EXAMPLES:
         },
         {
             "name": "update",
-            "description": "Update an existing memory",
+            "description": TOOL_DESCRIPTIONS["update"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -232,7 +211,7 @@ EXAMPLES:
         },
         {
             "name": "delete",
-            "description": "Delete a memory from the store",
+            "description": TOOL_DESCRIPTIONS["delete"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -249,14 +228,7 @@ EXAMPLES:
         },
         {
             "name": "stats",
-            "description": """Get statistics about stored memories.
-
-Returns total count, category breakdown, project distribution, and recent activity.
-
-EXAMPLES:
-- Overall stats: {}
-- Project stats: {"project_id": "my-project"}
-- Date range: {"start_date": "2026-01-01", "end_date": "2026-01-31"}""",
+            "description": TOOL_DESCRIPTIONS["stats"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -288,7 +260,7 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
     return [
         {
             "name": "pin_add",
-            "description": "Add a new pin (short-term task) to the current session. Pins are lightweight work items that can be promoted to permanent memories.",
+            "description": TOOL_DESCRIPTIONS["pin_add"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -327,7 +299,7 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
         },
         {
             "name": "pin_complete",
-            "description": "Mark a pin as completed. Returns promotion suggestion if importance >= 4.",
+            "description": TOOL_DESCRIPTIONS["pin_complete"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -344,7 +316,7 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
         },
         {
             "name": "pin_promote",
-            "description": "Promote a completed pin to a permanent memory. Use this for important work items that should be preserved long-term.",
+            "description": TOOL_DESCRIPTIONS["pin_promote"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -367,14 +339,7 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
         },
         {
             "name": "session_resume",
-            "description": """Resume the last session for a project. Returns active pins and session context.
-
-Call this at the START of any work session to see what was in progress.
-
-EXAMPLES:
-- Quick summary: {"project_id": "my-project", "expand": false}
-- Smart resume (recommended): {"project_id": "my-project", "expand": "smart"}
-- Full details: {"project_id": "my-project", "expand": true, "limit": 5}""",
+            "description": TOOL_DESCRIPTIONS["session_resume"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -406,7 +371,7 @@ EXAMPLES:
         },
         {
             "name": "session_end",
-            "description": "End the current session for a project. Optionally provide a summary.",
+            "description": TOOL_DESCRIPTIONS["session_end"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -445,7 +410,7 @@ def get_batch_tool_schemas() -> List[Dict[str, Any]]:
     return [
         {
             "name": "batch_operations",
-            "description": "Execute multiple mixed operations in batch for maximum efficiency. Reduces token usage by 30-50% through batch processing.",
+            "description": TOOL_DESCRIPTIONS["batch_operations"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -529,22 +494,7 @@ def get_relation_tool_schemas() -> List[Dict[str, Any]]:
     return [
         {
             "name": "link",
-            "description": """Create a relation between two memories.
-
-Use this to establish semantic connections between memories for better context retrieval.
-
-RELATION TYPES:
-- related: General relationship (default)
-- parent/child: Hierarchical relationship
-- supersedes: Source replaces target (for updates/corrections)
-- references: Source cites or mentions target
-- depends_on: Source requires target
-- similar: Content similarity
-
-EXAMPLES:
-- Link related memories: {"source_id": "abc123", "target_id": "def456"}
-- Create dependency: {"source_id": "task-1", "target_id": "task-2", "relation_type": "depends_on"}
-- Mark supersession: {"source_id": "new-decision", "target_id": "old-decision", "relation_type": "supersedes"}""",
+            "description": TOOL_DESCRIPTIONS["link"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -585,11 +535,7 @@ EXAMPLES:
         },
         {
             "name": "unlink",
-            "description": """Remove a relation between two memories.
-
-EXAMPLES:
-- Remove specific relation: {"source_id": "abc123", "target_id": "def456", "relation_type": "depends_on"}
-- Remove all relations: {"source_id": "abc123", "target_id": "def456"}""",
+            "description": TOOL_DESCRIPTIONS["unlink"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -617,17 +563,7 @@ EXAMPLES:
         },
         {
             "name": "get_links",
-            "description": """Get relations for a memory.
-
-DIRECTION OPTIONS:
-- outgoing: Relations where memory is the source
-- incoming: Relations where memory is the target
-- both: All relations (default)
-
-EXAMPLES:
-- Get all links: {"memory_id": "abc123"}
-- Get dependencies: {"memory_id": "abc123", "relation_type": "depends_on", "direction": "outgoing"}
-- Get what references this: {"memory_id": "abc123", "relation_type": "references", "direction": "incoming"}""",
+            "description": TOOL_DESCRIPTIONS["get_links"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -668,7 +604,7 @@ def get_review_tool_schemas() -> List[Dict[str, Any]]:
     return [
         {
             "name": "weekly_review",
-            "description": "Generate a weekly review report for a project. Returns incomplete pins, recent memories, session summaries, zero-result searches, and recommendations.",
+            "description": TOOL_DESCRIPTIONS["weekly_review"],
             "inputSchema": {
                 "type": "object",
                 "properties": {
