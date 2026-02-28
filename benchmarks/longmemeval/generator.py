@@ -66,7 +66,7 @@ def _call_claude(
                     "--output-format",
                     "text",
                     "--max-turns",
-                    "1",
+                    "3",
                 ],
                 input=prompt,
                 capture_output=True,
@@ -76,14 +76,23 @@ def _call_claude(
             )
 
             if result.returncode == 0 and result.stdout.strip():
-                elapsed = time.time() - start
                 response = result.stdout.strip()
-                logger.debug(
-                    "Claude response (%d chars) in %.1fs",
-                    len(response),
-                    elapsed,
-                )
-                return response, elapsed
+                # Detect CLI error disguised as success
+                if response.startswith("Error: Reached max turns"):
+                    logger.warning(
+                        "Max turns error (attempt %d/%d): %s",
+                        attempt + 1,
+                        max_attempts,
+                        response[:100],
+                    )
+                else:
+                    elapsed = time.time() - start
+                    logger.debug(
+                        "Claude response (%d chars) in %.1fs",
+                        len(response),
+                        elapsed,
+                    )
+                    return response, elapsed
 
             logger.warning(
                 "Claude CLI returned code %d (attempt %d/%d): %s",

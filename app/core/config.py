@@ -117,7 +117,7 @@ class Settings(BaseSettings):
         description="Enable cross-encoder reranking for search results (opt-in)",
     )
     reranking_model: str = Field(
-        default="cross-encoder/ms-marco-multilingual-MiniLM-L6-v2",
+        default="cross-encoder/ms-marco-MiniLM-L6-v2",
         description="Cross-encoder model for reranking",
     )
     reranking_top_k_multiplier: int = Field(

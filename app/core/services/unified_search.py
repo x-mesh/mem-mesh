@@ -113,7 +113,7 @@ class UnifiedSearchService:
             try:
                 from .reranker import RerankerService
                 self.reranker = RerankerService(
-                    model_name=reranking_model or "cross-encoder/ms-marco-multilingual-MiniLM-L6-v2",
+                    model_name=reranking_model or "cross-encoder/ms-marco-MiniLM-L6-v2",
                     preload=True,
                 )
                 logger.info("Reranking enabled with %s", reranking_model or "default model")

@@ -189,7 +189,7 @@ def parse_args() -> BenchmarkConfig:
     parser.add_argument(
         "--reranking-model",
         default=None,
-        help="Cross-encoder model for reranking (default: ms-marco-multilingual-MiniLM-L6-v2)",
+        help="Cross-encoder model for reranking (default: ms-marco-MiniLM-L6-v2)",
     )
 
     args = parser.parse_args()

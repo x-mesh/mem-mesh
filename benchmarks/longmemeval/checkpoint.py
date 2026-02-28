@@ -127,9 +127,10 @@ def update_result(
 
 
 def get_failed_question_ids(checkpoint: CheckpointData) -> list[str]:
-    """Return question IDs that have '(generation failed)' as their answer."""
+    """Return question IDs that had generation failures (including max turns errors)."""
     failed: list[str] = []
     for result in checkpoint.results:
-        if result.get("generated_answer") == "(generation failed)":
+        answer = result.get("generated_answer", "")
+        if answer == "(generation failed)" or answer.startswith("Error: Reached max turns"):
             failed.append(result["question_id"])
     return failed

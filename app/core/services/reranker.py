@@ -18,7 +18,7 @@ except ImportError:
     CROSS_ENCODER_AVAILABLE = False
     logger.info("sentence_transformers not available — reranking disabled")
 
-DEFAULT_RERANKING_MODEL = "cross-encoder/ms-marco-multilingual-MiniLM-L6-v2"
+DEFAULT_RERANKING_MODEL = "cross-encoder/ms-marco-MiniLM-L6-v2"
 
 
 @dataclass
