@@ -198,18 +198,19 @@ async def test_search_quality_metrics():
     print(f"평균 상위 점수: {metrics['avg_top_score']:.3f}")
     print(f"평균 검색 시간: {metrics['avg_search_time']*1000:.1f}ms")
 
+    qwr = metrics["queries_with_results"] or 1  # avoid division by zero
     print("\n품질 분포:")
     print(
         f"  - 높음 (≥0.7): {metrics['high_quality_results']}개 "
-        f"({metrics['high_quality_results']/metrics['queries_with_results']*100:.1f}%)"
+        f"({metrics['high_quality_results']/qwr*100:.1f}%)"
     )
     print(
         f"  - 중간 (0.5-0.7): {metrics['medium_quality_results']}개 "
-        f"({metrics['medium_quality_results']/metrics['queries_with_results']*100:.1f}%)"
+        f"({metrics['medium_quality_results']/qwr*100:.1f}%)"
     )
     print(
         f"  - 낮음 (<0.5): {metrics['low_quality_results']}개 "
-        f"({metrics['low_quality_results']/metrics['queries_with_results']*100:.1f}%)"
+        f"({metrics['low_quality_results']/qwr*100:.1f}%)"
     )
 
     # 상위 5개 고품질 결과
