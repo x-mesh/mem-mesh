@@ -5,7 +5,6 @@ Requirements: 전체
 
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
-from datetime import datetime
 
 
 class TokenInfo(BaseModel):

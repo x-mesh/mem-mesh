@@ -1,6 +1,5 @@
 """Tests for automatic schema migration system."""
 
-import asyncio
 import os
 import tempfile
 import pytest

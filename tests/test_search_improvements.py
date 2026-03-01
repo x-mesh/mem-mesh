@@ -36,7 +36,7 @@ async def test_score_normalization():
         print(f"  최소: {min(normalized):.3f}, 최대: {max(normalized):.3f}")
     
     # 자동 보정 테스트
-    print(f"\n자동 보정 추천:")
+    print("\n자동 보정 추천:")
     calibration = normalizer.auto_calibrate(test_scores)
     print(f"  추천 방법: {calibration['recommended_method']}")
     print(f"  이유: {calibration['reason']}")
@@ -75,7 +75,7 @@ async def test_search_with_normalization():
         "MCP"
     ]
     
-    print(f"\n정규화 전후 점수 비교:\n")
+    print("\n정규화 전후 점수 비교:\n")
     
     for query in test_queries:
         search_params = SearchParams(query=query, limit=5)
@@ -139,11 +139,11 @@ async def test_search_warmup():
     
     # 성능 개선 확인
     if first_search_time < 1.0:
-        print(f"\n✓ 첫 검색 성능 우수 (< 1초)")
+        print("\n✓ 첫 검색 성능 우수 (< 1초)")
     elif first_search_time < 2.0:
-        print(f"\n⚠ 첫 검색 성능 양호 (1-2초)")
+        print("\n⚠ 첫 검색 성능 양호 (1-2초)")
     else:
-        print(f"\n✗ 첫 검색 성능 개선 필요 (> 2초)")
+        print("\n✗ 첫 검색 성능 개선 필요 (> 2초)")
     
     await backend.shutdown()
 
@@ -188,7 +188,7 @@ async def test_combined_improvements():
         {"query": "MCP", "description": "약어"},
     ]
     
-    print(f"\n검색 품질 테스트:")
+    print("\n검색 품질 테스트:")
     print(f"{'쿼리':<20} {'설명':<15} {'결과':<5} {'평균점수':<10} {'시간(ms)':<10}")
     print("-" * 70)
     

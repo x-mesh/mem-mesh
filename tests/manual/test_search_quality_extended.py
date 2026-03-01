@@ -6,7 +6,7 @@
 import asyncio
 from app.core.storage.direct import DirectStorageBackend
 from app.core.config import create_settings
-from app.core.schemas.requests import AddParams, SearchParams
+from app.core.schemas.requests import SearchParams
 
 
 async def test_extended_search_quality():

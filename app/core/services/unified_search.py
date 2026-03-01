@@ -14,7 +14,6 @@ import json
 import logging
 import math
 import time
-import urllib3
 import asyncio
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from datetime import datetime, timedelta, timezone
@@ -30,7 +29,6 @@ from .score_normalizer import get_score_normalizer
 
 if TYPE_CHECKING:
     from .metrics_collector import MetricsCollector
-    from .search_quality import SearchIntentAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -769,7 +767,7 @@ class UnifiedSearchService:
                 
             return SearchResponse(results=results, total=len(results))
             
-        except Exception as e:
+        except Exception:
             # FTS 실패 시 (테이블 없음 등) 빈 결과 반환하여 Vector Search만 수행되도록 함
             return SearchResponse(results=[])
 

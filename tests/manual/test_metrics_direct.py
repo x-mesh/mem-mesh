@@ -2,7 +2,6 @@
 """웹 UI 검색 메트릭 수집 직접 테스트"""
 
 import asyncio
-import sys
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.search import SearchService

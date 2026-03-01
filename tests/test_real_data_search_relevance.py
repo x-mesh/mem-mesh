@@ -6,7 +6,6 @@ Real data-driven search relevance test
 """
 
 import asyncio
-from typing import List, Dict, Any
 from app.core.storage.direct import DirectStorageBackend
 from app.core.config import create_settings
 from app.core.schemas.requests import SearchParams
@@ -121,7 +120,7 @@ async def test_search_relevance():
             print(f"   결과: {len(result.results)}개")
             
             if len(result.results) == 0:
-                print(f"   ✗ 결과 없음")
+                print("   ✗ 결과 없음")
                 continue
             
             # 각 결과의 관련성 확인

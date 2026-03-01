@@ -14,7 +14,7 @@ def read_output(pipe, queue):
         for line in iter(pipe.readline, ''):
             if line:
                 queue.put(line.strip())
-    except:
+    except Exception:
         pass
 
 def test_mcp():
@@ -229,7 +229,7 @@ def test_mcp():
                                     stats_data = json.loads(stats_response)
                                     if "result" in stats_data and "structuredContent" in stats_data["result"]:
                                         stats = stats_data["result"]["structuredContent"]
-                                        print(f"✅ 통계 조회 성공!")
+                                        print("✅ 통계 조회 성공!")
                                         print(f"   - 총 메모리 수: {stats.get('total_memories', 0)}")
                                         print(f"   - 프로젝트 수: {stats.get('total_projects', 0)}")
                                     else:

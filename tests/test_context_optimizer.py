@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 from dataclasses import dataclass
 
 from app.core.services.context_optimizer import ContextOptimizer, ContextLoadingParams
-from app.core.schemas.sessions import SessionContext, SessionResponse
+from app.core.schemas.sessions import SessionContext
 from app.core.schemas.pins import PinResponse
 
 

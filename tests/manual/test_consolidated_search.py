@@ -47,7 +47,7 @@ async def test_consolidated():
         ORDER BY count DESC
     """)
 
-    print(f"\n📊 프로젝트별 메모리:")
+    print("\n📊 프로젝트별 메모리:")
     for project, count in cursor.fetchall():
         if project == current_project:
             print(f"  ✅ {project}: {count}개 (현재)")
@@ -102,7 +102,7 @@ async def test_consolidated():
     print("📊 프로젝트 통합 효과")
     print("=" * 80)
 
-    print(f"""
+    print("""
 ✅ **통합 완료**
    - 이전: mem-mesh-optimization, mem-mesh-search-quality 등 분산
    - 현재: mem-mesh로 통합 (131개 메모리)

@@ -22,7 +22,6 @@ from app.cli.prompts.behaviors import PROMPT_VERSION, REFLECT_CONFIG
 from app.cli.prompts.renderers import (
     VERSION_MARKER,
     extract_prompt_version,
-    render_cursor_context,
     render_cursor_followup,
     render_kiro_auto_create_pin,
     render_kiro_auto_save,
@@ -1202,8 +1201,8 @@ def cmd_status() -> None:
             print(f"  {name}: {_check_script_version(script)}")
 
     print()
-    print(f"Run 'mem-mesh-hooks install --target all' to update global hooks.")
-    print(f"Run 'mem-mesh-hooks sync-project' to update project-local hooks.")
+    print("Run 'mem-mesh-hooks install --target all' to update global hooks.")
+    print("Run 'mem-mesh-hooks sync-project' to update project-local hooks.")
 
 
 # ---------------------------------------------------------------------------

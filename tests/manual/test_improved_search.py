@@ -111,7 +111,7 @@ async def test_improved_search():
         if improvement > 0:
             print(f"\n  ✨ 개선: {improvement:+.0f}%")
         elif improvement == 0:
-            print(f"\n  ➡️ 동일")
+            print("\n  ➡️ 동일")
         else:
             print(f"\n  ⚠️ 악화: {improvement:.0f}%")
 
@@ -149,7 +149,7 @@ async def test_improved_search():
         print(f"   기본 검색: {avg_basic:.1f}%")
         print(f"   개선 검색: {avg_improved:.1f}%")
     else:
-        print(f"⚠️ 개선이 필요합니다.")
+        print("⚠️ 개선이 필요합니다.")
 
     # 가장 개선된 항목
     improvements = [(test_queries[i][0], improved_scores[i] - basic_scores[i])
@@ -157,7 +157,7 @@ async def test_improved_search():
     improvements.sort(key=lambda x: x[1], reverse=True)
 
     if improvements[0][1] > 0:
-        print(f"\n🏆 가장 개선된 검색어:")
+        print("\n🏆 가장 개선된 검색어:")
         for query, improvement in improvements[:3]:
             if improvement > 0:
                 print(f"   '{query}': +{improvement:.0f}%")

@@ -35,7 +35,7 @@ async def test_search_quality_stats():
         print(f"   시작: {stats['period']['start_time']}")
         print(f"   종료: {stats['period']['end_time']}")
         
-        print(f"\n📈 요약:")
+        print("\n📈 요약:")
         summary = stats['summary']
         print(f"   총 검색: {summary['total_searches']:,}")
         print(f"   평균 결과 수: {summary['avg_results_per_search']:.2f}")
@@ -45,7 +45,7 @@ async def test_search_quality_stats():
         print(f"   Zero-result 비율: {summary['zero_result_rate']:.2f}%")
         print(f"   낮은 점수 비율: {summary['low_score_rate']:.2f}%")
         
-        print(f"\n🔍 소스별 통계:")
+        print("\n🔍 소스별 통계:")
         for source in stats['by_source']:
             print(f"   {source['source']}: {source['count']}회, "
                   f"평균 {source['avg_results']:.2f}개 결과, "
@@ -58,12 +58,12 @@ async def test_search_quality_stats():
                   f"점수 {trend['avg_score']:.3f}")
         
         if stats['popular_queries']:
-            print(f"\n🔥 인기 검색어 Top 5:")
+            print("\n🔥 인기 검색어 Top 5:")
             for query in stats['popular_queries'][:5]:
                 print(f"   \"{query['query']}\": {query['count']}회, "
                       f"평균 {query['avg_results']:.2f}개 결과")
         else:
-            print(f"\n🔥 인기 검색어: 쿼리 해싱 활성화됨")
+            print("\n🔥 인기 검색어: 쿼리 해싱 활성화됨")
         
         print("\n✅ 검색 품질 통계 테스트 성공")
         
@@ -119,7 +119,7 @@ async def test_cache_performance_stats():
         print(f"   시작: {stats['period']['start_time']}")
         print(f"   종료: {stats['period']['end_time']}")
         
-        print(f"\n💾 임베딩 캐시 성능:")
+        print("\n💾 임베딩 캐시 성능:")
         cache = stats['embedding_cache']
         print(f"   총 작업: {cache['total_operations']:,}")
         print(f"   캐시 히트: {cache['cache_hits']:,}")
@@ -129,11 +129,11 @@ async def test_cache_performance_stats():
         
         # 캐시 효율성 평가
         if cache['hit_rate'] >= 80:
-            print(f"   ✅ 캐시 효율성: 매우 좋음")
+            print("   ✅ 캐시 효율성: 매우 좋음")
         elif cache['hit_rate'] >= 60:
-            print(f"   ⚠️ 캐시 효율성: 보통")
+            print("   ⚠️ 캐시 효율성: 보통")
         else:
-            print(f"   ❌ 캐시 효율성: 개선 필요")
+            print("   ❌ 캐시 효율성: 개선 필요")
         
         print("\n✅ 캐시 성능 통계 테스트 성공")
         

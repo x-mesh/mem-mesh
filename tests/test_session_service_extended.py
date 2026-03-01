@@ -72,13 +72,13 @@ class TestResumeWithTokenTracking:
     async def test_resume_with_expand_false(self, session_service, pin_service):
         """expand=false일 때 요약만 로드하고 토큰 절감"""
         # 세션 및 핀 생성
-        pin1 = await pin_service.create_pin(
+        await pin_service.create_pin(
             project_id="test-project",
             content="This is a test pin with some content",
             importance=3
         )
         
-        pin2 = await pin_service.create_pin(
+        await pin_service.create_pin(
             project_id="test-project",
             content="Another test pin with more detailed content here",
             importance=4
@@ -312,7 +312,7 @@ class TestGetSessionStatistics:
             content="Pin 1",
             importance=3
         )
-        pin2 = await pin_service.create_pin(
+        await pin_service.create_pin(
             project_id="stats-project",
             content="Pin 2",
             importance=4
@@ -321,7 +321,7 @@ class TestGetSessionStatistics:
         
         # 두 번째 세션 (새로운 세션 강제 생성)
         await asyncio.sleep(0.1)  # 시간 차이 확보
-        pin3 = await pin_service.create_pin(
+        await pin_service.create_pin(
             project_id="stats-project",
             content="Pin 3",
             importance=5

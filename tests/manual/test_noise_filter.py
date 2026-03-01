@@ -104,7 +104,7 @@ async def test_noise_filter():
         print(f"   - 정확도: {accuracy:.0f}% ({correct}/{len(smart_response.results)})")
 
         # 상위 3개 결과 표시
-        print(f"\n   상위 3개 결과:")
+        print("\n   상위 3개 결과:")
         for i, r in enumerate(smart_response.results[:3]):
             marker = "✅" if r.project_id == expected_project else "❌"
             print(f"   {i+1}. {marker} [{r.category}] {r.content[:40]}...")
@@ -133,7 +133,7 @@ async def test_noise_filter():
     """)
     target_total = cursor.fetchone()[0]
 
-    print(f"데이터베이스 통계:")
+    print("데이터베이스 통계:")
     print(f"- kiro-* 프로젝트: {kiro_total}개")
     print(f"- 타겟 프로젝트: {target_total}개")
     print()

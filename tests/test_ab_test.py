@@ -33,7 +33,7 @@ async def test_ab_test():
         print("🧪 단일 쿼리 비교 테스트")
         result = await ab_test.run_comparison("버그 수정", limit=5)
         
-        print(f"✅ A/B 테스트 성공!")
+        print("✅ A/B 테스트 성공!")
         print(f"   - 쿼리: {result.query}")
         print(f"   - 모델 A 시간: {result.model_a_time:.4f}초")
         print(f"   - 모델 B 시간: {result.model_b_time:.4f}초")

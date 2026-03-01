@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any
 # 상위 디렉토리를 path에 추가
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from app.core.services.project_detector import ProjectDetector, get_search_context
+from app.core.services.project_detector import ProjectDetector
 
 
 class MCPAutoContext:

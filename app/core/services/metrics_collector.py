@@ -5,10 +5,8 @@
 """
 
 import asyncio
-import time
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from uuid import uuid4
 
 from app.core.database.base import Database
 from app.core.database.models import SearchMetric, EmbeddingMetric
@@ -311,7 +309,7 @@ class MetricsCollector:
         Returns:
             검색 품질 통계
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         # 시작 시간 계산
         start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + "Z"
@@ -469,7 +467,7 @@ class MetricsCollector:
         Returns:
             프로젝트별 검색 통계 리스트
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + "Z"
 
@@ -519,7 +517,7 @@ class MetricsCollector:
         Returns:
             캐시 성능 통계
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + "Z"
 

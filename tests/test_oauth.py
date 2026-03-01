@@ -9,13 +9,6 @@ import tempfile
 import os
 from datetime import datetime, timedelta, timezone
 
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-from urllib.parse import parse_qs, urlparse
-
 from fastapi.testclient import TestClient
 
 from app.core.database.base import Database
@@ -37,12 +30,14 @@ from app.core.auth.utils import (
     generate_state,
 )
 from app.core.auth.service import (
-    OAuthError,
     InvalidClientError,
     InvalidGrantError,
-    InvalidTokenError,
     InvalidRequestError,
 )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 # =============================================================================

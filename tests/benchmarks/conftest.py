@@ -7,7 +7,6 @@ that ``from benchmarks.longmemeval import ...`` resolves to the project-root
 benchmarks/longmemeval/ directory.
 """
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -24,11 +23,6 @@ _test_benchmarks = sys.modules.pop("benchmarks", None)
 _stale = {k: sys.modules.pop(k) for k in list(sys.modules) if k.startswith("benchmarks.")}
 
 # Import the real benchmarks.longmemeval package chain.
-import benchmarks as _real_benchmarks  # noqa: E402
-import benchmarks.longmemeval  # noqa: E402
-import benchmarks.longmemeval.indexer  # noqa: E402
-import benchmarks.longmemeval.models  # noqa: E402
-import benchmarks.longmemeval.retriever  # noqa: E402
 
 # Save the real sub-package references.
 _real_lme = sys.modules["benchmarks.longmemeval"]

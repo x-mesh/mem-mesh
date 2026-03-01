@@ -7,7 +7,7 @@ Real data-driven search quality test
 
 import asyncio
 import random
-from typing import List, Dict, Any
+from typing import List, Dict
 from app.core.storage.direct import DirectStorageBackend
 from app.core.config import create_settings
 from app.core.schemas.requests import SearchParams
@@ -73,7 +73,7 @@ async def extract_search_terms_from_db() -> Dict[str, List[str]]:
                 for tag in tag_list:
                     if tag and isinstance(tag, str):
                         search_terms["태그"].add(tag.strip())
-            except:
+            except Exception:
                 pass
         
         # 콘텐츠에서 키워드 추출
@@ -122,7 +122,7 @@ async def extract_search_terms_from_db() -> Dict[str, List[str]]:
     search_terms["복합_쿼리"] = search_terms["복합_쿼리"][:30]
     
     # 통계 출력
-    print(f"\n추출된 검색어 통계:")
+    print("\n추출된 검색어 통계:")
     print(f"  - 프로젝트명: {len(search_terms['프로젝트명'])}개")
     print(f"  - 카테고리: {len(search_terms['카테고리'])}개")
     print(f"  - 태그: {len(search_terms['태그'])}개")
@@ -257,9 +257,7 @@ async def test_real_data_search():
             if meets_expectation:
                 successful_tests += 1
                 results_by_category[category]["success"] += 1
-                status = "✓"
             else:
-                status = "○"
                 if scenario["expected_min_results"] > 0:
                     failed_tests.append({
                         "category": category,
@@ -305,7 +303,7 @@ async def test_real_data_search():
     # 실패한 테스트 상세
     if failed_tests:
         print(f"\n{'=' * 70}")
-        print(f"실패한 테스트 상세 (최대 10개)")
+        print("실패한 테스트 상세 (최대 10개)")
         print(f"{'=' * 70}")
         for fail in failed_tests[:10]:
             print(f"\n[{fail['category']}] '{fail['query']}'")
@@ -317,11 +315,11 @@ async def test_real_data_search():
     # 성능 평가
     success_rate = successful_tests / total_tests
     if success_rate >= 0.8:
-        print(f"\n✓ 실제 데이터 검색 품질: 우수 (80% 이상)")
+        print("\n✓ 실제 데이터 검색 품질: 우수 (80% 이상)")
     elif success_rate >= 0.6:
-        print(f"\n⚠ 실제 데이터 검색 품질: 양호 (60-80%)")
+        print("\n⚠ 실제 데이터 검색 품질: 양호 (60-80%)")
     else:
-        print(f"\n✗ 실제 데이터 검색 품질: 개선 필요 (60% 미만)")
+        print("\n✗ 실제 데이터 검색 품질: 개선 필요 (60% 미만)")
     
     return {
         "total_tests": total_tests,

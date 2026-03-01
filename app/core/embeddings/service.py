@@ -143,7 +143,7 @@ class EmbeddingService:
         # E5 모델 여부 (query/passage prefix 자동 적용)
         self._is_e5 = _is_e5_model(self.model_name)
         if self._is_e5:
-            logger.info(f"E5 model detected: query/passage prefix will be applied automatically")
+            logger.info("E5 model detected: query/passage prefix will be applied automatically")
 
         # 기본 차원 설정 (실제 모델 로드 후 업데이트됨)
         self.dimension: int = MODEL_DIMENSIONS.get(self.model_name, 384)
@@ -310,7 +310,7 @@ class EmbeddingService:
 
             # 비동기 메서드를 동기 컨텍스트에서 호출
             try:
-                loop = asyncio.get_running_loop()
+                asyncio.get_running_loop()
                 # 이미 이벤트 루프가 실행 중이면 태스크로 스케줄링
                 asyncio.create_task(
                     self.metrics_collector.collect_embedding_metric(

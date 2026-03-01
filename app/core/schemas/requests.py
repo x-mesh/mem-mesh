@@ -1,6 +1,6 @@
 """요청 스키마 정의"""
 
-from typing import Optional, List, Literal
+from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator
 import re
 

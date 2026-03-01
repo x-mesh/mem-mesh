@@ -7,7 +7,7 @@ Search Quality Testing and Benchmarking
 import asyncio
 import json
 import time
-from typing import List, Dict, Any
+from typing import List, Dict
 from datetime import datetime
 import statistics
 
@@ -339,7 +339,7 @@ class SearchQualityTester:
         with open('search_quality_results.json', 'w') as f:
             json.dump(output, f, indent=2, default=str)
 
-        print(f"\n💾 Detailed results saved to: search_quality_results.json")
+        print("\n💾 Detailed results saved to: search_quality_results.json")
 
     async def benchmark_performance(self):
         """Benchmark search performance under load"""

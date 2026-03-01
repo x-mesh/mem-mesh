@@ -2,7 +2,7 @@
 Storage Manager - MCP 서버들이 공유하는 스토리지 초기화/종료 로직.
 """
 
-from typing import Optional, Union
+from typing import Optional
 from ..core.config import Settings
 from ..core.storage.base import StorageBackend
 from ..core.storage.direct import DirectStorageBackend

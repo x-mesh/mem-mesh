@@ -76,7 +76,7 @@ async def test_query_expander():
             proj = r.project_id or "None"
             project_counts[proj] = project_counts.get(proj, 0) + 1
 
-        print(f"   프로젝트별 분포:")
+        print("   프로젝트별 분포:")
         for proj, count in sorted(project_counts.items(), key=lambda x: x[1], reverse=True)[:3]:
             print(f"     - {proj}: {count}개")
 

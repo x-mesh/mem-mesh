@@ -12,20 +12,16 @@ from app.core.config import get_settings
 from app.core.auth import OAuthService
 from app.core.auth.schemas import (
     OAuthMetadata,
-    OAuthAuthorizeRequest,
     OAuthTokenRequest,
-    OAuthTokenResponse,
     OAuthTokenError,
     OAuthClientRegistrationRequest,
     OAuthClientRegistrationResponse,
     OAuthClientCreate,
-    OAuthTokenRevokeRequest,
     OAuthTokenIntrospectResponse,
 )
 from app.core.auth.service import (
     OAuthError,
     InvalidClientError,
-    InvalidGrantError,
     InvalidRequestError,
 )
 

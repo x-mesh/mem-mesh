@@ -78,7 +78,7 @@ async def test_mcp_git_history():
         else:
             result = json.loads(add_response['result']['content'][0]['text'])
             print(f"✅ 메모리 추가 성공: ID={result['id']}")
-            memory_id = result['id']
+            result['id']
         
         # git-history 카테고리로 검색
         search_request = {
@@ -133,7 +133,7 @@ async def test_mcp_git_history():
             }
             process.stdin.write(json.dumps(shutdown_request) + '\n')
             process.stdin.flush()
-        except:
+        except Exception:
             pass
         
         process.terminate()

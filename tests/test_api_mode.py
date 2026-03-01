@@ -4,7 +4,6 @@
 import json
 import subprocess
 import sys
-import time
 import threading
 from queue import Queue, Empty
 import os
@@ -16,7 +15,7 @@ def read_output(pipe, queue):
         for line in iter(pipe.readline, ""):
             if line:
                 queue.put(line.strip())
-    except:
+    except Exception:
         pass
 
 

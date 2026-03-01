@@ -11,7 +11,6 @@ import asyncio
 from typing import List
 
 import httpx
-import pytest
 
 from tests.integration.conftest import (
     TEST_PROJECT_ID,

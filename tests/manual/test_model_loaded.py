@@ -41,7 +41,7 @@ print(f"\nExplicit model -> model_name: {service2.model_name}")
 
 # 임베딩 테스트
 service2.load_model()
-import numpy as np
+import numpy as np  # noqa: E402
 
 test_pairs = [
     ("토큰", "token"),
@@ -57,5 +57,5 @@ for kor, eng in test_pairs:
 
     similarity = cosine_similarity(emb_kor, emb_eng)
     print(f"\n'{kor}' vs '{eng}' 유사도:")
-    print(f"  영어 모델: Would be ~0.08")
+    print("  영어 모델: Would be ~0.08")
     print(f"  다국어 모델: {similarity:.3f}")

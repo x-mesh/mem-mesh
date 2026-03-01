@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Union
 from fastapi import APIRouter, HTTPException, Depends
 
-from app.core.services.memory import MemoryService
 from app.core.services.stats import StatsService
 from app.core.services.embedding_manager import EmbeddingManagerService
 from app.core.services.project import ProjectService
@@ -24,7 +23,6 @@ from app.core.schemas.requests import RuleUpdateParams
 from app.core.schemas.pins import PinCreate, PinUpdate
 from app.core.schemas.projects import ProjectUpdate
 from ..common.dependencies import (
-    get_memory_service,
     get_stats_service,
     get_embedding_manager,
     get_project_service,

@@ -6,7 +6,6 @@ import pytest
 import asyncio
 import tempfile
 import os
-from typing import List, Optional
 from unittest.mock import Mock
 
 from hypothesis import given, strategies as st, settings as hyp_settings, HealthCheck
@@ -18,7 +17,6 @@ from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.memory import MemoryService
 from app.core.storage.direct import DirectStorageBackend
-from app.core.storage.api import APIStorageBackend
 from app.core.schemas.requests import AddParams, SearchParams, UpdateParams, StatsParams
 
 

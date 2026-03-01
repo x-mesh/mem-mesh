@@ -93,15 +93,15 @@ async def analyze_embeddings():
     )
     print(f"threshold1 ↔ understood 유사도: {thresh1_understood_sim:.6f}")
     
-    print(f"\n💡 분석 결과:")
+    print("\n💡 분석 결과:")
     if understood_sim > thresh_sim:
         print(f"  ❗ 'threshold'가 'understood'와 더 유사함! ({understood_sim:.6f} > {thresh_sim:.6f})")
-        print(f"     이것이 검색 결과 이상 현상의 원인일 수 있습니다.")
+        print("     이것이 검색 결과 이상 현상의 원인일 수 있습니다.")
     else:
         print(f"  ✅ 'threshold'가 'threshold1'과 더 유사함 ({thresh_sim:.6f} > {understood_sim:.6f})")
     
     # 벡터 거리 분석
-    print(f"\n📏 유클리드 거리 분석:")
+    print("\n📏 유클리드 거리 분석:")
     thresh_thresh1_dist = np.linalg.norm(embeddings["threshold"] - embeddings["threshold1"])
     thresh_understood_dist = np.linalg.norm(embeddings["threshold"] - embeddings["understood"])
     
@@ -109,9 +109,9 @@ async def analyze_embeddings():
     print(f"  threshold ↔ understood 거리: {thresh_understood_dist:.6f}")
     
     if thresh_understood_dist < thresh_thresh1_dist:
-        print(f"  ❗ 'threshold'가 'understood'와 더 가까움!")
+        print("  ❗ 'threshold'가 'understood'와 더 가까움!")
     else:
-        print(f"  ✅ 'threshold'가 'threshold1'과 더 가까움")
+        print("  ✅ 'threshold'가 'threshold1'과 더 가까움")
 
 
 if __name__ == "__main__":

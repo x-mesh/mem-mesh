@@ -7,9 +7,6 @@ app/mcp_stdio/server.py의 FastMCP 서버 구현을 테스트합니다.
 import pytest
 import tempfile
 import os
-import json
-from typing import Optional
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
@@ -21,8 +18,6 @@ from app.core.config import Settings
 from app.mcp_common.tools import MCPToolHandlers
 from app.mcp_common.storage import StorageManager
 from app.mcp_common.schemas import (
-    get_tool_schemas,
-    get_pin_tool_schemas,
     get_all_tool_schemas,
 )
 
@@ -167,7 +162,7 @@ def test_tool_schemas_valid():
 
     for schema in all_schemas:
         # 필수 필드 확인
-        assert "name" in schema, f"Schema missing 'name'"
+        assert "name" in schema, "Schema missing 'name'"
         assert "description" in schema, (
             f"Schema {schema.get('name', 'unknown')} missing 'description'"
         )

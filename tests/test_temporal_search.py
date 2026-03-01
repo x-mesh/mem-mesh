@@ -6,7 +6,6 @@
 - UnifiedSearchService 시간 필터/부스트/감쇠
 """
 
-import math
 import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
@@ -14,8 +13,6 @@ from unittest.mock import MagicMock
 from app.core.schemas.requests import SearchParams, VALID_TIME_RANGES, VALID_TEMPORAL_MODES
 from app.core.services.query_expander import (
     extract_time_expression,
-    KOREAN_TIME_EXPRESSIONS,
-    ENGLISH_TIME_EXPRESSIONS,
 )
 from app.core.services.unified_search import UnifiedSearchService
 from app.core.schemas.responses import SearchResult, SearchResponse

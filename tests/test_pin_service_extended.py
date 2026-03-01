@@ -3,7 +3,6 @@
 import pytest
 import tempfile
 import os
-from datetime import datetime, timezone
 from app.core.database.base import Database
 from app.core.services.pin import PinService, PinNotFoundError
 from app.core.services.session import SessionService
@@ -85,7 +84,7 @@ class TestGetPinsFiltered:
     async def test_filter_by_status(self, pin_service, test_session):
         """상태 필터링 테스트"""
         # 다양한 상태의 핀 생성
-        pin1 = await pin_service.create_pin(
+        await pin_service.create_pin(
             project_id="test-project", content="Open task", importance=3, user_id="test-user"
         )
         pin2 = await pin_service.create_pin(

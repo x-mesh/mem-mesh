@@ -5,16 +5,12 @@ Pin Service 테스트
 import pytest
 import tempfile
 import os
-from unittest.mock import Mock, patch
 
 from app.core.services.pin import (
     PinService,
     PinNotFoundError,
     PinAlreadyCompletedError,
-    InvalidStatusTransitionError,
 )
-from app.core.services.session import SessionService
-from app.core.services.project import ProjectService
 from app.core.database.base import Database
 from app.core.schemas.pins import PinUpdate
 
@@ -275,7 +271,7 @@ class TestPinQuery:
             importance=3,
             user_id="test-user",
         )
-        pin2 = await pin_service.create_pin(
+        await pin_service.create_pin(
             project_id="test-project",
             content="Second pin in session for testing",
             importance=5,

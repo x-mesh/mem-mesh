@@ -11,7 +11,6 @@
 import asyncio
 import json
 import aiohttp
-from datetime import datetime, timezone
 
 async def create_test_memory(content: str, project_id: str = "kiro-conversations"):
     """테스트용 메모리 생성"""
@@ -36,7 +35,7 @@ async def create_test_memory(content: str, project_id: str = "kiro-conversations
                 }
             }
             
-            print(f"📤 Creating memory...")
+            print("📤 Creating memory...")
             print(f"   Content: {content[:50]}...")
             print(f"   Project: {project_id}")
             
@@ -48,7 +47,7 @@ async def create_test_memory(content: str, project_id: str = "kiro-conversations
             ) as response:
                 if response.status == 200:
                     result = await response.json()
-                    print(f"✅ Memory created successfully")
+                    print("✅ Memory created successfully")
                     
                     # 응답에서 메모리 ID 추출
                     if 'result' in result and 'content' in result['result']:
@@ -74,17 +73,17 @@ async def check_websocket_stats():
             async with session.get('http://127.0.0.1:8000/ws/stats') as response:
                 if response.status == 200:
                     stats = await response.json()
-                    print(f"📊 WebSocket Stats:")
+                    print("📊 WebSocket Stats:")
                     print(f"   Total connections: {stats.get('total_connections', 0)}")
                     print(f"   Global subscribers: {stats.get('global_subscribers', 0)}")
                     
                     project_subs = stats.get('project_subscriptions', {})
                     if project_subs:
-                        print(f"   Project subscriptions:")
+                        print("   Project subscriptions:")
                         for project, count in project_subs.items():
                             print(f"     - {project}: {count} subscribers")
                     else:
-                        print(f"   No project subscriptions")
+                        print("   No project subscriptions")
                     
                     return stats.get('total_connections', 0) > 0
                 else:
@@ -114,26 +113,26 @@ async def main():
     memory_id = await create_test_memory(user_message, "kiro-conversations")
     
     if memory_id:
-        print(f"\n✅ 메모리가 성공적으로 생성되었습니다!")
+        print("\n✅ 메모리가 성공적으로 생성되었습니다!")
         print(f"   Memory ID: {memory_id}")
         
         if has_connections:
-            print(f"\n🎉 WebSocket 연결이 있으므로 실시간 알림이 전송되었습니다!")
-            print(f"   브라우저에서 새 메모리가 자동으로 나타나는지 확인해보세요.")
+            print("\n🎉 WebSocket 연결이 있으므로 실시간 알림이 전송되었습니다!")
+            print("   브라우저에서 새 메모리가 자동으로 나타나는지 확인해보세요.")
         else:
-            print(f"\n📝 WebSocket 연결이 없어서 실시간 알림은 전송되지 않았습니다.")
-            print(f"   브라우저를 새로고침하면 새 메모리를 볼 수 있습니다.")
+            print("\n📝 WebSocket 연결이 없어서 실시간 알림은 전송되지 않았습니다.")
+            print("   브라우저를 새로고침하면 새 메모리를 볼 수 있습니다.")
         
-        print(f"\n📋 실시간 업데이트 확인 방법:")
-        print(f"   1. 브라우저에서 http://127.0.0.1:8000/memories 열기")
-        print(f"   2. 개발자 도구(F12) → Console 탭에서 WebSocket 메시지 확인")
-        print(f"   3. 이 스크립트를 다시 실행하여 새 메모리 생성")
-        print(f"   4. 브라우저에서 자동으로 새 메모리가 나타나는지 확인")
+        print("\n📋 실시간 업데이트 확인 방법:")
+        print("   1. 브라우저에서 http://127.0.0.1:8000/memories 열기")
+        print("   2. 개발자 도구(F12) → Console 탭에서 WebSocket 메시지 확인")
+        print("   3. 이 스크립트를 다시 실행하여 새 메모리 생성")
+        print("   4. 브라우저에서 자동으로 새 메모리가 나타나는지 확인")
         
         return 0
     else:
-        print(f"\n❌ 메모리 생성에 실패했습니다.")
-        print(f"   서버가 실행 중인지 확인해주세요: python -m app.web --reload")
+        print("\n❌ 메모리 생성에 실패했습니다.")
+        print("   서버가 실행 중인지 확인해주세요: python -m app.web --reload")
         return 1
 
 if __name__ == "__main__":

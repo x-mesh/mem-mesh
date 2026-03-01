@@ -4,7 +4,6 @@ TokenEstimator 단위 테스트
 Requirements: 7.1, 7.2
 """
 
-import pytest
 from app.core.services.token_estimator import TokenEstimator
 
 

@@ -1,7 +1,7 @@
 """Unified MCP tool dispatcher - eliminates duplicated dispatch logic."""
 
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from pydantic import ValidationError
 
 from .tools import MCPToolHandlers

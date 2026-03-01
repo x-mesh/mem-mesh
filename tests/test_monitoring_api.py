@@ -5,8 +5,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import tempfile
 
-from fastapi.testclient import TestClient
-from fastapi import FastAPI
 
 from app.core.database.base import Database
 from app.core.services.monitoring import MonitoringService

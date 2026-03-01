@@ -6,7 +6,6 @@ WebSocket 실시간 업데이트 테스트 - memories 페이지 통합 확인
 import asyncio
 import json
 import aiohttp
-from datetime import datetime, timezone
 
 async def test_memory_creation_with_websocket():
     """메모리 생성 시 WebSocket 알림이 전송되는지 테스트"""
@@ -35,7 +34,7 @@ async def test_memory_creation_with_websocket():
                 }
             }
             
-            print(f"📤 Sending memory creation request...")
+            print("📤 Sending memory creation request...")
             print(f"   Content: {test_memory['content'][:50]}...")
             print(f"   Project: {test_memory['project_id']}")
             print(f"   Category: {test_memory['category']}")
@@ -48,7 +47,7 @@ async def test_memory_creation_with_websocket():
             ) as response:
                 if response.status == 200:
                     result = await response.json()
-                    print(f"✅ Memory creation request successful")
+                    print("✅ Memory creation request successful")
                     print(f"   Response: {result}")
                     
                     # 응답에서 메모리 ID 추출
@@ -78,7 +77,7 @@ async def test_websocket_connection():
             async with session.get('http://127.0.0.1:8000/ws/stats') as response:
                 if response.status == 200:
                     stats = await response.json()
-                    print(f"✅ WebSocket server is running")
+                    print("✅ WebSocket server is running")
                     print(f"   Total connections: {stats.get('total_connections', 0)}")
                     print(f"   Global subscribers: {stats.get('global_subscribers', 0)}")
                     print(f"   Project subscriptions: {stats.get('project_subscriptions', {})}")
@@ -107,17 +106,17 @@ async def main():
     # 2. 메모리 생성 및 WebSocket 알림 테스트
     memory_id = await test_memory_creation_with_websocket()
     if memory_id:
-        print(f"\n🎉 Test completed successfully!")
+        print("\n🎉 Test completed successfully!")
         print(f"   Memory created with ID: {memory_id}")
-        print(f"   WebSocket notifications should be sent to connected clients")
-        print(f"\n📋 To verify real-time updates:")
-        print(f"   1. Open http://127.0.0.1:8000/memories in your browser")
-        print(f"   2. Open browser developer tools (F12)")
-        print(f"   3. Check the Console tab for WebSocket messages")
-        print(f"   4. The new memory should appear automatically in the list")
+        print("   WebSocket notifications should be sent to connected clients")
+        print("\n📋 To verify real-time updates:")
+        print("   1. Open http://127.0.0.1:8000/memories in your browser")
+        print("   2. Open browser developer tools (F12)")
+        print("   3. Check the Console tab for WebSocket messages")
+        print("   4. The new memory should appear automatically in the list")
         return 0
     else:
-        print(f"\n💥 Test failed - memory creation unsuccessful")
+        print("\n💥 Test failed - memory creation unsuccessful")
         return 1
 
 if __name__ == "__main__":

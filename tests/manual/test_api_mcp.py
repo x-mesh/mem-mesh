@@ -131,7 +131,7 @@ async def test_api_mcp():
             }
             process.stdin.write(json.dumps(shutdown_request) + '\n')
             process.stdin.flush()
-        except:
+        except Exception:
             pass
         
         process.terminate()

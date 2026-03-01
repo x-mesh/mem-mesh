@@ -6,9 +6,8 @@ Requirements: 6.1, 6.2, 6.3, 6.4, 6.5
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from app.core.services.unified_search import UnifiedSearchService
-from app.core.schemas.responses import SearchResponse, SearchResult
+from app.core.schemas.responses import SearchResponse
 from app.core.schemas.sessions import SessionContext
-from app.core.services.search_quality import SearchIntent
 
 
 @pytest.fixture

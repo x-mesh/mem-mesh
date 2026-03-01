@@ -11,10 +11,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.services.scoring import (
     ScoringContext,
-    ScoringResult,
     ExactMatchScorer,
     ContentQualityScorer,
-    RecencyScorer,
     CategoryBoostScorer,
     TagMatchScorer,
     ScoringPipeline,

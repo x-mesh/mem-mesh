@@ -5,7 +5,6 @@ Search Service for mem-mesh
 
 import json
 import logging
-import re
 import time
 from typing import Optional, List, TYPE_CHECKING
 from datetime import datetime
@@ -102,8 +101,6 @@ class SearchService:
         """
         # 메트릭 수집을 위한 시간 측정 시작
         start_time = time.perf_counter()
-        embedding_time_ms = None
-        search_time_ms = None
 
         # Query Expansion for Korean/English (if available)
         original_query = query

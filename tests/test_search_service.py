@@ -3,7 +3,6 @@ Search Service 테스트
 """
 
 import pytest
-import asyncio
 import tempfile
 import os
 from unittest.mock import Mock

@@ -13,7 +13,6 @@ from app.core.schemas.sessions import (
     SessionContext,
 )
 from app.core.schemas.pins import PinResponse
-from app.core.schemas.optimization import TokenInfo
 from app.core.utils.user import get_current_user
 
 logger = logging.getLogger(__name__)

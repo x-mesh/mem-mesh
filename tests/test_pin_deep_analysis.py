@@ -16,7 +16,6 @@ import os
 from app.core.database.base import Database
 from app.core.services.pin import (
     PinService,
-    PinNotFoundError,
     PinAlreadyCompletedError,
 )
 from app.core.services.session import SessionService
@@ -270,7 +269,7 @@ class TestCrossSessionContinuity:
     ):
         """미완료 Pin이 세션 resume 후 접근 가능"""
         # 세션 생성 및 Pin 추가
-        session = await session_service.get_or_create_active_session(
+        await session_service.get_or_create_active_session(
             project_id="test-project", user_id="test-user"
         )
         pin = await pin_service.create_pin(
