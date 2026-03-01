@@ -330,7 +330,11 @@ async def test_real_data_search():
     print("실제 데이터 기반 검색 테스트 결과")
     print(f"{'=' * 70}")
     print(f"총 테스트: {total_tests}개")
-    print(f"성공: {successful_tests}개 ({successful_tests/total_tests*100:.1f}%)")
+    print(
+        f"성공: {successful_tests}개 ({successful_tests/total_tests*100:.1f}%)"
+        if total_tests
+        else "성공: 0개"
+    )
     print(f"실패: {len(failed_tests)}개")
 
     # 카테고리별 결과
