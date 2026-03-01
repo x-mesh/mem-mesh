@@ -116,6 +116,10 @@ class MemoriesPage extends HTMLElement {
       wsClient.off('memory_updated', this._boundHandlers.memoryUpdated);
       wsClient.off('memory_deleted', this._boundHandlers.memoryDeleted);
     }
+    if (this._boundKeydown) {
+      document.removeEventListener('keydown', this._boundKeydown);
+      this._boundKeydown = null;
+    }
     this.destroyPalette();
   }
 
@@ -781,11 +785,26 @@ class MemoriesPage extends HTMLElement {
       });
     }
 
-    // Keyboard: j/k navigation on rows
-    this.addEventListener('keydown', (e) => {
-      if (e.target.matches('input, select, textarea')) return;
+    // Keyboard: j/k navigation, Space peek, Cmd+K palette — bound on document
+    this._boundKeydown = (e) => {
+      // Only handle when this page is connected and visible
+      if (!this.isConnected) return;
+
+      // Cmd+K palette (always active)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        this.openPalette();
+        return;
+      }
+
+      // Skip when focus is in an input/select/textarea (except Escape)
+      if (e.target.matches('input, select, textarea, .combobox-input') && e.key !== 'Escape') return;
+
+      // Skip when a modal overlay is open (edit modal, palette, export menu)
+      if (document.querySelector('.cmd-palette-overlay, .mem-edit-overlay')) return;
+
       const rows = Array.from(this.querySelectorAll('.mem-row'));
-      if (!rows.length) return;
+      if (!rows.length && e.key !== 'Escape') return;
       const curIdx = rows.findIndex(r => r.classList.contains('keyboard-selected'));
 
       if (e.key === 'j' || e.key === 'ArrowDown') {
@@ -823,7 +842,10 @@ class MemoriesPage extends HTMLElement {
         const sel = this.querySelector('.mem-row.keyboard-selected');
         if (sel) {
           const id = sel.dataset.memoryId;
-          if (id) this.openPeek(id);
+          if (id) {
+            if (this._peekId === id) this.closePeek();
+            else this.openPeek(id);
+          }
         }
       }
       // Escape = close peek, or deselect all
@@ -838,16 +860,8 @@ class MemoriesPage extends HTMLElement {
       if (e.key === 'e' && !e.metaKey && !e.ctrlKey) {
         this.exportMemories(e.shiftKey ? 'csv' : 'json');
       }
-    });
-
-    // Global Cmd+K to open palette
-    this._boundCmdK = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        this.openPalette();
-      }
     };
-    document.addEventListener('keydown', this._boundCmdK);
+    document.addEventListener('keydown', this._boundKeydown);
   }
 
   /* ── WebSocket ──────────────────────────────────────────── */
@@ -1162,10 +1176,6 @@ class MemoriesPage extends HTMLElement {
 
   destroyPalette() {
     this.closePalette();
-    if (this._boundCmdK) {
-      document.removeEventListener('keydown', this._boundCmdK);
-      this._boundCmdK = null;
-    }
   }
 
   _showRecentPalette(container) {
