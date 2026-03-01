@@ -366,7 +366,7 @@ async def test_real_data_search():
                 print(f"  예상: {fail['expected']}개 이상, 실제: {fail['actual']}개")
 
     # 성능 평가
-    success_rate = successful_tests / total_tests
+    success_rate = successful_tests / total_tests if total_tests else 0
     if success_rate >= 0.8:
         print("\n✓ 실제 데이터 검색 품질: 우수 (80% 이상)")
     elif success_rate >= 0.6:
