@@ -1,14 +1,14 @@
 """모니터링 API 테스트"""
 
-import pytest
+import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-import tempfile
 
+import pytest
 
 from app.core.database.base import Database
-from app.core.services.monitoring import MonitoringService
 from app.core.services.metrics_collector import MetricsCollector
+from app.core.services.monitoring import MonitoringService
 
 
 @pytest.fixture
@@ -16,10 +16,10 @@ async def temp_db():
     """임시 데이터베이스 생성"""
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
-    
+
     db = Database(db_path)
     await db.connect()
-    
+
     # 테이블 생성
     await db.execute("""
         CREATE TABLE IF NOT EXISTS search_metrics (
@@ -42,7 +42,7 @@ async def temp_db():
             source TEXT NOT NULL
         )
     """)
-    
+
     await db.execute("""
         CREATE TABLE IF NOT EXISTS embedding_metrics (
             id TEXT PRIMARY KEY,
@@ -56,7 +56,7 @@ async def temp_db():
             model_name TEXT NOT NULL
         )
     """)
-    
+
     await db.execute("""
         CREATE TABLE IF NOT EXISTS alerts (
             id TEXT PRIMARY KEY,
@@ -70,9 +70,9 @@ async def temp_db():
             resolved_at DATETIME
         )
     """)
-    
+
     yield db
-    
+
     await db.close()
     Path(db_path).unlink(missing_ok=True)
 
@@ -103,9 +103,9 @@ async def sample_data(collector, temp_db):
             avg_similarity=0.7 + i * 0.02,
             top_similarity=0.8 + i * 0.02,
             project_id="test-project" if i % 2 == 0 else None,
-            source="test"
+            source="test",
         )
-    
+
     # 결과 없음 쿼리 추가
     for i in range(3):
         await collector.collect_search_metric(
@@ -113,9 +113,9 @@ async def sample_data(collector, temp_db):
             result_count=0,
             response_time_ms=50,
             avg_similarity=None,
-            source="test"
+            source="test",
         )
-    
+
     # 임베딩 메트릭 추가
     for i in range(5):
         await collector.collect_embedding_metric(
@@ -123,11 +123,11 @@ async def sample_data(collector, temp_db):
             count=1 if i % 2 == 0 else 10,
             total_time_ms=100 + i * 20,
             cache_hit=i % 3 == 0,
-            model_name="test-model"
+            model_name="test-model",
         )
-    
+
     await collector.flush()
-    
+
     return {"search_count": 13, "embedding_count": 5}
 
 
@@ -136,17 +136,15 @@ async def test_get_search_metrics(monitoring_service, sample_data):
     """검색 메트릭 조회 테스트"""
     now = datetime.utcnow()
     start_date = now - timedelta(hours=1)
-    
+
     result = await monitoring_service.get_search_metrics(
-        start_date=start_date,
-        end_date=now,
-        aggregation="hourly"
+        start_date=start_date, end_date=now, aggregation="hourly"
     )
-    
+
     assert "period" in result
     assert "summary" in result
     assert "timeseries" in result
-    
+
     # 요약 통계 확인
     summary = result["summary"]
     assert summary["total_searches"] == 13
@@ -159,13 +157,11 @@ async def test_get_search_metrics_with_project_filter(monitoring_service, sample
     """프로젝트 필터링 테스트"""
     now = datetime.utcnow()
     start_date = now - timedelta(hours=1)
-    
+
     result = await monitoring_service.get_search_metrics(
-        start_date=start_date,
-        end_date=now,
-        project_id="test-project"
+        start_date=start_date, end_date=now, project_id="test-project"
     )
-    
+
     # test-project는 5개 (i % 2 == 0인 경우)
     assert result["summary"]["total_searches"] == 5
 
@@ -174,17 +170,15 @@ async def test_get_search_metrics_with_project_filter(monitoring_service, sample
 async def test_get_query_analysis(monitoring_service, sample_data):
     """쿼리 분석 테스트"""
     result = await monitoring_service.get_query_analysis(
-        limit=100,
-        sort_by="frequency",
-        days=7
+        limit=100, sort_by="frequency", days=7
     )
-    
+
     assert "queries" in result
     assert "top_queries" in result
     assert "low_similarity_queries" in result
     assert "no_results_queries" in result
     assert "length_distribution" in result
-    
+
     # 결과 없음 쿼리 확인
     assert len(result["no_results_queries"]) == 3
 
@@ -194,21 +188,20 @@ async def test_get_embedding_metrics(monitoring_service, sample_data):
     """임베딩 메트릭 조회 테스트"""
     now = datetime.utcnow()
     start_date = now - timedelta(hours=1)
-    
+
     result = await monitoring_service.get_embedding_metrics(
-        start_date=start_date,
-        end_date=now
+        start_date=start_date, end_date=now
     )
-    
+
     assert "period" in result
     assert "summary" in result
     assert "by_operation" in result
     assert "timeseries" in result
-    
+
     # 요약 통계 확인
     summary = result["summary"]
     assert summary["total_operations"] == 5
-    
+
     # 작업 유형별 통계 확인
     assert len(result["by_operation"]) == 2  # generate, batch_generate
 
@@ -217,9 +210,9 @@ async def test_get_embedding_metrics(monitoring_service, sample_data):
 async def test_get_recent_searches(monitoring_service, sample_data):
     """최근 검색 목록 조회 테스트"""
     result = await monitoring_service.get_recent_searches(limit=10)
-    
+
     assert len(result) == 10
-    
+
     # 최신 순으로 정렬되어 있는지 확인
     for i in range(len(result) - 1):
         assert result[i]["timestamp"] >= result[i + 1]["timestamp"]
@@ -229,15 +222,15 @@ async def test_get_recent_searches(monitoring_service, sample_data):
 async def test_get_dashboard_summary(monitoring_service, sample_data):
     """대시보드 요약 테스트"""
     result = await monitoring_service.get_dashboard_summary()
-    
+
     assert "search" in result
     assert "embedding" in result
     assert "alerts" in result
     assert "generated_at" in result
-    
+
     # 검색 통계 확인
     assert result["search"]["last_24h"]["total"] == 13
-    
+
     # 임베딩 통계 확인
     assert result["embedding"]["last_24h"]["total_operations"] == 5
 
@@ -247,12 +240,11 @@ async def test_empty_metrics(monitoring_service):
     """빈 메트릭 조회 테스트"""
     now = datetime.utcnow()
     start_date = now - timedelta(hours=1)
-    
+
     result = await monitoring_service.get_search_metrics(
-        start_date=start_date,
-        end_date=now
+        start_date=start_date, end_date=now
     )
-    
+
     assert result["summary"]["total_searches"] == 0
     assert result["summary"]["avg_similarity"] == 0
     assert len(result["timeseries"]) == 0
@@ -262,11 +254,9 @@ async def test_empty_metrics(monitoring_service):
 async def test_query_analysis_sort_by_similarity(monitoring_service, sample_data):
     """유사도 기준 정렬 테스트"""
     result = await monitoring_service.get_query_analysis(
-        limit=10,
-        sort_by="similarity",
-        days=7
+        limit=10, sort_by="similarity", days=7
     )
-    
+
     # 낮은 유사도 순으로 정렬되어야 함
     queries = result["queries"]
     for i in range(len(queries) - 1):
@@ -278,15 +268,15 @@ async def test_query_analysis_sort_by_similarity(monitoring_service, sample_data
 async def test_query_analysis_sort_by_time(monitoring_service, sample_data):
     """응답 시간 기준 정렬 테스트"""
     result = await monitoring_service.get_query_analysis(
-        limit=10,
-        sort_by="time",
-        days=7
+        limit=10, sort_by="time", days=7
     )
-    
+
     # 느린 응답 시간 순으로 정렬되어야 함
     queries = result["queries"]
     for i in range(len(queries) - 1):
-        assert queries[i]["avg_response_time_ms"] >= queries[i + 1]["avg_response_time_ms"]
+        assert (
+            queries[i]["avg_response_time_ms"] >= queries[i + 1]["avg_response_time_ms"]
+        )
 
 
 @pytest.mark.asyncio
@@ -294,12 +284,11 @@ async def test_no_results_rate_calculation(monitoring_service, sample_data):
     """결과 없음 비율 계산 테스트"""
     now = datetime.utcnow()
     start_date = now - timedelta(hours=1)
-    
+
     result = await monitoring_service.get_search_metrics(
-        start_date=start_date,
-        end_date=now
+        start_date=start_date, end_date=now
     )
-    
+
     # 13개 중 3개가 결과 없음 = 약 23.08%
     expected_rate = 3 / 13 * 100
     assert abs(result["summary"]["no_results_rate"] - expected_rate) < 0.1
@@ -310,12 +299,11 @@ async def test_cache_hit_rate_calculation(monitoring_service, sample_data):
     """캐시 히트율 계산 테스트"""
     now = datetime.utcnow()
     start_date = now - timedelta(hours=1)
-    
+
     result = await monitoring_service.get_embedding_metrics(
-        start_date=start_date,
-        end_date=now
+        start_date=start_date, end_date=now
     )
-    
+
     # 5개 중 2개가 캐시 히트 (i % 3 == 0: 0, 3) = 40%
     expected_rate = 2 / 5 * 100
     assert abs(result["summary"]["cache_hit_rate"] - expected_rate) < 0.1

@@ -1,16 +1,17 @@
 """Pin 서비스 - Pin 관리 비즈니스 로직"""
 
-import logging
 import json
+import logging
 from datetime import datetime, timezone
-from typing import Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
     from app.core.services.session import SessionService
+
 from uuid import uuid4
 
 from app.core.database.base import Database
-from app.core.schemas.pins import PinUpdate, PinResponse
+from app.core.schemas.pins import PinResponse, PinUpdate
 from app.core.utils.user import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -233,12 +234,8 @@ class PinService:
         lead_time_hours = None
         if pin.created_at:
             try:
-                created = datetime.fromisoformat(
-                    pin.created_at.replace("Z", "+00:00")
-                )
-                completed = datetime.fromisoformat(
-                    now.replace("Z", "+00:00")
-                )
+                created = datetime.fromisoformat(pin.created_at.replace("Z", "+00:00"))
+                completed = datetime.fromisoformat(now.replace("Z", "+00:00"))
                 lead_time_hours = (completed - created).total_seconds() / 3600
             except Exception:
                 pass
@@ -281,7 +278,9 @@ class PinService:
 
         # 중복 승격 방지: 이미 승격된 핀인지 확인
         if pin.promoted_to_memory_id:
-            logger.info(f"Pin {pin_id} already promoted to memory {pin.promoted_to_memory_id}")
+            logger.info(
+                f"Pin {pin_id} already promoted to memory {pin.promoted_to_memory_id}"
+            )
             return {
                 "memory_id": pin.promoted_to_memory_id,
                 "pin_deleted": False,
@@ -290,8 +289,8 @@ class PinService:
             }
 
         # Memory 생성 (MemoryService 사용)
-        from app.core.services.memory import MemoryService
         from app.core.embeddings.service import EmbeddingService
+        from app.core.services.memory import MemoryService
 
         # EmbeddingService: DI된 인스턴스 재사용, 없으면 새로 생성
         embedding_service = self._embedding_service or EmbeddingService()
@@ -358,8 +357,8 @@ class PinService:
             if not rows:
                 return 0
 
-            from app.core.services.relation import RelationService
             from app.core.schemas.relations import RelationCreate, RelationType
+            from app.core.services.relation import RelationService
 
             relation_service = RelationService(self.db)
             linked_count = 0
@@ -519,7 +518,9 @@ class PinService:
 
         # 새로운 컬럼 안전하게 접근
         try:
-            estimated_tokens = row["estimated_tokens"] if row["estimated_tokens"] is not None else 0
+            estimated_tokens = (
+                row["estimated_tokens"] if row["estimated_tokens"] is not None else 0
+            )
         except (KeyError, IndexError):
             estimated_tokens = 0
 
@@ -622,7 +623,7 @@ class PinService:
         # 상태별 집계
         status_rows = await self.db.fetchall(
             "SELECT status, COUNT(*) as cnt FROM pins WHERE session_id = ? GROUP BY status",
-            (session_id,)
+            (session_id,),
         )
         by_status = {"open": 0, "in_progress": 0, "completed": 0}
         total = 0
@@ -633,7 +634,7 @@ class PinService:
         # 중요도별 집계
         importance_rows = await self.db.fetchall(
             "SELECT importance, COUNT(*) as cnt FROM pins WHERE session_id = ? GROUP BY importance",
-            (session_id,)
+            (session_id,),
         )
         by_importance = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
         for row in importance_rows:
@@ -652,11 +653,19 @@ class PinService:
                     AND promoted_to_memory_id IS NULL THEN 1 ELSE 0 END) as promo_candidates
             FROM pins WHERE session_id = ?
             """,
-            (session_id,)
+            (session_id,),
         )
 
-        avg_lead_time_hours = agg_row["avg_lead_time"] if agg_row and agg_row["avg_lead_time"] is not None else None
-        promotion_candidates = agg_row["promo_candidates"] if agg_row and agg_row["promo_candidates"] is not None else 0
+        avg_lead_time_hours = (
+            agg_row["avg_lead_time"]
+            if agg_row and agg_row["avg_lead_time"] is not None
+            else None
+        )
+        promotion_candidates = (
+            agg_row["promo_candidates"]
+            if agg_row and agg_row["promo_candidates"] is not None
+            else 0
+        )
 
         return {
             "total": total,

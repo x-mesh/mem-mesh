@@ -9,21 +9,21 @@ MCP 2025-03-26 스펙의 Streamable HTTP transport 구현.
 Spec: https://modelcontextprotocol.io/specification/2025-03-26/basic/transports
 """
 
-import json
 import asyncio
-import uuid
+import json
 import logging
-from typing import Dict, Any, Optional
+import uuid
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Request, Response, HTTPException, Header
+from fastapi import APIRouter, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
-from app.mcp_common.tools import MCPToolHandlers
-from app.mcp_common.schemas import get_all_tool_schemas
+from app.core.version import MCP_PROTOCOL_VERSION, SERVER_INFO
 from app.mcp_common.dispatcher import MCPDispatcher
-from app.mcp_common.transport import format_jsonrpc_response, format_jsonrpc_error
-from app.core.version import SERVER_INFO, MCP_PROTOCOL_VERSION
+from app.mcp_common.schemas import get_all_tool_schemas
+from app.mcp_common.tools import MCPToolHandlers
+from app.mcp_common.transport import format_jsonrpc_error, format_jsonrpc_response
 
 logger = logging.getLogger(__name__)
 
@@ -92,11 +92,11 @@ async def handle_tools_call(params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def process_jsonrpc_request(
-    request: Dict[str, Any]
+    request: Dict[str, Any],
 ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
     JSON-RPC 요청 처리
-    
+
     Returns:
         tuple: (response, new_session_id)
         - response: JSON-RPC 응답 (notification인 경우 None)
@@ -133,7 +133,10 @@ async def process_jsonrpc_request(
             return format_jsonrpc_response({}, req_id), None
 
         else:
-            return format_jsonrpc_error(f"Method not found: {method}", req_id, -32601), None
+            return (
+                format_jsonrpc_error(f"Method not found: {method}", req_id, -32601),
+                None,
+            )
 
     except Exception as e:
         logger.exception(f"Error processing request: {method}")
@@ -163,16 +166,15 @@ async def streamable_http_get(
 ):
     """
     Streamable HTTP GET - SSE 스트림 연결
-    
+
     클라이언트가 서버로부터 메시지를 받기 위한 SSE 스트림을 엽니다.
     """
     # SSE를 지원하지 않으면 405
     if not accepts_sse(accept):
         raise HTTPException(
-            status_code=405,
-            detail="This endpoint requires Accept: text/event-stream"
+            status_code=405, detail="This endpoint requires Accept: text/event-stream"
         )
-    
+
     # 세션 ID가 없으면 새 세션 생성 (backwards compatibility)
     session_id = mcp_session_id
     if not session_id:
@@ -192,7 +194,7 @@ async def streamable_http_get(
             yield {
                 "event": "endpoint",
                 "data": f"/mcp/message?session_id={session_id}",
-                "id": str(event_id)
+                "id": str(event_id),
             }
             event_id += 1
 
@@ -207,7 +209,7 @@ async def streamable_http_get(
                     yield {
                         "event": "message",
                         "data": json.dumps(message),
-                        "id": str(event_id)
+                        "id": str(event_id),
                     }
                     event_id += 1
                 except asyncio.TimeoutError:
@@ -231,7 +233,7 @@ async def streamable_http_post(
 ):
     """
     Streamable HTTP POST - JSON-RPC 요청 처리
-    
+
     클라이언트가 서버로 JSON-RPC 메시지를 보냅니다.
     Accept 헤더에 따라 JSON 또는 SSE로 응답합니다.
     """
@@ -263,14 +265,14 @@ async def streamable_http_post(
     # SSE 스트림으로 응답할지 JSON으로 응답할지 결정
     # Streamable HTTP에서는 기본적으로 JSON 응답
     # (SSE는 여러 응답이 필요한 경우에만 사용)
-    
+
     # JSON 응답 생성
     json_response = JSONResponse(content=response)
-    
+
     # initialize 응답에 세션 ID 포함
     if new_session_id:
         json_response.headers["Mcp-Session-Id"] = new_session_id
-    
+
     return json_response
 
 
@@ -280,12 +282,12 @@ async def streamable_http_delete(
 ):
     """
     Streamable HTTP DELETE - 세션 종료
-    
+
     클라이언트가 세션을 명시적으로 종료합니다.
     """
     if not mcp_session_id:
         raise HTTPException(status_code=400, detail="Mcp-Session-Id header required")
-    
+
     if mcp_session_id in _sessions:
         del _sessions[mcp_session_id]
         logger.info(f"Session terminated: {mcp_session_id}")
@@ -298,15 +300,14 @@ async def streamable_http_delete(
 # 기존 HTTP+SSE transport 호환성 엔드포인트 (deprecated)
 # ============================================================
 
+
 @router.post("/message")
 async def legacy_message_endpoint(
-    request: Request,
-    session_id: str,
-    auto_create: bool = True
+    request: Request, session_id: str, auto_create: bool = True
 ):
     """
     [DEPRECATED] 기존 HTTP+SSE transport의 message 엔드포인트
-    
+
     새 클라이언트는 POST /mcp/sse를 사용하세요.
     """
     if session_id not in _sessions:

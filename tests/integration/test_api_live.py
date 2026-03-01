@@ -19,7 +19,6 @@ import pytest
 
 from tests.integration.conftest import TEST_PROJECT_ID, unique_content
 
-
 # ---------------------------------------------------------------------------
 # 1. Health & Info
 # ---------------------------------------------------------------------------
@@ -252,7 +251,10 @@ class TestPinWorkflow:
         assert r.status_code == 200
         complete_data = r.json()
         # importance >= 4 should suggest promotion
-        assert complete_data.get("promote_suggested") or complete_data.get("status") == "completed"
+        assert (
+            complete_data.get("promote_suggested")
+            or complete_data.get("status") == "completed"
+        )
 
         # Promote to memory
         r = await http.post(
@@ -264,9 +266,7 @@ class TestPinWorkflow:
         if "memory_id" in promote_data:
             cleanup_memories.append(promote_data["memory_id"])
 
-    async def test_pin_crud(
-        self, http: httpx.AsyncClient, cleanup_pins: List[str]
-    ):
+    async def test_pin_crud(self, http: httpx.AsyncClient, cleanup_pins: List[str]):
         """Create → read → update → delete pin."""
         # Create
         r = await http.post(

@@ -3,11 +3,11 @@
 Automatic project detection from context
 """
 
+import logging
 import os
 import re
-import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +20,10 @@ class ProjectDetector:
         self.project_mappings = {
             # 디렉토리명 → 프로젝트 ID
             # 대부분 디렉토리명을 그대로 사용하도록 변경
-            'kiro': None,  # kiro는 제외
-            'test': None,  # test 디렉토리 제외
-            'tmp': None,   # tmp 디렉토리 제외
-            'temp': None,  # temp 디렉토리 제외
+            "kiro": None,  # kiro는 제외
+            "test": None,  # test 디렉토리 제외
+            "tmp": None,  # tmp 디렉토리 제외
+            "temp": None,  # temp 디렉토리 제외
         }
 
         # 프로젝트 패턴 (정규식) - 특별한 경우만
@@ -89,19 +89,21 @@ class ProjectDetector:
             current = path
 
             while current.parent != current:
-                if (current / '.git').exists():
+                if (current / ".git").exists():
                     git_dir = current
                     break
                 current = current.parent
 
             if git_dir:
                 # Git remote origin 확인
-                config_file = git_dir / '.git' / 'config'
+                config_file = git_dir / ".git" / "config"
                 if config_file.exists():
-                    with open(config_file, 'r') as f:
+                    with open(config_file, "r") as f:
                         content = f.read()
                         # GitHub/GitLab URL에서 리포지토리명 추출
-                        match = re.search(r'url = .*/([^/]+?)(?:\.git)?$', content, re.MULTILINE)
+                        match = re.search(
+                            r"url = .*/([^/]+?)(?:\.git)?$", content, re.MULTILINE
+                        )
                         if match:
                             repo_name = match.group(1)
                             logger.info(f"Project detected from git: {repo_name}")
@@ -119,10 +121,22 @@ class ProjectDetector:
         """유효한 프로젝트명인지 확인"""
         # 제외할 디렉토리명
         excluded = {
-            'desktop', 'downloads', 'documents', 'home',
-            'users', 'root', 'var', 'tmp', 'temp',
-            'test', 'tests', 'node_modules', 'venv',
-            '.', '..', ''
+            "desktop",
+            "downloads",
+            "documents",
+            "home",
+            "users",
+            "root",
+            "var",
+            "tmp",
+            "temp",
+            "test",
+            "tests",
+            "node_modules",
+            "venv",
+            ".",
+            "..",
+            "",
         }
 
         if name.lower() in excluded:
@@ -133,12 +147,14 @@ class ProjectDetector:
             return False
 
         # 특수문자만 있는 경우 제외
-        if not re.search(r'[a-zA-Z0-9]', name):
+        if not re.search(r"[a-zA-Z0-9]", name):
             return False
 
         return True
 
-    def get_context(self, additional_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def get_context(
+        self, additional_info: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
         전체 컨텍스트 가져오기
 
@@ -149,15 +165,15 @@ class ProjectDetector:
             컨텍스트 딕셔너리
         """
         context = {
-            'project': self.detect_from_path(),
-            'directory': os.path.basename(os.getcwd()),
-            'full_path': os.getcwd(),
-            'user': os.environ.get('USER', 'unknown'),
+            "project": self.detect_from_path(),
+            "directory": os.path.basename(os.getcwd()),
+            "full_path": os.getcwd(),
+            "user": os.environ.get("USER", "unknown"),
         }
 
         # 환경 변수에서 추가 정보
-        if 'MEM_MESH_PROJECT' in os.environ:
-            context['project'] = os.environ['MEM_MESH_PROJECT']
+        if "MEM_MESH_PROJECT" in os.environ:
+            context["project"] = os.environ["MEM_MESH_PROJECT"]
 
         if additional_info:
             context.update(additional_info)
@@ -189,11 +205,11 @@ def get_search_context() -> Dict[str, Any]:
     context = detector.get_context()
 
     # 검색 최적화 설정 추가
-    context['search_settings'] = {
-        'limit': 5,
-        'min_score': 0.3,
-        'aggressive_filter': True,
-        'exclude_projects': ['kiro-*', 'test-*', 'tmp-*']
+    context["search_settings"] = {
+        "limit": 5,
+        "min_score": 0.3,
+        "aggressive_filter": True,
+        "exclude_projects": ["kiro-*", "test-*", "tmp-*"],
     }
 
     return context

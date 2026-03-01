@@ -4,10 +4,11 @@
 """
 
 import asyncio
+
+from app.core.config import Settings
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.simple_improved_search import SimpleImprovedSearch
-from app.core.config import Settings
 
 
 async def debug_search():
@@ -19,8 +20,8 @@ async def debug_search():
 
     # 다국어 모델 명시
     embedding_service = EmbeddingService(
-        model_name='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
-        preload=False
+        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        preload=False,
     )
     embedding_service.load_model()
 
@@ -75,11 +76,15 @@ async def debug_search():
         results = await search.search(eq, limit=3)
 
         # mem-mesh-optimization 결과 카운트
-        opt_count = sum(1 for r in results.results if r.project_id == 'mem-mesh-optimization')
+        opt_count = sum(
+            1 for r in results.results if r.project_id == "mem-mesh-optimization"
+        )
         print(f"  mem-mesh-optimization 결과: {opt_count}/{len(results.results)}")
 
         if results.results:
-            print(f"  첫 번째 결과: [{results.results[0].category}] {results.results[0].content[:30]}...")
+            print(
+                f"  첫 번째 결과: [{results.results[0].category}] {results.results[0].content[:30]}..."
+            )
             print(f"  프로젝트: {results.results[0].project_id}")
 
 

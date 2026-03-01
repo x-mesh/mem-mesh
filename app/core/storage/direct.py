@@ -4,25 +4,25 @@ import json
 import logging
 from typing import Optional
 
-from .base import StorageBackend
+from ..config import get_settings
 from ..database.base import Database
 from ..embeddings.service import EmbeddingService
-from ..services.memory import MemoryService
-from ..services.search import SearchService
-from ..services.unified_search import UnifiedSearchService
-from ..services.search_warmup import get_warmup_service
-from ..services.context import ContextService
-from ..services.stats import StatsService
-from ..schemas.requests import AddParams, SearchParams, UpdateParams, StatsParams
+from ..schemas.requests import AddParams, SearchParams, StatsParams, UpdateParams
 from ..schemas.responses import (
     AddResponse,
-    SearchResponse,
     ContextResponse,
-    UpdateResponse,
     DeleteResponse,
+    SearchResponse,
     StatsResponse,
+    UpdateResponse,
 )
-from ..config import get_settings
+from ..services.context import ContextService
+from ..services.memory import MemoryService
+from ..services.search import SearchService
+from ..services.search_warmup import get_warmup_service
+from ..services.stats import StatsService
+from ..services.unified_search import UnifiedSearchService
+from .base import StorageBackend
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,11 @@ class DirectStorageBackend(StorageBackend):
         try:
             # 데이터베이스 연결
             settings = get_settings()
-            self.db = Database(self.db_path, busy_timeout=self.busy_timeout, embedding_dim=settings.embedding_dim)
+            self.db = Database(
+                self.db_path,
+                busy_timeout=self.busy_timeout,
+                embedding_dim=settings.embedding_dim,
+            )
             await self.db.connect()
 
             # 임베딩 서비스 초기화 (MCP 서버에서는 preload 하지 않음)
@@ -124,9 +128,11 @@ class DirectStorageBackend(StorageBackend):
                 warmup_result = await warmup_service.warmup(
                     embedding_service=self.embedding_service,
                     db=self.db,
-                    cache_manager=self.search_service.cache_manager
-                    if self.search_service
-                    else None,
+                    cache_manager=(
+                        self.search_service.cache_manager
+                        if self.search_service
+                        else None
+                    ),
                 )
                 logger.info(f"Search warmup completed: {warmup_result}")
 

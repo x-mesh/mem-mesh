@@ -9,13 +9,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from benchmarks.longmemeval.models import (
-    BenchmarkItem,
-    BenchmarkReport,
-    CategoryReport,
-    QuestionResult,
-    RetrievalMetrics,
-)
 from benchmarks.longmemeval.config import (
     BenchmarkConfig,
     DatasetConfig,
@@ -31,12 +24,18 @@ from benchmarks.longmemeval.indexer import (
     WindowIndexer,
     create_indexer,
 )
+from benchmarks.longmemeval.models import (
+    BenchmarkItem,
+    BenchmarkReport,
+    CategoryReport,
+    QuestionResult,
+    RetrievalMetrics,
+)
 from benchmarks.longmemeval.retriever import (
     _compute_metrics,
     _extract_session_ids,
     _ndcg_at_k,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -338,18 +337,14 @@ class TestWindowIndexer:
         assert "session_0" in chunks[0]["tags"]
         assert "window_0_3" in chunks[0]["tags"]
 
-    def test_overlap_creates_more_chunks(
-        self, sample_item: BenchmarkItem
-    ) -> None:
+    def test_overlap_creates_more_chunks(self, sample_item: BenchmarkItem) -> None:
         no_overlap = WindowIndexer(window_size=2, overlap=0)
         with_overlap = WindowIndexer(window_size=2, overlap=1)
         chunks_no = no_overlap.build_chunks(sample_item)
         chunks_yes = with_overlap.build_chunks(sample_item)
         assert len(chunks_yes) >= len(chunks_no)
 
-    def test_window_content_includes_date(
-        self, sample_item: BenchmarkItem
-    ) -> None:
+    def test_window_content_includes_date(self, sample_item: BenchmarkItem) -> None:
         indexer = WindowIndexer(window_size=2, overlap=0, include_date=True)
         chunks = indexer.build_chunks(sample_item)
         for chunk in chunks:
@@ -373,9 +368,7 @@ class TestTurnIndexer:
         assert "session_0" in chunks[1]["tags"]
         assert "turn_1" in chunks[1]["tags"]
 
-    def test_turn_content_has_two_utterances(
-        self, sample_item: BenchmarkItem
-    ) -> None:
+    def test_turn_content_has_two_utterances(self, sample_item: BenchmarkItem) -> None:
         indexer = TurnIndexer(include_date=False)
         chunks = indexer.build_chunks(sample_item)
         # Each turn chunk should have exactly 2 utterances (lines)

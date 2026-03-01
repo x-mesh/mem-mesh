@@ -4,8 +4,8 @@ Context Service for mem-mesh
 """
 
 import logging
-from typing import Optional, List
 from datetime import datetime
+from typing import List, Optional
 
 from ..database.base import Database
 from ..embeddings.service import EmbeddingService

@@ -1,8 +1,9 @@
 """요청 스키마 정의"""
 
-from typing import Optional, List
-from pydantic import BaseModel, Field, field_validator
 import re
+from typing import List, Optional
+
+from pydantic import BaseModel, Field, field_validator
 
 
 def normalize_project_id(v: Optional[str]) -> Optional[str]:

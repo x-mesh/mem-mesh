@@ -4,9 +4,9 @@ OAuth utility functions.
 PKCE, 시크릿 생성, 해싱 등 유틸리티 함수.
 """
 
-import secrets
-import hashlib
 import base64
+import hashlib
+import secrets
 from typing import Optional
 
 

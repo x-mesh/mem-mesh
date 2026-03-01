@@ -3,8 +3,8 @@ MCP Prompt Optimizer
 Reduces token usage in IDE <-> mem-mesh communication
 """
 
-from typing import Dict, List, Any, Optional
 import json
+from typing import Any, Dict, List, Optional
 
 
 class PromptOptimizer:

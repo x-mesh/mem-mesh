@@ -1,11 +1,7 @@
 """Storage abstraction layer for mem-mesh"""
 
+from .api import APIStorageBackend
 from .base import StorageBackend
 from .direct import DirectStorageBackend
-from .api import APIStorageBackend
 
-__all__ = [
-    "StorageBackend",
-    "DirectStorageBackend", 
-    "APIStorageBackend"
-]
+__all__ = ["StorageBackend", "DirectStorageBackend", "APIStorageBackend"]

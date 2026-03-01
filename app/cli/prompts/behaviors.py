@@ -10,7 +10,6 @@ Usage:
 from dataclasses import dataclass
 from typing import List
 
-
 # ---------------------------------------------------------------------------
 # Prompt schema version — bump on ANY behavioral rule change
 # ---------------------------------------------------------------------------

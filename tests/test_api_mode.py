@@ -2,11 +2,11 @@
 """API 모드 MCP 서버 테스트"""
 
 import json
+import os
 import subprocess
 import sys
 import threading
-from queue import Queue, Empty
-import os
+from queue import Empty, Queue
 
 
 def read_output(pipe, queue):

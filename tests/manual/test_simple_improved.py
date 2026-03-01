@@ -4,11 +4,12 @@
 """
 
 import asyncio
+
+from app.core.config import Settings
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.search import SearchService
 from app.core.services.simple_improved_search import SimpleImprovedSearch
-from app.core.config import Settings
 
 
 async def test_simple_improved():
@@ -36,7 +37,7 @@ async def test_simple_improved():
         ("토큰 최적화", "mem-mesh-optimization"),
         ("검색 품질", "mem-mesh-search-quality"),
         ("캐싱", "mem-mesh-optimization"),
-        ("임베딩", "mem-mesh-search-quality")
+        ("임베딩", "mem-mesh-search-quality"),
     ]
 
     for query, expected_project in test_queries:
@@ -44,7 +45,9 @@ async def test_simple_improved():
         print("-" * 40)
 
         # 간단한 개선 검색
-        results = await simple_search.search(query, limit=5, project_filter=expected_project)
+        results = await simple_search.search(
+            query, limit=5, project_filter=expected_project
+        )
 
         correct = 0
         for i, r in enumerate(results.results[:5]):
@@ -56,7 +59,9 @@ async def test_simple_improved():
             print(f"  {i+1}. {marker} [{r.category}] {r.content[:60]}...")
             print(f"     점수: {r.similarity_score:.3f}, 프로젝트: {r.project_id}")
 
-        accuracy = (correct / min(5, len(results.results))) * 100 if results.results else 0
+        accuracy = (
+            (correct / min(5, len(results.results))) * 100 if results.results else 0
+        )
         print(f"  📊 정확도: {accuracy:.0f}%")
 
     # 프로젝트 필터 없이도 테스트

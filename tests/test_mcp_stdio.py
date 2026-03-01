@@ -4,23 +4,23 @@ FastMCP 기반 MCP Stdio 서버 테스트
 app/mcp_stdio/server.py의 FastMCP 서버 구현을 테스트합니다.
 """
 
-import pytest
-import tempfile
 import os
+import tempfile
 
+import pytest
+
+from app.core.config import Settings
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
+from app.core.services.context import ContextService
 from app.core.services.memory import MemoryService
 from app.core.services.search import SearchService
-from app.core.services.context import ContextService
 from app.core.services.stats import StatsService
-from app.core.config import Settings
-from app.mcp_common.tools import MCPToolHandlers
-from app.mcp_common.storage import StorageManager
 from app.mcp_common.schemas import (
     get_all_tool_schemas,
 )
-
+from app.mcp_common.storage import StorageManager
+from app.mcp_common.tools import MCPToolHandlers
 
 # ============== Fixtures ==============
 
@@ -163,20 +163,20 @@ def test_tool_schemas_valid():
     for schema in all_schemas:
         # 필수 필드 확인
         assert "name" in schema, "Schema missing 'name'"
-        assert "description" in schema, (
-            f"Schema {schema.get('name', 'unknown')} missing 'description'"
-        )
+        assert (
+            "description" in schema
+        ), f"Schema {schema.get('name', 'unknown')} missing 'description'"
         assert "inputSchema" in schema, f"Schema {schema['name']} missing 'inputSchema'"
 
         input_schema = schema["inputSchema"]
 
         # JSON Schema 기본 구조 확인
-        assert input_schema.get("type") == "object", (
-            f"Schema {schema['name']} inputSchema type should be 'object'"
-        )
-        assert "properties" in input_schema, (
-            f"Schema {schema['name']} missing 'properties'"
-        )
+        assert (
+            input_schema.get("type") == "object"
+        ), f"Schema {schema['name']} inputSchema type should be 'object'"
+        assert (
+            "properties" in input_schema
+        ), f"Schema {schema['name']} missing 'properties'"
 
 
 # ============== Core Memory Tool Tests ==============

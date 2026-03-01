@@ -7,11 +7,12 @@ Provides endpoints for searching memories with various modes and filters.
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.core.services.unified_search import UnifiedSearchService
 from app.core.schemas.responses import SearchResponse
+from app.core.services.unified_search import UnifiedSearchService
+
 from ...common.dependencies import get_search_service
 
 logger = logging.getLogger(__name__)
@@ -165,12 +166,14 @@ async def search_with_context(
     search results. Reduces token usage while providing relevant context.
     """
     try:
-        search_response, optimized_context = await service.search_with_context_optimization(
-            query=body.query,
-            project_id=body.project_id,
-            category=body.category,
-            limit=body.limit,
-            optimize_context=body.optimize_context,
+        search_response, optimized_context = (
+            await service.search_with_context_optimization(
+                query=body.query,
+                project_id=body.project_id,
+                category=body.category,
+                limit=body.limit,
+                optimize_context=body.optimize_context,
+            )
         )
 
         context_dict = None
@@ -178,7 +181,11 @@ async def search_with_context(
             try:
                 context_dict = {
                     "session_id": getattr(optimized_context, "session_id", None),
-                    "pins_count": len(optimized_context.pins) if hasattr(optimized_context, "pins") and optimized_context.pins else 0,
+                    "pins_count": (
+                        len(optimized_context.pins)
+                        if hasattr(optimized_context, "pins") and optimized_context.pins
+                        else 0
+                    ),
                     "strategy": getattr(optimized_context, "strategy", None),
                     "token_budget": getattr(optimized_context, "token_budget", None),
                 }

@@ -6,7 +6,7 @@ Database models for OAuth clients, tokens, and authorization codes.
 
 import json
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field

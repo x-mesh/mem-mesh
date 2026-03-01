@@ -6,7 +6,7 @@ This module handles embedding migrations and model consistency checks.
 import json
 import logging
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
