@@ -108,6 +108,7 @@ strict_equality = true
 
 [[tool.mypy.overrides]]
 module = "mcp.*"
+follow_imports = "skip"
 ignore_errors = true
 
 [tool.pytest.ini_options]
