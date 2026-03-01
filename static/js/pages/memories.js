@@ -84,6 +84,14 @@ class MemoriesPage extends HTMLElement {
     this._stats = null;
     // P1: active pins
     this._activePins = [];
+    // P2: favorites (localStorage)
+    this._favorites = new Set(JSON.parse(localStorage.getItem('mem-favorites') || '[]'));
+    this._showFavoritesOnly = false;
+    // P2: peek panel
+    this._peekId = null;
+    this._peekData = null;
+    // P2: sources list (from stats)
+    this._sources = [];
   }
 
   connectedCallback() {
@@ -182,13 +190,25 @@ class MemoriesPage extends HTMLElement {
           <button class="mem-time-btn${this.timeRange === 'this_week' ? ' active' : ''}" data-range="this_week">Week</button>
           <button class="mem-time-btn${this.timeRange === 'this_month' ? ' active' : ''}" data-range="this_month">Month</button>
         </div>
+        <select class="mem-source-select">
+          <option value="">All Sources</option>
+        </select>
+        <button class="mem-fav-toggle${this._showFavoritesOnly ? ' active' : ''}" title="Favorites only">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="${this._showFavoritesOnly ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        </button>
+        <button class="mem-export-btn" title="Export memories">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
         <connection-status></connection-status>
       </div>
       <div class="mem-stats-bar"></div>
       <div class="mem-batch-bar" style="display:none"></div>
       <div class="mem-chips"></div>
       <div class="mem-suggestions"></div>
-      <div class="mem-list"></div>
+      <div class="mem-content-area">
+        <div class="mem-list"></div>
+        <div class="mem-peek-panel" style="display:none"></div>
+      </div>
       <div class="mem-footer"></div>
     `;
 
@@ -199,6 +219,8 @@ class MemoriesPage extends HTMLElement {
     if (sortSel) sortSel.value = this.sortBy;
     const modeSel = this.querySelector('.mem-mode-select');
     if (modeSel) modeSel.value = this.searchMode;
+    const srcSel = this.querySelector('.mem-source-select');
+    if (srcSel && this.viewParams.source) srcSel.value = this.viewParams.source;
 
     this.renderChips();
   }
@@ -214,19 +236,25 @@ class MemoriesPage extends HTMLElement {
     const score = mem.similarity_score ? `<span class="mem-score">${(mem.similarity_score * 100).toFixed(0)}%</span>` : '';
     const contentHtml = this.searchQuery ? highlight(content, this.searchQuery) : esc(content);
     const isSelected = this._selected.has(mem.id);
+    const isFav = this._favorites.has(mem.id);
+    const srcBadge = source ? `<span class="mem-source-badge mem-clickable-filter" data-filter-type="source" data-filter-value="${esc(source)}">${esc(source)}</span>` : '';
 
     return `
       <div class="recent-item mem-row${isSelected ? ' mem-selected' : ''}" data-memory-id="${esc(mem.id)}" role="button" tabindex="0">
         <label class="mem-checkbox-wrap" onclick="event.stopPropagation()">
           <input type="checkbox" class="mem-checkbox" data-id="${esc(mem.id)}" ${isSelected ? 'checked' : ''} />
         </label>
+        <button class="mem-star-btn${isFav ? ' active' : ''}" data-id="${esc(mem.id)}" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="${isFav ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        </button>
         <span class="recent-item-icon">${icon}</span>
         <span class="recent-item-badge mem-clickable-filter" data-filter-type="category" data-filter-value="${esc(mem.category)}">${esc(mem.category)}</span>
         ${mem.project_id ? `<span class="recent-item-project mem-clickable-filter" data-filter-type="project_id" data-filter-value="${esc(mem.project_id)}">${esc(mem.project_id)}</span>` : ''}
         <span class="recent-item-content">${contentHtml}</span>
         ${tags.length ? `<span class="mem-tags">${tags.map(t => `<span class="mem-tag mem-clickable-filter" data-filter-type="tag" data-filter-value="${esc(t)}">#${esc(t)}</span>`).join('')}</span>` : ''}
+        ${srcBadge}
         ${score}
-        <span class="recent-item-time">${time}${source ? ` · ${source}` : ''}</span>
+        <span class="recent-item-time">${time}</span>
         <span class="mem-row-actions">
           <button class="mem-action-btn mem-edit-btn" data-id="${esc(mem.id)}" title="Edit">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -251,7 +279,11 @@ class MemoriesPage extends HTMLElement {
       return;
     }
 
-    if (this.memories.length === 0) {
+    const displayMems = this._showFavoritesOnly
+      ? this.memories.filter(m => this._favorites.has(m.id))
+      : this.memories;
+
+    if (displayMems.length === 0) {
       const hasFilters = this.searchQuery || Object.values(this.viewParams).some(v => v);
       container.innerHTML = `
         <div class="mem-empty">
@@ -262,8 +294,8 @@ class MemoriesPage extends HTMLElement {
       return;
     }
 
-    if (this.page === 0) {
-      container.innerHTML = this.memories.map(m => this.buildRow(m)).join('');
+    if (this.page === 0 || this._showFavoritesOnly) {
+      container.innerHTML = displayMems.map(m => this.buildRow(m)).join('');
     } else {
       // append new rows for load-more
       const frag = document.createRange().createContextualFragment(
@@ -488,7 +520,56 @@ class MemoriesPage extends HTMLElement {
     this.addEventListener('click', (e) => {
       const target = e.target;
 
-      // Inline click filter (badge, tag, project)
+      // Star/favorite toggle
+      const starBtn = target.closest('.mem-star-btn');
+      if (starBtn) {
+        e.stopPropagation();
+        this.toggleFavorite(starBtn.dataset.id);
+        return;
+      }
+
+      // Favorites filter toggle
+      if (target.closest('.mem-fav-toggle')) {
+        this.toggleFavoritesFilter();
+        return;
+      }
+
+      // Export button (left click = JSON, will show dropdown)
+      const exportBtn = target.closest('.mem-export-btn');
+      if (exportBtn) {
+        this._showExportMenu(exportBtn);
+        return;
+      }
+      // Export menu item
+      const exportItem = target.closest('.mem-export-item');
+      if (exportItem) {
+        this.exportMemories(exportItem.dataset.format);
+        this._closeExportMenu();
+        return;
+      }
+
+      // Peek panel actions
+      if (target.closest('.mem-peek-close')) {
+        this.closePeek();
+        return;
+      }
+      if (target.closest('.mem-peek-edit')) {
+        const id = target.closest('.mem-peek-edit').dataset.id;
+        if (id) { this.closePeek(); this.openEditModal(id); }
+        return;
+      }
+      if (target.closest('.mem-peek-fav')) {
+        const id = target.closest('.mem-peek-fav').dataset.id;
+        if (id) { this.toggleFavorite(id); this.renderPeekPanel(); }
+        return;
+      }
+      if (target.closest('.mem-peek-open-btn')) {
+        const id = target.closest('.mem-peek-open-btn').dataset.id;
+        if (id && window.app?.router) { this.closePeek(); window.app.router.navigate(`/memory/${id}`); }
+        return;
+      }
+
+      // Inline click filter (badge, tag, project, source)
       const filterEl = target.closest('.mem-clickable-filter');
       if (filterEl) {
         e.stopPropagation();
@@ -505,11 +586,14 @@ class MemoriesPage extends HTMLElement {
         return;
       }
 
-      // Row click → navigate to detail
+      // Row click → if peek is open, switch peek; otherwise navigate
       const row = target.closest('.mem-row');
-      if (row && !target.closest('.mem-action-btn')) {
+      if (row && !target.closest('.mem-action-btn') && !target.closest('.mem-checkbox-wrap')) {
         const id = row.dataset.memoryId;
-        if (id && window.app?.router) {
+        if (!id) return;
+        if (this._peekId) {
+          this.openPeek(id);
+        } else if (window.app?.router) {
           window.app.router.navigate(`/memory/${id}`);
         }
         return;
@@ -629,6 +713,10 @@ class MemoriesPage extends HTMLElement {
         this.searchMode = target.value;
         this.resetAndLoad();
       }
+      if (target.matches('.mem-source-select')) {
+        this.viewParams.source = target.value || null;
+        this.resetAndLoad();
+      }
     });
 
     // Search input with debounce
@@ -702,9 +790,26 @@ class MemoriesPage extends HTMLElement {
           if (cb) cb.checked = !isSelected;
         }
       }
-      // Escape = deselect all (only when something is selected)
-      if (e.key === 'Escape' && this._selected.size > 0) {
-        this.toggleSelectAll(false);
+      // Space = toggle peek on keyboard-selected row
+      if (e.key === ' ') {
+        e.preventDefault();
+        const sel = this.querySelector('.mem-row.keyboard-selected');
+        if (sel) {
+          const id = sel.dataset.memoryId;
+          if (id) this.openPeek(id);
+        }
+      }
+      // Escape = close peek, or deselect all
+      if (e.key === 'Escape') {
+        if (this._peekId) {
+          this.closePeek();
+        } else if (this._selected.size > 0) {
+          this.toggleSelectAll(false);
+        }
+      }
+      // e = export JSON, E (shift) = export CSV
+      if (e.key === 'e' && !e.metaKey && !e.ctrlKey) {
+        this.exportMemories(e.shiftKey ? 'csv' : 'json');
       }
     });
 
@@ -1119,6 +1224,21 @@ class MemoriesPage extends HTMLElement {
         api.get('/memories/daily-counts', { days: 7 })
       ]);
       this._stats = { ...stats, daily: daily?.daily_counts || [] };
+      // Populate source filter select
+      const sources = stats.sources_breakdown || {};
+      this._sources = Object.keys(sources);
+      const srcSel = this.querySelector('.mem-source-select');
+      if (srcSel && this._sources.length) {
+        this._sources.forEach(s => {
+          if (!srcSel.querySelector(`option[value="${s}"]`)) {
+            const opt = document.createElement('option');
+            opt.value = s;
+            opt.textContent = `${s} (${sources[s]})`;
+            srcSel.appendChild(opt);
+          }
+        });
+        if (this.viewParams.source) srcSel.value = this.viewParams.source;
+      }
       this.renderStatsBar();
     } catch { /* ignore — stats are optional */ }
   }
@@ -1269,6 +1389,217 @@ class MemoriesPage extends HTMLElement {
     this.renderBatchBar();
     this.renderMemoryList();
     this.showToast(`${updated} memories updated to ${category}`, 'success');
+  }
+
+  /* ── P2: Favorites ─────────────────────────────────────── */
+
+  toggleFavorite(memoryId) {
+    if (this._favorites.has(memoryId)) {
+      this._favorites.delete(memoryId);
+    } else {
+      this._favorites.add(memoryId);
+    }
+    localStorage.setItem('mem-favorites', JSON.stringify([...this._favorites]));
+
+    // Update star icon in DOM
+    const starBtn = this.querySelector(`.mem-star-btn[data-id="${memoryId}"]`);
+    if (starBtn) {
+      const isFav = this._favorites.has(memoryId);
+      starBtn.classList.toggle('active', isFav);
+      starBtn.title = isFav ? 'Remove from favorites' : 'Add to favorites';
+      const svg = starBtn.querySelector('svg');
+      if (svg) svg.setAttribute('fill', isFav ? 'currentColor' : 'none');
+    }
+
+    // Re-filter if showing favorites only
+    if (this._showFavoritesOnly) this.renderMemoryList();
+  }
+
+  toggleFavoritesFilter() {
+    this._showFavoritesOnly = !this._showFavoritesOnly;
+    const btn = this.querySelector('.mem-fav-toggle');
+    if (btn) {
+      btn.classList.toggle('active', this._showFavoritesOnly);
+      const svg = btn.querySelector('svg');
+      if (svg) svg.setAttribute('fill', this._showFavoritesOnly ? 'currentColor' : 'none');
+    }
+    this.renderMemoryList();
+    this.renderFooter();
+  }
+
+  /* ── P2: Peek Preview Panel ──────────────────────────── */
+
+  async openPeek(memoryId) {
+    if (this._peekId === memoryId) { this.closePeek(); return; }
+    this._peekId = memoryId;
+
+    const panel = this.querySelector('.mem-peek-panel');
+    if (!panel) return;
+
+    panel.style.display = 'block';
+    panel.innerHTML = '<div class="mem-peek-loading">Loading...</div>';
+    this.querySelector('.mem-content-area')?.classList.add('peek-open');
+
+    try {
+      const api = window.app?.apiClient;
+      if (!api) return;
+      const mem = await api.getMemory(memoryId);
+      if (!mem || this._peekId !== memoryId) return;
+      this._peekData = mem;
+      this.renderPeekPanel();
+    } catch {
+      panel.innerHTML = '<div class="mem-peek-loading">Failed to load</div>';
+    }
+  }
+
+  closePeek() {
+    this._peekId = null;
+    this._peekData = null;
+    const panel = this.querySelector('.mem-peek-panel');
+    if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
+    this.querySelector('.mem-content-area')?.classList.remove('peek-open');
+  }
+
+  renderPeekPanel() {
+    const panel = this.querySelector('.mem-peek-panel');
+    if (!panel || !this._peekData) return;
+
+    const m = this._peekData;
+    // Normalize tags (API may return JSON string)
+    if (typeof m.tags === 'string') {
+      try { m.tags = JSON.parse(m.tags); } catch { m.tags = []; }
+    }
+    const icon = CAT_ICONS[m.category] || DEFAULT_ICON;
+    const isFav = this._favorites.has(m.id);
+
+    panel.innerHTML = `
+      <div class="mem-peek-header">
+        <span class="mem-peek-cat">${icon} ${esc(m.category)}</span>
+        <div class="mem-peek-actions">
+          <button class="mem-action-btn mem-peek-fav" data-id="${esc(m.id)}" title="Favorite">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="${isFav ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          </button>
+          <button class="mem-action-btn mem-peek-edit" data-id="${esc(m.id)}" title="Edit">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="mem-action-btn mem-peek-close" title="Close">&times;</button>
+        </div>
+      </div>
+      <div class="mem-peek-meta">
+        ${m.project_id ? `<span class="mem-peek-project">${esc(m.project_id)}</span>` : ''}
+        ${m.source ? `<span class="mem-peek-source">${esc(m.source)}</span>` : ''}
+        <span class="mem-peek-time">${relTime(m.created_at)}</span>
+        ${m.updated_at && m.updated_at !== m.created_at ? `<span class="mem-peek-updated">updated ${relTime(m.updated_at)}</span>` : ''}
+      </div>
+      ${(m.tags || []).length ? `<div class="mem-peek-tags">${m.tags.map(t => `<span class="mem-tag">#${esc(t)}</span>`).join('')}</div>` : ''}
+      <div class="mem-peek-body">${this._renderMarkdown(m.content || '')}</div>
+      <div class="mem-peek-footer">
+        <span class="mem-peek-id">${m.id.substring(0, 8)}...</span>
+        <button class="mem-peek-open-btn" data-id="${esc(m.id)}">Open full →</button>
+      </div>
+    `;
+  }
+
+  _renderMarkdown(text) {
+    // Simple markdown → HTML: headers, bold, code blocks, lists
+    return esc(text)
+      .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+      .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/^- (.+)$/gm, '<li>$1</li>')
+      .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
+      .replace(/\n\n/g, '<br><br>')
+      .replace(/\n/g, '<br>');
+  }
+
+  /* ── P2: Export Menu ──────────────────────────────────── */
+
+  _showExportMenu(anchorEl) {
+    this._closeExportMenu();
+    const menu = document.createElement('div');
+    menu.className = 'mem-export-menu';
+    const count = this._selected.size > 0 ? `${this._selected.size} selected` : `${this.memories.length} memories`;
+    menu.innerHTML = `
+      <div class="mem-export-menu-label">Export ${count}</div>
+      <button class="mem-export-item" data-format="json">JSON</button>
+      <button class="mem-export-item" data-format="csv">CSV</button>
+    `;
+    const rect = anchorEl.getBoundingClientRect();
+    Object.assign(menu.style, {
+      position: 'fixed',
+      top: `${rect.bottom + 4}px`,
+      right: `${window.innerWidth - rect.right}px`,
+      zIndex: '9999'
+    });
+    document.body.appendChild(menu);
+    this._exportMenu = menu;
+    // Close on outside click
+    this._exportMenuClose = (e) => {
+      if (!menu.contains(e.target) && !anchorEl.contains(e.target)) this._closeExportMenu();
+    };
+    setTimeout(() => document.addEventListener('click', this._exportMenuClose), 0);
+  }
+
+  _closeExportMenu() {
+    if (this._exportMenu) {
+      this._exportMenu.remove();
+      this._exportMenu = null;
+    }
+    if (this._exportMenuClose) {
+      document.removeEventListener('click', this._exportMenuClose);
+      this._exportMenuClose = null;
+    }
+  }
+
+  /* ── P2: Export ───────────────────────────────────────── */
+
+  exportMemories(format) {
+    const data = this._selected.size > 0
+      ? this.memories.filter(m => this._selected.has(m.id))
+      : this.memories;
+
+    if (!data.length) {
+      this.showToast('No memories to export', 'warning');
+      return;
+    }
+
+    let content, filename, mime;
+
+    if (format === 'json') {
+      const exported = data.map(m => ({
+        id: m.id,
+        content: m.content,
+        category: m.category,
+        tags: m.tags,
+        project_id: m.project_id,
+        source: m.source,
+        created_at: m.created_at,
+        updated_at: m.updated_at
+      }));
+      content = JSON.stringify(exported, null, 2);
+      filename = `memories-${new Date().toISOString().slice(0, 10)}.json`;
+      mime = 'application/json';
+    } else {
+      // CSV
+      const headers = ['id', 'category', 'project_id', 'source', 'tags', 'content', 'created_at'];
+      const csvEsc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
+      const rows = data.map(m =>
+        [m.id, m.category, m.project_id || '', m.source || '', (m.tags || []).join(';'), m.content || '', m.created_at || ''].map(csvEsc).join(',')
+      );
+      content = headers.join(',') + '\n' + rows.join('\n');
+      filename = `memories-${new Date().toISOString().slice(0, 10)}.csv`;
+      mime = 'text/csv';
+    }
+
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    this.showToast(`Exported ${data.length} memories as ${format.toUpperCase()}`, 'success');
   }
 
   /* ── Toast ──────────────────────────────────────────────── */
@@ -1976,6 +2307,253 @@ style.textContent = `
     background: rgba(99, 102, 241, 0.06);
   }
 
+  /* ── P2: Favorites star ─────────────────── */
+  .mem-star-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    opacity: 0;
+    width: 0;
+    overflow: hidden;
+    transition: opacity 0.15s, width 0.15s, color 0.15s;
+  }
+  .mem-row:hover .mem-star-btn,
+  .mem-row.keyboard-selected .mem-star-btn,
+  .mem-star-btn.active {
+    opacity: 1;
+    width: 18px;
+  }
+  .mem-star-btn.active { color: #f59e0b; }
+  .mem-star-btn:hover { color: #f59e0b; }
+
+  /* ── P2: Favorites toggle btn ─────────── */
+  .mem-fav-toggle {
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.375rem;
+    display: flex;
+    align-items: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .mem-fav-toggle:hover { color: #f59e0b; border-color: #f59e0b; }
+  .mem-fav-toggle.active { color: #f59e0b; border-color: #f59e0b; background: rgba(245, 158, 11, 0.08); }
+
+  /* ── P2: Export btn ───────────────────── */
+  .mem-export-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.375rem;
+    display: flex;
+    align-items: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .mem-export-btn:hover { color: var(--text-primary); border-color: var(--border-hover, var(--border-color)); }
+
+  /* ── P2: Export Menu ──────────────────── */
+  .mem-export-menu {
+    background: var(--card-bg, var(--bg-primary));
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    padding: 0.375rem;
+    min-width: 140px;
+    animation: cp-slide-in 0.1s ease;
+  }
+  .mem-export-menu-label {
+    padding: 0.25rem 0.625rem;
+    font-size: 0.625rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .mem-export-item {
+    display: block;
+    width: 100%;
+    padding: 0.375rem 0.625rem;
+    border: none;
+    background: none;
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+    text-align: left;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .mem-export-item:hover { background: var(--bg-secondary); }
+
+  /* ── P2: Source badge ─────────────────── */
+  .mem-source-badge {
+    flex-shrink: 0;
+    font-size: 0.5625rem;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: var(--bg-tertiary, var(--bg-secondary));
+    color: var(--text-muted);
+    white-space: nowrap;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  /* ── P2: Source select ────────────────── */
+  .mem-source-select {
+    padding: 0.4375rem 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.75rem;
+    cursor: pointer;
+    outline: none;
+  }
+
+  /* ── P2: Content area (list + peek) ─── */
+  .mem-content-area {
+    display: flex;
+    gap: 0;
+    transition: gap 0.2s;
+  }
+  .mem-content-area .mem-list {
+    flex: 1;
+    min-width: 0;
+    transition: flex 0.2s;
+  }
+  .mem-content-area.peek-open {
+    gap: 0.75rem;
+  }
+  .mem-content-area.peek-open .mem-list {
+    flex: 1;
+  }
+
+  /* ── P2: Peek Panel ───────────────────── */
+  .mem-peek-panel {
+    width: 380px;
+    max-height: calc(100vh - 220px);
+    overflow-y: auto;
+    background: var(--card-bg, var(--bg-primary));
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius, 8px);
+    animation: peek-in 0.15s ease;
+    flex-shrink: 0;
+  }
+  @keyframes peek-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
+
+  .mem-peek-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .mem-peek-cat {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: capitalize;
+  }
+  .mem-peek-actions { display: flex; gap: 0.25rem; }
+  .mem-peek-close {
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .mem-peek-close:hover { color: var(--text-primary); }
+
+  .mem-peek-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border-color);
+  }
+  .mem-peek-project {
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--bg-secondary);
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+  .mem-peek-source {
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--bg-tertiary, var(--bg-secondary));
+    text-transform: uppercase;
+    font-weight: 500;
+    font-size: 0.5625rem;
+    letter-spacing: 0.02em;
+  }
+  .mem-peek-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    padding: 0.375rem 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .mem-peek-body {
+    padding: 0.75rem;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--text-primary);
+    word-break: break-word;
+  }
+  .mem-peek-body h3 { font-size: 0.875rem; font-weight: 600; margin: 0.75rem 0 0.375rem; color: var(--text-primary); }
+  .mem-peek-body h4 { font-size: 0.8125rem; font-weight: 600; margin: 0.5rem 0 0.25rem; color: var(--text-secondary); }
+  .mem-peek-body code { padding: 1px 4px; border-radius: 3px; background: var(--bg-secondary); font-size: 0.75rem; font-family: 'SF Mono', 'Fira Code', monospace; }
+  .mem-peek-body strong { font-weight: 600; }
+  .mem-peek-body ul { margin: 0.25rem 0; padding-left: 1.25rem; }
+  .mem-peek-body li { margin-bottom: 0.125rem; }
+
+  .mem-peek-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-top: 1px solid var(--border-color);
+    font-size: 0.625rem;
+    color: var(--text-muted);
+  }
+  .mem-peek-id { font-family: monospace; }
+  .mem-peek-open-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.25rem 0.625rem;
+    font-size: 0.6875rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .mem-peek-open-btn:hover { color: var(--text-primary); background: var(--bg-secondary); }
+  .mem-peek-loading { padding: 2rem 1rem; text-align: center; color: var(--text-muted); font-size: 0.8125rem; }
+
   /* ── Responsive ─────────────────────────── */
   @media (max-width: 640px) {
     .mem-toolbar {
@@ -1992,6 +2570,9 @@ style.textContent = `
     .mem-list .recent-item-badge { display: none; }
     .mem-list .recent-item-project { display: none; }
     .mem-score { display: none; }
+    .mem-source-badge { display: none; }
+    .mem-peek-panel { display: none !important; }
+    .mem-content-area.peek-open { gap: 0; }
     .cmd-palette { max-height: 70vh; }
   }
 `;
