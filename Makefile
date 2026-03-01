@@ -1,4 +1,4 @@
-.PHONY: help install test test-live test-live-api test-live-mcp test-live-realdata test-all clean run-api run-mcp run-dashboard docker-build docker-up docker-down docker-logs format lint
+.PHONY: help install test test-live test-live-api test-live-mcp test-live-realdata test-all clean run-api run-mcp run-dashboard docker-build docker-up docker-down docker-logs format lint version bump
 
 # Default target
 .DEFAULT_GOAL := help
@@ -8,6 +8,7 @@ PYTHON := python
 PIP := pip
 PYTEST := pytest
 DOCKER_COMPOSE := docker compose -f docker/docker-compose.yml
+VERSION := $(shell grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
 
 help: ## Show this help message
 	@echo "mem-mesh - AI Memory Management System"
@@ -168,3 +169,15 @@ quickstart: ## Docker quick start (build + up)
 stop: ## Stop all services
 	$(MAKE) docker-down
 	@echo "✓ All services stopped"
+
+version: ## Show current version
+	@echo $(VERSION)
+
+bump: ## Bump version (usage: make bump V=1.1.0)
+ifndef V
+	$(error Usage: make bump V=x.y.z)
+endif
+	@sed -i '' 's/^version = ".*"/version = "$(V)"/' pyproject.toml
+	@echo "✓ Bumped version to $(V)"
+	@echo "  pyproject.toml updated (single source of truth)"
+	@echo "  app/core/version.py reads from pyproject.toml at runtime"

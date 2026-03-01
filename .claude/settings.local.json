@@ -13,7 +13,8 @@
       "mcp__mem-mesh__batch_operations",
       "Bash(curl:*)",
       "Bash(grep \"path\":*)",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(find:*)"
     ]
   }
 }

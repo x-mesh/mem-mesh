@@ -353,7 +353,7 @@ code, pre, pre code, .inline-code {
   margin: 0 auto;
   padding: 0 var(--space-6);
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   height: 64px;
   gap: var(--space-6);
@@ -373,6 +373,8 @@ code, pre, pre code, .inline-code {
   font-weight: var(--font-semibold);
   font-size: var(--text-lg);
   transition: var(--transition);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .logo-link:hover {
@@ -937,6 +939,10 @@ code, pre, pre code, .inline-code {
   }
 
   .logo-text {
+    display: none;
+  }
+
+  .version-badge {
     display: none;
   }
 

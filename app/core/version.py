@@ -2,10 +2,33 @@
 mem-mesh 버전 및 서버 정보 중앙 관리 모듈.
 
 모든 모듈에서 이 파일을 import하여 일관된 버전 정보를 사용합니다.
+버전의 단일 소스는 pyproject.toml — 여기서는 읽기만 한다.
 """
 
-# 버전 정보
-__VERSION__ = "1.0.8"
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from pathlib import Path
+
+
+def _read_version() -> str:
+    """pyproject.toml → importlib.metadata → fallback 순으로 버전을 읽는다."""
+    # 1) installed package metadata (pip install -e . 등)
+    try:
+        return _pkg_version("mem-mesh")
+    except PackageNotFoundError:
+        pass
+
+    # 2) pyproject.toml 직접 파싱 (개발 모드, 미설치 상태)
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    if pyproject.exists():
+        for line in pyproject.read_text().splitlines():
+            if line.strip().startswith("version"):
+                # version = "1.0.8"
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+
+    return "0.0.0"
+
+
+__VERSION__ = _read_version()
 
 # MCP 프로토콜 버전 (Streamable HTTP transport 지원)
 MCP_PROTOCOL_VERSION = "2025-03-26"
