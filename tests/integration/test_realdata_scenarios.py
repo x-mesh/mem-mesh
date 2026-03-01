@@ -20,7 +20,6 @@ from typing import Any, Dict, List
 import httpx
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -33,7 +32,9 @@ async def get_existing_projects(http: httpx.AsyncClient) -> List[str]:
         return []
     data = r.json()
     if isinstance(data, list):
-        return [p.get("project_id") or p.get("id", "") for p in data if isinstance(p, dict)]
+        return [
+            p.get("project_id") or p.get("id", "") for p in data if isinstance(p, dict)
+        ]
     if isinstance(data, dict) and "projects" in data:
         return [p.get("project_id") or p.get("id", "") for p in data["projects"]]
     return []
@@ -47,7 +48,9 @@ async def get_existing_stats(http: httpx.AsyncClient) -> Dict[str, Any]:
     return r.json()
 
 
-async def get_some_memories(http: httpx.AsyncClient, limit: int = 5) -> List[Dict[str, Any]]:
+async def get_some_memories(
+    http: httpx.AsyncClient, limit: int = 5
+) -> List[Dict[str, Any]]:
     """Get some existing memories for testing."""
     r = await http.post(
         "/api/memories/search",
@@ -119,9 +122,9 @@ class TestCategorySearch:
         results = data.get("results", [])
         for mem in results:
             if "category" in mem:
-                assert mem["category"] == category, (
-                    f"Category mismatch: expected {category}, got {mem['category']}"
-                )
+                assert (
+                    mem["category"] == category
+                ), f"Category mismatch: expected {category}, got {mem['category']}"
 
     async def test_stats_show_category_breakdown(self, http: httpx.AsyncClient):
         """Stats should include category distribution."""

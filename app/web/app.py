@@ -9,17 +9,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.core.version import __VERSION__
-from .lifespan import lifespan
-from .common.middleware import setup_middleware, setup_exception_handlers
-from .dashboard import routes as dashboard_routes
+
+from .common.middleware import setup_exception_handlers, setup_middleware
 from .dashboard import pages as dashboard_pages
+from .dashboard import routes as dashboard_routes
+from .lifespan import lifespan
 from .mcp import sse as mcp_sse
-from .websocket import router as websocket_router
 from .monitoring import router as monitoring_router
 from .oauth import router as oauth_router
-from .oauth.middleware import BearerTokenMiddleware
 from .oauth.basic_auth import BasicAuthMiddleware
-
+from .oauth.middleware import BearerTokenMiddleware
+from .websocket import router as websocket_router
 
 # Jinja2 템플릿 설정
 templates = Jinja2Templates(directory="templates")

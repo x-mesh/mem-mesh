@@ -2,14 +2,14 @@
 Session Service 테스트
 """
 
-import pytest
-import tempfile
 import os
-from unittest.mock import Mock
+import tempfile
 
-from app.core.services.session import SessionService, NoActiveSessionError
-from app.core.services.project import ProjectService
+import pytest
+
 from app.core.database.base import Database
+from app.core.services.project import ProjectService
+from app.core.services.session import SessionService
 
 
 @pytest.fixture

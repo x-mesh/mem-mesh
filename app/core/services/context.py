@@ -3,14 +3,12 @@ Context Service for mem-mesh
 메모리 맥락 조회를 담당하는 서비스
 """
 
-import json
 import logging
-from typing import Optional, List
-from datetime import datetime, timezone
+from datetime import datetime
+from typing import List, Optional
 
 from ..database.base import Database
 from ..embeddings.service import EmbeddingService
-from ..schemas.requests import ContextParams
 from ..schemas.responses import ContextResponse, RelatedMemory, SearchResult
 
 logger = logging.getLogger(__name__)

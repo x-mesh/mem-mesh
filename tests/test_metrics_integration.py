@@ -3,14 +3,14 @@
 SearchService와 EmbeddingService에 MetricsCollector가 올바르게 통합되었는지 테스트합니다.
 """
 
-import pytest
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.core.services.search import SearchService
-from app.core.services.metrics_collector import MetricsCollector
+import pytest
+
 from app.core.embeddings.service import EmbeddingService
-from app.core.schemas.responses import SearchResponse, SearchResult
+from app.core.schemas.responses import SearchResponse
+from app.core.services.metrics_collector import MetricsCollector
+from app.core.services.search import SearchService
 
 
 class TestSearchServiceMetricsIntegration:
@@ -66,7 +66,7 @@ class TestSearchServiceMetricsIntegration:
                     with patch.object(
                         service.cache_manager, "cache_search_results", return_value=None
                     ):
-                        result = await service.search(query="test query", limit=5)
+                        await service.search(query="test query", limit=5)
 
         # Then
         mock_metrics_collector.collect_search_metric.assert_called_once()
@@ -156,7 +156,7 @@ class TestSearchServiceMetricsIntegration:
                     with patch.object(
                         service.cache_manager, "cache_search_results", return_value=None
                     ):
-                        result = await service.search(query="test", limit=5)
+                        await service.search(query="test", limit=5)
 
         # Then
         call_kwargs = mock_metrics_collector.collect_search_metric.call_args.kwargs
@@ -193,7 +193,7 @@ class TestSearchServiceMetricsIntegration:
         )
 
         # When
-        result = await service.search(query="", limit=5)
+        await service.search(query="", limit=5)
 
         # Then
         mock_metrics_collector.collect_search_metric.assert_called_once()

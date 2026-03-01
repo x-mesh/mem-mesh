@@ -4,10 +4,11 @@
 """
 
 import asyncio
+
+from app.core.config import Settings
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.final_improved_search import FinalImprovedSearch
-from app.core.config import Settings
 
 
 async def test_final():
@@ -19,8 +20,8 @@ async def test_final():
 
     # 다국어 모델 명시
     embedding_service = EmbeddingService(
-        model_name='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
-        preload=False
+        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        preload=False,
     )
     embedding_service.load_model()
 
@@ -46,7 +47,7 @@ async def test_final():
         ("토큰 최적화", "mem-mesh-optimization"),
         ("검색 품질", "mem-mesh-search-quality"),
         ("캐시 관리", "mem-mesh-optimization"),
-        ("의도 분석", "mem-mesh-search-quality")
+        ("의도 분석", "mem-mesh-search-quality"),
     ]
 
     # 프로젝트 필터 없이 테스트
@@ -72,7 +73,9 @@ async def test_final():
             print(f"  {i+1}. {marker} [{r.category}] {r.content[:50]}...")
             print(f"     점수: {r.similarity_score:.3f}, 프로젝트: {r.project_id}")
 
-        accuracy = (correct / min(5, len(results.results))) * 100 if results.results else 0
+        accuracy = (
+            (correct / min(5, len(results.results))) * 100 if results.results else 0
+        )
         total_correct += accuracy
         print(f"  📊 정확도: {accuracy:.0f}% ({correct}/5)")
 
@@ -102,7 +105,9 @@ async def test_final():
     for query, expected in test_cases[:6]:  # 처음 6개만
         results = await search.search(query, limit=5, project_filter=expected)
         correct = sum(1 for r in results.results[:5] if r.project_id == expected)
-        accuracy = (correct / min(5, len(results.results))) * 100 if results.results else 0
+        accuracy = (
+            (correct / min(5, len(results.results))) * 100 if results.results else 0
+        )
         filter_correct += accuracy
         print(f"'{query}': {accuracy:.0f}% ({correct}/5)")
 

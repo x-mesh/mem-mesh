@@ -1,10 +1,10 @@
 """MetricsCollector 서비스 단위 테스트"""
 
-import pytest
 import asyncio
-from datetime import datetime
-from pathlib import Path
 import tempfile
+from pathlib import Path
+
+import pytest
 
 from app.core.database.base import Database
 from app.core.services.metrics_collector import MetricsCollector
@@ -15,10 +15,10 @@ async def temp_db():
     """임시 데이터베이스 생성"""
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
-    
+
     db = Database(db_path)
     await db.connect()
-    
+
     # 테이블 생성
     await db.execute("""
         CREATE TABLE IF NOT EXISTS search_metrics (
@@ -41,7 +41,7 @@ async def temp_db():
             source TEXT NOT NULL
         )
     """)
-    
+
     await db.execute("""
         CREATE TABLE IF NOT EXISTS embedding_metrics (
             id TEXT PRIMARY KEY,
@@ -55,9 +55,9 @@ async def temp_db():
             model_name TEXT NOT NULL
         )
     """)
-    
+
     yield db
-    
+
     await db.close()
     Path(db_path).unlink(missing_ok=True)
 
@@ -66,9 +66,7 @@ async def temp_db():
 async def collector(temp_db):
     """MetricsCollector 인스턴스 생성"""
     collector = MetricsCollector(
-        database=temp_db,
-        buffer_size=5,  # 테스트용 작은 버퍼
-        flush_interval=60
+        database=temp_db, buffer_size=5, flush_interval=60  # 테스트용 작은 버퍼
     )
     yield collector
     await collector.stop()
@@ -85,21 +83,20 @@ async def test_collect_search_metric(collector, temp_db):
         avg_similarity=0.8,
         top_similarity=0.95,
         project_id="test-project",
-        source="test"
+        source="test",
     )
-    
+
     assert metric_id is not None
     assert len(collector.search_buffer) == 1
-    
+
     # 버퍼 플러시
     await collector.flush()
-    
+
     # 데이터베이스 확인
     result = await temp_db.fetchone(
-        "SELECT * FROM search_metrics WHERE id = ?",
-        (metric_id,)
+        "SELECT * FROM search_metrics WHERE id = ?", (metric_id,)
     )
-    
+
     assert result is not None
     assert result["query"] == "test query"
     assert result["query_length"] == 10
@@ -120,21 +117,20 @@ async def test_collect_embedding_metric(collector, temp_db):
         count=1,
         total_time_ms=100,
         cache_hit=False,
-        model_name="test-model"
+        model_name="test-model",
     )
-    
+
     assert metric_id is not None
     assert len(collector.embedding_buffer) == 1
-    
+
     # 버퍼 플러시
     await collector.flush()
-    
+
     # 데이터베이스 확인
     result = await temp_db.fetchone(
-        "SELECT * FROM embedding_metrics WHERE id = ?",
-        (metric_id,)
+        "SELECT * FROM embedding_metrics WHERE id = ?", (metric_id,)
     )
-    
+
     assert result is not None
     assert result["operation"] == "generate"
     assert result["count"] == 1
@@ -150,15 +146,12 @@ async def test_auto_flush_on_buffer_full(collector, temp_db):
     # buffer_size=5로 설정되어 있음
     for i in range(5):
         await collector.collect_search_metric(
-            query=f"query {i}",
-            result_count=i,
-            response_time_ms=100,
-            source="test"
+            query=f"query {i}", result_count=i, response_time_ms=100, source="test"
         )
-    
+
     # 버퍼가 자동으로 플러시되어야 함
     assert len(collector.search_buffer) == 0
-    
+
     # 데이터베이스 확인
     results = await temp_db.fetchall("SELECT * FROM search_metrics")
     assert len(results) == 5
@@ -170,19 +163,16 @@ async def test_batch_flush(collector, temp_db):
     # 여러 메트릭 수집 (버퍼 크기 미만)
     for i in range(3):
         await collector.collect_search_metric(
-            query=f"query {i}",
-            result_count=i,
-            response_time_ms=100,
-            source="test"
+            query=f"query {i}", result_count=i, response_time_ms=100, source="test"
         )
-    
+
     assert len(collector.search_buffer) == 3
-    
+
     # 수동 플러시
     await collector.flush()
-    
+
     assert len(collector.search_buffer) == 0
-    
+
     # 데이터베이스 확인
     results = await temp_db.fetchall("SELECT * FROM search_metrics")
     assert len(results) == 3
@@ -192,31 +182,25 @@ async def test_batch_flush(collector, temp_db):
 async def test_query_sanitization(temp_db):
     """쿼리 해시 처리 테스트"""
     collector = MetricsCollector(
-        database=temp_db,
-        buffer_size=10,
-        hash_queries=True  # 해시 활성화
+        database=temp_db, buffer_size=10, hash_queries=True  # 해시 활성화
     )
-    
+
     original_query = "sensitive query"
     metric_id = await collector.collect_search_metric(
-        query=original_query,
-        result_count=1,
-        response_time_ms=100,
-        source="test"
+        query=original_query, result_count=1, response_time_ms=100, source="test"
     )
-    
+
     await collector.flush()
-    
+
     # 데이터베이스 확인
     result = await temp_db.fetchone(
-        "SELECT * FROM search_metrics WHERE id = ?",
-        (metric_id,)
+        "SELECT * FROM search_metrics WHERE id = ?", (metric_id,)
     )
-    
+
     # 쿼리가 해시되어 저장되어야 함
     assert result["query"] != original_query
     assert len(result["query"]) == 16  # 해시의 처음 16자
-    
+
     await collector.stop()
 
 
@@ -228,23 +212,20 @@ async def test_buffer_stats(collector):
     assert stats["search_buffer_size"] == 0
     assert stats["embedding_buffer_size"] == 0
     assert stats["buffer_capacity"] == 5
-    
+
     # 메트릭 추가
     await collector.collect_search_metric(
-        query="test",
-        result_count=1,
-        response_time_ms=100,
-        source="test"
+        query="test", result_count=1, response_time_ms=100, source="test"
     )
-    
+
     await collector.collect_embedding_metric(
         operation="generate",
         count=1,
         total_time_ms=100,
         cache_hit=False,
-        model_name="test"
+        model_name="test",
     )
-    
+
     # 상태 확인
     stats = await collector.get_buffer_stats()
     assert stats["search_buffer_size"] == 1
@@ -261,16 +242,16 @@ async def test_concurrent_collection(collector, temp_db):
             query=f"concurrent query {i}",
             result_count=i,
             response_time_ms=100,
-            source="test"
+            source="test",
         )
         tasks.append(task)
-    
+
     # 모든 태스크 완료 대기
     await asyncio.gather(*tasks)
-    
+
     # 플러시
     await collector.flush()
-    
+
     # 데이터베이스 확인 (모든 메트릭이 저장되어야 함)
     results = await temp_db.fetchall("SELECT * FROM search_metrics")
     assert len(results) == 10
@@ -281,20 +262,17 @@ async def test_stop_flushes_buffer(collector, temp_db):
     """stop() 호출 시 버퍼 플러시 테스트"""
     # 메트릭 수집 (버퍼에만 저장)
     await collector.collect_search_metric(
-        query="test",
-        result_count=1,
-        response_time_ms=100,
-        source="test"
+        query="test", result_count=1, response_time_ms=100, source="test"
     )
-    
+
     assert len(collector.search_buffer) == 1
-    
+
     # stop 호출 (자동 플러시)
     await collector.stop()
-    
+
     # 버퍼가 비워져야 함
     assert len(collector.search_buffer) == 0
-    
+
     # 데이터베이스 확인
     results = await temp_db.fetchall("SELECT * FROM search_metrics")
     assert len(results) == 1
@@ -309,17 +287,16 @@ async def test_embedding_avg_time_calculation(collector, temp_db):
         count=10,
         total_time_ms=500,
         cache_hit=False,
-        model_name="test-model"
+        model_name="test-model",
     )
-    
+
     await collector.flush()
-    
+
     # 데이터베이스 확인
     result = await temp_db.fetchone(
-        "SELECT * FROM embedding_metrics WHERE id = ?",
-        (metric_id,)
+        "SELECT * FROM embedding_metrics WHERE id = ?", (metric_id,)
     )
-    
+
     # 평균 시간이 올바르게 계산되어야 함
     assert result["avg_time_per_embedding_ms"] == 50.0  # 500 / 10
 
@@ -329,20 +306,16 @@ async def test_optional_fields(collector, temp_db):
     """선택적 필드 테스트"""
     # 최소 필드만으로 메트릭 수집
     metric_id = await collector.collect_search_metric(
-        query="minimal query",
-        result_count=0,
-        response_time_ms=100,
-        source="test"
+        query="minimal query", result_count=0, response_time_ms=100, source="test"
     )
-    
+
     await collector.flush()
-    
+
     # 데이터베이스 확인
     result = await temp_db.fetchone(
-        "SELECT * FROM search_metrics WHERE id = ?",
-        (metric_id,)
+        "SELECT * FROM search_metrics WHERE id = ?", (metric_id,)
     )
-    
+
     assert result is not None
     assert result["query"] == "minimal query"
     assert result["avg_similarity_score"] is None

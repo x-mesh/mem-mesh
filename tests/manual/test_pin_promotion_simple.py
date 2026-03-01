@@ -4,22 +4,20 @@ Work Tracking - Pin 승격(Memory Promotion) 기능 단순화 테스트
 """
 
 import asyncio
-import tempfile
 import os
-from datetime import datetime, timezone
+import tempfile
 
 from app.core.database.base import Database
+from app.core.services.pin import PinService
 from app.core.services.project import ProjectService
 from app.core.services.session import SessionService
-from app.core.services.pin import PinService
-from app.core.schemas.pins import PinUpdate
 
 
 async def test_pin_promotion_simple():
     """Pin 승격 기능 단순화 테스트"""
-    
+
     # 임시 데이터베이스 생성
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as f:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as f:
         db_path = f.name
 
     try:
@@ -34,7 +32,9 @@ async def test_pin_promotion_simple():
 
         print("1. 프로젝트 및 세션 생성:")
         project = await project_service.get_or_create_project("promotion-test-project")
-        session = await session_service.get_or_create_active_session("promotion-test-project", "test-user")
+        session = await session_service.get_or_create_active_session(
+            "promotion-test-project", "test-user"
+        )
         print(f"   프로젝트: {project.id}")
         print(f"   세션: {session.id}")
 
@@ -44,7 +44,7 @@ async def test_pin_promotion_simple():
             content="Critical security vulnerability needs to be addressed immediately",
             importance=4,
             tags=["security", "critical", "urgent"],
-            user_id="test-user"
+            user_id="test-user",
         )
         print(f"   생성된 Pin: {pin.id}")
         print(f"   내용: {pin.content}")
@@ -75,7 +75,7 @@ async def test_pin_promotion_simple():
         await db.close()
 
         # 임시 파일 정리
-        for ext in ['', '-wal', '-shm']:
+        for ext in ["", "-wal", "-shm"]:
             path = db_path + ext
             if os.path.exists(path):
                 os.unlink(path)
@@ -85,7 +85,7 @@ async def test_pin_promotion_simple():
     except Exception as e:
         print(f"테스트 중 오류 발생: {e}")
         # 정리
-        for ext in ['', '-wal', '-shm']:
+        for ext in ["", "-wal", "-shm"]:
             path = db_path + ext
             if os.path.exists(path):
                 os.unlink(path)

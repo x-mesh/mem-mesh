@@ -5,15 +5,14 @@ Search Service for mem-mesh
 
 import json
 import logging
-import re
 import time
-from typing import Optional, List, TYPE_CHECKING
 from datetime import datetime
 from difflib import SequenceMatcher
+from typing import TYPE_CHECKING, List, Optional
 
 from ..database.base import Database
 from ..embeddings.service import EmbeddingService
-from ..schemas.responses import SearchResult, SearchResponse
+from ..schemas.responses import SearchResponse, SearchResult
 
 try:
     from .query_expander import get_query_expander
@@ -102,8 +101,6 @@ class SearchService:
         """
         # 메트릭 수집을 위한 시간 측정 시작
         start_time = time.perf_counter()
-        embedding_time_ms = None
-        search_time_ms = None
 
         # Query Expansion for Korean/English (if available)
         original_query = query
@@ -347,7 +344,9 @@ class SearchService:
             # 캐시에서 임베딩 확인 또는 생성
             query_embedding_list = await self.cache_manager.get_cached_embedding(query)
             if query_embedding_list is None:
-                query_embedding_list = self.embedding_service.embed(query, is_query=True)
+                query_embedding_list = self.embedding_service.embed(
+                    query, is_query=True
+                )
                 await self.cache_manager.cache_embedding(query, query_embedding_list)
                 logger.info(
                     f"[Cache MISS] Generated new embedding for query: '{query[:50]}...'"
@@ -367,7 +366,7 @@ class SearchService:
                 return await self._text_based_search(query, filters, limit)
 
             # 스코어링 파이프라인 설정
-            from .scoring import ScoringPipeline, ScoringContext
+            from .scoring import ScoringContext, ScoringPipeline
 
             pipeline = ScoringPipeline()
             pipeline.set_recency_weight(recency_weight)
@@ -653,7 +652,9 @@ class SearchService:
             # 캐시에서 임베딩 확인 또는 생성
             query_embedding_list = await self.cache_manager.get_cached_embedding(query)
             if query_embedding_list is None:
-                query_embedding_list = self.embedding_service.embed(query, is_query=True)
+                query_embedding_list = self.embedding_service.embed(
+                    query, is_query=True
+                )
                 await self.cache_manager.cache_embedding(query, query_embedding_list)
                 logger.info(
                     f"[Cache MISS] Generated new embedding for query: '{query[:50]}...'"

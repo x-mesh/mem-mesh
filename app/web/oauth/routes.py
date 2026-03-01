@@ -1,33 +1,29 @@
 """OAuth 2.1 endpoints per MCP 2025-03-26 spec."""
 
-import time
 import logging
+import time
 from typing import Optional
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Request, HTTPException, Form, Query, Depends
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from app.core.config import get_settings
 from app.core.auth import OAuthService
 from app.core.auth.schemas import (
-    OAuthMetadata,
-    OAuthAuthorizeRequest,
-    OAuthTokenRequest,
-    OAuthTokenResponse,
-    OAuthTokenError,
+    OAuthClientCreate,
     OAuthClientRegistrationRequest,
     OAuthClientRegistrationResponse,
-    OAuthClientCreate,
-    OAuthTokenRevokeRequest,
+    OAuthMetadata,
+    OAuthTokenError,
     OAuthTokenIntrospectResponse,
+    OAuthTokenRequest,
 )
 from app.core.auth.service import (
-    OAuthError,
     InvalidClientError,
-    InvalidGrantError,
     InvalidRequestError,
+    OAuthError,
 )
+from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -176,18 +172,20 @@ async def register_client(
             redirect_uris=registration.redirect_uris,
             scopes=scopes,
             grant_types=registration.grant_types,
-            client_type="public"
-            if registration.token_endpoint_auth_method == "none"
-            else "confidential",
+            client_type=(
+                "public"
+                if registration.token_endpoint_auth_method == "none"
+                else "confidential"
+            ),
         )
 
         client, plain_secret = await service.create_client(client_params)
 
         return OAuthClientRegistrationResponse(
             client_id=client.client_id,
-            client_secret=plain_secret
-            if client.client_type == "confidential"
-            else None,
+            client_secret=(
+                plain_secret if client.client_type == "confidential" else None
+            ),
             client_id_issued_at=int(time.time()),
             client_secret_expires_at=0,
             client_name=client.client_name,

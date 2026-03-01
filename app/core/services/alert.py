@@ -5,9 +5,8 @@
 
 import asyncio
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
-from uuid import uuid4
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 from app.core.database.base import Database
 from app.core.database.models import Alert
@@ -248,15 +247,13 @@ class AlertService:
 
     async def get_active_alerts(self) -> List[Dict[str, Any]]:
         """활성 알림 목록 조회"""
-        rows = await self.database.fetchall(
-            """
+        rows = await self.database.fetchall("""
             SELECT id, timestamp, alert_type, severity, message, 
                    metric_value, threshold_value
             FROM alerts 
             WHERE resolved_at IS NULL
             ORDER BY timestamp DESC
-            """
-        )
+            """)
 
         return [
             {
@@ -353,14 +350,12 @@ class AlertService:
         )
 
         # 심각도별 활성 알림 수
-        severity_rows = await self.database.fetchall(
-            """
+        severity_rows = await self.database.fetchall("""
             SELECT severity, COUNT(*) as count 
             FROM alerts 
             WHERE resolved_at IS NULL
             GROUP BY severity
-            """
-        )
+            """)
 
         # 최근 24시간 알림 수
         yesterday = (datetime.utcnow() - timedelta(days=1)).isoformat() + "Z"

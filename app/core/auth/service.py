@@ -1,35 +1,35 @@
 """OAuth Service - Client management, token issuance, and validation."""
 
-import logging
 import json
+import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Tuple
+from typing import List, Optional, Tuple
 
 from app.core.database.base import Database
-from .models import OAuthClient, OAuthToken, OAuthAuthorizationCode, _utc_now_iso
 
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
+from .models import OAuthAuthorizationCode, OAuthClient, OAuthToken, _utc_now_iso
 from .schemas import (
     OAuthClientCreate,
-    OAuthClientUpdate,
     OAuthClientResponse,
+    OAuthClientUpdate,
     OAuthClientWithSecretResponse,
     OAuthTokenRequest,
     OAuthTokenResponse,
 )
 from .utils import (
+    generate_authorization_code,
     generate_client_id,
     generate_client_secret,
     generate_token,
-    generate_authorization_code,
     hash_secret,
-    verify_secret,
     verify_pkce,
+    verify_secret,
 )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 
 logger = logging.getLogger(__name__)
 

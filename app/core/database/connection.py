@@ -17,10 +17,10 @@ except ImportError:
     SQLITE3_MODULE = "sqlite3"
 
 import asyncio
-from pathlib import Path
-from typing import Any, Optional, Dict, List, Tuple
-from contextlib import asynccontextmanager
 import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 try:
     import sqlite_vec

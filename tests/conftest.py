@@ -7,12 +7,6 @@
 import os
 import tempfile
 from pathlib import Path
-
-# manual/과 benchmarks/ 하위 테스트는 자동 수집에서 제외 (수동 실행용)
-collect_ignore = [
-    str(Path(__file__).parent / "manual"),
-    str(Path(__file__).parent / "benchmarks"),
-]
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, Mock
 
@@ -20,6 +14,12 @@ import pytest
 
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
+
+# manual/과 benchmarks/ 하위 테스트는 자동 수집에서 제외 (수동 실행용)
+collect_ignore = [
+    str(Path(__file__).parent / "manual"),
+    str(Path(__file__).parent / "benchmarks"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -155,32 +155,26 @@ def mock_tool_handlers():
 
     handlers = MagicMock(spec=MCPToolHandlers)
     handlers.add = AsyncMock(
-        return_value={"id": "test-id", "status": "saved", "created_at": "2026-01-01T00:00:00Z"}
+        return_value={
+            "id": "test-id",
+            "status": "saved",
+            "created_at": "2026-01-01T00:00:00Z",
+        }
     )
     handlers.search = AsyncMock(
         return_value={"results": [], "total": 0, "format": "standard"}
     )
-    handlers.context = AsyncMock(
-        return_value={"memory": None, "related_memories": []}
-    )
-    handlers.update = AsyncMock(
-        return_value={"id": "test-id", "status": "updated"}
-    )
-    handlers.delete = AsyncMock(
-        return_value={"id": "test-id", "status": "deleted"}
-    )
+    handlers.context = AsyncMock(return_value={"memory": None, "related_memories": []})
+    handlers.update = AsyncMock(return_value={"id": "test-id", "status": "updated"})
+    handlers.delete = AsyncMock(return_value={"id": "test-id", "status": "deleted"})
     handlers.stats = AsyncMock(
         return_value={"total_memories": 0, "categories_breakdown": {}}
     )
-    handlers.pin_add = AsyncMock(
-        return_value={"id": "pin-1", "status": "created"}
-    )
+    handlers.pin_add = AsyncMock(return_value={"id": "pin-1", "status": "created"})
     handlers.pin_complete = AsyncMock(
         return_value={"id": "pin-1", "status": "completed", "suggest_promotion": False}
     )
-    handlers.pin_promote = AsyncMock(
-        return_value={"id": "pin-1", "memory_id": "mem-1"}
-    )
+    handlers.pin_promote = AsyncMock(return_value={"id": "pin-1", "memory_id": "mem-1"})
     handlers.session_resume = AsyncMock(
         return_value={"session_id": "sess-1", "pins": [], "token_info": {}}
     )
@@ -190,10 +184,6 @@ def mock_tool_handlers():
     handlers.link = AsyncMock(
         return_value={"id": "rel-1", "created": True, "message": "Linked"}
     )
-    handlers.unlink = AsyncMock(
-        return_value={"success": True, "deleted_count": 1}
-    )
-    handlers.get_links = AsyncMock(
-        return_value={"relations": [], "total": 0}
-    )
+    handlers.unlink = AsyncMock(return_value={"success": True, "deleted_count": 1})
+    handlers.get_links = AsyncMock(return_value={"relations": [], "total": 0})
     return handlers

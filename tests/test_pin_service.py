@@ -2,21 +2,18 @@
 Pin Service 테스트
 """
 
-import pytest
-import tempfile
 import os
-from unittest.mock import Mock, patch
+import tempfile
 
-from app.core.services.pin import (
-    PinService,
-    PinNotFoundError,
-    PinAlreadyCompletedError,
-    InvalidStatusTransitionError,
-)
-from app.core.services.session import SessionService
-from app.core.services.project import ProjectService
+import pytest
+
 from app.core.database.base import Database
 from app.core.schemas.pins import PinUpdate
+from app.core.services.pin import (
+    PinAlreadyCompletedError,
+    PinNotFoundError,
+    PinService,
+)
 
 
 @pytest.fixture
@@ -275,7 +272,7 @@ class TestPinQuery:
             importance=3,
             user_id="test-user",
         )
-        pin2 = await pin_service.create_pin(
+        await pin_service.create_pin(
             project_id="test-project",
             content="Second pin in session for testing",
             importance=5,

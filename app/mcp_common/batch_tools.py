@@ -4,16 +4,16 @@ Enables efficient batch processing to reduce token usage
 """
 
 import asyncio
-import logging
-from typing import List, Dict, Any, Optional
-from datetime import datetime
 import json
+import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
+from ..core.database.base import Database
+from ..core.embeddings.service import EmbeddingService
+from ..core.services.cache_manager import get_cache_manager
 from ..core.services.memory import MemoryService
 from ..core.services.search import SearchService
-from ..core.embeddings.service import EmbeddingService
-from ..core.database.base import Database
-from ..core.services.cache_manager import get_cache_manager
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +84,9 @@ class BatchOperationHandler:
                         {
                             "index": i,
                             "id": memory.id,
-                            "content": content[:100] + "..."
-                            if len(content) > 100
-                            else content,
+                            "content": (
+                                content[:100] + "..." if len(content) > 100 else content
+                            ),
                             "status": "success",
                         }
                     )
@@ -95,9 +95,9 @@ class BatchOperationHandler:
                     errors.append(
                         {
                             "index": i,
-                            "content": content[:100] + "..."
-                            if len(content) > 100
-                            else content,
+                            "content": (
+                                content[:100] + "..." if len(content) > 100 else content
+                            ),
                             "error": str(e),
                             "status": "failed",
                         }
@@ -168,7 +168,9 @@ class BatchOperationHandler:
             logger.info(
                 f"Generating batch embeddings for {len(uncached_queries)} uncached queries"
             )
-            new_embeddings = self.embedding_service.embed_batch(uncached_queries, is_query=True)
+            new_embeddings = self.embedding_service.embed_batch(
+                uncached_queries, is_query=True
+            )
 
             # 캐시에 저장
             for query, embedding in zip(uncached_queries, new_embeddings):
@@ -253,8 +255,10 @@ class BatchOperationHandler:
         # 배치 추가 작업 처리
         if add_operations:
             contents = [op.get("content", "") for op in add_operations]
-            logger.info(f"Processing {len(add_operations)} add operations with contents: {[c[:30] for c in contents]}")
-            
+            logger.info(
+                f"Processing {len(add_operations)} add operations with contents: {[c[:30] for c in contents]}"
+            )
+
             batch_add_result = await self.batch_add_memories(
                 contents=contents,
                 project_id=add_operations[0].get("project_id"),
@@ -262,15 +266,19 @@ class BatchOperationHandler:
                 source=add_operations[0].get("source", "mcp_batch"),
                 tags=add_operations[0].get("tags"),
             )
-            
-            logger.info(f"batch_add_result status: {batch_add_result.get('status')}, results count: {len(batch_add_result.get('results', []))}, errors count: {len(batch_add_result.get('errors', []))}")
+
+            logger.info(
+                f"batch_add_result status: {batch_add_result.get('status')}, results count: {len(batch_add_result.get('results', []))}, errors count: {len(batch_add_result.get('errors', []))}"
+            )
 
             # 결과를 원래 인덱스에 매핑
             if batch_add_result.get("status") == "success":
                 for i, op in enumerate(add_operations):
                     # batch_add_result["results"]는 리스트이고, 각 항목에 index가 있음
                     add_results = batch_add_result.get("results", [])
-                    logger.info(f"Mapping add operation {i}: op_index={op['index']}, add_results_len={len(add_results)}")
+                    logger.info(
+                        f"Mapping add operation {i}: op_index={op['index']}, add_results_len={len(add_results)}"
+                    )
                     if i < len(add_results):
                         results.append(
                             {
@@ -334,8 +342,8 @@ class BatchOperationHandler:
 
         # 배치 pin_add 작업 처리
         if pin_add_operations:
-            from ..core.services.pin import PinService
             from ..core.services.importance_analyzer import ImportanceAnalyzer
+            from ..core.services.pin import PinService
 
             pin_service = PinService(self.db)
             analyzer = ImportanceAnalyzer()
@@ -359,21 +367,25 @@ class BatchOperationHandler:
                         tags=tags,
                         auto_importance=auto_importance,
                     )
-                    results.append({
-                        "index": op["index"],
-                        "type": "pin_add",
-                        "success": True,
-                        "pin_id": pin_result.id,
-                        "importance": pin_result.importance,
-                        "auto_importance": auto_importance,
-                    })
+                    results.append(
+                        {
+                            "index": op["index"],
+                            "type": "pin_add",
+                            "success": True,
+                            "pin_id": pin_result.id,
+                            "importance": pin_result.importance,
+                            "auto_importance": auto_importance,
+                        }
+                    )
                 except Exception as e:
-                    results.append({
-                        "index": op["index"],
-                        "type": "pin_add",
-                        "success": False,
-                        "error": str(e),
-                    })
+                    results.append(
+                        {
+                            "index": op["index"],
+                            "type": "pin_add",
+                            "success": False,
+                            "error": str(e),
+                        }
+                    )
 
         # 인덱스 순으로 정렬
         results.sort(key=lambda x: x["index"])
@@ -401,15 +413,17 @@ class BatchOperationHandler:
 
 async def test_batch_operations():
     """Test batch operations functionality"""
-    from ..core.database.base import Database
     from ..core.config import Settings
+    from ..core.database.base import Database
     from ..core.embeddings.service import EmbeddingService
     from ..core.services.memory import MemoryService
     from ..core.services.search import SearchService
 
     # Initialize services
     test_settings = Settings()
-    db = Database(test_settings.database_path, embedding_dim=test_settings.embedding_dim)
+    db = Database(
+        test_settings.database_path, embedding_dim=test_settings.embedding_dim
+    )
     await db.connect()
     embedding_service = EmbeddingService(preload=False)
     memory_service = MemoryService(db, embedding_service)
@@ -457,7 +471,7 @@ async def test_batch_operations():
 
     # Print cache statistics
     cache_stats = get_cache_manager().get_cache_stats()
-    print(f"\n=== Cache Statistics ===")
+    print("\n=== Cache Statistics ===")
     print(f"Cache stats: {json.dumps(cache_stats, indent=2)}")
 
 

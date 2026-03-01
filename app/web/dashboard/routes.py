@@ -8,28 +8,28 @@ import json
 import logging
 from pathlib import Path
 from typing import Union
-from fastapi import APIRouter, HTTPException, Depends
 
-from app.core.services.memory import MemoryService
-from app.core.services.stats import StatsService
-from app.core.services.embedding_manager import EmbeddingManagerService
-from app.core.services.project import ProjectService
-from app.core.services.session import SessionService, NoActiveSessionError
-from app.core.services.pin import (
-    PinService,
-    PinNotFoundError,
-    InvalidStatusTransitionError,
-)
-from app.core.schemas.requests import RuleUpdateParams
+from fastapi import APIRouter, Depends, HTTPException
+
 from app.core.schemas.pins import PinCreate, PinUpdate
 from app.core.schemas.projects import ProjectUpdate
+from app.core.schemas.requests import RuleUpdateParams
+from app.core.services.embedding_manager import EmbeddingManagerService
+from app.core.services.pin import (
+    InvalidStatusTransitionError,
+    PinNotFoundError,
+    PinService,
+)
+from app.core.services.project import ProjectService
+from app.core.services.session import NoActiveSessionError, SessionService
+from app.core.services.stats import StatsService
+
 from ..common.dependencies import (
-    get_memory_service,
-    get_stats_service,
     get_embedding_manager,
+    get_pin_service,
     get_project_service,
     get_session_service,
-    get_pin_service,
+    get_stats_service,
 )
 from .route_modules import router as modular_router
 
@@ -78,7 +78,7 @@ def _resolve_rule_path(rule_entry: dict) -> Path:
 async def api_root():
     """API root endpoint"""
     from app.core.version import __VERSION__, MCP_PROTOCOL_VERSION
-    
+
     return {
         "name": "mem-mesh",
         "description": "Central memory server with vector search",
@@ -92,7 +92,7 @@ async def api_root():
 async def health_check():
     """Health check endpoint"""
     from datetime import datetime, timezone
-    
+
     return {
         "status": "healthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),

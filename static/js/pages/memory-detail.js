@@ -1062,7 +1062,7 @@ style.textContent = `
     margin-bottom: 2rem;
   }
   
-  .header-actions {
+  .memory-detail-page .header-actions {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -1716,7 +1716,7 @@ style.textContent = `
       height: auto;
     }
     
-    .header-actions {
+    .memory-detail-page .header-actions {
       flex-direction: column;
       gap: 1rem;
       align-items: stretch;

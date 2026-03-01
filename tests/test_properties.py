@@ -2,24 +2,24 @@
 Property-based tests for mem-mesh system
 """
 
-import pytest
 import asyncio
-import tempfile
 import os
-from typing import List, Optional
+import re
+import tempfile
 from unittest.mock import Mock
 
-from hypothesis import given, strategies as st, settings as hyp_settings, HealthCheck
+import pytest
+from hypothesis import HealthCheck, given
+from hypothesis import settings as hyp_settings
+from hypothesis import strategies as st
 from hypothesis.strategies import composite
-import re
 
 from app.core.config import Settings
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
+from app.core.schemas.requests import AddParams, SearchParams, StatsParams, UpdateParams
 from app.core.services.memory import MemoryService
 from app.core.storage.direct import DirectStorageBackend
-from app.core.storage.api import APIStorageBackend
-from app.core.schemas.requests import AddParams, SearchParams, UpdateParams, StatsParams
 
 
 @composite
@@ -202,9 +202,9 @@ class TestConcurrencyProperties:
         for writer_id, created_ids in writer_results:
             for memory_id in created_ids:
                 memory = await memory_service.get(memory_id)
-                assert memory is not None, (
-                    f"Memory {memory_id} from writer {writer_id} was not saved"
-                )
+                assert (
+                    memory is not None
+                ), f"Memory {memory_id} from writer {writer_id} was not saved"
                 assert "concurrent_test" in memory.source
 
         await db.close()
@@ -332,17 +332,18 @@ class TestSettingsProperties:
 
     @given(
         storage_mode=st.sampled_from(["direct", "api"]),
-        api_base_url=st.text(min_size=10, max_size=50).filter(
-            lambda x: "\x00" not in x
-        ).map(
-            lambda x: "http://" + x.replace(" ", "")
-        ),
+        api_base_url=st.text(min_size=10, max_size=50)
+        .filter(lambda x: "\x00" not in x)
+        .map(lambda x: "http://" + x.replace(" ", "")),
         database_path=st.text(min_size=1, max_size=100).filter(
             lambda x: "\x00" not in x
         ),
         busy_timeout=st.integers(min_value=1000, max_value=60000),
     )
-    @hyp_settings(max_examples=20, suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow])
+    @hyp_settings(
+        max_examples=20,
+        suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow],
+    )
     def test_settings_configuration_round_trip(
         self, storage_mode, api_base_url, database_path, busy_timeout
     ):
@@ -407,6 +408,7 @@ class TestSettingsProperties:
         **Validates: Requirements 1.5**
         """
         import os
+
         from pydantic import ValidationError
 
         # 환경변수 설정

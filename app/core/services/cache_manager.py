@@ -6,10 +6,11 @@ Reduces token usage by 40-60% through intelligent caching
 import hashlib
 import json
 import time
-from typing import Dict, List, Optional, Any, Tuple
 from collections import OrderedDict
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
-from datetime import datetime, timedelta
 
 
 class TTLCache:
@@ -65,14 +66,18 @@ class TTLCache:
 
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics"""
-        hit_rate = self.hits / (self.hits + self.misses) if (self.hits + self.misses) > 0 else 0
+        hit_rate = (
+            self.hits / (self.hits + self.misses)
+            if (self.hits + self.misses) > 0
+            else 0
+        )
         return {
-            'size': len(self.cache),
-            'maxsize': self.maxsize,
-            'hits': self.hits,
-            'misses': self.misses,
-            'hit_rate': hit_rate,
-            'ttl': self.ttl
+            "size": len(self.cache),
+            "maxsize": self.maxsize,
+            "hits": self.hits,
+            "misses": self.misses,
+            "hit_rate": hit_rate,
+            "ttl": self.ttl,
         }
 
 
@@ -84,10 +89,10 @@ class SmartCacheManager:
 
     def __init__(
         self,
-        embedding_ttl: int = 86400,    # 24 hours for embeddings (stable data)
-        search_ttl: int = 3600,        # 1 hour for search results (frequently changing)
-        context_ttl: int = 1800,       # 30 minutes for context (dynamic data)
-        similarity_threshold: float = 0.95  # Threshold for semantic similarity
+        embedding_ttl: int = 86400,  # 24 hours for embeddings (stable data)
+        search_ttl: int = 3600,  # 1 hour for search results (frequently changing)
+        context_ttl: int = 1800,  # 30 minutes for context (dynamic data)
+        similarity_threshold: float = 0.95,  # Threshold for semantic similarity
     ):
         """
         Initialize smart cache manager with multiple cache layers
@@ -112,8 +117,8 @@ class SmartCacheManager:
     def _generate_cache_key(self, query: str, **kwargs) -> str:
         """Generate deterministic cache key from query and parameters"""
         key_data = {
-            'query': query.lower().strip(),
-            **{k: v for k, v in sorted(kwargs.items()) if v is not None}
+            "query": query.lower().strip(),
+            **{k: v for k, v in sorted(kwargs.items()) if v is not None},
         }
         key_str = json.dumps(key_data, sort_keys=True)
         return hashlib.sha256(key_str.encode()).hexdigest()[:16]
@@ -172,9 +177,7 @@ class SmartCacheManager:
                 del self.query_vectors[key]
 
     async def find_similar_cached_query(
-        self,
-        query: str,
-        embedding: Optional[List[float]] = None
+        self, query: str, embedding: Optional[List[float]] = None
     ) -> Optional[Tuple[str, Any]]:
         """
         Find semantically similar cached query
@@ -204,7 +207,9 @@ class SmartCacheManager:
             # Check if we have search results for this similar query
             result = self.search_cache.get(best_match)
             if result:
-                print(f"[Cache HIT] Similar query found (similarity: {best_similarity:.2f})")
+                print(
+                    f"[Cache HIT] Similar query found (similarity: {best_similarity:.2f})"
+                )
                 self.total_token_saved += 50  # Estimate for search operation
                 return (best_match, result)
 
@@ -215,7 +220,7 @@ class SmartCacheManager:
         query: str,
         project_id: Optional[str] = None,
         category: Optional[str] = None,
-        limit: int = 5
+        limit: int = 5,
     ) -> Optional[Any]:
         """
         Get cached search results
@@ -224,10 +229,7 @@ class SmartCacheManager:
             Cached search results or None if not found
         """
         cache_key = self._generate_cache_key(
-            query,
-            project_id=project_id,
-            category=category,
-            limit=limit
+            query, project_id=project_id, category=category, limit=limit
         )
         return self.search_cache.get(cache_key)
 
@@ -237,28 +239,20 @@ class SmartCacheManager:
         results: Any,
         project_id: Optional[str] = None,
         category: Optional[str] = None,
-        limit: int = 5
+        limit: int = 5,
     ) -> None:
         """Cache search results"""
         cache_key = self._generate_cache_key(
-            query,
-            project_id=project_id,
-            category=category,
-            limit=limit
+            query, project_id=project_id, category=category, limit=limit
         )
         self.search_cache.set(cache_key, results)
 
     async def get_cached_context(
-        self,
-        memory_id: str,
-        depth: int = 2,
-        project_id: Optional[str] = None
+        self, memory_id: str, depth: int = 2, project_id: Optional[str] = None
     ) -> Optional[Any]:
         """Get cached context for memory"""
         cache_key = self._generate_cache_key(
-            f"context_{memory_id}",
-            depth=depth,
-            project_id=project_id
+            f"context_{memory_id}", depth=depth, project_id=project_id
         )
         return self.context_cache.get(cache_key)
 
@@ -267,13 +261,11 @@ class SmartCacheManager:
         memory_id: str,
         context: Any,
         depth: int = 2,
-        project_id: Optional[str] = None
+        project_id: Optional[str] = None,
     ) -> None:
         """Cache context for memory"""
         cache_key = self._generate_cache_key(
-            f"context_{memory_id}",
-            depth=depth,
-            project_id=project_id
+            f"context_{memory_id}", depth=depth, project_id=project_id
         )
         self.context_cache.set(cache_key, context)
 
@@ -282,18 +274,18 @@ class SmartCacheManager:
         uptime = (datetime.now() - self.cache_creation_time).total_seconds()
 
         return {
-            'uptime_seconds': uptime,
-            'total_tokens_saved': self.total_token_saved,
-            'estimated_cost_saved': self.total_token_saved * 0.00002,  # Rough estimate
-            'caches': {
-                'embedding': self.embedding_cache.get_stats(),
-                'search': self.search_cache.get_stats(),
-                'context': self.context_cache.get_stats()
+            "uptime_seconds": uptime,
+            "total_tokens_saved": self.total_token_saved,
+            "estimated_cost_saved": self.total_token_saved * 0.00002,  # Rough estimate
+            "caches": {
+                "embedding": self.embedding_cache.get_stats(),
+                "search": self.search_cache.get_stats(),
+                "context": self.context_cache.get_stats(),
             },
-            'semantic_cache': {
-                'stored_vectors': len(self.query_vectors),
-                'similarity_threshold': self.similarity_threshold
-            }
+            "semantic_cache": {
+                "stored_vectors": len(self.query_vectors),
+                "similarity_threshold": self.similarity_threshold,
+            },
         }
 
     def clear_all_caches(self) -> None:
@@ -330,11 +322,11 @@ _cache_instance: Optional[SmartCacheManager] = None
 def get_cache_manager(
     embedding_ttl: Optional[int] = None,
     search_ttl: Optional[int] = None,
-    context_ttl: Optional[int] = None
+    context_ttl: Optional[int] = None,
 ) -> SmartCacheManager:
     """
     Get or create global cache manager instance
-    
+
     Args:
         embedding_ttl: Override embedding cache TTL (seconds)
         search_ttl: Override search cache TTL (seconds)
@@ -345,10 +337,12 @@ def get_cache_manager(
         # Use provided TTLs or defaults
         _cache_instance = SmartCacheManager(
             embedding_ttl=embedding_ttl or 86400,  # 24 hours
-            search_ttl=search_ttl or 3600,         # 1 hour
-            context_ttl=context_ttl or 1800        # 30 minutes
+            search_ttl=search_ttl or 3600,  # 1 hour
+            context_ttl=context_ttl or 1800,  # 30 minutes
         )
-        print(f"[Cache] Smart cache manager initialized (embedding_ttl={embedding_ttl or 86400}s, search_ttl={search_ttl or 3600}s, context_ttl={context_ttl or 1800}s)")
+        print(
+            f"[Cache] Smart cache manager initialized (embedding_ttl={embedding_ttl or 86400}s, search_ttl={search_ttl or 3600}s, context_ttl={context_ttl or 1800}s)"
+        )
     return _cache_instance
 
 

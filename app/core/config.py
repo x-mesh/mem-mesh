@@ -7,6 +7,7 @@ Supports storage_mode for direct SQLite access or API mode.
 """
 
 from typing import Literal, Optional
+
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
@@ -161,7 +162,7 @@ class Settings(BaseSettings):
         default=False,
         description="Enable OAuth authentication for Dashboard/Web API endpoints",
     )
-    
+
     # Basic Auth for Web Dashboard (simpler alternative to OAuth for browser access)
     web_basic_auth_enabled: bool = Field(
         default=False,

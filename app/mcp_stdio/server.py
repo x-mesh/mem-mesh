@@ -15,15 +15,17 @@ FastMCP-only (2): cache_stats, clear_cache
 """
 
 import os
-from fastmcp import FastMCP
 from typing import Optional, Union
+
+from fastmcp import FastMCP
+
 from ..core.config import Settings
+from ..core.services.cache_manager import get_cache_manager
 from ..core.utils.logger import get_logger, setup_logging
-from ..mcp_common.storage import StorageManager
-from ..mcp_common.tools import MCPToolHandlers
 from ..mcp_common.batch_tools import BatchOperationHandler
 from ..mcp_common.descriptions import TOOL_DESCRIPTIONS
-from ..core.services.cache_manager import get_cache_manager
+from ..mcp_common.storage import StorageManager
+from ..mcp_common.tools import MCPToolHandlers
 
 # 로깅 시스템 초기화
 setup_logging()
@@ -62,7 +64,9 @@ async def initialize_storage(settings: Optional[Settings] = None) -> None:
     from ..core.services.search import SearchService
 
     batch_settings = settings or Settings()
-    db = Database(batch_settings.database_path, embedding_dim=batch_settings.embedding_dim)
+    db = Database(
+        batch_settings.database_path, embedding_dim=batch_settings.embedding_dim
+    )
     await db.connect()
     embedding_service = EmbeddingService(preload=False)
     memory_service = MemoryService(db, embedding_service)
@@ -84,7 +88,7 @@ async def shutdown_storage() -> None:
     await storage_manager.shutdown()
     if batch_handler is not None:
         try:
-            if hasattr(batch_handler, 'db') and batch_handler.db is not None:
+            if hasattr(batch_handler, "db") and batch_handler.db is not None:
                 await batch_handler.db.disconnect()
         except Exception as e:
             logger.warning("Error closing batch handler DB", error=str(e))
@@ -237,7 +241,9 @@ async def link(
     metadata: Optional[dict] = None,
 ) -> dict:
     """Internal handler for link tool."""
-    return await _get_handlers().link(source_id, target_id, relation_type, strength, metadata)
+    return await _get_handlers().link(
+        source_id, target_id, relation_type, strength, metadata
+    )
 
 
 @mcp.tool(description=TOOL_DESCRIPTIONS["unlink"])

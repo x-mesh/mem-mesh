@@ -10,12 +10,12 @@ Requirements: 4.1, 4.4 - SQLite WAL mode and busy_timeout configuration
 
 import json
 import logging
-from typing import Any, Optional, Dict, List, Tuple
 from contextlib import asynccontextmanager
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .connection import DatabaseConnection, SQLITE_VEC_AVAILABLE, SQLITE3_MODULE
+from .connection import SQLITE3_MODULE, SQLITE_VEC_AVAILABLE, DatabaseConnection
 from .initializer import DatabaseInitializer
 from .migrator import DatabaseMigrator
 
@@ -39,7 +39,9 @@ class Database:
     - 4.4: busy_timeout configuration
     """
 
-    def __init__(self, db_path: str, busy_timeout: int = 5000, embedding_dim: int = 384):
+    def __init__(
+        self, db_path: str, busy_timeout: int = 5000, embedding_dim: int = 384
+    ):
         self.db_path = db_path
         self.busy_timeout = busy_timeout
         self.embedding_dim = embedding_dim
@@ -56,7 +58,7 @@ class Database:
         return self._connection._lock
 
     async def connect(self) -> None:
-        vec_loaded = await self._connection.connect()
+        await self._connection.connect()
         await self.init_tables()
         logger.info(f"Database connected: {self.db_path}")
 
@@ -299,7 +301,6 @@ class Database:
                 data["updated_at"],
             ),
         )
-
 
     @asynccontextmanager
     async def transaction(self):

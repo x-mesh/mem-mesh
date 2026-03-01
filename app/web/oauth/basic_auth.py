@@ -4,10 +4,10 @@ Provides simple username/password authentication for browser access.
 Uses SQLite-backed session store for persistence across restarts and workers.
 """
 
-import secrets
 import logging
-from typing import Optional, Callable
+import secrets
 from datetime import datetime, timedelta, timezone
+from typing import Callable, Optional
 
 from fastapi import Request, Response
 from fastapi.responses import RedirectResponse

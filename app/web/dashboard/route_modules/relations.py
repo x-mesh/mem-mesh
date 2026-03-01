@@ -3,22 +3,22 @@ Memory Relations API 라우트.
 """
 
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
-from app.core.services.relation import (
-    RelationService,
-    RelationNotFoundError,
-    MemoryNotFoundError,
-)
 from app.core.schemas.relations import (
     Relation,
     RelationCreate,
-    RelationUpdate,
-    RelationType,
-    RelationWithMemory,
     RelationGraph,
+    RelationType,
+    RelationUpdate,
+    RelationWithMemory,
+)
+from app.core.services.relation import (
+    MemoryNotFoundError,
+    RelationNotFoundError,
+    RelationService,
 )
 from app.web.common.dependencies import get_relation_service
 
@@ -44,9 +44,7 @@ async def create_relation(
         logger.error(f"Create relation error: {e}")
         # UNIQUE constraint 위반 처리
         if "UNIQUE constraint" in str(e):
-            raise HTTPException(
-                status_code=409, detail="Relation already exists"
-            )
+            raise HTTPException(status_code=409, detail="Relation already exists")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -126,9 +124,7 @@ async def get_relation_graph(
 ):
     """관계 그래프 조회"""
     if depth < 1 or depth > 5:
-        raise HTTPException(
-            status_code=400, detail="depth must be between 1 and 5"
-        )
+        raise HTTPException(status_code=400, detail="depth must be between 1 and 5")
 
     graph = await service.get_relation_graph(
         memory_id=memory_id,

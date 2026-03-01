@@ -10,5 +10,6 @@ __all__ = ["EmbeddingService"]
 def __getattr__(name):
     if name == "EmbeddingService":
         from .service import EmbeddingService
+
         return EmbeddingService
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

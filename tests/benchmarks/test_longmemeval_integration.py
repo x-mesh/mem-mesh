@@ -66,6 +66,7 @@ def _sqlite_vec_available() -> bool:
     """Check if sqlite-vec is actually usable at runtime."""
     try:
         from app.core.database.base import SQLITE_VEC_AVAILABLE
+
         return SQLITE_VEC_AVAILABLE
     except ImportError:
         return False
@@ -119,9 +120,9 @@ async def test_index_retrieve_cleanup_flow(tmp_path: Path) -> None:
         # Verify memories exist via search
         params = SearchParams(query="", project_id=project_id, limit=20)
         response = await storage.search_memories(params)
-        assert len(response.results) == 3, (
-            f"Expected 3 stored memories, got {len(response.results)}"
-        )
+        assert (
+            len(response.results) == 3
+        ), f"Expected 3 stored memories, got {len(response.results)}"
 
         # --- Retrieve ---
         # When sqlite-vec is not available, patch to use fuzzy search
@@ -143,31 +144,31 @@ async def test_index_retrieve_cleanup_flow(tmp_path: Path) -> None:
         assert len(retrieved_session_ids) > 0, "No session IDs extracted"
 
         # The answer session (0) should be among retrieved sessions
-        assert 0 in retrieved_session_ids, (
-            f"Answer session 0 not found in retrieved sessions: {retrieved_session_ids}"
-        )
+        assert (
+            0 in retrieved_session_ids
+        ), f"Answer session 0 not found in retrieved sessions: {retrieved_session_ids}"
 
         # Metrics should be computed
         assert metrics.retrieval_time_ms > 0, "Retrieval time not recorded"
 
         # recall_any at k=10 should be 1.0 since answer session should be retrieved
-        assert metrics.recall_any[10] == 1.0, (
-            f"Expected recall_any@10=1.0, got {metrics.recall_any[10]}"
-        )
+        assert (
+            metrics.recall_any[10] == 1.0
+        ), f"Expected recall_any@10=1.0, got {metrics.recall_any[10]}"
 
         # recall_all at k=10 should also be 1.0 (only 1 answer session)
-        assert metrics.recall_all[10] == 1.0, (
-            f"Expected recall_all@10=1.0, got {metrics.recall_all[10]}"
-        )
+        assert (
+            metrics.recall_all[10] == 1.0
+        ), f"Expected recall_all@10=1.0, got {metrics.recall_all[10]}"
 
         # --- Cleanup ---
         await cleanup_project(storage, project_id)
 
         # Verify all memories are deleted
         response = await storage.search_memories(params)
-        assert len(response.results) == 0, (
-            f"Expected 0 results after cleanup, got {len(response.results)}"
-        )
+        assert (
+            len(response.results) == 0
+        ), f"Expected 0 results after cleanup, got {len(response.results)}"
 
     finally:
         await storage.shutdown()
@@ -224,31 +225,31 @@ async def test_project_isolation(tmp_path: Path) -> None:
         # Search project A - should only return project A results
         params_a = SearchParams(query="", project_id=project_a, limit=20)
         response_a = await storage.search_memories(params_a)
-        assert len(response_a.results) == 3, (
-            f"Project A should have 3 results, got {len(response_a.results)}"
-        )
+        assert (
+            len(response_a.results) == 3
+        ), f"Project A should have 3 results, got {len(response_a.results)}"
 
         # Search project B - should only return project B results
         params_b = SearchParams(query="", project_id=project_b, limit=20)
         response_b = await storage.search_memories(params_b)
-        assert len(response_b.results) == 2, (
-            f"Project B should have 2 results, got {len(response_b.results)}"
-        )
+        assert (
+            len(response_b.results) == 2
+        ), f"Project B should have 2 results, got {len(response_b.results)}"
 
         # Delete project A only
         await cleanup_project(storage, project_a)
 
         # Project A should be empty
         response_a = await storage.search_memories(params_a)
-        assert len(response_a.results) == 0, (
-            f"Project A should be empty after cleanup, got {len(response_a.results)}"
-        )
+        assert (
+            len(response_a.results) == 0
+        ), f"Project A should be empty after cleanup, got {len(response_a.results)}"
 
         # Project B should still have its memories
         response_b = await storage.search_memories(params_b)
-        assert len(response_b.results) == 2, (
-            f"Project B should still have 2 results, got {len(response_b.results)}"
-        )
+        assert (
+            len(response_b.results) == 2
+        ), f"Project B should still have 2 results, got {len(response_b.results)}"
 
     finally:
         # Cleanup project B as well

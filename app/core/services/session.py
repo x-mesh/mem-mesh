@@ -1,19 +1,18 @@
 """Session 서비스 - 세션 관리 비즈니스 로직"""
 
-import logging
 import json
-from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any, Tuple, Union
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import uuid4
 
 from app.core.database.base import Database
-from app.core.services.project import ProjectService
-from app.core.schemas.sessions import (
-    SessionResponse,
-    SessionContext,
-)
 from app.core.schemas.pins import PinResponse
-from app.core.schemas.optimization import TokenInfo
+from app.core.schemas.sessions import (
+    SessionContext,
+    SessionResponse,
+)
+from app.core.services.project import ProjectService
 from app.core.utils.user import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -28,7 +27,12 @@ class NoActiveSessionError(Exception):
 class SessionService:
     """세션 관리 서비스"""
 
-    def __init__(self, db: Database, project_service: Optional[ProjectService] = None, embedding_service=None):
+    def __init__(
+        self,
+        db: Database,
+        project_service: Optional[ProjectService] = None,
+        embedding_service=None,
+    ):
         self.db = db
         self.project_service = project_service or ProjectService(db)
         self._embedding_service = embedding_service
@@ -178,7 +182,7 @@ class SessionService:
             """,
             (session.id, limit),
         )
-        
+
         if expand == "smart":
             # expand="smart": status × importance 2축 4-Tier 매트릭스
             # Tier 1: active + important(≥4) → full content
@@ -193,7 +197,7 @@ class SessionService:
             # expand=false: 컴팩트 핀 정보 반환 (맥락 유지용)
             # content를 80자로 제한하여 토큰 절약하면서 맥락 제공
             pins = [self._pin_row_to_compact(r) for r in pin_rows]
-        
+
         # 세션 요약이 없으면 최근 열린 핀들로 자동 생성
         summary = session.summary
         if not summary and open_pins > 0:
@@ -380,7 +384,7 @@ class SessionService:
     def _pin_row_to_compact(self, row) -> Dict[str, Any]:
         """
         DB row를 컴팩트 핀 정보로 변환 (토큰 절약용).
-        
+
         expand=false일 때 사용. 맥락 유지에 필요한 최소 정보만 포함:
         - id: 핀 식별자 (complete/promote 호출용)
         - content: 80자로 제한된 내용 요약
@@ -389,7 +393,7 @@ class SessionService:
         """
         content = row["content"] or ""
         truncated_content = content[:80] + "..." if len(content) > 80 else content
-        
+
         return {
             "id": row["id"],
             "content": truncated_content,
@@ -511,7 +515,7 @@ class SessionService:
         project_id: str,
         user_id: Optional[str] = None,
         expand: Union[bool, str] = False,
-        limit: int = 10
+        limit: int = 10,
     ) -> Tuple[Optional[SessionContext], Dict[str, int]]:
         """
         토큰 추적과 함께 세션 재개
@@ -531,33 +535,32 @@ class SessionService:
             }
         """
         from app.core.services.token_tracker import TokenTracker
-        
+
         # 기존 resume_last_session 호출
         session_context = await self.resume_last_session(
-            project_id=project_id,
-            user_id=user_id,
-            expand=expand,
-            limit=limit
+            project_id=project_id, user_id=user_id, expand=expand, limit=limit
         )
-        
+
         if not session_context:
             # 세션이 없으면 토큰 정보도 0으로 반환
             return None, {
                 "loaded_tokens": 0,
                 "unloaded_tokens": 0,
-                "estimated_total": 0
+                "estimated_total": 0,
             }
-        
+
         # TokenTracker 초기화
         token_tracker = TokenTracker(self.db)
-        
+
         # 로드된 컨텐츠의 토큰 수 계산
         loaded_tokens = 0
-        
+
         # 세션 요약 토큰
         if session_context.summary:
-            loaded_tokens += await token_tracker.estimate_tokens(session_context.summary)
-        
+            loaded_tokens += await token_tracker.estimate_tokens(
+                session_context.summary
+            )
+
         # 핀 내용 토큰 계산 (expand 모드에 따라 다름)
         if expand == "smart" and session_context.pins:
             # smart: 각 Tier의 반환된 content 기준으로 loaded 토큰 계산
@@ -594,9 +597,11 @@ class SessionService:
                     ) as unloaded_chars
                     FROM pins WHERE session_id = ?
                     """,
-                    (session_context.session_id,)
+                    (session_context.session_id,),
                 )
-                unloaded_chars = row["unloaded_chars"] if row and row["unloaded_chars"] else 0
+                unloaded_chars = (
+                    row["unloaded_chars"] if row and row["unloaded_chars"] else 0
+                )
                 # 문자 → 토큰 근사 (영문 ~4 chars/token, 한국어 ~2 chars/token, 혼합 ~3)
                 unloaded_tokens = max(0, unloaded_chars // 3)
             else:
@@ -606,22 +611,22 @@ class SessionService:
                     SELECT SUM(LENGTH(content)) as total_chars
                     FROM pins WHERE session_id = ?
                     """,
-                    (session_context.session_id,)
+                    (session_context.session_id,),
                 )
                 total_chars = row["total_chars"] if row and row["total_chars"] else 0
                 unloaded_tokens = max(0, total_chars // 3)
-        
+
         estimated_total = loaded_tokens + unloaded_tokens
-        
+
         # 토큰 사용량 기록
         await token_tracker.record_session_tokens(
             session_id=session_context.session_id,
             loaded_tokens=loaded_tokens,
             unloaded_tokens=unloaded_tokens,
             event_type="resume",
-            context_depth=limit
+            context_depth=limit,
         )
-        
+
         # token_usage 테이블에도 기록
         await token_tracker.record_token_usage(
             project_id=project_id,
@@ -629,51 +634,51 @@ class SessionService:
             tokens_used=loaded_tokens,
             session_id=session_context.session_id,
             tokens_saved=unloaded_tokens,
-            optimization_applied=is_optimized
+            optimization_applied=is_optimized,
         )
-        
+
         token_info = {
             "loaded_tokens": loaded_tokens,
             "unloaded_tokens": unloaded_tokens,
-            "estimated_total": estimated_total
+            "estimated_total": estimated_total,
         }
-        
+
         logger.info(
             f"Session resumed with token tracking: session={session_context.session_id}, "
             f"loaded={loaded_tokens}, unloaded={unloaded_tokens}"
         )
-        
+
         return session_context, token_info
 
     async def end_with_auto_promotion(
         self,
         session_id: str,
         summary: Optional[str] = None,
-        auto_promote_threshold: int = 4
+        auto_promote_threshold: int = 4,
     ) -> Dict[str, Any]:
         """
         자동 승격과 함께 세션 종료
-        
+
         Args:
             session_id: 세션 ID
             summary: 세션 요약
             auto_promote_threshold: 자동 승격 중요도 임계값 (기본값: 4)
-            
+
         Returns:
             {
                 "session": SessionResponse,
                 "promoted_pins": List[str],  # 승격된 핀 ID 목록
                 "token_savings": Dict[str, Any]
             }
-            
+
         Requirements: 5.4
         """
-        from app.core.services.token_tracker import TokenTracker
         from app.core.services.pin import PinService
-        
+        from app.core.services.token_tracker import TokenTracker
+
         # 세션 종료
         session = await self.end_session(session_id, summary)
-        
+
         if not session:
             logger.warning(f"Session {session_id} not found for auto-promotion")
             return {
@@ -683,10 +688,10 @@ class SessionService:
                     "total_tokens": 0,
                     "loaded_tokens": 0,
                     "saved_tokens": 0,
-                    "savings_rate": 0.0
-                }
+                    "savings_rate": 0.0,
+                },
             }
-        
+
         # importance >= threshold인 완료된 핀 조회
         promotion_candidates = await self.db.fetchall(
             """
@@ -697,13 +702,13 @@ class SessionService:
             AND promoted_to_memory_id IS NULL
             ORDER BY importance DESC
             """,
-            (session_id, auto_promote_threshold)
+            (session_id, auto_promote_threshold),
         )
-        
+
         # 핀 승격 처리
         pin_service = PinService(self.db, self._embedding_service)
         promoted_pins = []
-        
+
         for candidate in promotion_candidates:
             try:
                 result = await pin_service.promote_to_memory(candidate["id"])
@@ -715,45 +720,42 @@ class SessionService:
                     )
             except Exception as e:
                 logger.error(f"Failed to promote pin {candidate['id']}: {e}")
-        
+
         # 토큰 절감 통계 계산
         token_tracker = TokenTracker(self.db)
         token_savings = await token_tracker.calculate_savings(session_id)
-        
+
         # 세션 종료 이벤트 기록
         await token_tracker.record_session_tokens(
-            session_id=session_id,
-            loaded_tokens=0,
-            unloaded_tokens=0,
-            event_type="end"
+            session_id=session_id, loaded_tokens=0, unloaded_tokens=0, event_type="end"
         )
-        
+
         logger.info(
             f"Session {session_id} ended with auto-promotion: "
             f"{len(promoted_pins)} pins promoted, "
             f"token savings: {token_savings['savings_rate']:.2%}"
         )
-        
+
         return {
             "session": session,
             "promoted_pins": promoted_pins,
-            "token_savings": token_savings
+            "token_savings": token_savings,
         }
 
     async def get_session_statistics(
         self,
         project_id: Optional[str] = None,
         start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+        end_date: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         세션 통계 조회
-        
+
         Args:
             project_id: 프로젝트 ID (None이면 전체)
             start_date: 시작 날짜 (ISO 형식, 선택적)
             end_date: 종료 날짜 (ISO 형식, 선택적)
-            
+
         Returns:
             {
                 "total_sessions": int,
@@ -762,29 +764,29 @@ class SessionService:
                 "importance_distribution": Dict[int, int],
                 "avg_token_savings_rate": float
             }
-            
+
         Requirements: 9.1, 9.2, 9.3, 9.4, 9.5
         """
         from app.core.services.token_tracker import TokenTracker
-        
+
         # 기본 쿼리 구성
         query_conditions = ["1=1"]
         params = []
-        
+
         if project_id:
             query_conditions.append("s.project_id = ?")
             params.append(project_id)
-        
+
         if start_date:
             query_conditions.append("s.started_at >= ?")
             params.append(start_date)
-        
+
         if end_date:
             query_conditions.append("s.started_at <= ?")
             params.append(end_date)
-        
+
         where_clause = " AND ".join(query_conditions)
-        
+
         # 1. 총 세션 수 및 평균 지속 시간
         session_stats = await self.db.fetchone(
             f"""
@@ -800,12 +802,12 @@ class SessionService:
             FROM sessions s
             WHERE {where_clause}
             """,
-            tuple(params)
+            tuple(params),
         )
-        
+
         total_sessions = session_stats["total_sessions"] or 0
         avg_duration_hours = session_stats["avg_duration_hours"] or 0.0
-        
+
         # 2. 세션당 평균 핀 수
         pin_stats = await self.db.fetchone(
             f"""
@@ -816,13 +818,15 @@ class SessionService:
             JOIN sessions s ON p.session_id = s.id
             WHERE {where_clause}
             """,
-            tuple(params)
+            tuple(params),
         )
-        
+
         total_pins = pin_stats["total_pins"] or 0
         sessions_with_pins = pin_stats["sessions_with_pins"] or 1  # 0으로 나누기 방지
-        avg_pins_per_session = total_pins / sessions_with_pins if sessions_with_pins > 0 else 0.0
-        
+        avg_pins_per_session = (
+            total_pins / sessions_with_pins if sessions_with_pins > 0 else 0.0
+        )
+
         # 3. 중요도별 핀 분포
         importance_rows = await self.db.fetchall(
             f"""
@@ -835,20 +839,20 @@ class SessionService:
             GROUP BY p.importance
             ORDER BY p.importance
             """,
-            tuple(params)
+            tuple(params),
         )
-        
-        importance_distribution = {row["importance"]: row["count"] for row in importance_rows}
-        
+
+        importance_distribution = {
+            row["importance"]: row["count"] for row in importance_rows
+        }
+
         # 4. 평균 토큰 절감률
         token_tracker = TokenTracker(self.db)
-        
+
         # 프로젝트별 토큰 통계 조회
         if project_id:
             token_stats = await token_tracker.get_project_token_statistics(
-                project_id=project_id,
-                start_date=start_date,
-                end_date=end_date
+                project_id=project_id, start_date=start_date, end_date=end_date
             )
             avg_token_savings_rate = token_stats.get("avg_savings_rate", 0.0)
         else:
@@ -858,40 +862,42 @@ class SessionService:
                 SELECT id FROM sessions s
                 WHERE {where_clause}
                 """,
-                tuple(params)
+                tuple(params),
             )
-            
+
             if all_sessions:
                 total_savings_rate = 0.0
                 valid_sessions = 0
-                
+
                 for session_row in all_sessions:
                     try:
-                        savings = await token_tracker.calculate_savings(session_row["id"])
+                        savings = await token_tracker.calculate_savings(
+                            session_row["id"]
+                        )
                         if savings["total_tokens"] > 0:
                             total_savings_rate += savings["savings_rate"]
                             valid_sessions += 1
                     except Exception:
                         continue
-                
+
                 avg_token_savings_rate = (
                     total_savings_rate / valid_sessions if valid_sessions > 0 else 0.0
                 )
             else:
                 avg_token_savings_rate = 0.0
-        
+
         result = {
             "total_sessions": total_sessions,
             "avg_duration_hours": round(avg_duration_hours, 2),
             "avg_pins_per_session": round(avg_pins_per_session, 2),
             "importance_distribution": importance_distribution,
-            "avg_token_savings_rate": round(avg_token_savings_rate, 4)
+            "avg_token_savings_rate": round(avg_token_savings_rate, 4),
         }
-        
+
         logger.info(
             f"Session statistics calculated: "
             f"total={total_sessions}, avg_duration={avg_duration_hours:.2f}h, "
             f"avg_pins={avg_pins_per_session:.2f}, avg_savings={avg_token_savings_rate:.2%}"
         )
-        
+
         return result

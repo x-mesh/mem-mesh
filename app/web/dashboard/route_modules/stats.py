@@ -6,10 +6,12 @@ Provides endpoints for retrieving memory statistics and project information.
 
 import logging
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Depends, Query
 
-from app.core.services.stats import StatsService
+from fastapi import APIRouter, Depends, HTTPException, Query
+
 from app.core.schemas.responses import StatsResponse
+from app.core.services.stats import StatsService
+
 from ...common.dependencies import get_stats_service
 
 logger = logging.getLogger(__name__)
@@ -61,7 +63,12 @@ async def get_daily_counts(
             result.append({"date": date_str, "count": date_counts.get(date_str, 0)})
             current += timedelta(days=1)
 
-        return {"daily_counts": result, "days": days, "start_date": start_date, "end_date": end_date}
+        return {
+            "daily_counts": result,
+            "days": days,
+            "start_date": start_date,
+            "end_date": end_date,
+        }
     except Exception as e:
         logger.error(f"Get daily counts error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -89,9 +96,9 @@ async def get_projects(service: StatsService = Depends(get_stats_service)):
             "projects": projects,
             "total_projects": len(projects),
             "total_memories": total_memories,
-            "avg_per_project": total_memories // len(projects)
-            if len(projects) > 0
-            else 0,
+            "avg_per_project": (
+                total_memories // len(projects) if len(projects) > 0 else 0
+            ),
         }
     except Exception as e:
         logger.error(f"Get projects error: {e}")

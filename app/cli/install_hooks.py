@@ -22,7 +22,6 @@ from app.cli.prompts.behaviors import PROMPT_VERSION, REFLECT_CONFIG
 from app.cli.prompts.renderers import (
     VERSION_MARKER,
     extract_prompt_version,
-    render_cursor_context,
     render_cursor_followup,
     render_kiro_auto_create_pin,
     render_kiro_auto_save,
@@ -807,8 +806,10 @@ def _install_claude(
             _write_script(
                 track_script,
                 _render_template(
-                    TRACK_HOOK_TEMPLATE, url,
-                    source_tag="claude-code-hook", ide_tag="claude",
+                    TRACK_HOOK_TEMPLATE,
+                    url,
+                    source_tag="claude-code-hook",
+                    ide_tag="claude",
                 ),
             )
         print(f"  -> {track_script}")
@@ -827,8 +828,10 @@ def _install_claude(
         _write_script(
             stop_script,
             _render_template(
-                STOP_HOOK_TEMPLATE, url,
-                source_tag="claude-code-hook", ide_tag="claude",
+                STOP_HOOK_TEMPLATE,
+                url,
+                source_tag="claude-code-hook",
+                ide_tag="claude",
             ),
         )
     print(f"  -> {stop_script}")
@@ -844,8 +847,10 @@ def _install_claude(
             _write_script(
                 reflect_script,
                 _render_template(
-                    REFLECT_HOOK_TEMPLATE, url,
-                    source_tag="claude-code-hook", ide_tag="claude",
+                    REFLECT_HOOK_TEMPLATE,
+                    url,
+                    source_tag="claude-code-hook",
+                    ide_tag="claude",
                 ),
             )
         print(f"  -> {reflect_script}")
@@ -865,7 +870,9 @@ def _install_claude(
         if api_key:
             print("  ANTHROPIC_API_KEY: set")
         else:
-            print("  WARNING: ANTHROPIC_API_KEY not set — reflect hook will be inactive")
+            print(
+                "  WARNING: ANTHROPIC_API_KEY not set — reflect hook will be inactive"
+            )
             print("  Set it in your shell profile: export ANTHROPIC_API_KEY=sk-...")
 
     print("[claude] Done.")
@@ -877,13 +884,17 @@ def _install_kiro(url: str, mode: str = "api", path: str = "") -> None:
 
     stop_script = KIRO_HOOKS_DIR / "mem-mesh-stop.sh"
     if mode == "local":
-        _write_script(stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path))
+        _write_script(
+            stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path)
+        )
     else:
         _write_script(
             stop_script,
             _render_template(
-                KIRO_STOP_HOOK_TEMPLATE, url,
-                source_tag="kiro-hook", ide_tag="kiro",
+                KIRO_STOP_HOOK_TEMPLATE,
+                url,
+                source_tag="kiro-hook",
+                ide_tag="kiro",
             ),
         )
     print(f"  -> {stop_script}")
@@ -936,28 +947,38 @@ def _install_cursor(
             session_start_script,
             _render_local_template(CURSOR_SESSION_START_TEMPLATE, path),
         )
-        _write_script(track_script, _render_local_template(LOCAL_TRACK_HOOK_TEMPLATE, path))
-        _write_script(stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path))
+        _write_script(
+            track_script, _render_local_template(LOCAL_TRACK_HOOK_TEMPLATE, path)
+        )
+        _write_script(
+            stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path)
+        )
     else:
         _write_script(
             session_start_script,
             _render_template(
-                CURSOR_SESSION_START_TEMPLATE, url,
-                source_tag="cursor-hook", ide_tag="cursor",
+                CURSOR_SESSION_START_TEMPLATE,
+                url,
+                source_tag="cursor-hook",
+                ide_tag="cursor",
             ),
         )
         _write_script(
             track_script,
             _render_template(
-                TRACK_HOOK_TEMPLATE, url,
-                source_tag="cursor-hook", ide_tag="cursor",
+                TRACK_HOOK_TEMPLATE,
+                url,
+                source_tag="cursor-hook",
+                ide_tag="cursor",
             ),
         )
         _write_script(
             stop_script,
             _render_template(
-                CURSOR_STOP_TEMPLATE, url,
-                source_tag="cursor-hook", ide_tag="cursor",
+                CURSOR_STOP_TEMPLATE,
+                url,
+                source_tag="cursor-hook",
+                ide_tag="cursor",
             ),
         )
     print(f"  -> {session_start_script}")
@@ -1123,7 +1144,9 @@ def cmd_status() -> None:
         try:
             settings = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
             has_hooks = "hooks" in settings
-            print(f"  settings.json hooks: {'configured' if has_hooks else 'not configured'}")
+            print(
+                f"  settings.json hooks: {'configured' if has_hooks else 'not configured'}"
+            )
         except (json.JSONDecodeError, OSError):
             print("  settings.json: parse error")
     else:
@@ -1144,7 +1167,8 @@ def cmd_status() -> None:
         try:
             data = json.loads(KIRO_SETTINGS.read_text(encoding="utf-8"))
             mem_hooks = [
-                h for h in data.get("hooks", [])
+                h
+                for h in data.get("hooks", [])
                 if h.get("name", "").startswith("mem-mesh:")
             ]
             print(f"  hooks.json:  {len(mem_hooks)} mem-mesh hook(s) registered")
@@ -1164,9 +1188,8 @@ def cmd_status() -> None:
     print(f"  track hook:   {_check_script_version(cursor_track)}")
     print(f"  stop hook:    {_check_script_version(cursor_stop)}")
 
-    url = (
-        _extract_url_from_script(cursor_track)
-        or _extract_url_from_script(cursor_stop)
+    url = _extract_url_from_script(cursor_track) or _extract_url_from_script(
+        cursor_stop
     )
     if url:
         print(f"  target URL:   {url}")
@@ -1175,9 +1198,7 @@ def cmd_status() -> None:
         try:
             settings = json.loads(CURSOR_SETTINGS.read_text(encoding="utf-8"))
             has_hooks = "hooks" in settings
-            print(
-                f"  hooks.json:   {'configured' if has_hooks else 'not configured'}"
-            )
+            print(f"  hooks.json:   {'configured' if has_hooks else 'not configured'}")
         except (json.JSONDecodeError, OSError):
             print("  hooks.json:   parse error")
     else:
@@ -1191,7 +1212,11 @@ def cmd_status() -> None:
 
         # Kiro hooks
         kiro_dir = project_root / ".kiro" / "hooks"
-        for name in ("auto-save-conversations", "auto-create-pin-on-task", "load-project-context"):
+        for name in (
+            "auto-save-conversations",
+            "auto-create-pin-on-task",
+            "load-project-context",
+        ):
             hook_file = kiro_dir / f"{name}.kiro.hook"
             print(f"  {name}: {_check_kiro_hook_version(hook_file)}")
 
@@ -1202,8 +1227,8 @@ def cmd_status() -> None:
             print(f"  {name}: {_check_script_version(script)}")
 
     print()
-    print(f"Run 'mem-mesh-hooks install --target all' to update global hooks.")
-    print(f"Run 'mem-mesh-hooks sync-project' to update project-local hooks.")
+    print("Run 'mem-mesh-hooks install --target all' to update global hooks.")
+    print("Run 'mem-mesh-hooks sync-project' to update project-local hooks.")
 
 
 # ---------------------------------------------------------------------------

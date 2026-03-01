@@ -7,26 +7,28 @@ Memory Relations 서비스.
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import List, Optional
 
 from app.core.database.base import Database
 from app.core.schemas.relations import (
     Relation,
     RelationCreate,
-    RelationUpdate,
-    RelationType,
-    RelationWithMemory,
     RelationGraph,
+    RelationType,
+    RelationUpdate,
+    RelationWithMemory,
 )
 
 
 class RelationNotFoundError(Exception):
     """관계를 찾을 수 없음"""
+
     pass
 
 
 class MemoryNotFoundError(Exception):
     """메모리를 찾을 수 없음"""
+
     pass
 
 
@@ -88,9 +90,7 @@ class RelationService:
 
         return self._row_to_relation(row)
 
-    async def update_relation(
-        self, relation_id: str, data: RelationUpdate
-    ) -> Relation:
+    async def update_relation(self, relation_id: str, data: RelationUpdate) -> Relation:
         """관계 수정"""
         existing = await self.get_relation(relation_id)
         if not existing:
@@ -261,15 +261,6 @@ class RelationService:
     ) -> List[Relation]:
         """벡터 유사도 기반 자동 연결"""
         # 현재 메모리의 임베딩으로 유사한 메모리 검색
-        similar_query = """
-            SELECT m.id, vec.distance
-            FROM memory_embeddings vec
-            JOIN memories m ON vec.memory_id = m.id
-            WHERE vec.memory_id != ?
-            AND vec.distance <= ?
-            ORDER BY vec.distance ASC
-            LIMIT ?
-        """
         # Note: 실제 구현은 EmbeddingService와 연동 필요
         # 여기서는 기본 구조만 제공
 
@@ -302,8 +293,16 @@ class RelationService:
             metadata=json.loads(row["metadata"]) if row["metadata"] else None,
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
-            source_content=row["source_content"] if "source_content" in row.keys() else None,
-            source_project_id=row["source_project_id"] if "source_project_id" in row.keys() else None,
-            target_content=row["target_content"] if "target_content" in row.keys() else None,
-            target_project_id=row["target_project_id"] if "target_project_id" in row.keys() else None,
+            source_content=(
+                row["source_content"] if "source_content" in row.keys() else None
+            ),
+            source_project_id=(
+                row["source_project_id"] if "source_project_id" in row.keys() else None
+            ),
+            target_content=(
+                row["target_content"] if "target_content" in row.keys() else None
+            ),
+            target_project_id=(
+                row["target_project_id"] if "target_project_id" in row.keys() else None
+            ),
         )

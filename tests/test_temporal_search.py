@@ -6,20 +6,21 @@
 - UnifiedSearchService 시간 필터/부스트/감쇠
 """
 
-import math
-import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
-from app.core.schemas.requests import SearchParams, VALID_TIME_RANGES, VALID_TEMPORAL_MODES
+import pytest
+
+from app.core.schemas.requests import (
+    VALID_TEMPORAL_MODES,
+    VALID_TIME_RANGES,
+    SearchParams,
+)
+from app.core.schemas.responses import SearchResponse, SearchResult
 from app.core.services.query_expander import (
     extract_time_expression,
-    KOREAN_TIME_EXPRESSIONS,
-    ENGLISH_TIME_EXPRESSIONS,
 )
 from app.core.services.unified_search import UnifiedSearchService
-from app.core.schemas.responses import SearchResult, SearchResponse
-
 
 # ── SearchParams 시간 파라미터 검증 ──
 
@@ -132,9 +133,7 @@ class TestExtractTimeExpression:
 # ── UnifiedSearchService 시간 처리 ──
 
 
-def _make_result(
-    memory_id: str, score: float, created_at: str
-) -> SearchResult:
+def _make_result(memory_id: str, score: float, created_at: str) -> SearchResult:
     """테스트용 SearchResult 생성"""
     return SearchResult(
         id=memory_id,
@@ -344,9 +343,7 @@ class TestResolveTimeRange:
 
     def test_date_from_to_parsed(self):
         service = self._get_service()
-        dt_from, dt_to = service._resolve_time_range(
-            None, "2026-02-01", "2026-02-28"
-        )
+        dt_from, dt_to = service._resolve_time_range(None, "2026-02-01", "2026-02-28")
         assert dt_from is not None
         assert dt_to is not None
         assert dt_from.day == 1

@@ -7,9 +7,8 @@ Usage:
     from app.cli.prompts.behaviors import CORE_RULES, SAVE_CRITERIA, PROMPT_VERSION
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List
-
 
 # ---------------------------------------------------------------------------
 # Prompt schema version — bump on ANY behavioral rule change

@@ -9,18 +9,18 @@
 """
 
 import asyncio
-import pytest
-import tempfile
 import os
+import tempfile
+
+import pytest
 
 from app.core.database.base import Database
+from app.core.schemas.pins import PinResponse
 from app.core.services.pin import (
-    PinService,
-    PinNotFoundError,
     PinAlreadyCompletedError,
+    PinService,
 )
 from app.core.services.session import SessionService
-from app.core.schemas.pins import PinResponse
 
 
 @pytest.fixture
@@ -143,9 +143,7 @@ class TestSmartExpand4Tier:
     ):
         """Tier 4: completed + importance<4 → id + importance + status만"""
         content = "D" * 100 + " 완료된 일반 작업"
-        await self._create_pin(
-            pin_service, content, importance=2, status="completed"
-        )
+        await self._create_pin(pin_service, content, importance=2, status="completed")
 
         ctx = await session_service.resume_last_session(
             project_id="test-project", user_id="test-user", expand="smart"
@@ -270,7 +268,7 @@ class TestCrossSessionContinuity:
     ):
         """미완료 Pin이 세션 resume 후 접근 가능"""
         # 세션 생성 및 Pin 추가
-        session = await session_service.get_or_create_active_session(
+        await session_service.get_or_create_active_session(
             project_id="test-project", user_id="test-user"
         )
         pin = await pin_service.create_pin(

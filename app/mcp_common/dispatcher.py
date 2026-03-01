@@ -1,12 +1,13 @@
 """Unified MCP tool dispatcher - eliminates duplicated dispatch logic."""
 
 import json
-from typing import Dict, Any, Optional
+from typing import Any, Dict
+
 from pydantic import ValidationError
 
-from .tools import MCPToolHandlers
-from .transport import format_tool_response, format_tool_error
 from ..core.utils.logger import get_logger
+from .tools import MCPToolHandlers
+from .transport import format_tool_error, format_tool_response
 
 logger = get_logger("mcp-dispatcher")
 
@@ -257,7 +258,9 @@ class MCPDispatcher:
         # BatchOperationHandler가 있으면 사용 (배치 임베딩/캐시 최적화)
         if self._batch_handler is not None:
             try:
-                result = await self._batch_handler.batch_operations(operations=operations)
+                result = await self._batch_handler.batch_operations(
+                    operations=operations
+                )
                 return format_tool_response(result)
             except Exception as e:
                 logger.error(f"Batch operations failed: {e}")
@@ -271,70 +274,104 @@ class MCPDispatcher:
                 op_type = op.get("type")
 
                 if op_type == "add":
-                    add_result = await self._dispatch_add({
-                        "content": op.get("content"),
-                        "project_id": op.get("project_id"),
-                        "category": op.get("category", "task"),
-                        "source": op.get("source", "mcp_batch"),
-                        "tags": op.get("tags"),
-                    })
+                    add_result = await self._dispatch_add(
+                        {
+                            "content": op.get("content"),
+                            "project_id": op.get("project_id"),
+                            "category": op.get("category", "task"),
+                            "source": op.get("source", "mcp_batch"),
+                            "tags": op.get("tags"),
+                        }
+                    )
                     if not add_result.get("isError"):
                         content_text = add_result["content"][0]["text"]
                         parsed = json.loads(content_text)
-                        results.append({
-                            "index": i, "type": "add", "success": True,
-                            "memory_id": parsed.get("id"),
-                        })
+                        results.append(
+                            {
+                                "index": i,
+                                "type": "add",
+                                "success": True,
+                                "memory_id": parsed.get("id"),
+                            }
+                        )
                     else:
-                        results.append({
-                            "index": i, "type": "add", "success": False,
-                            "error": add_result["content"][0]["text"],
-                        })
+                        results.append(
+                            {
+                                "index": i,
+                                "type": "add",
+                                "success": False,
+                                "error": add_result["content"][0]["text"],
+                            }
+                        )
 
                 elif op_type == "search":
-                    search_result = await self._dispatch_search({
-                        "query": op.get("query"),
-                        "project_id": op.get("project_id"),
-                        "category": op.get("category"),
-                        "limit": op.get("limit", 5),
-                    })
+                    search_result = await self._dispatch_search(
+                        {
+                            "query": op.get("query"),
+                            "project_id": op.get("project_id"),
+                            "category": op.get("category"),
+                            "limit": op.get("limit", 5),
+                        }
+                    )
                     if not search_result.get("isError"):
                         content_text = search_result["content"][0]["text"]
                         parsed = json.loads(content_text)
-                        results.append({
-                            "index": i, "type": "search", "success": True,
-                            "results": parsed.get("results", []),
-                            "total": parsed.get("total"),
-                        })
+                        results.append(
+                            {
+                                "index": i,
+                                "type": "search",
+                                "success": True,
+                                "results": parsed.get("results", []),
+                                "total": parsed.get("total"),
+                            }
+                        )
                     else:
-                        results.append({
-                            "index": i, "type": "search", "success": False,
-                            "error": search_result["content"][0]["text"],
-                        })
+                        results.append(
+                            {
+                                "index": i,
+                                "type": "search",
+                                "success": False,
+                                "error": search_result["content"][0]["text"],
+                            }
+                        )
                 elif op_type == "pin_add":
-                    pin_result = await self._dispatch_pin_add({
-                        "content": op.get("content"),
-                        "project_id": op.get("project_id"),
-                        "importance": op.get("importance"),
-                        "tags": op.get("tags"),
-                    })
+                    pin_result = await self._dispatch_pin_add(
+                        {
+                            "content": op.get("content"),
+                            "project_id": op.get("project_id"),
+                            "importance": op.get("importance"),
+                            "tags": op.get("tags"),
+                        }
+                    )
                     if not pin_result.get("isError"):
                         content_text = pin_result["content"][0]["text"]
                         parsed = json.loads(content_text)
-                        results.append({
-                            "index": i, "type": "pin_add", "success": True,
-                            "pin_id": parsed.get("id"),
-                        })
+                        results.append(
+                            {
+                                "index": i,
+                                "type": "pin_add",
+                                "success": True,
+                                "pin_id": parsed.get("id"),
+                            }
+                        )
                     else:
-                        results.append({
-                            "index": i, "type": "pin_add", "success": False,
-                            "error": pin_result["content"][0]["text"],
-                        })
+                        results.append(
+                            {
+                                "index": i,
+                                "type": "pin_add",
+                                "success": False,
+                                "error": pin_result["content"][0]["text"],
+                            }
+                        )
                 else:
-                    results.append({
-                        "index": i, "type": op_type, "success": False,
-                        "error": f"Unknown operation type: {op_type}",
-                    })
+                    results.append(
+                        {
+                            "index": i,
+                            "type": op_type,
+                            "success": False,
+                            "error": f"Unknown operation type: {op_type}",
+                        }
+                    )
 
             add_count = sum(1 for op in operations if op.get("type") == "add")
             search_count = sum(1 for op in operations if op.get("type") == "search")

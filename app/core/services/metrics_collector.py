@@ -5,13 +5,11 @@
 """
 
 import asyncio
-import time
 from datetime import datetime
-from typing import Optional, List, Dict, Any
-from uuid import uuid4
+from typing import Any, Dict, List, Optional
 
 from app.core.database.base import Database
-from app.core.database.models import SearchMetric, EmbeddingMetric
+from app.core.database.models import EmbeddingMetric, SearchMetric
 from app.core.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -311,7 +309,7 @@ class MetricsCollector:
         Returns:
             검색 품질 통계
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         # 시작 시간 계산
         start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + "Z"
@@ -414,18 +412,26 @@ class MetricsCollector:
             },
             "summary": {
                 "total_searches": total,
-                "avg_results_per_search": round(total_stats["avg_results"], 2)
-                if total_stats and total_stats["avg_results"]
-                else 0,
-                "avg_similarity_score": round(total_stats["avg_score"], 3)
-                if total_stats and total_stats["avg_score"]
-                else 0,
-                "avg_top_score": round(total_stats["avg_top_score"], 3)
-                if total_stats and total_stats["avg_top_score"]
-                else 0,
-                "avg_response_time_ms": round(total_stats["avg_response_time"], 1)
-                if total_stats and total_stats["avg_response_time"]
-                else 0,
+                "avg_results_per_search": (
+                    round(total_stats["avg_results"], 2)
+                    if total_stats and total_stats["avg_results"]
+                    else 0
+                ),
+                "avg_similarity_score": (
+                    round(total_stats["avg_score"], 3)
+                    if total_stats and total_stats["avg_score"]
+                    else 0
+                ),
+                "avg_top_score": (
+                    round(total_stats["avg_top_score"], 3)
+                    if total_stats and total_stats["avg_top_score"]
+                    else 0
+                ),
+                "avg_response_time_ms": (
+                    round(total_stats["avg_response_time"], 1)
+                    if total_stats and total_stats["avg_response_time"]
+                    else 0
+                ),
                 "zero_result_rate": round(zero_result_rate, 2),
                 "low_score_rate": round(low_score_rate, 2),
             },
@@ -447,16 +453,18 @@ class MetricsCollector:
                 }
                 for row in trend_stats
             ],
-            "popular_queries": [
-                {
-                    "query": row["query"],
-                    "count": row["count"],
-                    "avg_results": round(row["avg_results"], 2),
-                }
-                for row in popular_queries
-            ]
-            if not self.hash_queries
-            else [],
+            "popular_queries": (
+                [
+                    {
+                        "query": row["query"],
+                        "count": row["count"],
+                        "avg_results": round(row["avg_results"], 2),
+                    }
+                    for row in popular_queries
+                ]
+                if not self.hash_queries
+                else []
+            ),
         }
 
     async def get_project_search_stats(self, hours: int = 24) -> List[Dict[str, Any]]:
@@ -469,7 +477,7 @@ class MetricsCollector:
         Returns:
             프로젝트별 검색 통계 리스트
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + "Z"
 
@@ -500,11 +508,11 @@ class MetricsCollector:
                 "avg_results": round(row["avg_results"], 2),
                 "avg_score": round(row["avg_score"], 3) if row["avg_score"] else 0,
                 "avg_response_time_ms": round(row["avg_response_time"], 1),
-                "zero_result_rate": round(
-                    row["zero_result_count"] / row["search_count"] * 100, 2
-                )
-                if row["search_count"] > 0
-                else 0,
+                "zero_result_rate": (
+                    round(row["zero_result_count"] / row["search_count"] * 100, 2)
+                    if row["search_count"] > 0
+                    else 0
+                ),
             }
             for row in stats
         ]
@@ -519,7 +527,7 @@ class MetricsCollector:
         Returns:
             캐시 성능 통계
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + "Z"
 

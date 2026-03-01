@@ -4,8 +4,12 @@ OAuth data models.
 Database models for OAuth clients, tokens, and authorization codes.
 """
 
+import json
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import List, Optional
+from uuid import uuid4
+
+from pydantic import BaseModel, Field
 
 
 def _utc_now() -> datetime:
@@ -16,11 +20,6 @@ def _utc_now() -> datetime:
 def _utc_now_iso() -> str:
     """Get current UTC time as ISO format string with Z suffix."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
-
-
-from uuid import uuid4
-from pydantic import BaseModel, Field
-import json
 
 
 class OAuthClient(BaseModel):

@@ -6,17 +6,22 @@ mcp_common 모듈을 사용하여 공통 로직을 공유합니다.
 FastMCP 대신 직접 MCP 프로토콜을 구현하여 안정성 향상.
 """
 
-import sys
-import json
-import asyncio
-from typing import Optional, Dict, Any
+from __future__ import annotations
 
-from ..core.version import SERVER_INFO, MCP_PROTOCOL_VERSION
+import asyncio
+import json
+import sys
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
 from ..core.utils.logger import setup_logging
+from ..core.version import MCP_PROTOCOL_VERSION, SERVER_INFO
+from ..mcp_common.dispatcher import MCPDispatcher
 from ..mcp_common.storage import StorageManager
 from ..mcp_common.tools import MCPToolHandlers
-from ..mcp_common.dispatcher import MCPDispatcher
 from ..mcp_common.transport import format_tool_error
+
+if TYPE_CHECKING:
+    from ..mcp_common.batch_tools import BatchOperationHandler
 
 log = setup_logging("mem-mesh-mcp-pure")
 
@@ -126,15 +131,17 @@ async def initialize_storage():
     storage = await storage_manager.initialize()
     tool_handlers = MCPToolHandlers(storage)
 
-    from ..core.database.base import Database
     from ..core.config import Settings as PureSettings
+    from ..core.database.base import Database
     from ..core.embeddings.service import EmbeddingService
     from ..core.services.memory import MemoryService
     from ..core.services.search import SearchService
     from ..mcp_common.batch_tools import BatchOperationHandler
 
     batch_settings = PureSettings()
-    db = Database(batch_settings.database_path, embedding_dim=batch_settings.embedding_dim)
+    db = Database(
+        batch_settings.database_path, embedding_dim=batch_settings.embedding_dim
+    )
     await db.connect()
     embedding_service = EmbeddingService(preload=False)
     memory_service = MemoryService(db, embedding_service)
@@ -228,7 +235,7 @@ async def main():
     log.info("Performing cleanup...")
     if batch_handler is not None:
         try:
-            if hasattr(batch_handler, 'db') and batch_handler.db is not None:
+            if hasattr(batch_handler, "db") and batch_handler.db is not None:
                 await batch_handler.db.disconnect()
                 log.info("Batch handler DB disconnected")
         except Exception as e:

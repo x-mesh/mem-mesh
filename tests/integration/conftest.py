@@ -29,6 +29,7 @@ def _check_server_sync() -> bool:
     _server_checked = True
     try:
         import urllib.request
+
         req = urllib.request.Request(f"{BASE_URL}/api/health")
         with urllib.request.urlopen(req, timeout=5) as resp:
             _server_available = resp.status == 200
@@ -153,11 +154,15 @@ async def mcp_session(http: httpx.AsyncClient) -> AsyncGenerator[str, None]:
 
     Cleans up the session on teardown.
     """
-    resp = await mcp_call(http, "initialize", {
-        "protocolVersion": "2025-03-26",
-        "capabilities": {},
-        "clientInfo": {"name": "integration-test", "version": "1.0"},
-    })
+    resp = await mcp_call(
+        http,
+        "initialize",
+        {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": {"name": "integration-test", "version": "1.0"},
+        },
+    )
     session_id = resp.get("_session_id")
     assert session_id, "Failed to get MCP session ID"
     yield session_id

@@ -1,15 +1,14 @@
 """Dashboard OAuth Client Management API."""
 
 import logging
-from typing import Optional
 
-from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.core.auth import OAuthService
 from app.core.auth.schemas import (
     OAuthClientCreate,
-    OAuthClientUpdate,
     OAuthClientResponse,
+    OAuthClientUpdate,
     OAuthClientWithSecretResponse,
 )
 

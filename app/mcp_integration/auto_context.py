@@ -6,12 +6,12 @@ Automatic context detection for MCP
 import os
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 # 상위 디렉토리를 path에 추가
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from app.core.services.project_detector import ProjectDetector, get_search_context
+from app.core.services.project_detector import ProjectDetector
 
 
 class MCPAutoContext:
@@ -33,8 +33,8 @@ class MCPAutoContext:
         4. 상위 디렉토리명
         """
         # 1. 환경변수 확인
-        if 'MEM_MESH_PROJECT' in os.environ:
-            return os.environ['MEM_MESH_PROJECT']
+        if "MEM_MESH_PROJECT" in os.environ:
+            return os.environ["MEM_MESH_PROJECT"]
 
         # 2. 현재 디렉토리 기반 감지
         project = self.detector.detect_from_path()
@@ -45,7 +45,7 @@ class MCPAutoContext:
         current_dir = os.path.basename(os.getcwd())
 
         # kiro로 시작하면 None 반환 (노이즈 방지)
-        if current_dir.startswith('kiro'):
+        if current_dir.startswith("kiro"):
             return None
 
         return current_dir
@@ -66,28 +66,28 @@ class MCPAutoContext:
 
         # 기본 파라미터
         params = {
-            'query': query,
-            'limit': kwargs.get('limit', 5),
-            'min_score': kwargs.get('min_score', 0.3)
+            "query": query,
+            "limit": kwargs.get("limit", 5),
+            "min_score": kwargs.get("min_score", 0.3),
         }
 
         # 프로젝트 필터 추가
         if project:
-            params['project_filter'] = project
+            params["project_filter"] = project
 
         # 카테고리 힌트
-        if 'category' in kwargs:
-            params['category'] = kwargs['category']
+        if "category" in kwargs:
+            params["category"] = kwargs["category"]
 
         # 태그
-        if 'tags' in kwargs:
-            params['tags'] = kwargs['tags']
+        if "tags" in kwargs:
+            params["tags"] = kwargs["tags"]
 
         # 노이즈 필터 설정
-        params['noise_filter'] = {
-            'aggressive': True,
-            'exclude_projects': ['kiro-*', 'test-*', 'tmp-*'],
-            'min_content_length': 50
+        params["noise_filter"] = {
+            "aggressive": True,
+            "exclude_projects": ["kiro-*", "test-*", "tmp-*"],
+            "min_content_length": 50,
         }
 
         return params

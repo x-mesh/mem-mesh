@@ -10,7 +10,7 @@ Similar to Prisma migrations but simpler for SQLite.
 
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, List, Dict, Any, Optional, Callable, Awaitable
+from typing import TYPE_CHECKING, Awaitable, Callable, Dict, Optional
 
 if TYPE_CHECKING:
     from .connection import DatabaseConnection
@@ -23,7 +23,7 @@ CURRENT_SCHEMA_VERSION = 4
 
 class SchemaMigrator:
     """Handles automatic schema migrations.
-    
+
     Features:
     - Version tracking in _schema_migrations table
     - Auto-detection and addition of missing columns
@@ -46,9 +46,11 @@ class SchemaMigrator:
 
         # Ensure migrations table exists
         await self._ensure_migrations_table()
-        
+
         current_version = await self._get_current_version()
-        logger.info(f"Current schema version: {current_version}, target: {CURRENT_SCHEMA_VERSION}")
+        logger.info(
+            f"Current schema version: {current_version}, target: {CURRENT_SCHEMA_VERSION}"
+        )
 
         if current_version >= CURRENT_SCHEMA_VERSION:
             logger.info("Schema is up to date")
@@ -100,7 +102,7 @@ class SchemaMigrator:
             INSERT INTO _schema_migrations (version, applied_at, description)
             VALUES (?, ?, ?)
             """,
-            (version, datetime.now(timezone.utc).isoformat(), description)
+            (version, datetime.now(timezone.utc).isoformat(), description),
         )
 
     async def _column_exists(self, table: str, column: str) -> bool:
@@ -113,14 +115,10 @@ class SchemaMigrator:
             return False
 
     async def _add_column_if_missing(
-        self, 
-        table: str, 
-        column: str, 
-        column_type: str,
-        default: Optional[str] = None
+        self, table: str, column: str, column_type: str, default: Optional[str] = None
     ) -> bool:
         """Add column to table if it doesn't exist.
-        
+
         Returns True if column was added, False if already exists.
         """
         if await self._column_exists(table, column):
@@ -129,7 +127,7 @@ class SchemaMigrator:
 
         default_clause = f" DEFAULT {default}" if default is not None else ""
         sql = f"ALTER TABLE {table} ADD COLUMN {column} {column_type}{default_clause}"
-        
+
         try:
             await self.connection.execute(sql)
             logger.info(f"Added column {table}.{column}")
@@ -141,8 +139,7 @@ class SchemaMigrator:
     async def _table_exists(self, table: str) -> bool:
         """Check if a table exists."""
         cursor = await self.connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            (table,)
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
         )
         return cursor.fetchone() is not None
 
@@ -154,27 +151,45 @@ class SchemaMigrator:
         # All tables should already exist from initializer
         logger.info("Marking initial schema version")
 
-    async def _migration_v2_work_tracking_columns(self, migrator: "SchemaMigrator") -> None:
+    async def _migration_v2_work_tracking_columns(
+        self, migrator: "SchemaMigrator"
+    ) -> None:
         """Add work tracking columns that may be missing."""
-        
+
         # pins table columns
         if await self._table_exists("pins"):
-            await self._add_column_if_missing("pins", "promoted_to_memory_id", "TEXT", "NULL")
+            await self._add_column_if_missing(
+                "pins", "promoted_to_memory_id", "TEXT", "NULL"
+            )
             await self._add_column_if_missing("pins", "auto_importance", "INTEGER", "0")
-            await self._add_column_if_missing("pins", "estimated_tokens", "INTEGER", "0")
+            await self._add_column_if_missing(
+                "pins", "estimated_tokens", "INTEGER", "0"
+            )
             await self._add_column_if_missing("pins", "user_id", "TEXT", "'default'")
 
         # sessions table columns
         if await self._table_exists("sessions"):
-            await self._add_column_if_missing("sessions", "user_id", "TEXT", "'default'")
-            await self._add_column_if_missing("sessions", "initial_context_tokens", "INTEGER", "0")
-            await self._add_column_if_missing("sessions", "total_loaded_tokens", "INTEGER", "0")
-            await self._add_column_if_missing("sessions", "total_saved_tokens", "INTEGER", "0")
+            await self._add_column_if_missing(
+                "sessions", "user_id", "TEXT", "'default'"
+            )
+            await self._add_column_if_missing(
+                "sessions", "initial_context_tokens", "INTEGER", "0"
+            )
+            await self._add_column_if_missing(
+                "sessions", "total_loaded_tokens", "INTEGER", "0"
+            )
+            await self._add_column_if_missing(
+                "sessions", "total_saved_tokens", "INTEGER", "0"
+            )
 
         # projects table columns (if any new ones needed)
         if await self._table_exists("projects"):
-            await self._add_column_if_missing("projects", "global_rules", "TEXT", "NULL")
-            await self._add_column_if_missing("projects", "global_context", "TEXT", "NULL")
+            await self._add_column_if_missing(
+                "projects", "global_rules", "TEXT", "NULL"
+            )
+            await self._add_column_if_missing(
+                "projects", "global_context", "TEXT", "NULL"
+            )
 
     async def _migration_v3_relation_tables(self, migrator: "SchemaMigrator") -> None:
         """Add memory_relations table for existing databases."""
@@ -197,12 +212,18 @@ class SchemaMigrator:
             """)
             logger.info("Created memory_relations table via migration v3")
 
-    async def _migration_v4_pin_columns_integrity(self, migrator: "SchemaMigrator") -> None:
+    async def _migration_v4_pin_columns_integrity(
+        self, migrator: "SchemaMigrator"
+    ) -> None:
         """Ensure all pin columns exist for databases that skipped earlier migrations."""
         if await self._table_exists("pins"):
             await self._add_column_if_missing("pins", "auto_importance", "INTEGER", "0")
-            await self._add_column_if_missing("pins", "estimated_tokens", "INTEGER", "0")
-            await self._add_column_if_missing("pins", "promoted_to_memory_id", "TEXT", "NULL")
+            await self._add_column_if_missing(
+                "pins", "estimated_tokens", "INTEGER", "0"
+            )
+            await self._add_column_if_missing(
+                "pins", "promoted_to_memory_id", "TEXT", "NULL"
+            )
             await self._add_column_if_missing("pins", "embedding", "BLOB", "NULL")
             await self._add_column_if_missing("pins", "user_id", "TEXT", "'default'")
             logger.info("Pin columns integrity check completed via migration v4")
