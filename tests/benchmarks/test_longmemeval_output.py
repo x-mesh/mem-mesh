@@ -26,7 +26,6 @@ from benchmarks.longmemeval.reporter import (
 )
 from benchmarks.longmemeval.translator import _load_existing, _parse_json, _save_results
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -60,8 +59,18 @@ def _make_question_result(
         answer="Something",
         hypothesis="Something happened",
         retrieval_metrics=RetrievalMetrics(
-            recall_any={1: recall_any_10, 3: recall_any_10, 5: recall_any_10, 10: recall_any_10},
-            recall_all={1: recall_all_10, 3: recall_all_10, 5: recall_all_10, 10: recall_all_10},
+            recall_any={
+                1: recall_any_10,
+                3: recall_any_10,
+                5: recall_any_10,
+                10: recall_any_10,
+            },
+            recall_all={
+                1: recall_all_10,
+                3: recall_all_10,
+                5: recall_all_10,
+                10: recall_all_10,
+            },
             ndcg={1: 1.0, 3: 1.0, 5: 1.0, 10: 1.0},
             retrieval_time_ms=time_ms,
         ),
@@ -196,7 +205,9 @@ class TestGenerateReport:
         assert multi.correct == 2
         assert multi.accuracy == pytest.approx(1.0)
 
-    def test_avg_retrieval_metrics(self, question_results: List[QuestionResult]) -> None:
+    def test_avg_retrieval_metrics(
+        self, question_results: List[QuestionResult]
+    ) -> None:
         report = generate_report(results=question_results, experiment_name="ret-test")
         m = report.avg_retrieval_metrics
         assert m.recall_any[10] == pytest.approx(1.0)
@@ -230,7 +241,9 @@ class TestGenerateReport:
 
 
 class TestPrintReport:
-    def test_runs_without_error(self, sample_report: BenchmarkReport, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_runs_without_error(
+        self, sample_report: BenchmarkReport, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         print_report(sample_report)
         captured = capsys.readouterr()
         assert "test-run" in captured.out
@@ -238,7 +251,9 @@ class TestPrintReport:
 
 
 class TestSaveReportMarkdown:
-    def test_writes_valid_markdown(self, sample_report: BenchmarkReport, tmp_path: Path) -> None:
+    def test_writes_valid_markdown(
+        self, sample_report: BenchmarkReport, tmp_path: Path
+    ) -> None:
         md_path = str(tmp_path / "report.md")
         save_report_markdown(sample_report, md_path)
 
@@ -247,14 +262,18 @@ class TestSaveReportMarkdown:
         assert "| Category |" in content
         assert "single-session-user-centric" in content
 
-    def test_creates_parent_dirs(self, sample_report: BenchmarkReport, tmp_path: Path) -> None:
+    def test_creates_parent_dirs(
+        self, sample_report: BenchmarkReport, tmp_path: Path
+    ) -> None:
         md_path = str(tmp_path / "sub" / "dir" / "report.md")
         save_report_markdown(sample_report, md_path)
         assert Path(md_path).exists()
 
 
 class TestSaveReportJson:
-    def test_writes_valid_json(self, sample_report: BenchmarkReport, tmp_path: Path) -> None:
+    def test_writes_valid_json(
+        self, sample_report: BenchmarkReport, tmp_path: Path
+    ) -> None:
         json_path = str(tmp_path / "report.json")
         save_report_json(sample_report, json_path)
 
@@ -263,7 +282,9 @@ class TestSaveReportJson:
         assert isinstance(data["category_results"], list)
         assert isinstance(data["avg_retrieval_metrics"], dict)
 
-    def test_creates_parent_dirs(self, sample_report: BenchmarkReport, tmp_path: Path) -> None:
+    def test_creates_parent_dirs(
+        self, sample_report: BenchmarkReport, tmp_path: Path
+    ) -> None:
         json_path = str(tmp_path / "sub" / "dir" / "report.json")
         save_report_json(sample_report, json_path)
         assert Path(json_path).exists()

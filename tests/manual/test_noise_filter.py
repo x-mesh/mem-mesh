@@ -4,11 +4,12 @@
 """
 
 import asyncio
+
+from app.core.config import Settings
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.final_improved_search import FinalImprovedSearch
 from app.core.services.noise_filter import NoiseFilter, SmartSearchFilter
-from app.core.config import Settings
 
 
 async def test_noise_filter():
@@ -19,8 +20,8 @@ async def test_noise_filter():
     await db.connect()
 
     embedding_service = EmbeddingService(
-        model_name='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
-        preload=False
+        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        preload=False,
     )
     embedding_service.load_model()
 
@@ -50,56 +51,56 @@ async def test_noise_filter():
         # 프로젝트별 통계
         project_stats = {}
         for r in results.results:
-            project = r.project_id or 'None'
+            project = r.project_id or "None"
             project_stats[project] = project_stats.get(project, 0) + 1
 
         # kiro 프로젝트 카운트
-        kiro_count = sum(1 for p in project_stats if p.startswith('kiro-'))
+        kiro_count = sum(1 for p in project_stats if p.startswith("kiro-"))
         print(f"   - kiro-* 프로젝트: {kiro_count}개")
         print(f"   - {expected_project}: {project_stats.get(expected_project, 0)}개")
 
         # 노이즈 필터 적용
         filtered_results = noise_filter.filter(
-            results.results,
-            query,
-            project_hint=expected_project,
-            aggressive=False
+            results.results, query, project_hint=expected_project, aggressive=False
         )
         print(f"\n2️⃣ 기본 필터 적용: {len(filtered_results)}개 결과")
 
         # 필터 후 통계
         filtered_stats = {}
         for r in filtered_results[:5]:  # 상위 5개만
-            project = r.project_id or 'None'
+            project = r.project_id or "None"
             filtered_stats[project] = filtered_stats.get(project, 0) + 1
 
-        kiro_count_filtered = sum(1 for p in filtered_stats if p.startswith('kiro-'))
+        kiro_count_filtered = sum(1 for p in filtered_stats if p.startswith("kiro-"))
         print(f"   - kiro-* 프로젝트: {kiro_count_filtered}개")
         print(f"   - {expected_project}: {filtered_stats.get(expected_project, 0)}개")
 
         # 공격적 필터 적용
         aggressive_filtered = noise_filter.filter(
-            results.results,
-            query,
-            project_hint=expected_project,
-            aggressive=True
+            results.results, query, project_hint=expected_project, aggressive=True
         )
         print(f"\n3️⃣ 공격적 필터: {len(aggressive_filtered)}개 결과")
 
         # 스마트 필터 (컨텍스트 포함)
         context = {
-            'project': expected_project,
-            'time_range': '30d',
-            'aggressive_filter': True,
-            'max_results': 5
+            "project": expected_project,
+            "time_range": "30d",
+            "aggressive_filter": True,
+            "max_results": 5,
         }
 
         smart_response = smart_filter.apply(results, query, context)
         print(f"\n4️⃣ 스마트 필터 (컨텍스트): {len(smart_response.results)}개 결과")
 
         # 스마트 필터 결과 분석
-        correct = sum(1 for r in smart_response.results if r.project_id == expected_project)
-        accuracy = (correct / len(smart_response.results)) * 100 if smart_response.results else 0
+        correct = sum(
+            1 for r in smart_response.results if r.project_id == expected_project
+        )
+        accuracy = (
+            (correct / len(smart_response.results)) * 100
+            if smart_response.results
+            else 0
+        )
 
         print(f"   - 정확도: {accuracy:.0f}% ({correct}/{len(smart_response.results)})")
 

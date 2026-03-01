@@ -1,14 +1,14 @@
 """OAuth Bearer Token Authentication Middleware."""
 
 import logging
-from typing import Optional, Callable
+from typing import Callable, Optional
 
-from fastapi import Request, HTTPException
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.core.config import get_settings
 from app.core.auth.utils import parse_bearer_token
+from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
     def _requires_auth(self, path: str, settings) -> bool:
         """
         Determine if a path requires authentication.
-        
+
         Logic:
         1. If auth_enabled=False, no authentication required anywhere
         2. Public paths (health, docs, static) are always exempt

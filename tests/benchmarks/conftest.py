@@ -20,7 +20,9 @@ if _PROJECT_ROOT not in sys.path:
 _test_benchmarks = sys.modules.pop("benchmarks", None)
 
 # Also remove any stale benchmarks.* entries from tests/
-_stale = {k: sys.modules.pop(k) for k in list(sys.modules) if k.startswith("benchmarks.")}
+_stale = {
+    k: sys.modules.pop(k) for k in list(sys.modules) if k.startswith("benchmarks.")
+}
 
 # Import the real benchmarks.longmemeval package chain.
 

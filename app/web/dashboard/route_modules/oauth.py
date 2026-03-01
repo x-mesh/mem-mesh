@@ -2,13 +2,13 @@
 
 import logging
 
-from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.core.auth import OAuthService
 from app.core.auth.schemas import (
     OAuthClientCreate,
-    OAuthClientUpdate,
     OAuthClientResponse,
+    OAuthClientUpdate,
     OAuthClientWithSecretResponse,
 )
 

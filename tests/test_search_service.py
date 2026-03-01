@@ -2,16 +2,17 @@
 Search Service 테스트
 """
 
-import pytest
-import tempfile
 import os
-from unittest.mock import Mock
+import tempfile
 from datetime import datetime, timezone
+from unittest.mock import Mock
 
-from app.core.services.search import SearchService
+import pytest
+
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.memory import MemoryService
+from app.core.services.search import SearchService
 
 
 @pytest.fixture

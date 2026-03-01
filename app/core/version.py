@@ -25,11 +25,11 @@ SERVER_INFO = {
 def get_server_info(transport: str = None) -> dict:
     """
     서버 정보 반환.
-    
+
     Args:
-        transport: transport 타입 (stdio, sse 등). 
+        transport: transport 타입 (stdio, sse 등).
                    지정하면 description에 포함됨.
-    
+
     Returns:
         서버 정보 딕셔너리
     """

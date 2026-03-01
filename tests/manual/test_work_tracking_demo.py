@@ -4,19 +4,19 @@ Work Tracking 기능 데모 테스트
 """
 
 import asyncio
-import tempfile
 import os
+import tempfile
 
 from app.core.database.base import Database
-from app.core.services.project import ProjectService
 from app.core.schemas.projects import ProjectUpdate
+from app.core.services.project import ProjectService
 
 
 async def test_work_tracking():
     """Work Tracking 기능 테스트"""
-    
+
     # 임시 데이터베이스 생성
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as f:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as f:
         db_path = f.name
 
     try:
@@ -37,9 +37,11 @@ async def test_work_tracking():
         update_data = ProjectUpdate(
             name="Test Project Updated",
             description="This is a test project for work tracking.",
-            tech_stack="Python, FastAPI, SQLite"
+            tech_stack="Python, FastAPI, SQLite",
         )
-        updated_project = await project_service.update_project("test-project-1", update_data)
+        updated_project = await project_service.update_project(
+            "test-project-1", update_data
+        )
         print(f"   업데이트된 이름: {updated_project.name}")
         print(f"   설명: {updated_project.description}")
         print(f"   기술 스택: {updated_project.tech_stack}")
@@ -68,7 +70,7 @@ async def test_work_tracking():
         await db.close()
 
         # 임시 파일 정리
-        for ext in ['', '-wal', '-shm']:
+        for ext in ["", "-wal", "-shm"]:
             path = db_path + ext
             if os.path.exists(path):
                 os.unlink(path)
@@ -78,7 +80,7 @@ async def test_work_tracking():
     except Exception as e:
         print(f"테스트 중 오류 발생: {e}")
         # 정리
-        for ext in ['', '-wal', '-shm']:
+        for ext in ["", "-wal", "-shm"]:
             path = db_path + ext
             if os.path.exists(path):
                 os.unlink(path)

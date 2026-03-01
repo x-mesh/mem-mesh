@@ -7,26 +7,28 @@ Memory Relations 서비스.
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import List, Optional
 
 from app.core.database.base import Database
 from app.core.schemas.relations import (
     Relation,
     RelationCreate,
-    RelationUpdate,
-    RelationType,
-    RelationWithMemory,
     RelationGraph,
+    RelationType,
+    RelationUpdate,
+    RelationWithMemory,
 )
 
 
 class RelationNotFoundError(Exception):
     """관계를 찾을 수 없음"""
+
     pass
 
 
 class MemoryNotFoundError(Exception):
     """메모리를 찾을 수 없음"""
+
     pass
 
 
@@ -88,9 +90,7 @@ class RelationService:
 
         return self._row_to_relation(row)
 
-    async def update_relation(
-        self, relation_id: str, data: RelationUpdate
-    ) -> Relation:
+    async def update_relation(self, relation_id: str, data: RelationUpdate) -> Relation:
         """관계 수정"""
         existing = await self.get_relation(relation_id)
         if not existing:
@@ -293,8 +293,16 @@ class RelationService:
             metadata=json.loads(row["metadata"]) if row["metadata"] else None,
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
-            source_content=row["source_content"] if "source_content" in row.keys() else None,
-            source_project_id=row["source_project_id"] if "source_project_id" in row.keys() else None,
-            target_content=row["target_content"] if "target_content" in row.keys() else None,
-            target_project_id=row["target_project_id"] if "target_project_id" in row.keys() else None,
+            source_content=(
+                row["source_content"] if "source_content" in row.keys() else None
+            ),
+            source_project_id=(
+                row["source_project_id"] if "source_project_id" in row.keys() else None
+            ),
+            target_content=(
+                row["target_content"] if "target_content" in row.keys() else None
+            ),
+            target_project_id=(
+                row["target_project_id"] if "target_project_id" in row.keys() else None
+            ),
         )

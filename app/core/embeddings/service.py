@@ -3,13 +3,14 @@ Embedding Service for mem-mesh
 텍스트를 벡터로 변환하는 서비스
 """
 
+import logging
 import os
 import ssl
 import struct
-import logging
 import time
+from typing import TYPE_CHECKING, Optional
+
 import urllib3
-from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..services.metrics_collector import MetricsCollector
@@ -57,6 +58,7 @@ if _ignore_ssl:
 
 try:
     from sentence_transformers import SentenceTransformer
+
     SENTENCE_TRANSFORMERS_AVAILABLE = True
 except ImportError:
     SENTENCE_TRANSFORMERS_AVAILABLE = False
@@ -123,7 +125,7 @@ class EmbeddingService:
                 "sentence-transformers is not installed. "
                 "Install it with: pip install sentence-transformers"
             )
-        
+
         self.model: Optional[SentenceTransformer] = None
         self.metrics_collector = metrics_collector
 
@@ -143,7 +145,9 @@ class EmbeddingService:
         # E5 모델 여부 (query/passage prefix 자동 적용)
         self._is_e5 = _is_e5_model(self.model_name)
         if self._is_e5:
-            logger.info("E5 model detected: query/passage prefix will be applied automatically")
+            logger.info(
+                "E5 model detected: query/passage prefix will be applied automatically"
+            )
 
         # 기본 차원 설정 (실제 모델 로드 후 업데이트됨)
         self.dimension: int = MODEL_DIMENSIONS.get(self.model_name, 384)
@@ -216,7 +220,9 @@ class EmbeddingService:
 
         try:
             prepared = self._prepare_text(text, is_query)
-            embedding = self.model.encode(prepared, convert_to_tensor=False, normalize_embeddings=True)
+            embedding = self.model.encode(
+                prepared, convert_to_tensor=False, normalize_embeddings=True
+            )
             result = embedding.tolist()
 
             self._collect_embedding_metric(
@@ -231,7 +237,9 @@ class EmbeddingService:
             logger.error(f"Failed to generate embedding for text: {e}")
             raise
 
-    def embed_batch(self, texts: list[str], is_query: bool = False) -> list[list[float]]:
+    def embed_batch(
+        self, texts: list[str], is_query: bool = False
+    ) -> list[list[float]]:
         """
         배치 임베딩
 
@@ -249,7 +257,9 @@ class EmbeddingService:
 
         try:
             prepared = [self._prepare_text(t, is_query) for t in texts]
-            embeddings = self.model.encode(prepared, convert_to_tensor=False, normalize_embeddings=True)
+            embeddings = self.model.encode(
+                prepared, convert_to_tensor=False, normalize_embeddings=True
+            )
             result = [embedding.tolist() for embedding in embeddings]
 
             self._collect_embedding_metric(

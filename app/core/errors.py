@@ -129,7 +129,9 @@ class ContextNotFoundError(MemMeshError):
     error_code = ErrorCode.CONTEXT_NOT_FOUND
 
     def __init__(self, memory_id: str):
-        super().__init__(f"Context not found for memory: {memory_id}", memory_id=memory_id)
+        super().__init__(
+            f"Context not found for memory: {memory_id}", memory_id=memory_id
+        )
 
 
 class RelationNotFoundError(MemMeshError):

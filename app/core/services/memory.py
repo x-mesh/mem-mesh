@@ -5,13 +5,13 @@ Memory Service for mem-mesh
 
 import json
 import logging
-from typing import Optional, List
 from datetime import datetime
+from typing import List, Optional
 
 from ..database.base import Database
 from ..database.models import Memory
 from ..embeddings.service import EmbeddingService
-from ..schemas.responses import AddResponse, UpdateResponse, DeleteResponse
+from ..schemas.responses import AddResponse, DeleteResponse, UpdateResponse
 
 logger = logging.getLogger(__name__)
 
@@ -280,9 +280,11 @@ class MemoryService:
                             content,
                             content_hash,
                             category or existing_memory.category,
-                            json.dumps(tags)
-                            if tags is not None
-                            else existing_memory.tags,
+                            (
+                                json.dumps(tags)
+                                if tags is not None
+                                else existing_memory.tags
+                            ),
                             embedding_bytes,
                             datetime.utcnow().isoformat() + "Z",
                             memory_id,
@@ -304,9 +306,11 @@ class MemoryService:
                         """,
                         (
                             category or existing_memory.category,
-                            json.dumps(tags)
-                            if tags is not None
-                            else existing_memory.tags,
+                            (
+                                json.dumps(tags)
+                                if tags is not None
+                                else existing_memory.tags
+                            ),
                             datetime.utcnow().isoformat() + "Z",
                             memory_id,
                         ),
@@ -417,6 +421,7 @@ class MemoryService:
             if cursor.fetchone():
                 # sqlite-vec 사용 - embedding을 JSON 형식으로 변환
                 import json
+
                 import numpy as np
 
                 # bytes를 numpy array로 변환
@@ -459,6 +464,7 @@ class MemoryService:
             if cursor.fetchone():
                 # sqlite-vec 사용 - embedding을 JSON 형식으로 변환
                 import json
+
                 import numpy as np
 
                 # bytes를 numpy array로 변환

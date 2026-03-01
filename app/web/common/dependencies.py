@@ -7,15 +7,16 @@ FastAPI 의존성 함수들.
 from fastapi import HTTPException
 
 from app.core.database.base import Database
-from app.core.services.memory import MemoryService
-from app.core.services.unified_search import UnifiedSearchService
 from app.core.services.context import ContextService
-from app.core.services.stats import StatsService
 from app.core.services.embedding_manager import EmbeddingManagerService
-from app.core.services.project import ProjectService
-from app.core.services.session import SessionService
+from app.core.services.memory import MemoryService
 from app.core.services.pin import PinService
+from app.core.services.project import ProjectService
 from app.core.services.relation import RelationService
+from app.core.services.session import SessionService
+from app.core.services.stats import StatsService
+from app.core.services.unified_search import UnifiedSearchService
+
 from ..lifespan import get_services
 
 
@@ -89,7 +90,6 @@ def get_pin_service() -> PinService:
     if services["pin_service"] is None:
         raise HTTPException(status_code=500, detail="Pin service not initialized")
     return services["pin_service"]
-
 
 
 def get_relation_service() -> RelationService:

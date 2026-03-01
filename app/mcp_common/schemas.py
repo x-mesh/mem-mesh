@@ -5,12 +5,20 @@ Pure MCP 구현에서 tools/list 응답에 사용됩니다.
 FastMCP는 자동으로 스키마를 생성하지만, 일관성을 위해 여기서 정의합니다.
 """
 
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 from .descriptions import TOOL_DESCRIPTIONS
 
 # 유효한 카테고리 목록
-VALID_CATEGORIES = ["task", "bug", "idea", "decision", "incident", "code_snippet", "git-history"]
+VALID_CATEGORIES = [
+    "task",
+    "bug",
+    "idea",
+    "decision",
+    "incident",
+    "code_snippet",
+    "git-history",
+]
 
 # 유효한 검색 모드 목록
 VALID_SEARCH_MODES = ["hybrid", "exact", "semantic", "fuzzy"]
@@ -31,39 +39,35 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": "Memory content (10-10000 characters)",
                         "minLength": 10,
-                        "maxLength": 10000
+                        "maxLength": 10000,
                     },
                     "project_id": {
                         "type": "string",
                         "description": "Project identifier (optional)",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "category": {
                         "type": "string",
                         "description": "Memory category",
                         "default": "task",
-                        "enum": VALID_CATEGORIES
+                        "enum": VALID_CATEGORIES,
                     },
                     "source": {
                         "type": "string",
                         "description": "Memory source",
                         "default": "mcp",
-                        "maxLength": 50
+                        "maxLength": 50,
                     },
                     "tags": {
                         "type": "array",
-                        "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 50
-                        },
+                        "items": {"type": "string", "minLength": 1, "maxLength": 50},
                         "description": "Memory tags",
-                        "maxItems": 20
+                        "maxItems": 20,
                     },
                 },
                 "required": ["content"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
         {
@@ -75,63 +79,71 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                     "query": {
                         "type": "string",
                         "description": "Search query. Use empty string '' to get recent memories without search. Korean time expressions (이번주, 지난달) are auto-detected.",
-                        "maxLength": 500
+                        "maxLength": 500,
                     },
                     "project_id": {
                         "type": "string",
                         "description": "Project filter",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "category": {
                         "type": "string",
                         "description": "Category filter",
-                        "enum": VALID_CATEGORIES
+                        "enum": VALID_CATEGORIES,
                     },
                     "limit": {
                         "type": "integer",
                         "description": "Maximum results (1-20)",
                         "default": 5,
                         "minimum": 1,
-                        "maximum": 20
+                        "maximum": 20,
                     },
                     "recency_weight": {
                         "type": "number",
                         "description": "Recency weight (0.0-1.0)",
                         "default": 0.0,
                         "minimum": 0.0,
-                        "maximum": 1.0
+                        "maximum": 1.0,
                     },
                     "response_format": {
                         "type": "string",
                         "description": "Response format: minimal (IDs only), compact (summaries), standard (full), full (complete)",
                         "default": "standard",
-                        "enum": ["minimal", "compact", "standard", "full"]
+                        "enum": ["minimal", "compact", "standard", "full"],
                     },
                     "time_range": {
                         "type": "string",
                         "description": "Time range shortcut: today, yesterday, this_week, last_week, this_month, last_month, this_quarter",
-                        "enum": ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_quarter"]
+                        "enum": [
+                            "today",
+                            "yesterday",
+                            "this_week",
+                            "last_week",
+                            "this_month",
+                            "last_month",
+                            "this_quarter",
+                        ],
                     },
                     "date_from": {
                         "type": "string",
                         "description": "Start date (YYYY-MM-DD)",
-                        "pattern": r"^\d{4}-\d{2}-\d{2}$"
+                        "pattern": r"^\d{4}-\d{2}-\d{2}$",
                     },
                     "date_to": {
                         "type": "string",
                         "description": "End date (YYYY-MM-DD)",
-                        "pattern": r"^\d{4}-\d{2}-\d{2}$"
+                        "pattern": r"^\d{4}-\d{2}-\d{2}$",
                     },
                     "temporal_mode": {
                         "type": "string",
                         "description": "Temporal mode: filter (only in range), boost (prioritize in range, default), decay (score decreases with age)",
                         "default": "boost",
-                        "enum": ["filter", "boost", "decay"]
+                        "enum": ["filter", "boost", "decay"],
                     },
                 },
                 "required": ["query"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
         {
@@ -144,30 +156,30 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": "Memory ID to get context for",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "depth": {
                         "type": "integer",
                         "description": "Search depth (1-5)",
                         "default": 2,
                         "minimum": 1,
-                        "maximum": 5
+                        "maximum": 5,
                     },
                     "project_id": {
                         "type": "string",
                         "description": "Project filter",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "response_format": {
                         "type": "string",
                         "description": "Response format: compact (summaries), standard (full)",
                         "default": "standard",
-                        "enum": ["compact", "standard", "full"]
+                        "enum": ["compact", "standard", "full"],
                     },
                 },
                 "required": ["memory_id"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
         {
@@ -180,32 +192,28 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": "Memory ID to update",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "content": {
                         "type": "string",
                         "description": "New content",
                         "minLength": 10,
-                        "maxLength": 10000
+                        "maxLength": 10000,
                     },
                     "category": {
                         "type": "string",
                         "description": "New category",
-                        "enum": VALID_CATEGORIES
+                        "enum": VALID_CATEGORIES,
                     },
                     "tags": {
                         "type": "array",
-                        "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 50
-                        },
+                        "items": {"type": "string", "minLength": 1, "maxLength": 50},
                         "description": "New tags",
-                        "maxItems": 20
+                        "maxItems": 20,
                     },
                 },
                 "required": ["memory_id"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
         {
@@ -218,11 +226,11 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": "Memory ID to delete",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                 },
                 "required": ["memory_id"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
         {
@@ -235,20 +243,20 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": "Project filter",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "start_date": {
                         "type": "string",
                         "description": "Start date filter (YYYY-MM-DD)",
-                        "pattern": r"^\d{4}-\d{2}-\d{2}$"
+                        "pattern": r"^\d{4}-\d{2}-\d{2}$",
                     },
                     "end_date": {
                         "type": "string",
                         "description": "End date filter (YYYY-MM-DD)",
-                        "pattern": r"^\d{4}-\d{2}-\d{2}$"
+                        "pattern": r"^\d{4}-\d{2}-\d{2}$",
                     },
                 },
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
     ]
@@ -267,33 +275,29 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": "Pin content describing the task or work item",
                         "minLength": 10,
-                        "maxLength": 10000
+                        "maxLength": 10000,
                     },
                     "project_id": {
                         "type": "string",
                         "description": "Project identifier",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "importance": {
                         "type": "integer",
                         "description": "Importance score (1-5). Auto-determined if not provided.",
                         "minimum": 1,
-                        "maximum": 5
+                        "maximum": 5,
                     },
                     "tags": {
                         "type": "array",
-                        "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 50
-                        },
+                        "items": {"type": "string", "minLength": 1, "maxLength": 50},
                         "description": "Pin tags",
-                        "maxItems": 10
+                        "maxItems": 10,
                     },
                 },
                 "required": ["content", "project_id"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
         {
@@ -306,11 +310,11 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": "Pin ID to complete",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                 },
                 "required": ["pin_id"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
         {
@@ -323,17 +327,24 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": "Pin ID to promote to memory",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "category": {
                         "type": "string",
                         "description": "Memory category (default: task)",
-                        "enum": ["task", "bug", "idea", "decision", "incident", "code_snippet"],
-                        "default": "task"
+                        "enum": [
+                            "task",
+                            "bug",
+                            "idea",
+                            "decision",
+                            "incident",
+                            "code_snippet",
+                        ],
+                        "default": "task",
                     },
                 },
                 "required": ["pin_id"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
         {
@@ -346,26 +357,26 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": "Project identifier",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "expand": {
                         "description": "Expand mode: false=compact(80 chars), true=full content, 'smart'=4-tier matrix based on status×importance (recommended). Smart tiers: T1(active+important)=full, T2(active+normal)=200chars, T3(completed+important)=80chars, T4(completed+normal)=id only",
                         "default": False,
                         "oneOf": [
                             {"type": "boolean"},
-                            {"type": "string", "enum": ["smart"]}
-                        ]
+                            {"type": "string", "enum": ["smart"]},
+                        ],
                     },
                     "limit": {
                         "type": "integer",
                         "description": "Maximum number of pins to return",
                         "default": 10,
                         "minimum": 1,
-                        "maximum": 50
+                        "maximum": 50,
                     },
                 },
                 "required": ["project_id"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
         {
@@ -378,16 +389,16 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": "Project identifier",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "summary": {
                         "type": "string",
                         "description": "Session summary (auto-generated if not provided)",
-                        "maxLength": 500
+                        "maxLength": 500,
                     },
                 },
                 "required": ["project_id"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
     ]
@@ -422,70 +433,78 @@ def get_batch_tool_schemas() -> List[Dict[str, Any]]:
                                 "type": {
                                     "type": "string",
                                     "description": "Operation type",
-                                    "enum": ["add", "search", "pin_add"]
+                                    "enum": ["add", "search", "pin_add"],
                                 },
                                 "content": {
                                     "type": "string",
                                     "description": "Memory content (for 'add' operations) or Pin content (for 'pin_add')",
                                     "minLength": 10,
-                                    "maxLength": 10000
+                                    "maxLength": 10000,
                                 },
                                 "query": {
                                     "type": "string",
                                     "description": "Search query (for 'search' operations). Use empty string for recent memories.",
-                                    "maxLength": 500
+                                    "maxLength": 500,
                                 },
                                 "project_id": {
                                     "type": "string",
                                     "description": "Project identifier",
                                     "pattern": "^[a-zA-Z0-9_-]+$",
-                                    "maxLength": 100
+                                    "maxLength": 100,
                                 },
                                 "category": {
                                     "type": "string",
                                     "description": "Category",
-                                    "enum": VALID_CATEGORIES
+                                    "enum": VALID_CATEGORIES,
                                 },
                                 "tags": {
                                     "type": "array",
                                     "items": {
                                         "type": "string",
                                         "minLength": 1,
-                                        "maxLength": 50
+                                        "maxLength": 50,
                                     },
                                     "description": "Tags",
-                                    "maxItems": 20
+                                    "maxItems": 20,
                                 },
                                 "limit": {
                                     "type": "integer",
                                     "description": "Maximum results (for 'search' operations)",
                                     "default": 5,
                                     "minimum": 1,
-                                    "maximum": 20
+                                    "maximum": 20,
                                 },
                                 "importance": {
                                     "type": "integer",
                                     "description": "Importance score (for 'pin_add' operations). Auto-determined if not provided.",
                                     "minimum": 1,
-                                    "maximum": 5
+                                    "maximum": 5,
                                 },
                             },
                             "required": ["type"],
-                            "additionalProperties": False
+                            "additionalProperties": False,
                         },
                         "minItems": 1,
-                        "maxItems": 50
+                        "maxItems": 50,
                     },
                 },
                 "required": ["operations"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
     ]
 
 
 # 유효한 관계 유형 목록
-VALID_RELATION_TYPES = ["related", "parent", "child", "supersedes", "references", "depends_on", "similar"]
+VALID_RELATION_TYPES = [
+    "related",
+    "parent",
+    "child",
+    "supersedes",
+    "references",
+    "depends_on",
+    "similar",
+]
 
 
 def get_relation_tool_schemas() -> List[Dict[str, Any]]:
@@ -501,35 +520,35 @@ def get_relation_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": "Source memory ID",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "target_id": {
                         "type": "string",
                         "description": "Target memory ID",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "relation_type": {
                         "type": "string",
                         "description": "Type of relation",
                         "default": "related",
-                        "enum": VALID_RELATION_TYPES
+                        "enum": VALID_RELATION_TYPES,
                     },
                     "strength": {
                         "type": "number",
                         "description": "Relation strength (0.0-1.0)",
                         "default": 1.0,
                         "minimum": 0.0,
-                        "maximum": 1.0
+                        "maximum": 1.0,
                     },
                     "metadata": {
                         "type": "object",
                         "description": "Optional metadata for the relation",
-                        "additionalProperties": True
+                        "additionalProperties": True,
                     },
                 },
                 "required": ["source_id", "target_id"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
         {
@@ -542,22 +561,22 @@ def get_relation_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": "Source memory ID",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "target_id": {
                         "type": "string",
                         "description": "Target memory ID",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "relation_type": {
                         "type": "string",
                         "description": "Specific relation type to remove (optional - removes all if not specified)",
-                        "enum": VALID_RELATION_TYPES
+                        "enum": VALID_RELATION_TYPES,
                     },
                 },
                 "required": ["source_id", "target_id"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
         {
@@ -570,29 +589,29 @@ def get_relation_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": "Memory ID to get relations for",
                         "pattern": "^[a-zA-Z0-9_-]+$",
-                        "maxLength": 100
+                        "maxLength": 100,
                     },
                     "relation_type": {
                         "type": "string",
                         "description": "Filter by relation type (optional)",
-                        "enum": VALID_RELATION_TYPES
+                        "enum": VALID_RELATION_TYPES,
                     },
                     "direction": {
                         "type": "string",
                         "description": "Relation direction filter",
                         "default": "both",
-                        "enum": ["outgoing", "incoming", "both"]
+                        "enum": ["outgoing", "incoming", "both"],
                     },
                     "limit": {
                         "type": "integer",
                         "description": "Maximum relations to return",
                         "default": 20,
                         "minimum": 1,
-                        "maximum": 100
+                        "maximum": 100,
                     },
                 },
                 "required": ["memory_id"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
         },
     ]

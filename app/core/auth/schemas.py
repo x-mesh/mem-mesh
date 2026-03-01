@@ -4,9 +4,9 @@ OAuth Pydantic schemas for request/response validation.
 MCP 2025-03-26 OAuth 스펙 준수.
 """
 
-from typing import Optional, List
-from pydantic import BaseModel, Field
+from typing import List, Optional
 
+from pydantic import BaseModel, Field
 
 # ============================================================================
 # Client Registration (RFC 7591 Dynamic Client Registration)

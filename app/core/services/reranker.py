@@ -62,9 +62,7 @@ class RerankerService:
         start = time.time()
         self._model = CrossEncoder(self.model_name)
         elapsed = time.time() - start
-        logger.info(
-            "CrossEncoder loaded: %s (%.1fs)", self.model_name, elapsed
-        )
+        logger.info("CrossEncoder loaded: %s (%.1fs)", self.model_name, elapsed)
 
     @property
     def is_available(self) -> bool:

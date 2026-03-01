@@ -4,36 +4,36 @@ OAuth 2.1 + PKCE Tests
 Comprehensive tests for OAuth service, endpoints, and PKCE flow.
 """
 
-import pytest
-import tempfile
 import os
+import tempfile
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.core.database.base import Database
-from app.core.config import Settings
 from app.core.auth import OAuthService
-from app.core.auth.models import OAuthClient, OAuthToken, OAuthAuthorizationCode
+from app.core.auth.models import OAuthAuthorizationCode, OAuthClient, OAuthToken
 from app.core.auth.schemas import OAuthClientCreate, OAuthClientUpdate
-from app.core.auth.utils import (
-    generate_client_id,
-    generate_client_secret,
-    generate_token,
-    generate_authorization_code,
-    hash_secret,
-    verify_secret,
-    generate_code_verifier,
-    generate_code_challenge,
-    verify_pkce,
-    parse_bearer_token,
-    generate_state,
-)
 from app.core.auth.service import (
     InvalidClientError,
     InvalidGrantError,
     InvalidRequestError,
 )
+from app.core.auth.utils import (
+    generate_authorization_code,
+    generate_client_id,
+    generate_client_secret,
+    generate_code_challenge,
+    generate_code_verifier,
+    generate_state,
+    generate_token,
+    hash_secret,
+    parse_bearer_token,
+    verify_pkce,
+    verify_secret,
+)
+from app.core.config import Settings
+from app.core.database.base import Database
 
 
 def _utc_now() -> datetime:
@@ -870,8 +870,9 @@ class TestBearerTokenMiddleware:
 
     def test_requires_auth_disabled_globally(self):
         """When auth_enabled=False, no paths require auth."""
-        from app.web.oauth.middleware import BearerTokenMiddleware
         from unittest.mock import MagicMock
+
+        from app.web.oauth.middleware import BearerTokenMiddleware
 
         middleware = BearerTokenMiddleware(app=MagicMock())
         settings = MagicMock()
@@ -886,8 +887,9 @@ class TestBearerTokenMiddleware:
 
     def test_requires_auth_public_paths_exempt(self):
         """Public paths are always exempt from auth."""
-        from app.web.oauth.middleware import BearerTokenMiddleware
         from unittest.mock import MagicMock
+
+        from app.web.oauth.middleware import BearerTokenMiddleware
 
         middleware = BearerTokenMiddleware(app=MagicMock())
         settings = MagicMock()
@@ -903,8 +905,9 @@ class TestBearerTokenMiddleware:
 
     def test_requires_auth_oauth_paths_exempt(self):
         """OAuth paths are always exempt from auth."""
-        from app.web.oauth.middleware import BearerTokenMiddleware
         from unittest.mock import MagicMock
+
+        from app.web.oauth.middleware import BearerTokenMiddleware
 
         middleware = BearerTokenMiddleware(app=MagicMock())
         settings = MagicMock()
@@ -913,15 +916,21 @@ class TestBearerTokenMiddleware:
         settings.web_auth_enabled = True
 
         # OAuth paths should be exempt (needed for auth flow)
-        assert middleware._requires_auth("/.well-known/oauth-authorization-server", settings) is False
+        assert (
+            middleware._requires_auth(
+                "/.well-known/oauth-authorization-server", settings
+            )
+            is False
+        )
         assert middleware._requires_auth("/oauth/authorize", settings) is False
         assert middleware._requires_auth("/oauth/token", settings) is False
         assert middleware._requires_auth("/oauth/register", settings) is False
 
     def test_requires_auth_mcp_paths(self):
         """MCP paths follow mcp_auth_enabled setting."""
-        from app.web.oauth.middleware import BearerTokenMiddleware
         from unittest.mock import MagicMock
+
+        from app.web.oauth.middleware import BearerTokenMiddleware
 
         middleware = BearerTokenMiddleware(app=MagicMock())
         settings = MagicMock()
@@ -939,8 +948,9 @@ class TestBearerTokenMiddleware:
 
     def test_requires_auth_api_paths(self):
         """API paths follow web_auth_enabled setting."""
-        from app.web.oauth.middleware import BearerTokenMiddleware
         from unittest.mock import MagicMock
+
+        from app.web.oauth.middleware import BearerTokenMiddleware
 
         middleware = BearerTokenMiddleware(app=MagicMock())
         settings = MagicMock()
@@ -958,8 +968,9 @@ class TestBearerTokenMiddleware:
 
     def test_requires_auth_dashboard_pages(self):
         """Dashboard pages follow web_auth_enabled setting."""
-        from app.web.oauth.middleware import BearerTokenMiddleware
         from unittest.mock import MagicMock
+
+        from app.web.oauth.middleware import BearerTokenMiddleware
 
         middleware = BearerTokenMiddleware(app=MagicMock())
         settings = MagicMock()
@@ -979,8 +990,9 @@ class TestBearerTokenMiddleware:
 
     def test_requires_auth_combined_settings(self):
         """Test various combinations of auth settings."""
-        from app.web.oauth.middleware import BearerTokenMiddleware
         from unittest.mock import MagicMock
+
+        from app.web.oauth.middleware import BearerTokenMiddleware
 
         middleware = BearerTokenMiddleware(app=MagicMock())
         settings = MagicMock()
@@ -1018,8 +1030,9 @@ class TestBasicAuth:
 
     def test_verify_credentials_valid(self):
         """Test valid credentials verification."""
+        from unittest.mock import MagicMock, patch
+
         from app.web.oauth.basic_auth import verify_credentials
-        from unittest.mock import patch, MagicMock
 
         mock_settings = MagicMock()
         mock_settings.admin_username = "admin"
@@ -1032,8 +1045,9 @@ class TestBasicAuth:
 
     def test_verify_credentials_no_password_set(self):
         """Test credentials verification when no password is set."""
+        from unittest.mock import MagicMock, patch
+
         from app.web.oauth.basic_auth import verify_credentials
-        from unittest.mock import patch, MagicMock
 
         mock_settings = MagicMock()
         mock_settings.admin_username = "admin"
@@ -1047,8 +1061,8 @@ class TestBasicAuth:
         """Test session creation, validation, and deletion."""
         from app.web.oauth.basic_auth import (
             create_session,
-            validate_session,
             delete_session,
+            validate_session,
         )
 
         # Create session
@@ -1076,8 +1090,9 @@ class TestBasicAuth:
 
     def test_basic_auth_middleware_disabled(self):
         """Test middleware when basic auth is disabled."""
-        from app.web.oauth.basic_auth import BasicAuthMiddleware
         from unittest.mock import MagicMock
+
+        from app.web.oauth.basic_auth import BasicAuthMiddleware
 
         middleware = BasicAuthMiddleware(app=MagicMock())
 
@@ -1090,7 +1105,9 @@ class TestBasicAuth:
         # OAuth/MCP paths should be exempt
         assert middleware._is_oauth_path("/mcp/sse") is True
         assert middleware._is_oauth_path("/oauth/token") is True
-        assert middleware._is_oauth_path("/.well-known/oauth-authorization-server") is True
+        assert (
+            middleware._is_oauth_path("/.well-known/oauth-authorization-server") is True
+        )
 
         # Dashboard paths should not be exempt
         assert middleware._is_public_path("/") is False

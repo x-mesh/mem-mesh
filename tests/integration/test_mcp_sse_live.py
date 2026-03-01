@@ -30,7 +30,6 @@ from tests.integration.conftest import (
     unique_content,
 )
 
-
 # ---------------------------------------------------------------------------
 # 1. Initialize session
 # ---------------------------------------------------------------------------
@@ -39,11 +38,15 @@ from tests.integration.conftest import (
 class TestMCPInitialize:
     async def test_initialize(self, http: httpx.AsyncClient):
         """POST /mcp/sse with initialize → get session_id."""
-        resp = await mcp_call(http, "initialize", {
-            "protocolVersion": "2025-03-26",
-            "capabilities": {},
-            "clientInfo": {"name": "test-client", "version": "0.1"},
-        })
+        resp = await mcp_call(
+            http,
+            "initialize",
+            {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "test-client", "version": "0.1"},
+            },
+        )
         assert "result" in resp, f"No result in response: {resp}"
         assert resp["result"]["protocolVersion"] == "2025-03-26"
         assert "_session_id" in resp
@@ -56,11 +59,15 @@ class TestMCPInitialize:
         )
 
     async def test_initialize_returns_server_info(self, http: httpx.AsyncClient):
-        resp = await mcp_call(http, "initialize", {
-            "protocolVersion": "2025-03-26",
-            "capabilities": {},
-            "clientInfo": {"name": "test", "version": "0.1"},
-        })
+        resp = await mcp_call(
+            http,
+            "initialize",
+            {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "0.1"},
+            },
+        )
         server_info = resp["result"]["serverInfo"]
         assert "name" in server_info
         assert "version" in server_info
@@ -213,9 +220,9 @@ class TestMCPPinWorkflow:
             session_id=mcp_session,
         )
         assert isinstance(result, dict), f"pin_complete failed: {result}"
-        assert result.get("status") == "completed" or result.get("id"), (
-            f"pin_complete unexpected response: {result}"
-        )
+        assert result.get("status") == "completed" or result.get(
+            "id"
+        ), f"pin_complete unexpected response: {result}"
 
         # pin_promote
         result = await mcp_tools_call(
@@ -264,9 +271,7 @@ class TestMCPSession:
 
 
 class TestMCPSSEStream:
-    async def test_sse_stream_receives_endpoint_event(
-        self, http: httpx.AsyncClient
-    ):
+    async def test_sse_stream_receives_endpoint_event(self, http: httpx.AsyncClient):
         """GET /mcp/sse with Accept: text/event-stream → receive endpoint event."""
         session_id = None
         # Use a dedicated client with short read timeout for SSE streaming
@@ -304,9 +309,9 @@ class TestMCPSSEStream:
                     except httpx.ReadTimeout:
                         # SSE is long-lived; timeout after first event is expected
                         if buffer:
-                            assert "endpoint" in buffer, (
-                                f"Got SSE data but no endpoint event: {buffer[:200]}"
-                            )
+                            assert (
+                                "endpoint" in buffer
+                            ), f"Got SSE data but no endpoint event: {buffer[:200]}"
                         else:
                             pytest.fail("SSE stream timed out without any data")
             except httpx.ReadTimeout:
@@ -335,9 +340,7 @@ class TestMCPStateless:
         assert isinstance(result, dict)
 
     async def test_stateless_search(self, http: httpx.AsyncClient):
-        result = await mcp_stateless_call(
-            http, "search", {"query": "test", "limit": 3}
-        )
+        result = await mcp_stateless_call(http, "search", {"query": "test", "limit": 3})
         assert isinstance(result, dict)
 
 

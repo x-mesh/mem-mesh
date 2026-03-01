@@ -4,8 +4,7 @@ Query Expander - 한국어/영어 검색어 확장
 """
 
 import re
-from typing import List, Dict, Optional, Tuple
-
+from typing import Dict, List, Optional, Tuple
 
 KOREAN_TIME_EXPRESSIONS: Dict[str, str] = {
     "오늘": "today",
@@ -423,7 +422,7 @@ class QueryExpander:
             "체비셰프거리": "chebyshev distance",
             "마할라노비스거리": "mahalanobis distance",
             "브레그만발산": "bregman divergence",
-            "총변동거리": "total variation distance"
+            "총변동거리": "total variation distance",
         }
 
         # 영어 → 한국어 역방향 사전 생성
@@ -485,18 +484,18 @@ class QueryExpander:
 
     def is_korean(self, text: str) -> bool:
         """텍스트가 한국어인지 확인"""
-        korean_pattern = re.compile('[가-힣]+')
+        korean_pattern = re.compile("[가-힣]+")
         return bool(korean_pattern.search(text))
 
     def is_english(self, text: str) -> bool:
         """텍스트가 영어인지 확인"""
-        english_pattern = re.compile('[a-zA-Z]+')
+        english_pattern = re.compile("[a-zA-Z]+")
         return bool(english_pattern.search(text))
 
     def get_language(self, text: str) -> str:
         """텍스트의 주 언어 판별"""
-        korean_count = len(re.findall('[가-힣]', text))
-        english_count = len(re.findall('[a-zA-Z]', text))
+        korean_count = len(re.findall("[가-힣]", text))
+        english_count = len(re.findall("[a-zA-Z]", text))
 
         if korean_count > english_count:
             return "korean"

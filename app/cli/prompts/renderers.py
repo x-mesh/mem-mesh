@@ -21,7 +21,6 @@ from app.cli.prompts.behaviors import (
     SESSION_CONFIG,
 )
 
-
 # ---------------------------------------------------------------------------
 # Generic: markdown rules text (used by Cursor additional_context, Claude CLAUDE.md)
 # ---------------------------------------------------------------------------
@@ -159,9 +158,7 @@ def render_cursor_context(
     """
     rules = render_rules_text(project_id)
     resume_section = (
-        f"### 세션 복원 결과\n```json\n{resume_data}\n```\n\n"
-        if resume_data
-        else ""
+        f"### 세션 복원 결과\n```json\n{resume_data}\n```\n\n" if resume_data else ""
     )
     return (
         f"## mem-mesh Memory Integration (Auto-loaded)\n\n"
@@ -182,8 +179,8 @@ def render_cursor_followup(project_id: str = "mem-mesh") -> str:
         f"방금 완료한 작업이 중요하다면, mem-mesh에 기록해주세요.\n\n"
         f"**저장 기준**: {save_list}\n"
         f"**스킵 기준**: {skip_list}\n\n"
-        f"저장 시: 버그 수정은 category=\"bug\", 설계 결정은 category=\"decision\", "
-        f"코드 패턴은 category=\"code_snippet\"으로 "
+        f'저장 시: 버그 수정은 category="bug", 설계 결정은 category="decision", '
+        f'코드 패턴은 category="code_snippet"으로 '
         f'add(project_id="{project_id}")를 호출하세요.\n'
         f"일상적 작업이었다면 무시하세요."
     )

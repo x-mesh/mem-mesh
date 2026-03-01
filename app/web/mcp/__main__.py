@@ -7,31 +7,39 @@ python -m app.web.mcp 로 실행
 """
 
 import argparse
+
 import uvicorn
 
-from app.web.common.server import init_server, create_uvicorn_config
+from app.web.common.server import create_uvicorn_config, init_server
 
 
 def main():
     """MCP 서버 메인 함수"""
     settings = init_server()
-    
+
     parser = argparse.ArgumentParser(description="mem-mesh MCP SSE Server")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
-    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host address (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8001, help="Port number (default: 8001)")
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host address (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port", type=int, default=8001, help="Port number (default: 8001)"
+    )
     parser.add_argument("--workers", type=int, help="Number of worker processes")
     args = parser.parse_args()
-    
-    print("\n" + "="*60)
+
+    print("\n" + "=" * 60)
     print("  mem-mesh MCP SSE Server (MCP Only)")
-    print("="*60)
+    print("=" * 60)
     print("  Mode:          MCP SSE Only (no Dashboard)")
     print(f"  Host:          {args.host}")
     print(f"  Port:          {args.port}")
     print("  Endpoints:     /mcp/sse, /mcp/info, /mcp/tools/call")
-    print("="*60 + "\n")
-    
+    print("=" * 60 + "\n")
+
     config = create_uvicorn_config(
         app_path="app.web.mcp.app:app",
         settings=settings,
@@ -39,9 +47,9 @@ def main():
         port=args.port,
         workers=args.workers,
         reload=args.reload,
-        access_log_prefix="mcp-"
+        access_log_prefix="mcp-",
     )
-    
+
     uvicorn.run(**config)
 
 

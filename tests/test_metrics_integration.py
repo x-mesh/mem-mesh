@@ -3,13 +3,14 @@
 SearchService와 EmbeddingService에 MetricsCollector가 올바르게 통합되었는지 테스트합니다.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.core.services.search import SearchService
-from app.core.services.metrics_collector import MetricsCollector
+import pytest
+
 from app.core.embeddings.service import EmbeddingService
 from app.core.schemas.responses import SearchResponse
+from app.core.services.metrics_collector import MetricsCollector
+from app.core.services.search import SearchService
 
 
 class TestSearchServiceMetricsIntegration:

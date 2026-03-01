@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter
 
-from .routes import router as oauth_router
 from .login_routes import router as login_router
+from .routes import router as oauth_router
 
 # Combined router
 router = APIRouter()

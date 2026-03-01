@@ -3,12 +3,12 @@
 Noise filtering for search results
 """
 
-import re
 import logging
-from typing import List, Optional
+import re
 from datetime import datetime, timedelta, timezone
+from typing import List, Optional
 
-from ..schemas.responses import SearchResult, SearchResponse
+from ..schemas.responses import SearchResponse, SearchResult
 
 logger = logging.getLogger(__name__)
 

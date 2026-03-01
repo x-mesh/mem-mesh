@@ -1,10 +1,12 @@
 """PinService 확장 기능 테스트 (Task 6.1-6.3)"""
 
-import pytest
-import tempfile
 import os
+import tempfile
+
+import pytest
+
 from app.core.database.base import Database
-from app.core.services.pin import PinService, PinNotFoundError
+from app.core.services.pin import PinNotFoundError, PinService
 from app.core.services.session import SessionService
 
 
@@ -14,13 +16,13 @@ async def db():
     # 임시 파일 생성
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
-    
+
     # Database 인스턴스 생성 및 연결
     database = Database(db_path)
     await database.connect()
-    
+
     yield database
-    
+
     # 정리
     await database.close()
     if os.path.exists(db_path):
@@ -55,22 +57,22 @@ class TestGetPinsFiltered:
         """최소 중요도 필터링 테스트"""
         # 다양한 중요도의 핀 생성 (user_id를 명시하여 같은 세션 사용)
         await pin_service.create_pin(
-            project_id="test-project", 
-            content="Low importance task", 
+            project_id="test-project",
+            content="Low importance task",
             importance=2,
-            user_id="test-user"
+            user_id="test-user",
         )
         await pin_service.create_pin(
-            project_id="test-project", 
-            content="High importance task", 
+            project_id="test-project",
+            content="High importance task",
             importance=4,
-            user_id="test-user"
+            user_id="test-user",
         )
         await pin_service.create_pin(
-            project_id="test-project", 
-            content="Critical task", 
+            project_id="test-project",
+            content="Critical task",
             importance=5,
-            user_id="test-user"
+            user_id="test-user",
         )
 
         # importance >= 4 필터링
@@ -85,10 +87,16 @@ class TestGetPinsFiltered:
         """상태 필터링 테스트"""
         # 다양한 상태의 핀 생성
         await pin_service.create_pin(
-            project_id="test-project", content="Open task", importance=3, user_id="test-user"
+            project_id="test-project",
+            content="Open task",
+            importance=3,
+            user_id="test-user",
         )
         pin2 = await pin_service.create_pin(
-            project_id="test-project", content="Task to complete", importance=3, user_id="test-user"
+            project_id="test-project",
+            content="Task to complete",
+            importance=3,
+            user_id="test-user",
         )
         await pin_service.complete_pin(pin2.id)
 
@@ -108,21 +116,21 @@ class TestGetPinsFiltered:
             content="Backend task",
             importance=3,
             tags=["backend", "api"],
-            user_id="test-user"
+            user_id="test-user",
         )
         await pin_service.create_pin(
             project_id="test-project",
             content="Frontend task",
             importance=3,
             tags=["frontend", "ui"],
-            user_id="test-user"
+            user_id="test-user",
         )
         await pin_service.create_pin(
             project_id="test-project",
             content="Full stack task",
             importance=3,
             tags=["backend", "frontend"],
-            user_id="test-user"
+            user_id="test-user",
         )
 
         # backend 태그 필터링
@@ -141,7 +149,7 @@ class TestGetPinsFiltered:
             content="High priority backend task",
             importance=4,
             tags=["backend"],
-            user_id="test-user"
+            user_id="test-user",
         )
         await pin_service.complete_pin(pin1.id)
 
@@ -150,7 +158,7 @@ class TestGetPinsFiltered:
             content="Low priority backend task",
             importance=2,
             tags=["backend"],
-            user_id="test-user"
+            user_id="test-user",
         )
 
         pin3 = await pin_service.create_pin(
@@ -158,7 +166,7 @@ class TestGetPinsFiltered:
             content="High priority frontend task",
             importance=4,
             tags=["frontend"],
-            user_id="test-user"
+            user_id="test-user",
         )
         await pin_service.complete_pin(pin3.id)
 
@@ -181,12 +189,17 @@ class TestGetPinsFiltered:
         pins = []
         for i in range(5):
             pin = await pin_service.create_pin(
-                project_id="test-project", content=f"Task {i}", importance=3, user_id="test-user"
+                project_id="test-project",
+                content=f"Task {i}",
+                importance=3,
+                user_id="test-user",
             )
             pins.append(pin)
 
         # 필터링 (모든 핀)
-        filtered = await pin_service.get_pins_filtered(session_id=test_session.id, limit=10)
+        filtered = await pin_service.get_pins_filtered(
+            session_id=test_session.id, limit=10
+        )
 
         # 최신 핀이 먼저 나와야 함
         assert len(filtered) == 5
@@ -198,11 +211,16 @@ class TestGetPinsFiltered:
         # 10개 핀 생성
         for i in range(10):
             await pin_service.create_pin(
-                project_id="test-project", content=f"Task {i}", importance=3, user_id="test-user"
+                project_id="test-project",
+                content=f"Task {i}",
+                importance=3,
+                user_id="test-user",
             )
 
         # limit=5로 조회
-        filtered = await pin_service.get_pins_filtered(session_id=test_session.id, limit=5)
+        filtered = await pin_service.get_pins_filtered(
+            session_id=test_session.id, limit=5
+        )
 
         assert len(filtered) == 5
 
@@ -214,13 +232,22 @@ class TestGetPinStatistics:
         """기본 통계 계산 테스트"""
         # 다양한 핀 생성
         await pin_service.create_pin(
-            project_id="test-project", content="Task 1", importance=1, user_id="test-user"
+            project_id="test-project",
+            content="Task 1",
+            importance=1,
+            user_id="test-user",
         )
         await pin_service.create_pin(
-            project_id="test-project", content="Task 2", importance=3, user_id="test-user"
+            project_id="test-project",
+            content="Task 2",
+            importance=3,
+            user_id="test-user",
         )
         pin3 = await pin_service.create_pin(
-            project_id="test-project", content="Task 3", importance=5, user_id="test-user"
+            project_id="test-project",
+            content="Task 3",
+            importance=5,
+            user_id="test-user",
         )
         await pin_service.complete_pin(pin3.id)
 
@@ -238,18 +265,27 @@ class TestGetPinStatistics:
         """승격 후보 집계 테스트"""
         # importance >= 4인 완료된 핀 생성
         pin1 = await pin_service.create_pin(
-            project_id="test-project", content="High priority task", importance=4, user_id="test-user"
+            project_id="test-project",
+            content="High priority task",
+            importance=4,
+            user_id="test-user",
         )
         await pin_service.complete_pin(pin1.id)
 
         pin2 = await pin_service.create_pin(
-            project_id="test-project", content="Critical task", importance=5, user_id="test-user"
+            project_id="test-project",
+            content="Critical task",
+            importance=5,
+            user_id="test-user",
         )
         await pin_service.complete_pin(pin2.id)
 
         # importance < 4인 완료된 핀
         pin3 = await pin_service.create_pin(
-            project_id="test-project", content="Normal task", importance=3, user_id="test-user"
+            project_id="test-project",
+            content="Normal task",
+            importance=3,
+            user_id="test-user",
         )
         await pin_service.complete_pin(pin3.id)
 
@@ -262,12 +298,18 @@ class TestGetPinStatistics:
         """평균 lead_time 계산 테스트"""
         # 핀 생성 및 완료
         pin1 = await pin_service.create_pin(
-            project_id="test-project", content="Task 1", importance=3, user_id="test-user"
+            project_id="test-project",
+            content="Task 1",
+            importance=3,
+            user_id="test-user",
         )
         await pin_service.complete_pin(pin1.id)
 
         pin2 = await pin_service.create_pin(
-            project_id="test-project", content="Task 2", importance=3, user_id="test-user"
+            project_id="test-project",
+            content="Task 2",
+            importance=3,
+            user_id="test-user",
         )
         await pin_service.complete_pin(pin2.id)
 
@@ -295,7 +337,10 @@ class TestPromoteToMemoryDuplicatePrevention:
     async def test_promote_once(self, pin_service, test_session):
         """첫 승격 테스트"""
         pin = await pin_service.create_pin(
-            project_id="test-project", content="Important task to promote", importance=5, user_id="test-user"
+            project_id="test-project",
+            content="Important task to promote",
+            importance=5,
+            user_id="test-user",
         )
         await pin_service.complete_pin(pin.id)
 
@@ -309,7 +354,10 @@ class TestPromoteToMemoryDuplicatePrevention:
     async def test_prevent_duplicate_promotion(self, pin_service, test_session):
         """중복 승격 방지 테스트"""
         pin = await pin_service.create_pin(
-            project_id="test-project", content="Important task to promote", importance=5, user_id="test-user"
+            project_id="test-project",
+            content="Important task to promote",
+            importance=5,
+            user_id="test-user",
         )
         await pin_service.complete_pin(pin.id)
 
@@ -328,7 +376,10 @@ class TestPromoteToMemoryDuplicatePrevention:
     async def test_promoted_pin_has_memory_id(self, pin_service, test_session):
         """승격된 핀이 promoted_to_memory_id를 가지는지 테스트"""
         pin = await pin_service.create_pin(
-            project_id="test-project", content="Important task", importance=5, user_id="test-user"
+            project_id="test-project",
+            content="Important task",
+            importance=5,
+            user_id="test-user",
         )
         await pin_service.complete_pin(pin.id)
 
