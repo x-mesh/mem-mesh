@@ -209,7 +209,7 @@ async def test_edge_cases():
     print(f"실패: {len(failed_tests)}개")
     
     if failed_tests:
-        print(f"\n실패한 테스트:")
+        print("\n실패한 테스트:")
         for fail in failed_tests:
             print(f"  - [{fail['category']}] '{fail['query']}'")
             print(f"    오류: {fail['error']}")

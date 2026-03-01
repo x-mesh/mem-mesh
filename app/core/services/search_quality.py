@@ -4,12 +4,10 @@ Advanced Search Quality System for mem-mesh
 """
 
 import re
-import math
 import json
 import logging
-from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime, timedelta
-from collections import Counter
+from typing import List, Dict, Any, Optional
+from datetime import datetime
 import numpy as np
 from dataclasses import dataclass
 

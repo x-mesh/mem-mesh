@@ -421,7 +421,7 @@ class StatsService:
             avg_lead_time = lead_time_result['avg_lead_time_hours'] if lead_time_result else None
             min_lead_time = lead_time_result['min_lead_time_hours'] if lead_time_result else None
             max_lead_time = lead_time_result['max_lead_time_hours'] if lead_time_result else None
-            completed_count = lead_time_result['completed_count'] if lead_time_result else 0
+            lead_time_result['completed_count'] if lead_time_result else 0
             
             # 중요도별 분포
             importance_query = f"""

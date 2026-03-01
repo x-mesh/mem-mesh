@@ -261,15 +261,6 @@ class RelationService:
     ) -> List[Relation]:
         """벡터 유사도 기반 자동 연결"""
         # 현재 메모리의 임베딩으로 유사한 메모리 검색
-        similar_query = """
-            SELECT m.id, vec.distance
-            FROM memory_embeddings vec
-            JOIN memories m ON vec.memory_id = m.id
-            WHERE vec.memory_id != ?
-            AND vec.distance <= ?
-            ORDER BY vec.distance ASC
-            LIMIT ?
-        """
         # Note: 실제 구현은 EmbeddingService와 연동 필요
         # 여기서는 기본 구조만 제공
 

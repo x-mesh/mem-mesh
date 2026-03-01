@@ -39,10 +39,8 @@ class MonitoringService:
         """
         # 날짜 포맷 결정
         if aggregation == "hourly":
-            date_format = "%Y-%m-%d %H:00:00"
             group_by = "strftime('%Y-%m-%d %H:00:00', timestamp)"
         else:
-            date_format = "%Y-%m-%d"
             group_by = "strftime('%Y-%m-%d', timestamp)"
         
         # 기본 조건 (빈 쿼리 제외)

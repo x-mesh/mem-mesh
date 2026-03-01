@@ -9,21 +9,15 @@ import pytest
 import tempfile
 import os
 import json
-from typing import Dict, Any, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
-import io
-import sys
+from unittest.mock import AsyncMock, MagicMock
 
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.memory import MemoryService
 from app.core.services.search import SearchService
-from app.core.services.context import ContextService
-from app.core.services.stats import StatsService
 from app.core.config import Settings
 from app.mcp_common.tools import MCPToolHandlers
 from app.mcp_common.storage import StorageManager
-from app.mcp_common.schemas import get_all_tool_schemas
 from app.core.version import SERVER_INFO, MCP_PROTOCOL_VERSION
 
 # Import Pure MCP server functions

@@ -7,7 +7,6 @@ between Pure MCP and SSE MCP implementations.
 
 import pytest
 import json
-from typing import Dict, Any
 from unittest.mock import AsyncMock, MagicMock
 
 from app.mcp_common.tools import MCPToolHandlers
@@ -369,7 +368,7 @@ async def test_dispatch_exception_handling(dispatcher, mock_tool_handlers):
 @pytest.mark.asyncio
 async def test_dispatch_validation_error_handling(dispatcher, mock_tool_handlers):
     """Test ValidationError handling during dispatch"""
-    from pydantic import ValidationError, BaseModel
+    from pydantic import BaseModel
 
     class TestModel(BaseModel):
         value: int

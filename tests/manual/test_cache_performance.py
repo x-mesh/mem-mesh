@@ -9,9 +9,7 @@ Run with: python test_cache_performance.py
 import asyncio
 import time
 import json
-import random
-from typing import List, Dict, Any
-from datetime import datetime
+from typing import Dict, Any
 
 # Add parent directory to path
 import sys
@@ -278,14 +276,14 @@ class PerformanceTest:
              results['search_with_cache']['average_time']) /
             results['search_without_cache']['average_time'] * 100
         )
-        print(f"\n📊 Search Performance:")
+        print("\n📊 Search Performance:")
         print(f"  Without cache: {results['search_without_cache']['average_time']:.3f}s avg")
         print(f"  With cache: {results['search_with_cache']['average_time']:.3f}s avg")
         print(f"  Cache hit rate: {results['search_with_cache']['cache_hit_rate']:.2%}")
         print(f"  Performance improvement: {search_improvement:.1f}%")
 
         # Batch operations performance
-        print(f"\n📦 Batch Operations:")
+        print("\n📦 Batch Operations:")
         print(f"  Add speedup: {results['batch_add']['speedup']:.2f}x faster")
         print(f"  Search speedup: {results['batch_search']['speedup']:.2f}x faster")
         print(f"  Time saved (add): {results['batch_add']['time_saved']:.2f}s")
@@ -299,20 +297,20 @@ class PerformanceTest:
         )
         estimated_cost_saved = total_tokens_saved * 0.00002  # Rough estimate
 
-        print(f"\n💰 Token & Cost Savings:")
+        print("\n💰 Token & Cost Savings:")
         print(f"  Total tokens saved: {total_tokens_saved:,}")
         print(f"  Estimated cost saved: ${estimated_cost_saved:.4f}")
 
         # Overall efficiency
-        print(f"\n✨ Overall Efficiency Gains:")
+        print("\n✨ Overall Efficiency Gains:")
         print(f"  Average search speedup with cache: {search_improvement:.1f}%")
         print(f"  Batch operations speedup: {((results['batch_add']['speedup'] + results['batch_search']['speedup']) / 2):.2f}x")
-        print(f"  Memory efficiency: Reduced redundant embeddings")
+        print("  Memory efficiency: Reduced redundant embeddings")
 
         # Save detailed results
         with open("cache_performance_results.json", "w") as f:
             json.dump(results, f, indent=2, default=str)
-        print(f"\n📁 Detailed results saved to: cache_performance_results.json")
+        print("\n📁 Detailed results saved to: cache_performance_results.json")
 
 
 async def main():

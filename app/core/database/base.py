@@ -56,7 +56,7 @@ class Database:
         return self._connection._lock
 
     async def connect(self) -> None:
-        vec_loaded = await self._connection.connect()
+        await self._connection.connect()
         await self.init_tables()
         logger.info(f"Database connected: {self.db_path}")
 

@@ -9,7 +9,6 @@ python -m app.web.dashboard 로 실행
 import argparse
 import uvicorn
 
-from app.core.config import Settings
 from app.web.common.server import init_server, create_uvicorn_config
 
 
@@ -27,7 +26,7 @@ def main():
     print("\n" + "="*60)
     print("  mem-mesh Dashboard Server (Dashboard Only)")
     print("="*60)
-    print(f"  Mode:          Dashboard Only (no MCP)")
+    print("  Mode:          Dashboard Only (no MCP)")
     print(f"  Port:          {args.port or settings.server_port}")
     print("="*60 + "\n")
     

@@ -4,7 +4,6 @@
 """
 
 import asyncio
-import json
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.search import SearchService

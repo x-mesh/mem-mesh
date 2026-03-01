@@ -57,7 +57,7 @@ async def test_git_history_category():
         stats_params = StatsParams(project_id="mem-mesh-core")
         stats_result = await storage.get_stats(stats_params)
         
-        print(f"✅ 통계 조회 성공:")
+        print("✅ 통계 조회 성공:")
         print(f"  - 총 메모리: {stats_result.total_memories}")
         if hasattr(stats_result, 'by_category'):
             for category, count in stats_result.by_category.items():

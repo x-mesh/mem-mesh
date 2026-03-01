@@ -829,7 +829,7 @@ class MCPToolHandlers:
             if relation_type:
                 # 특정 타입만 삭제
                 try:
-                    rel_type = RelationType(relation_type)
+                    RelationType(relation_type)
                 except ValueError:
                     valid_types = [t.value for t in RelationType]
                     return {

@@ -10,7 +10,7 @@ Similar to Prisma migrations but simpler for SQLite.
 
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, List, Dict, Any, Optional, Callable, Awaitable
+from typing import TYPE_CHECKING, Dict, Optional, Callable, Awaitable
 
 if TYPE_CHECKING:
     from .connection import DatabaseConnection

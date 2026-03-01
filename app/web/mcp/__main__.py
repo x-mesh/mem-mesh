@@ -9,7 +9,6 @@ python -m app.web.mcp 로 실행
 import argparse
 import uvicorn
 
-from app.core.config import Settings
 from app.web.common.server import init_server, create_uvicorn_config
 
 
@@ -27,10 +26,10 @@ def main():
     print("\n" + "="*60)
     print("  mem-mesh MCP SSE Server (MCP Only)")
     print("="*60)
-    print(f"  Mode:          MCP SSE Only (no Dashboard)")
+    print("  Mode:          MCP SSE Only (no Dashboard)")
     print(f"  Host:          {args.host}")
     print(f"  Port:          {args.port}")
-    print(f"  Endpoints:     /mcp/sse, /mcp/info, /mcp/tools/call")
+    print("  Endpoints:     /mcp/sse, /mcp/info, /mcp/tools/call")
     print("="*60 + "\n")
     
     config = create_uvicorn_config(

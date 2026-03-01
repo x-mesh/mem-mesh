@@ -121,12 +121,12 @@ def analyze_vector_components(embedding_service):
     diff_understood = thresh_emb - understood_emb
     diff_thresh1 = thresh_emb - thresh1_emb
     
-    print(f"  threshold - understood:")
+    print("  threshold - understood:")
     print(f"    L2 거리: {np.linalg.norm(diff_understood):.6f}")
     print(f"    평균 차이: {np.mean(np.abs(diff_understood)):.6f}")
     print(f"    최대 차이: {np.max(np.abs(diff_understood)):.6f}")
     
-    print(f"\n  threshold - threshold1:")
+    print("\n  threshold - threshold1:")
     print(f"    L2 거리: {np.linalg.norm(diff_thresh1):.6f}")
     print(f"    평균 차이: {np.mean(np.abs(diff_thresh1)):.6f}")
     print(f"    최대 차이: {np.max(np.abs(diff_thresh1)):.6f}")

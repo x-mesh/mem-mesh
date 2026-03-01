@@ -16,7 +16,6 @@ VALID_CATEGORIES = ["task", "bug", "idea", "decision", "incident", "code_snippet
 VALID_SEARCH_MODES = ["hybrid", "exact", "semantic", "fuzzy"]
 
 # 서버 정보는 중앙 모듈에서 import
-from ..core.version import SERVER_INFO, __VERSION__, MCP_PROTOCOL_VERSION
 
 
 def get_tool_schemas() -> List[Dict[str, Any]]:

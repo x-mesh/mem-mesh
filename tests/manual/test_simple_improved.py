@@ -22,7 +22,7 @@ async def test_simple_improved():
     embedding_service.load_model()
 
     # 기본 검색
-    basic_search = SearchService(db, embedding_service)
+    SearchService(db, embedding_service)
 
     # 간단한 개선 검색
     simple_search = SimpleImprovedSearch(db, embedding_service)

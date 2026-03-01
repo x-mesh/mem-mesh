@@ -7,12 +7,6 @@ from typing import Optional, List, Tuple
 
 from app.core.database.base import Database
 from .models import OAuthClient, OAuthToken, OAuthAuthorizationCode, _utc_now_iso
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
 from .schemas import (
     OAuthClientCreate,
     OAuthClientUpdate,
@@ -30,6 +24,10 @@ from .utils import (
     verify_secret,
     verify_pkce,
 )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 logger = logging.getLogger(__name__)
 

@@ -3,8 +3,6 @@
 검색어 인수 기능 데모 - 실제 명령행 실행 시뮬레이션
 """
 
-import subprocess
-import sys
 import time
 
 def run_command_demo(cmd, description):

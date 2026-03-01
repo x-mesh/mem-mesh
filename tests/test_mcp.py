@@ -87,7 +87,7 @@ async def test_mcp_server():
             add_response = json.loads(response)
             if 'result' in add_response:
                 memory_id = add_response['result']['content']['id']
-                print(f"✅ Memory added successfully!")
+                print("✅ Memory added successfully!")
                 print(f"   ID: {memory_id}")
                 print(f"   Status: {add_response['result']['content']['status']}")
             else:
@@ -142,7 +142,7 @@ async def test_mcp_server():
             stats_response = json.loads(response)
             if 'result' in stats_response:
                 stats = stats_response['result']['content']
-                print(f"✅ Statistics:")
+                print("✅ Statistics:")
                 print(f"   Total memories: {stats['total_memories']}")
                 print(f"   Unique projects: {stats['unique_projects']}")
                 print(f"   Categories: {stats['categories_breakdown']}")

@@ -60,7 +60,7 @@ async def test_realtime_memory_creation():
                 data = json.loads(message)
                 if data.get('type') == 'memory_created':
                     memory = data['data']['memory']
-                    print(f"🎉 Memory created notification received!")
+                    print("🎉 Memory created notification received!")
                     print(f"   ID: {memory['id']}")
                     print(f"   Status: {memory.get('status', 'N/A')}")
                     print(f"   Created: {memory.get('created_at', 'N/A')}")

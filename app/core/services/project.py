@@ -3,11 +3,9 @@
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List
-from uuid import uuid4
 
 from app.core.database.base import Database
 from app.core.schemas.projects import (
-    ProjectCreate,
     ProjectUpdate,
     ProjectResponse,
     ProjectWithStats,

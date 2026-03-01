@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 from uuid import uuid4
 
 from app.core.database.base import Database
-from app.core.schemas.pins import PinCreate, PinUpdate, PinResponse
+from app.core.schemas.pins import PinUpdate, PinResponse
 from app.core.utils.user import get_current_user
 
 logger = logging.getLogger(__name__)

@@ -6,10 +6,12 @@ mcp_common 모듈을 사용하여 공통 로직을 공유합니다.
 FastMCP 대신 직접 MCP 프로토콜을 구현하여 안정성 향상.
 """
 
+from __future__ import annotations
+
 import sys
 import json
 import asyncio
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TYPE_CHECKING
 
 from ..core.version import SERVER_INFO, MCP_PROTOCOL_VERSION
 from ..core.utils.logger import setup_logging
@@ -17,6 +19,9 @@ from ..mcp_common.storage import StorageManager
 from ..mcp_common.tools import MCPToolHandlers
 from ..mcp_common.dispatcher import MCPDispatcher
 from ..mcp_common.transport import format_tool_error
+
+if TYPE_CHECKING:
+    from ..mcp_common.batch_tools import BatchOperationHandler
 
 log = setup_logging("mem-mesh-mcp-pure")
 

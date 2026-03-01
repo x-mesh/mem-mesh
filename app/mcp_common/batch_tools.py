@@ -457,7 +457,7 @@ async def test_batch_operations():
 
     # Print cache statistics
     cache_stats = get_cache_manager().get_cache_stats()
-    print(f"\n=== Cache Statistics ===")
+    print("\n=== Cache Statistics ===")
     print(f"Cache stats: {json.dumps(cache_stats, indent=2)}")
 
 

@@ -6,7 +6,6 @@ Requirements: 7.1, 7.2, 7.3, 7.4, 7.5
 
 import pytest
 import uuid
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.services.token_tracker import TokenTracker
@@ -448,7 +447,7 @@ class TestGetProjectTokenStatistics:
         
         mock_db.fetchall.return_value = []
         
-        result = await token_tracker.get_project_token_statistics(
+        await token_tracker.get_project_token_statistics(
             project_id=project_id,
             start_date=start_date,
             end_date=end_date
@@ -483,7 +482,6 @@ class TestTokenTrackerIntegration:
     async def test_full_session_tracking_workflow(self, token_tracker, mock_db):
         """전체 세션 추적 워크플로우"""
         session_id = str(uuid.uuid4())
-        project_id = "test-project"
         
         # 1. 세션 시작 - 토큰 기록
         await token_tracker.record_session_tokens(

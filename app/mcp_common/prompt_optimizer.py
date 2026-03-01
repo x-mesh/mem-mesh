@@ -4,9 +4,7 @@ Reduces token usage in IDE <-> mem-mesh communication
 """
 
 from typing import Dict, List, Any, Optional
-from datetime import datetime
 import json
-import re
 
 
 class PromptOptimizer:

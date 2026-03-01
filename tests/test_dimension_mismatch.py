@@ -35,20 +35,20 @@ async def test_dimension_mismatch():
             expected_dim = 384
         
         print(f"테스트 모델: {test_model} ({expected_dim}차원)")
-        print(f"예상 결과: 차원 불일치 경고 표시")
+        print("예상 결과: 차원 불일치 경고 표시")
         
         # 모델 전환 (경고 메시지 확인)
         success = await search_tool.switch_model(test_model)
         
         if success:
-            print(f"\n✅ 모델 전환 성공 (경고와 함께)")
+            print("\n✅ 모델 전환 성공 (경고와 함께)")
             
             # 검색 테스트 (fallback 동작 확인)
-            print(f"\n🔍 검색 테스트 (차원 불일치 상황)")
+            print("\n🔍 검색 테스트 (차원 불일치 상황)")
             await search_tool.search("벡터 검색 테스트", limit=3)
             
         else:
-            print(f"\n❌ 모델 전환 실패 또는 사용자 취소")
+            print("\n❌ 모델 전환 실패 또는 사용자 취소")
         
     except Exception as e:
         print(f"❌ 테스트 실패: {e}")

@@ -4,7 +4,6 @@ WebSocket 실시간 알림 테스트
 """
 
 import asyncio
-import json
 from app.mcp_common.tools import MCPToolHandlers
 from app.core.storage.direct import DirectStorageBackend
 from app.web.websocket.realtime import notifier
@@ -32,7 +31,7 @@ async def test_websocket_notification():
         )
         
         print(f"✅ Memory created: {result['id']}")
-        print(f"📡 WebSocket notification should have been sent")
+        print("📡 WebSocket notification should have been sent")
         
         # 연결 통계 확인
         import requests

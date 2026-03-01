@@ -7,12 +7,6 @@
 import os
 import tempfile
 from pathlib import Path
-
-# manual/과 benchmarks/ 하위 테스트는 자동 수집에서 제외 (수동 실행용)
-collect_ignore = [
-    str(Path(__file__).parent / "manual"),
-    str(Path(__file__).parent / "benchmarks"),
-]
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, Mock
 
@@ -20,6 +14,12 @@ import pytest
 
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
+
+# manual/과 benchmarks/ 하위 테스트는 자동 수집에서 제외 (수동 실행용)
+collect_ignore = [
+    str(Path(__file__).parent / "manual"),
+    str(Path(__file__).parent / "benchmarks"),
+]
 
 
 # ---------------------------------------------------------------------------

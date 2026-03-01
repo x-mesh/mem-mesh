@@ -130,15 +130,15 @@ async def test_response_compression():
     print("\n" + "="*60)
     print("📊 테스트 요약")
     print("="*60)
-    print(f"✅ 압축 기능 정상 작동")
+    print("✅ 압축 기능 정상 작동")
     print(f"✅ Minimal 압축: {(1 - minimal_size/standard_size)*100:.1f}% 절감")
     print(f"✅ Compact 압축: {(1 - compact_size/standard_size)*100:.1f}% 절감")
     print(f"✅ Context 압축: {(1 - context_compact_size/context_standard_size)*100:.1f}% 절감" if result_standard.get('results') else "")
-    print(f"\n💡 권장 사용법:")
-    print(f"   - 빠른 조회: response_format='minimal'")
-    print(f"   - 일반 사용: response_format='compact'")
-    print(f"   - 상세 필요: response_format='standard' (기본값)")
-    print(f"   - 전체 데이터: response_format='full'")
+    print("\n💡 권장 사용법:")
+    print("   - 빠른 조회: response_format='minimal'")
+    print("   - 일반 사용: response_format='compact'")
+    print("   - 상세 필요: response_format='standard' (기본값)")
+    print("   - 전체 데이터: response_format='full'")
 
 
 if __name__ == "__main__":

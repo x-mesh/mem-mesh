@@ -3,15 +3,13 @@ Memory Service 테스트
 """
 
 import pytest
-import asyncio
 import tempfile
 import os
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
 
 from app.core.services.memory import (
     MemoryService,
     MemoryNotFoundError,
-    DatabaseError,
     EmbeddingError,
 )
 from app.core.database.base import Database

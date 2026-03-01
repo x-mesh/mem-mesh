@@ -6,14 +6,11 @@ Work Tracking - Pin 승격(Memory Promotion) 기능 테스트
 import asyncio
 import tempfile
 import os
-from datetime import datetime, timezone
 
 from app.core.database.base import Database
 from app.core.services.project import ProjectService
 from app.core.services.session import SessionService
 from app.core.services.pin import PinService
-from app.core.embeddings.service import EmbeddingService
-from app.core.config import get_settings
 
 
 async def test_pin_promotion():

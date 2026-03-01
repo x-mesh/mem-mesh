@@ -6,8 +6,6 @@ Requirements: 10.1, 10.2, 10.3
 """
 
 import pytest
-import asyncio
-from pathlib import Path
 import tempfile
 import os
 

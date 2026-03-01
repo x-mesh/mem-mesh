@@ -6,13 +6,11 @@ Work Tracking 기능 통합 테스트
 import asyncio
 import tempfile
 import os
-from datetime import datetime, timezone
 
 from app.core.database.base import Database
 from app.core.services.project import ProjectService
 from app.core.services.session import SessionService
 from app.core.services.pin import PinService
-from app.core.schemas.projects import ProjectUpdate
 
 
 async def test_work_tracking_integration():

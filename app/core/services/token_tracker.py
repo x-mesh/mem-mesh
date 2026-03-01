@@ -172,7 +172,7 @@ class TokenTracker:
                     "savings_rate": 0.0
                 }
             
-            initial_tokens = result["initial_context_tokens"] or 0
+            result["initial_context_tokens"] or 0
             loaded_tokens = result["total_loaded_tokens"] or 0
             saved_tokens = result["total_saved_tokens"] or 0
             

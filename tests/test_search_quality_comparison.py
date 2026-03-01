@@ -164,14 +164,14 @@ async def test_search_quality():
             if unified_count < legacy_count:
                 print(f"  ✓ 노이즈 필터 작동: {legacy_count - unified_count}개 필터링됨")
             else:
-                print(f"  ✗ 노이즈 필터 미작동")
+                print("  ✗ 노이즈 필터 미작동")
         
         if "디비" in query or "한국어" in desc:
             # 한국어 최적화 확인
             if unified_count > 0:
-                print(f"  ✓ 한국어 최적화 작동")
+                print("  ✓ 한국어 최적화 작동")
             else:
-                print(f"  ✗ 한국어 최적화 미작동")
+                print("  ✗ 한국어 최적화 미작동")
     
     print("\n" + "=" * 60)
     print("테스트 완료")

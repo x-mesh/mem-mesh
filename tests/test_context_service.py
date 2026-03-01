@@ -3,16 +3,15 @@ ContextService 테스트
 """
 
 import pytest
-import asyncio
 import tempfile
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.memory import MemoryService
 from app.core.services.context import ContextService, ContextNotFoundError
-from app.core.schemas.responses import ContextResponse, RelatedMemory
+from app.core.schemas.responses import ContextResponse
 
 
 @pytest.fixture
@@ -62,14 +61,14 @@ async def test_get_context_basic(context_service, memory_service):
         source="test",
     )
 
-    memory2 = await memory_service.create(
+    await memory_service.create(
         content="Added JWT token validation",
         project_id="test-project",
         category="task",
         source="test",
     )
 
-    memory3 = await memory_service.create(
+    await memory_service.create(
         content="Fixed login bug in authentication",
         project_id="test-project",
         category="bug",
@@ -111,14 +110,14 @@ async def test_get_context_with_project_filter(context_service, memory_service):
         source="test",
     )
 
-    memory2 = await memory_service.create(
+    await memory_service.create(
         content="Authentication testing",
         project_id="project-b",
         category="task",
         source="test",
     )
 
-    memory3 = await memory_service.create(
+    await memory_service.create(
         content="Authentication documentation",
         project_id="project-a",
         category="task",
@@ -149,7 +148,7 @@ async def test_get_context_with_project_filter(context_service, memory_service):
 async def test_get_context_relationship_classification(context_service, memory_service):
     """관계 분류 테스트"""
     # 시간차를 두고 메모리 생성
-    memory1 = await memory_service.create(
+    await memory_service.create(
         content="Started authentication work",
         project_id="test-project",
         category="task",
@@ -164,7 +163,7 @@ async def test_get_context_relationship_classification(context_service, memory_s
         source="test",
     )
 
-    memory3 = await memory_service.create(
+    await memory_service.create(
         content="Authentication system is working perfectly",
         project_id="test-project",
         category="task",
@@ -223,7 +222,7 @@ async def test_get_context_similarity_threshold(context_service, memory_service)
         source="test",
     )
 
-    memory2 = await memory_service.create(
+    await memory_service.create(
         content="Database schema migration for products table",
         project_id="test-project",
         category="task",

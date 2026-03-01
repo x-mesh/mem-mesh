@@ -38,16 +38,16 @@ async def fix_threshold_search():
             print(f"  - ID: {memory['id'][:8]}... | 프로젝트: {memory['project_id']} | 생성일: {memory['created_at']}")
         
         # 2. 사용자 확인
-        print(f"\n💡 해결 방안:")
-        print(f"  1. 이 메모리들을 삭제 (내용이 너무 단순함)")
-        print(f"  2. 내용을 더 의미있게 수정")
-        print(f"  3. 검색 알고리즘 개선")
+        print("\n💡 해결 방안:")
+        print("  1. 이 메모리들을 삭제 (내용이 너무 단순함)")
+        print("  2. 내용을 더 의미있게 수정")
+        print("  3. 검색 알고리즘 개선")
         
-        choice = input(f"\n어떤 방법을 선택하시겠습니까? (1/2/3/skip): ").strip()
+        choice = input("\n어떤 방법을 선택하시겠습니까? (1/2/3/skip): ").strip()
         
         if choice == "1":
             # 메모리 삭제
-            print(f"\n🗑️ 'understood' 메모리들 삭제 중...")
+            print("\n🗑️ 'understood' 메모리들 삭제 중...")
             
             for memory in understood_memories:
                 # 메모리 삭제
@@ -63,7 +63,7 @@ async def fix_threshold_search():
             
         elif choice == "2":
             # 내용 수정
-            print(f"\n✏️ 'understood' 메모리들 내용 수정 중...")
+            print("\n✏️ 'understood' 메모리들 내용 수정 중...")
             
             for i, memory in enumerate(understood_memories, 1):
                 new_content = input(f"메모리 {i} ({memory['id'][:8]}...) 새 내용: ").strip()
@@ -76,24 +76,24 @@ async def fix_threshold_search():
                     print(f"  ✅ 수정됨: {memory['id'][:8]}... -> '{new_content[:50]}...'")
             
             db.connection.commit()
-            print(f"✅ 메모리 내용 수정 완료")
+            print("✅ 메모리 내용 수정 완료")
             
         elif choice == "3":
             # 검색 알고리즘 개선
-            print(f"\n🔧 검색 알고리즘 개선 방안:")
-            print(f"  1. 최소 콘텐츠 길이 필터 (예: 10자 이상)")
-            print(f"  2. 콘텐츠 품질 점수 추가")
-            print(f"  3. 하이브리드 검색 가중치 조정")
-            print(f"  4. 정확한 단어 매칭 우선순위 증가")
+            print("\n🔧 검색 알고리즘 개선 방안:")
+            print("  1. 최소 콘텐츠 길이 필터 (예: 10자 이상)")
+            print("  2. 콘텐츠 품질 점수 추가")
+            print("  3. 하이브리드 검색 가중치 조정")
+            print("  4. 정확한 단어 매칭 우선순위 증가")
             
-            print(f"\n💡 이 방안들은 search.py 파일을 수정해야 합니다.")
+            print("\n💡 이 방안들은 search.py 파일을 수정해야 합니다.")
             
         else:
-            print(f"건너뛰기 선택됨")
+            print("건너뛰기 선택됨")
         
         # 3. 수정 후 테스트
         if choice in ["1", "2"]:
-            print(f"\n3️⃣ 수정 후 테스트")
+            print("\n3️⃣ 수정 후 테스트")
             print("-" * 60)
             
             # 간단한 검색 테스트

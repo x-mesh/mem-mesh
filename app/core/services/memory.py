@@ -11,7 +11,6 @@ from datetime import datetime
 from ..database.base import Database
 from ..database.models import Memory
 from ..embeddings.service import EmbeddingService
-from ..schemas.requests import AddParams, UpdateParams
 from ..schemas.responses import AddResponse, UpdateResponse, DeleteResponse
 
 logger = logging.getLogger(__name__)

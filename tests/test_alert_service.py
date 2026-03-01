@@ -1,11 +1,9 @@
 """AlertService 단위 테스트"""
 
 import pytest
-from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from app.core.services.alert import AlertService, AlertSeverity, AlertType
-from app.core.database.models import Alert
 
 
 class TestAlertService:

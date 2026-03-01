@@ -5,9 +5,8 @@ Session Service 테스트
 import pytest
 import tempfile
 import os
-from unittest.mock import Mock
 
-from app.core.services.session import SessionService, NoActiveSessionError
+from app.core.services.session import SessionService
 from app.core.services.project import ProjectService
 from app.core.database.base import Database
 

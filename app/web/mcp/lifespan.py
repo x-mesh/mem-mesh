@@ -42,7 +42,7 @@ async def mcp_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         
         # 설정 정보 출력
         log_level = os.getenv("MEM_MESH_LOG_LEVEL", "INFO")
-        log_file = os.getenv("MEM_MESH_LOG_FILE", "")
+        os.getenv("MEM_MESH_LOG_FILE", "")
         
         print("\n" + "="*60)
         print("  mem-mesh MCP SSE Server Starting")
@@ -50,7 +50,7 @@ async def mcp_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         print(f"  Database Path:   {settings.database_path}")
         print(f"  LOG_LEVEL:       {log_level}")
         print(f"  Embedding Model: {settings.embedding_model}")
-        print(f"  MCP SSE:         /mcp/sse")
+        print("  MCP SSE:         /mcp/sse")
         print("="*60 + "\n")
         
         # MCP 스토리지 초기화

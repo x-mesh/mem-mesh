@@ -3,10 +3,8 @@ Property-based tests for Work Tracking System (Pins, Sessions, Projects)
 """
 
 import pytest
-import asyncio
 import tempfile
 import os
-from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
 from hypothesis import given, strategies as st, settings as hyp_settings, HealthCheck
@@ -102,7 +100,7 @@ class TestProjectProperties:
         project_service = ProjectService(temp_db)
         
         # 프로젝트가 존재하지 않는지 확인
-        existing = await project_service.get_project(project_id)
+        await project_service.get_project(project_id)
         
         # get_or_create 호출
         project = await project_service.get_or_create_project(project_id)
@@ -139,7 +137,7 @@ class TestProjectProperties:
         project_service = ProjectService(temp_db)
         
         # 프로젝트 생성
-        project = await project_service.get_or_create_project(project_id)
+        await project_service.get_or_create_project(project_id)
         
         # 업데이트
         update = ProjectUpdate(

@@ -6,7 +6,6 @@ Work Tracking 기능 데모 테스트
 import asyncio
 import tempfile
 import os
-from datetime import datetime, timezone
 
 from app.core.database.base import Database
 from app.core.services.project import ProjectService

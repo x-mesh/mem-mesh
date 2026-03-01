@@ -81,14 +81,14 @@ async def test_auto_project_search():
             project_matches[proj] = project_matches.get(proj, 0) + 1
 
         print(f"  결과 수: {len(filtered_response.results)}")
-        print(f"  프로젝트 분포:")
+        print("  프로젝트 분포:")
         for proj, count in project_matches.items():
             marker = "✅" if proj == current_project else "⚠️"
             print(f"    {marker} {proj}: {count}개")
 
         # 상위 3개 결과
         if filtered_response.results:
-            print(f"\n  상위 3개 결과:")
+            print("\n  상위 3개 결과:")
             for i, r in enumerate(filtered_response.results[:3]):
                 is_match = r.project_id == current_project
                 marker = "✅" if is_match else "❌"

@@ -7,7 +7,6 @@ Detailed real data-driven search quality test
 
 import asyncio
 import time
-from typing import List, Dict, Any
 from app.core.storage.direct import DirectStorageBackend
 from app.core.config import create_settings
 from app.core.schemas.requests import SearchParams
@@ -187,7 +186,7 @@ async def test_search_quality_metrics():
     print(f"평균 상위 점수: {metrics['avg_top_score']:.3f}")
     print(f"평균 검색 시간: {metrics['avg_search_time']*1000:.1f}ms")
     
-    print(f"\n품질 분포:")
+    print("\n품질 분포:")
     print(f"  - 높음 (≥0.7): {metrics['high_quality_results']}개 "
           f"({metrics['high_quality_results']/metrics['queries_with_results']*100:.1f}%)")
     print(f"  - 중간 (0.5-0.7): {metrics['medium_quality_results']}개 "
@@ -226,7 +225,7 @@ async def test_search_quality_metrics():
             print(f"\n{i}. {result['description']}")
             print(f"   쿼리: '{result['query']}'")
             if result["result_count"] == 0:
-                print(f"   문제: 결과 없음")
+                print("   문제: 결과 없음")
             else:
                 print(f"   문제: 낮은 점수 ({result['top_score']:.3f})")
     else:

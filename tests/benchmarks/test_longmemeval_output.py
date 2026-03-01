@@ -15,7 +15,6 @@ from benchmarks.longmemeval.evaluator import is_abstention_answer, is_abstention
 from benchmarks.longmemeval.generator import build_context
 from benchmarks.longmemeval.models import (
     BenchmarkReport,
-    CategoryReport,
     QuestionResult,
     RetrievalMetrics,
 )
