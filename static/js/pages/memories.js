@@ -45,6 +45,15 @@ function truncate(text, max = 120) {
   return clean.length > max ? clean.substring(0, max) + '...' : clean;
 }
 
+function highlight(text, query) {
+  if (!query || !text) return esc(text);
+  const escaped = esc(text);
+  const terms = query.trim().split(/\s+/).filter(t => t.length >= 2);
+  if (!terms.length) return escaped;
+  const pattern = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  return escaped.replace(new RegExp(`(${pattern})`, 'gi'), '<mark>$1</mark>');
+}
+
 /* ── Component ──────────────────────────────────────────────── */
 
 class MemoriesPage extends HTMLElement {
@@ -69,6 +78,12 @@ class MemoriesPage extends HTMLElement {
     this._paletteSearchTimer = null;
     this._paletteIdx = -1;
     this._isInitialized = false;
+    // P1: batch selection
+    this._selected = new Set();
+    // P1: stats
+    this._stats = null;
+    // P1: active pins
+    this._activePins = [];
   }
 
   connectedCallback() {
@@ -82,6 +97,8 @@ class MemoriesPage extends HTMLElement {
     this.connectWebSocket();
     this.loadMemories();
     this.loadProjectsForFilter();
+    this.loadStats();
+    this.loadActivePins();
   }
 
   disconnectedCallback() {
@@ -167,6 +184,8 @@ class MemoriesPage extends HTMLElement {
         </div>
         <connection-status></connection-status>
       </div>
+      <div class="mem-stats-bar"></div>
+      <div class="mem-batch-bar" style="display:none"></div>
       <div class="mem-chips"></div>
       <div class="mem-suggestions"></div>
       <div class="mem-list"></div>
@@ -193,13 +212,18 @@ class MemoriesPage extends HTMLElement {
     const source = mem.source && mem.source !== 'unknown' ? mem.source : '';
     const tags = (mem.tags || []).slice(0, 3);
     const score = mem.similarity_score ? `<span class="mem-score">${(mem.similarity_score * 100).toFixed(0)}%</span>` : '';
+    const contentHtml = this.searchQuery ? highlight(content, this.searchQuery) : esc(content);
+    const isSelected = this._selected.has(mem.id);
 
     return `
-      <div class="recent-item mem-row" data-memory-id="${esc(mem.id)}" role="button" tabindex="0">
+      <div class="recent-item mem-row${isSelected ? ' mem-selected' : ''}" data-memory-id="${esc(mem.id)}" role="button" tabindex="0">
+        <label class="mem-checkbox-wrap" onclick="event.stopPropagation()">
+          <input type="checkbox" class="mem-checkbox" data-id="${esc(mem.id)}" ${isSelected ? 'checked' : ''} />
+        </label>
         <span class="recent-item-icon">${icon}</span>
         <span class="recent-item-badge mem-clickable-filter" data-filter-type="category" data-filter-value="${esc(mem.category)}">${esc(mem.category)}</span>
         ${mem.project_id ? `<span class="recent-item-project mem-clickable-filter" data-filter-type="project_id" data-filter-value="${esc(mem.project_id)}">${esc(mem.project_id)}</span>` : ''}
-        <span class="recent-item-content">${esc(content)}</span>
+        <span class="recent-item-content">${contentHtml}</span>
         ${tags.length ? `<span class="mem-tags">${tags.map(t => `<span class="mem-tag mem-clickable-filter" data-filter-type="tag" data-filter-value="${esc(t)}">#${esc(t)}</span>`).join('')}</span>` : ''}
         ${score}
         <span class="recent-item-time">${time}${source ? ` · ${source}` : ''}</span>
@@ -542,6 +566,28 @@ class MemoriesPage extends HTMLElement {
         return;
       }
 
+      // Batch: delete
+      if (target.closest('.mem-batch-delete-btn')) {
+        this.batchDelete();
+        return;
+      }
+      // Batch: deselect
+      if (target.closest('.mem-batch-clear-btn')) {
+        this.toggleSelectAll(false);
+        return;
+      }
+      // Pins badge click → filter by first pin's project
+      if (target.closest('.mem-stat-pins')) {
+        const pin = this._activePins[0];
+        if (pin?.project_id) {
+          this.viewParams.project_id = pin.project_id;
+          const projSel = this.querySelector('.mem-proj-select');
+          if (projSel) projSel.value = pin.project_id;
+          this.resetAndLoad();
+        }
+        return;
+      }
+
       // Time range button
       const timeBtn = target.closest('.mem-time-btn');
       if (timeBtn) {
@@ -556,6 +602,16 @@ class MemoriesPage extends HTMLElement {
     // Change delegation
     this.addEventListener('change', (e) => {
       const target = e.target;
+      // Checkbox for batch selection
+      if (target.matches('.mem-checkbox')) {
+        this.toggleSelect(target.dataset.id, target.checked);
+        return;
+      }
+      // Batch category change
+      if (target.matches('.mem-batch-cat')) {
+        this.batchChangeCategory(target.value);
+        return;
+      }
       if (target.matches('.mem-cat-select')) {
         this.viewParams.category = target.value || null;
         this.resetAndLoad();
@@ -634,6 +690,21 @@ class MemoriesPage extends HTMLElement {
       if (e.key === 'Enter') {
         const sel = this.querySelector('.mem-row.keyboard-selected');
         if (sel) sel.click();
+      }
+      // x = toggle selection on keyboard-selected row
+      if (e.key === 'x') {
+        const sel = this.querySelector('.mem-row.keyboard-selected');
+        if (sel) {
+          const id = sel.dataset.memoryId;
+          const isSelected = this._selected.has(id);
+          this.toggleSelect(id, !isSelected);
+          const cb = sel.querySelector('.mem-checkbox');
+          if (cb) cb.checked = !isSelected;
+        }
+      }
+      // Escape = deselect all (only when something is selected)
+      if (e.key === 'Escape' && this._selected.size > 0) {
+        this.toggleSelectAll(false);
       }
     });
 
@@ -1035,6 +1106,169 @@ class MemoriesPage extends HTMLElement {
     recent.unshift(query.trim());
     recent = recent.slice(0, 5);
     localStorage.setItem('mem-palette-recent', JSON.stringify(recent));
+  }
+
+  /* ── Stats bar ─────────────────────────────────────────── */
+
+  async loadStats() {
+    try {
+      const api = window.app?.apiClient;
+      if (!api) return;
+      const [stats, daily] = await Promise.all([
+        api.getStats(),
+        api.get('/memories/daily-counts', { days: 7 })
+      ]);
+      this._stats = { ...stats, daily: daily?.daily_counts || [] };
+      this.renderStatsBar();
+    } catch { /* ignore — stats are optional */ }
+  }
+
+  renderStatsBar() {
+    const bar = this.querySelector('.mem-stats-bar');
+    if (!bar || !this._stats) return;
+
+    const s = this._stats;
+    const total = s.total_memories || 0;
+    const cats = s.categories_breakdown || {};
+    const daily = s.daily || [];
+
+    // Mini sparkline (7 days)
+    const maxCount = Math.max(...daily.map(d => d.count), 1);
+    const sparkBars = daily.map(d => {
+      const h = Math.max(2, Math.round((d.count / maxCount) * 20));
+      return `<span class="mem-spark-bar" style="height:${h}px" title="${d.date}: ${d.count}"></span>`;
+    }).join('');
+
+    // Category pills (top 4)
+    const topCats = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    const catPills = topCats.map(([c, n]) =>
+      `<span class="mem-stat-cat mem-clickable-filter" data-filter-type="category" data-filter-value="${esc(c)}">${esc(c)} <strong>${n}</strong></span>`
+    ).join('');
+
+    // Week total
+    const weekTotal = daily.reduce((sum, d) => sum + d.count, 0);
+
+    // Active pins
+    const pinsHtml = this._activePins.length
+      ? `<span class="mem-stat-pins" title="Active pins">${this._activePins.length} pins</span>`
+      : '';
+
+    bar.innerHTML = `
+      <span class="mem-stat-total">${total} memories</span>
+      <span class="mem-stat-sep">·</span>
+      <span class="mem-stat-week">+${weekTotal} this week</span>
+      <span class="mem-sparkline">${sparkBars}</span>
+      ${catPills}
+      ${pinsHtml}
+    `;
+  }
+
+  /* ── Active Pins ──────────────────────────────────────── */
+
+  async loadActivePins() {
+    try {
+      const api = window.app?.apiClient;
+      if (!api) return;
+      const result = await api.get('/work/pins', { status: 'open', limit: 10 });
+      this._activePins = result?.pins || [];
+      this.renderStatsBar();
+    } catch { /* ignore */ }
+  }
+
+  /* ── Batch operations ─────────────────────────────────── */
+
+  toggleSelect(memoryId, checked) {
+    if (checked) {
+      this._selected.add(memoryId);
+    } else {
+      this._selected.delete(memoryId);
+    }
+    const row = this.querySelector(`.mem-row[data-memory-id="${memoryId}"]`);
+    if (row) row.classList.toggle('mem-selected', checked);
+    this.renderBatchBar();
+  }
+
+  toggleSelectAll(checked) {
+    this._selected.clear();
+    if (checked) {
+      this.memories.forEach(m => this._selected.add(m.id));
+    }
+    this.querySelectorAll('.mem-checkbox').forEach(cb => { cb.checked = checked; });
+    this.querySelectorAll('.mem-row').forEach(r => r.classList.toggle('mem-selected', checked));
+    this.renderBatchBar();
+  }
+
+  renderBatchBar() {
+    const bar = this.querySelector('.mem-batch-bar');
+    if (!bar) return;
+    const count = this._selected.size;
+    if (count === 0) {
+      bar.style.display = 'none';
+      return;
+    }
+    bar.style.display = 'flex';
+    bar.innerHTML = `
+      <span class="mem-batch-count">${count} selected</span>
+      <select class="mem-batch-cat" title="Change category">
+        <option value="">Category...</option>
+        <option value="task">Task</option>
+        <option value="bug">Bug</option>
+        <option value="idea">Idea</option>
+        <option value="decision">Decision</option>
+        <option value="incident">Incident</option>
+        <option value="code_snippet">Code Snippet</option>
+      </select>
+      <button class="mem-batch-delete-btn">Delete</button>
+      <button class="mem-batch-clear-btn">Deselect</button>
+    `;
+  }
+
+  async batchDelete() {
+    const ids = [...this._selected];
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} memories?`)) return;
+
+    const api = window.app?.apiClient;
+    if (!api) return;
+
+    let deleted = 0;
+    for (const id of ids) {
+      try {
+        await api.deleteMemory(id);
+        this.memories = this.memories.filter(m => m.id !== id);
+        this.totalMemories--;
+        const row = this.querySelector(`.mem-row[data-memory-id="${id}"]`);
+        if (row) row.remove();
+        deleted++;
+      } catch { /* continue */ }
+    }
+    this._selected.clear();
+    this.renderBatchBar();
+    this.renderFooter();
+    this.showToast(`${deleted} memories deleted`, 'success');
+  }
+
+  async batchChangeCategory(category) {
+    if (!category) return;
+    const ids = [...this._selected];
+    if (!ids.length) return;
+
+    const api = window.app?.apiClient;
+    if (!api) return;
+
+    let updated = 0;
+    for (const id of ids) {
+      try {
+        await api.updateMemory(id, { category });
+        const idx = this.memories.findIndex(m => m.id === id);
+        if (idx !== -1) this.memories[idx].category = category;
+        updated++;
+      } catch { /* continue */ }
+    }
+    this._selected.clear();
+    this.renderBatchBar();
+    this.renderMemoryList();
+    this.showToast(`${updated} memories updated to ${category}`, 'success');
   }
 
   /* ── Toast ──────────────────────────────────────────────── */
@@ -1606,6 +1840,141 @@ style.textContent = `
   }
   .mem-edit-save:hover { opacity: 0.9; }
   .mem-edit-save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ── Search Highlighting ───────────────── */
+  mark {
+    background: rgba(250, 204, 21, 0.25);
+    color: inherit;
+    padding: 0 1px;
+    border-radius: 2px;
+  }
+  [data-theme="dark"] mark,
+  .dark mark {
+    background: rgba(250, 204, 21, 0.15);
+  }
+
+  /* ── Stats Bar ────────────────────────── */
+  .mem-stats-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0;
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+    min-height: 1.5rem;
+  }
+  .mem-stats-bar:empty { display: none; }
+  .mem-stat-total { font-weight: 600; color: var(--text-secondary); }
+  .mem-stat-sep { opacity: 0.4; }
+  .mem-stat-week { color: var(--success-color, #10b981); }
+  .mem-sparkline {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 20px;
+    margin: 0 0.25rem;
+  }
+  .mem-spark-bar {
+    width: 4px;
+    background: var(--primary-color, #6366f1);
+    border-radius: 1px;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+  }
+  .mem-spark-bar:hover { opacity: 1; }
+  .mem-stat-cat {
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--bg-secondary);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .mem-stat-cat:hover { background: var(--border-color); }
+  .mem-stat-cat strong { font-weight: 600; color: var(--text-primary); margin-left: 2px; }
+  .mem-stat-pins {
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--primary-color, #6366f1);
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .mem-stat-pins:hover { background: rgba(99, 102, 241, 0.2); }
+
+  /* ── Batch Toolbar ────────────────────── */
+  .mem-batch-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    background: var(--primary-color, #6366f1);
+    color: white;
+    border-radius: var(--border-radius-sm, 6px);
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+  }
+  .mem-batch-count { flex: 1; }
+  .mem-batch-cat {
+    padding: 0.25rem 0.5rem;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 4px;
+    background: rgba(255,255,255,0.1);
+    color: white;
+    font-size: 0.6875rem;
+    cursor: pointer;
+  }
+  .mem-batch-cat option { color: var(--text-primary); background: var(--bg-primary); }
+  .mem-batch-delete-btn {
+    padding: 0.25rem 0.625rem;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 4px;
+    background: rgba(239,68,68,0.8);
+    color: white;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .mem-batch-delete-btn:hover { background: #ef4444; }
+  .mem-batch-clear-btn {
+    padding: 0.25rem 0.625rem;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 4px;
+    background: transparent;
+    color: white;
+    font-size: 0.6875rem;
+    cursor: pointer;
+  }
+  .mem-batch-clear-btn:hover { background: rgba(255,255,255,0.15); }
+
+  /* ── Checkbox in rows ─────────────────── */
+  .mem-checkbox-wrap {
+    display: flex;
+    align-items: center;
+    width: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: width 0.15s, opacity 0.15s, margin 0.15s;
+    margin-right: 0;
+    flex-shrink: 0;
+  }
+  .mem-row:hover .mem-checkbox-wrap,
+  .mem-row.mem-selected .mem-checkbox-wrap,
+  .mem-row.keyboard-selected .mem-checkbox-wrap {
+    width: 18px;
+    opacity: 1;
+    margin-right: 4px;
+  }
+  .mem-checkbox {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    accent-color: var(--primary-color, #6366f1);
+  }
+  .mem-row.mem-selected {
+    background: rgba(99, 102, 241, 0.06);
+  }
 
   /* ── Responsive ─────────────────────────── */
   @media (max-width: 640px) {
