@@ -347,6 +347,8 @@ class MemoriesPage extends HTMLElement {
     footer.innerHTML = `
       <span class="mem-count">${count} / ${total} memories</span>
       ${this.hasMore ? '<button class="mem-load-more-btn">Load more</button>' : ''}
+      <button class="mem-shortcuts-hint" title="Keyboard shortcuts (?)"
+        ><kbd>?</kbd> Shortcuts</button>
     `;
   }
 
@@ -664,6 +666,11 @@ class MemoriesPage extends HTMLElement {
         this.loadMemories();
         return;
       }
+      // Shortcuts help
+      if (target.closest('.mem-shortcuts-hint')) {
+        this.toggleShortcutsHelp();
+        return;
+      }
 
       // Chip remove
       const chipRemove = target.closest('.mem-chip-remove');
@@ -797,6 +804,13 @@ class MemoriesPage extends HTMLElement {
         return;
       }
 
+      // Shortcuts overlay: ? toggles, Escape closes
+      const shortcutsEl = document.querySelector('.mem-shortcuts-overlay');
+      if (shortcutsEl) {
+        if (e.key === 'Escape' || e.key === '?') shortcutsEl.remove();
+        return; // block all other keys while help is open
+      }
+
       // Skip when focus is in an input/select/textarea (except Escape)
       if (e.target.matches('input, select, textarea, .combobox-input') && e.key !== 'Escape') return;
 
@@ -859,6 +873,10 @@ class MemoriesPage extends HTMLElement {
       // e = export JSON, E (shift) = export CSV
       if (e.key === 'e' && !e.metaKey && !e.ctrlKey) {
         this.exportMemories(e.shiftKey ? 'csv' : 'json');
+      }
+      // ? = toggle keyboard shortcuts help
+      if (e.key === '?') {
+        this.toggleShortcutsHelp();
       }
     };
     document.addEventListener('keydown', this._boundKeydown);
@@ -1176,6 +1194,56 @@ class MemoriesPage extends HTMLElement {
 
   destroyPalette() {
     this.closePalette();
+  }
+
+  /* ── Keyboard Shortcuts Help ──────────────────────────── */
+
+  toggleShortcutsHelp() {
+    const existing = document.querySelector('.mem-shortcuts-overlay');
+    if (existing) { existing.remove(); return; }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'mem-shortcuts-overlay';
+    overlay.innerHTML = `
+      <div class="mem-shortcuts-panel">
+        <div class="mem-shortcuts-header">
+          <span>Keyboard Shortcuts</span>
+          <button class="mem-shortcuts-close">&times;</button>
+        </div>
+        <div class="mem-shortcuts-body">
+          <div class="mem-shortcuts-group">
+            <div class="mem-shortcuts-group-title">Navigation</div>
+            <div class="mem-shortcut-row"><kbd>j</kbd> / <kbd>&darr;</kbd><span>Next row</span></div>
+            <div class="mem-shortcut-row"><kbd>k</kbd> / <kbd>&uarr;</kbd><span>Previous row</span></div>
+            <div class="mem-shortcut-row"><kbd>Enter</kbd><span>Open memory</span></div>
+          </div>
+          <div class="mem-shortcuts-group">
+            <div class="mem-shortcuts-group-title">Preview & Selection</div>
+            <div class="mem-shortcut-row"><kbd>Space</kbd><span>Toggle peek preview</span></div>
+            <div class="mem-shortcut-row"><kbd>x</kbd><span>Toggle checkbox</span></div>
+            <div class="mem-shortcut-row"><kbd>Esc</kbd><span>Close peek / Deselect all</span></div>
+          </div>
+          <div class="mem-shortcuts-group">
+            <div class="mem-shortcuts-group-title">Actions</div>
+            <div class="mem-shortcut-row"><kbd>${navigator.platform.includes('Mac') ? '&#8984;' : 'Ctrl+'}K</kbd><span>Command palette</span></div>
+            <div class="mem-shortcut-row"><kbd>e</kbd><span>Export JSON</span></div>
+            <div class="mem-shortcut-row"><kbd>E</kbd><span>Export CSV</span></div>
+            <div class="mem-shortcut-row"><kbd>?</kbd><span>This help</span></div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay || e.target.closest('.mem-shortcuts-close')) {
+        overlay.remove();
+      }
+    });
+    overlay.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' || e.key === '?') { overlay.remove(); }
+    });
+
+    document.body.appendChild(overlay);
   }
 
   _showRecentPalette(container) {
@@ -2011,6 +2079,135 @@ style.textContent = `
   .mem-load-more-btn:hover {
     background: var(--bg-secondary);
     border-color: var(--border-hover, var(--border-color));
+  }
+
+  /* ── Shortcuts hint ──────────────────────── */
+  .mem-shortcuts-hint {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    font-size: 0.6875rem;
+    cursor: pointer;
+    border-radius: var(--border-radius-sm, 4px);
+    transition: color 0.15s, background 0.15s;
+  }
+  .mem-shortcuts-hint:hover {
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+  }
+  .mem-shortcuts-hint kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: var(--bg-primary);
+    font-family: inherit;
+    font-size: 0.625rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    box-shadow: 0 1px 0 var(--border-color);
+  }
+
+  /* ── Shortcuts help overlay ──────────────── */
+  .mem-shortcuts-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: sh-fade 0.15s ease;
+  }
+  @keyframes sh-fade { from { opacity: 0; } to { opacity: 1; } }
+
+  .mem-shortcuts-panel {
+    width: 400px;
+    max-width: 92vw;
+    background: var(--card-bg, var(--bg-primary));
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+    animation: sh-slide 0.15s ease;
+    overflow: hidden;
+  }
+  @keyframes sh-slide { from { transform: translateY(-8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  .mem-shortcuts-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .mem-shortcuts-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.25rem;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    line-height: 1;
+    border-radius: 4px;
+  }
+  .mem-shortcuts-close:hover { color: var(--text-primary); background: var(--bg-secondary); }
+
+  .mem-shortcuts-body {
+    padding: 0.5rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .mem-shortcuts-group {
+    padding: 0.25rem 1rem 0.5rem;
+  }
+  .mem-shortcuts-group-title {
+    font-size: 0.625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    padding-bottom: 0.375rem;
+  }
+  .mem-shortcut-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.3125rem 0;
+    font-size: 0.8125rem;
+    color: var(--text-primary);
+  }
+  .mem-shortcut-row kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    font-family: inherit;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    box-shadow: 0 1px 0 var(--border-color);
+  }
+  .mem-shortcut-row span {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
   }
 
   /* ── Cmd+K Command Palette ──────────────── */
