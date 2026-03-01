@@ -7,9 +7,15 @@ import { wsClient } from '../services/websocket-client.js';
 import '../components/connection-status.js';
 
 const CAT_ICONS = {
-  decision: '\u2605', bug: '\u25CF', code_snippet: '\u25C6',
-  idea: '\u25CB', incident: '\u25B2', task: '\u25A0', 'git-history': '\u25C7',
+  task: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>',
+  bug: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+  decision: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+  code_snippet: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+  incident: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  idea: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z"/></svg>',
+  'git-history': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="1.05" y1="12" x2="7" y2="12"/><line x1="17.01" y1="12" x2="22.96" y2="12"/></svg>',
 };
+const DEFAULT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
 
 class DashboardPage extends HTMLElement {
   constructor() {
@@ -83,7 +89,7 @@ class DashboardPage extends HTMLElement {
 
   setupEventListeners() {
     this.addEventListener('click', (e) => {
-      const row = e.target.closest('.ml-row');
+      const row = e.target.closest('.recent-item');
       if (row) {
         const id = row.dataset.id;
         if (id && window.app?.router) window.app.router.navigate(`/memory/${id}`);
@@ -177,6 +183,7 @@ class DashboardPage extends HTMLElement {
     this.className = 'dash';
     this.innerHTML = `
       <div class="dash-session" id="dash-session"></div>
+      <div class="dash-insights" id="dash-insights"></div>
       <div class="dash-toolbar">
         <span class="dash-title">Recent Memories</span>
         <div class="dash-filters">
@@ -203,6 +210,7 @@ class DashboardPage extends HTMLElement {
 
   renderContent() {
     this.renderSession();
+    this.renderInsights();
     this.renderMemoryList();
     this.renderFooter();
   }
@@ -226,13 +234,74 @@ class DashboardPage extends HTMLElement {
     `;
   }
 
+  renderInsights() {
+    const el = this.querySelector('#dash-insights');
+    if (!el || !this.stats) return;
+
+    const cats = this.stats.categories_breakdown || {};
+    const total = Object.values(cats).reduce((a, b) => a + b, 0);
+    if (total === 0) { el.innerHTML = ''; return; }
+
+    // Category distribution — top categories as inline bars
+    const sorted = Object.entries(cats).sort(([,a],[,b]) => b - a);
+    const topCats = sorted.slice(0, 4);
+    const catBars = topCats.map(([cat, count]) => {
+      const pct = Math.round((count / total) * 100);
+      const w = Math.max(pct, 4);
+      return `<span class="insight-bar-item">
+        <span class="insight-bar-track"><span class="insight-bar-fill cat-bg-${cat}" style="width:${w}%"></span></span>
+        <span class="insight-bar-label">${cat.replace('_',' ')} ${pct}%</span>
+      </span>`;
+    }).join('');
+    const moreCount = sorted.length - 4;
+    const moreLabel = moreCount > 0 ? `<span class="insight-more">+${moreCount} more</span>` : '';
+
+    // Weekly activity — count memories from last 7 days as mini bars
+    const filtered = this.memories.filter(m => {
+      const age = Date.now() - new Date(m.created_at).getTime();
+      return age < 7 * 86400000;
+    });
+    const dayBuckets = new Array(7).fill(0);
+    filtered.forEach(m => {
+      const daysAgo = Math.floor((Date.now() - new Date(m.created_at).getTime()) / 86400000);
+      if (daysAgo >= 0 && daysAgo < 7) dayBuckets[6 - daysAgo]++;
+    });
+    const maxDay = Math.max(...dayBuckets, 1);
+    const dayLabels = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    const today = new Date().getDay(); // 0=Sun
+    const sparkBars = dayBuckets.map((c, i) => {
+      const h = Math.max(Math.round((c / maxDay) * 24), 2);
+      const dayIdx = (today - 6 + i + 7) % 7;
+      return `<span class="spark-col" title="${dayLabels[dayIdx]}: ${c}"><span class="spark-bar" style="height:${h}px"></span></span>`;
+    }).join('');
+    const weekTotal = dayBuckets.reduce((a, b) => a + b, 0);
+
+    const totalMemories = this.stats.total_memories ?? total;
+
+    el.innerHTML = `
+      <div class="insight-card insight-total">
+        <span class="insight-count-lg">${totalMemories.toLocaleString()}</span>
+        <span class="insight-title">memories</span>
+      </div>
+      <div class="insight-card">
+        <span class="insight-title">Categories</span>
+        <div class="insight-bars">${catBars}${moreLabel}</div>
+      </div>
+      <div class="insight-card">
+        <span class="insight-title">This week</span>
+        <div class="insight-spark">${sparkBars}</div>
+        <span class="insight-count">${weekTotal}</span>
+      </div>
+    `;
+  }
+
   renderMemoryList() {
     const el = this.querySelector('#dash-list');
     if (!el) return;
 
     if (this.isLoading && this.memories.length === 0) {
       el.innerHTML = Array.from({ length: 8 }, () =>
-        '<div class="ml-row ml-skeleton"><span class="sk-line"></span></div>'
+        '<div class="recent-item ml-skeleton"><span class="sk-line"></span></div>'
       ).join('');
       return;
     }
@@ -249,17 +318,17 @@ class DashboardPage extends HTMLElement {
   }
 
   buildRow(m) {
-    const icon = CAT_ICONS[m.category] || '\u25CF';
-    const cat = (m.category || '').replace('_', ' ');
-    const title = this.extractTitle(m.content);
-    const proj = m.project_id || '';
+    const icon = CAT_ICONS[m.category] || DEFAULT_ICON;
+    const preview = (m.content || '').replace(/#{1,6}\s+/g, '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/\n/g, ' ').trim();
+    const truncated = preview.length > 120 ? preview.substring(0, 120) + '...' : preview;
     const time = this.relTime(m.created_at);
-    return `<div class="ml-row" data-id="${m.id}" role="button" tabindex="0">
-      <span class="ml-icon cat-${m.category}">${icon}</span>
-      <span class="ml-cat">${cat}</span>
-      <span class="ml-title">${this.esc(title)}</span>
-      <span class="ml-proj">${this.esc(proj)}</span>
-      <span class="ml-time">${time}</span>
+    const source = m.source && m.source !== 'unknown' ? m.source : '';
+    return `<div class="recent-item" data-id="${m.id}" role="button" tabindex="0">
+      <span class="recent-item-icon cat-${m.category}">${icon}</span>
+      <span class="recent-item-badge">${m.category}</span>
+      ${m.project_id ? `<span class="recent-item-project">${this.esc(m.project_id)}</span>` : ''}
+      <span class="recent-item-content">${this.esc(truncated)}</span>
+      <span class="recent-item-time">${time}${source ? ' \u00b7 ' + source : ''}</span>
     </div>`;
   }
 
@@ -285,12 +354,6 @@ class DashboardPage extends HTMLElement {
   filterByDays(memories) {
     const cutoff = Date.now() - this.filterDays * 86400000;
     return memories.filter(m => new Date(m.created_at).getTime() >= cutoff);
-  }
-
-  extractTitle(content) {
-    if (!content) return '(empty)';
-    const line = content.replace(/^#{1,6}\s+/, '').replace(/\*\*(.*?)\*\*/g, '$1').split('\n')[0].trim();
-    return line.length > 60 ? line.slice(0, 60) + '\u2026' : line;
   }
 
   relTime(d) {

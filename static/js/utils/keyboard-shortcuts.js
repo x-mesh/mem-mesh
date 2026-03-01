@@ -186,27 +186,34 @@ export class KeyboardShortcuts {
   registerDefaultShortcuts() {
     // Navigation shortcuts
     this.register('ctrl+k', () => {
+      // If memories page is active with its own Cmd+K palette, let it handle it
+      const memoriesPage = document.querySelector('memories-page');
+      if (memoriesPage && typeof memoriesPage.openPalette === 'function') {
+        memoriesPage.openPalette();
+        return;
+      }
+
       // If already on search/memories page, just focus the search input
-      const existingSearchInput = document.querySelector('.search-input') 
-        || document.querySelector('.chroma-search-input')
-        || document.querySelector('chroma-search-bar .chroma-search-input');
-      
+      const existingSearchInput = document.querySelector('.mem-search-input')
+        || document.querySelector('.search-input')
+        || document.querySelector('.chroma-search-input');
+
       if (existingSearchInput && document.activeElement !== existingSearchInput) {
         existingSearchInput.focus();
         existingSearchInput.select();
         return;
       }
-      
-      // Navigate to memories search view
+
+      // Navigate to memories page
       if (window.app?.router) {
-        window.app.router.navigate('/memories?view=search');
+        window.app.router.navigate('/memories');
       } else {
-        window.location.href = '/memories?view=search';
+        window.location.href = '/memories';
       }
-      
+
       setTimeout(() => {
-        const searchInput = document.querySelector('.search-input')
-          || document.querySelector('.chroma-search-input');
+        const searchInput = document.querySelector('.mem-search-input')
+          || document.querySelector('.search-input');
         if (searchInput) {
           searchInput.focus();
           searchInput.select();
@@ -335,7 +342,7 @@ export class KeyboardShortcuts {
    * Navigate in lists (for keyboard navigation)
    */
   navigateList(direction) {
-    const lists = document.querySelectorAll('.memory-list, .project-list, .search-results');
+    const lists = document.querySelectorAll('.mem-list, .memory-list, .project-list, .search-results');
     const activeList = Array.from(lists).find(list => 
       list.getBoundingClientRect().top >= 0 && 
       list.getBoundingClientRect().bottom <= window.innerHeight
@@ -343,7 +350,7 @@ export class KeyboardShortcuts {
     
     if (!activeList) return;
     
-    const items = activeList.querySelectorAll('.memory-card, .project-card, .search-result-item');
+    const items = activeList.querySelectorAll('.recent-item, .project-card, .search-result-item');
     if (items.length === 0) return;
     
     let currentIndex = Array.from(items).findIndex(item => 

@@ -33,6 +33,10 @@ class SearchRequest(BaseModel):
     sort_direction: str = "desc"
     recency_weight: float = Field(default=0.0, ge=0.0, le=1.0)
     search_mode: str = "hybrid"
+    time_range: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    temporal_mode: str = "boost"
 
 
 async def _do_search(
@@ -48,6 +52,10 @@ async def _do_search(
     recency_weight: float,
     search_mode: str,
     service: UnifiedSearchService,
+    time_range: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    temporal_mode: str = "boost",
 ) -> SearchResponse:
     """Shared search logic for GET and POST endpoints."""
     try:
@@ -63,6 +71,10 @@ async def _do_search(
             sort_direction=sort_direction,
             recency_weight=recency_weight,
             search_mode=search_mode,
+            time_range=time_range,
+            date_from=date_from,
+            date_to=date_to,
+            temporal_mode=temporal_mode,
         )
     except Exception as e:
         logger.error(f"Search memories error: {e}")
@@ -82,6 +94,10 @@ async def search_memories(
     sort_direction: str = "desc",
     recency_weight: float = 0.0,
     search_mode: str = "hybrid",
+    time_range: str = None,
+    date_from: str = None,
+    date_to: str = None,
+    temporal_mode: str = "boost",
     service: UnifiedSearchService = Depends(get_search_service),
 ) -> SearchResponse:
     """
@@ -106,6 +122,10 @@ async def search_memories(
         recency_weight=recency_weight,
         search_mode=search_mode,
         service=service,
+        time_range=time_range,
+        date_from=date_from,
+        date_to=date_to,
+        temporal_mode=temporal_mode,
     )
 
 
@@ -133,6 +153,10 @@ async def search_memories_post(
         recency_weight=body.recency_weight,
         search_mode=body.search_mode,
         service=service,
+        time_range=body.time_range,
+        date_from=body.date_from,
+        date_to=body.date_to,
+        temporal_mode=body.temporal_mode,
     )
 
 

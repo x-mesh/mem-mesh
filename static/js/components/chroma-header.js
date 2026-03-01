@@ -83,11 +83,20 @@ class ChromaHeader extends HTMLElement {
                 </svg>
                 <span>Work</span>
               </a>
-              <a href="/settings" class="nav-link nav-link-icon" data-route="/settings" data-nav="settings" title="Settings">
+              <a href="/analytics" class="nav-link" data-route="/analytics" data-nav="analytics">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                  <path d="M18 20V10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M12 20V4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M6 20V14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span>Analytics</span>
+              </a>
+              <a href="/settings" class="nav-link" data-route="/settings" data-nav="settings">
                 <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
                   <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
                   <path d="M12 1v2m0 18v2m-7.07-3.93l1.41-1.41m11.31-11.32l1.42-1.41M1 12h2m18 0h2m-3.93 7.07l-1.41-1.41M5.64 5.64L4.22 4.22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                 </svg>
+                <span>Settings</span>
               </a>
             </div>
           </nav>
@@ -213,6 +222,14 @@ class ChromaHeader extends HTMLElement {
                   <path d="M21 12V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
                 <span>Work</span>
+              </a>
+              <a href="/analytics" class="mobile-nav-link" data-route="/analytics" data-nav="analytics">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                  <path d="M18 20V10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M12 20V4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M6 20V14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span>Analytics</span>
               </a>
               <a href="/settings" class="mobile-nav-link" data-route="/settings" data-nav="settings">
                 <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
