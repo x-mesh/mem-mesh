@@ -6,6 +6,7 @@
 
 import { wsClient } from '../services/websocket-client.js';
 import '../components/connection-status.js';
+import '../components/searchable-combobox.js';
 
 /* ── helpers (same as dashboard.js) ─────────────────────────── */
 
@@ -165,19 +166,19 @@ class MemoriesPage extends HTMLElement {
           <option value="semantic">Semantic</option>
           <option value="fuzzy">Fuzzy</option>
         </select>
-        <select class="mem-cat-select">
+        <searchable-combobox class="mem-cat-combo" placeholder="All Categories">
           <option value="">All Categories</option>
-          <option value="task">Task</option>
-          <option value="bug">Bug</option>
-          <option value="idea">Idea</option>
-          <option value="decision">Decision</option>
-          <option value="incident">Incident</option>
-          <option value="code_snippet">Code Snippet</option>
-          <option value="git-history">Git History</option>
-        </select>
-        <select class="mem-proj-select">
+          <option value="task" data-icon="📋">Task</option>
+          <option value="bug" data-icon="🐛">Bug</option>
+          <option value="idea" data-icon="💡">Idea</option>
+          <option value="decision" data-icon="💎">Decision</option>
+          <option value="incident" data-icon="⚠️">Incident</option>
+          <option value="code_snippet" data-icon="💻">Code Snippet</option>
+          <option value="git-history" data-icon="📚">Git History</option>
+        </searchable-combobox>
+        <searchable-combobox class="mem-proj-combo" placeholder="All Projects">
           <option value="">All Projects</option>
-        </select>
+        </searchable-combobox>
         <select class="mem-sort-select">
           <option value="created_at">Newest</option>
           <option value="updated_at">Updated</option>
@@ -212,15 +213,35 @@ class MemoriesPage extends HTMLElement {
       <div class="mem-footer"></div>
     `;
 
-    // restore select values from URL
-    const catSel = this.querySelector('.mem-cat-select');
-    if (catSel && this.viewParams.category) catSel.value = this.viewParams.category;
+    // restore select/combobox values from URL
     const sortSel = this.querySelector('.mem-sort-select');
     if (sortSel) sortSel.value = this.sortBy;
     const modeSel = this.querySelector('.mem-mode-select');
     if (modeSel) modeSel.value = this.searchMode;
     const srcSel = this.querySelector('.mem-source-select');
     if (srcSel && this.viewParams.source) srcSel.value = this.viewParams.source;
+
+    // Initialize combobox options explicitly (child <option> may not be parsed yet)
+    setTimeout(() => {
+      const catCombo = this.querySelector('.mem-cat-combo');
+      if (catCombo) {
+        catCombo.setOptions([
+          { value: '', text: 'All Categories' },
+          { value: 'task', text: 'Task', icon: '📋' },
+          { value: 'bug', text: 'Bug', icon: '🐛' },
+          { value: 'idea', text: 'Idea', icon: '💡' },
+          { value: 'decision', text: 'Decision', icon: '💎' },
+          { value: 'incident', text: 'Incident', icon: '⚠️' },
+          { value: 'code_snippet', text: 'Code Snippet', icon: '💻' },
+          { value: 'git-history', text: 'Git History', icon: '📚' }
+        ]);
+        if (this.viewParams.category) catCombo.setValue(this.viewParams.category);
+      }
+      const projCombo = this.querySelector('.mem-proj-combo');
+      if (projCombo && this.viewParams.project_id) {
+        projCombo.setValue(this.viewParams.project_id);
+      }
+    }, 0);
 
     this.renderChips();
   }
@@ -382,12 +403,12 @@ class MemoriesPage extends HTMLElement {
     } else {
       this.viewParams[key] = null;
       if (key === 'category') {
-        const sel = this.querySelector('.mem-cat-select');
-        if (sel) sel.value = '';
+        const combo = this.querySelector('.mem-cat-combo');
+        if (combo) combo.setValue('', 'All Categories');
       }
       if (key === 'project_id') {
-        const sel = this.querySelector('.mem-proj-select');
-        if (sel) sel.value = '';
+        const combo = this.querySelector('.mem-proj-combo');
+        if (combo) combo.setValue('', 'All Projects');
       }
     }
     this.resetAndLoad();
@@ -400,10 +421,10 @@ class MemoriesPage extends HTMLElement {
     this.sortBy = this._prevSortBy || 'created_at';
     const input = this.querySelector('.mem-search-input');
     if (input) input.value = '';
-    const catSel = this.querySelector('.mem-cat-select');
-    if (catSel) catSel.value = '';
-    const projSel = this.querySelector('.mem-proj-select');
-    if (projSel) projSel.value = '';
+    const catCombo = this.querySelector('.mem-cat-combo');
+    if (catCombo) catCombo.setValue('', 'All Categories');
+    const projCombo = this.querySelector('.mem-proj-combo');
+    if (projCombo) projCombo.setValue('', 'All Projects');
     const sortSel = this.querySelector('.mem-sort-select');
     if (sortSel) sortSel.value = this.sortBy;
     this.querySelectorAll('.mem-time-btn').forEach(b => b.classList.toggle('active', b.dataset.range === ''));
@@ -499,15 +520,14 @@ class MemoriesPage extends HTMLElement {
       }
 
       if (projectsData?.projects) {
-        const sel = this.querySelector('.mem-proj-select');
-        if (sel) {
+        const projCombo = this.querySelector('.mem-proj-combo');
+        if (projCombo) {
+          const opts = [{ value: '', text: 'All Projects' }];
           projectsData.projects.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p.id;
-            opt.textContent = p.name || p.id;
-            sel.appendChild(opt);
+            opts.push({ value: p.id, text: p.name || p.id });
           });
-          if (this.viewParams.project_id) sel.value = this.viewParams.project_id;
+          projCombo.setOptions(opts);
+          if (this.viewParams.project_id) projCombo.setValue(this.viewParams.project_id);
         }
       }
     } catch { /* ignore */ }
@@ -577,10 +597,14 @@ class MemoriesPage extends HTMLElement {
         const value = filterEl.dataset.filterValue;
         if (type && value) {
           this.viewParams[type] = value;
-          const catSel = this.querySelector('.mem-cat-select');
-          if (type === 'category' && catSel) catSel.value = value;
-          const projSel = this.querySelector('.mem-proj-select');
-          if (type === 'project_id' && projSel) projSel.value = value;
+          if (type === 'category') {
+            const catCombo = this.querySelector('.mem-cat-combo');
+            if (catCombo) catCombo.setValue(value);
+          }
+          if (type === 'project_id') {
+            const projCombo = this.querySelector('.mem-proj-combo');
+            if (projCombo) projCombo.setValue(value);
+          }
           this.resetAndLoad();
         }
         return;
@@ -665,8 +689,8 @@ class MemoriesPage extends HTMLElement {
         const pin = this._activePins[0];
         if (pin?.project_id) {
           this.viewParams.project_id = pin.project_id;
-          const projSel = this.querySelector('.mem-proj-select');
-          if (projSel) projSel.value = pin.project_id;
+          const projCombo = this.querySelector('.mem-proj-combo');
+          if (projCombo) projCombo.setValue(pin.project_id);
           this.resetAndLoad();
         }
         return;
@@ -696,13 +720,16 @@ class MemoriesPage extends HTMLElement {
         this.batchChangeCategory(target.value);
         return;
       }
-      if (target.matches('.mem-cat-select')) {
-        this.viewParams.category = target.value || null;
+      // Searchable combobox change events (CustomEvent with detail)
+      if (target.matches('.mem-cat-combo')) {
+        this.viewParams.category = e.detail?.value || null;
         this.resetAndLoad();
+        return;
       }
-      if (target.matches('.mem-proj-select')) {
-        this.viewParams.project_id = target.value || null;
+      if (target.matches('.mem-proj-combo')) {
+        this.viewParams.project_id = e.detail?.value || null;
         this.resetAndLoad();
+        return;
       }
       if (target.matches('.mem-sort-select')) {
         this.sortBy = target.value;
@@ -1687,8 +1714,6 @@ style.textContent = `
     border-color: var(--primary-color, #6366f1);
     box-shadow: 0 0 0 2px rgba(99,102,241,0.12);
   }
-  .mem-cat-select,
-  .mem-proj-select,
   .mem-sort-select {
     padding: 0.4375rem 0.5rem;
     border: 1px solid var(--border-color);
@@ -1698,6 +1723,39 @@ style.textContent = `
     font-size: 0.75rem;
     cursor: pointer;
     outline: none;
+  }
+
+  /* ── Searchable Combobox in toolbar ──── */
+  .mem-cat-combo,
+  .mem-proj-combo {
+    flex-shrink: 0;
+    width: 150px;
+  }
+  .mem-cat-combo .combobox-input,
+  .mem-proj-combo .combobox-input {
+    padding: 0.4375rem 1.75rem 0.4375rem 0.5rem;
+    font-size: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+  }
+  .mem-cat-combo .combobox-input:focus,
+  .mem-proj-combo .combobox-input:focus {
+    border-color: var(--primary-color, #6366f1);
+    box-shadow: 0 0 0 2px rgba(99,102,241,0.12);
+  }
+  .mem-cat-combo .combobox-dropdown,
+  .mem-proj-combo .combobox-dropdown {
+    border-radius: var(--border-radius-sm, 6px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    max-height: 240px;
+  }
+  .mem-cat-combo .combobox-option,
+  .mem-proj-combo .combobox-option {
+    padding: 0.375rem 0.5rem;
+    font-size: 0.75rem;
+    gap: 0.375rem;
   }
 
   /* ── Search Mode Select ───────────────────── */
@@ -2563,7 +2621,8 @@ style.textContent = `
     }
     .mem-toolbar .mem-title { font-size: 1rem; }
     .mem-search-wrap { min-width: 100%; }
-    .mem-cat-select, .mem-proj-select, .mem-sort-select, .mem-mode-select { flex: 1; min-width: 0; }
+    .mem-cat-combo, .mem-proj-combo { width: auto; flex: 1; min-width: 0; }
+    .mem-sort-select, .mem-mode-select { flex: 1; min-width: 0; }
     .mem-time-range { width: 100%; }
     .mem-toolbar { flex-direction: row; flex-wrap: wrap; }
     .mem-tags { display: none; }

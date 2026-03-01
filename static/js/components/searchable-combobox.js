@@ -86,7 +86,8 @@ class SearchableCombobox extends HTMLElement {
     }
     
     this.dispatchEvent(new CustomEvent('change', {
-      detail: { value: this.selectedValue, text: this.selectedText }
+      detail: { value: this.selectedValue, text: this.selectedText },
+      bubbles: true
     }));
   }
   
