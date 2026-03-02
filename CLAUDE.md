@@ -51,6 +51,8 @@ uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 
 **M4. 보안** — API키, 토큰, PII, `.env` 내용 **절대 저장 금지**. 코드 스니펫의 민감 값은 `<REDACTED>`.
 
+**M5. Stop hook 피드백 즉시 실행** — system-reminder에 `"mem-mesh에 저장하세요"` 또는 `mcp__mem-mesh__add` 지시가 포함되어 있으면, **사용자 메시지 처리 전에 반드시 해당 저장을 먼저 실행**한다. Stop hook은 대화 분석 후 저장이 필요하다고 판단한 것이므로, 이 지시를 무시하거나 뒤로 미루면 안 된다.
+
 ---
 
 ## SHOULD (권장)

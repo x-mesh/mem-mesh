@@ -125,6 +125,7 @@ markers = [
     "unit: Unit tests",
     "integration: Integration tests",
     "property: Property-based tests",
+    "eval: DX evaluation tests (Tier 3 requires RUN_EVALS=1)",
 ]
 
 [tool.coverage.run]
