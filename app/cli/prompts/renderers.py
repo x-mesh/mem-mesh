@@ -19,6 +19,7 @@ from app.cli.prompts.behaviors import (
     REFLECT_CONFIG,
     SAVE_CRITERIA,
     SESSION_CONFIG,
+    STOP_PROMPT_CONFIG,
 )
 
 # ---------------------------------------------------------------------------
@@ -192,6 +193,47 @@ def render_cursor_followup(project_id: str = "mem-mesh") -> str:
 
 
 VERSION_MARKER = f"# mem-mesh-hooks prompt-version: {PROMPT_VERSION}"
+
+
+def render_claude_stop_prompt() -> str:
+    """Render the prompt for Claude Code's native ``type: "prompt"`` Stop hook.
+
+    Hybrid approach: front ~60% summarized by LLM, back ~40% kept raw.
+    The prompt instructs Haiku to decide save/skip and produce hybrid content.
+    Claude Code replaces ``$ARGUMENTS`` with stop-hook input at runtime.
+    """
+    front_pct = int(STOP_PROMPT_CONFIG.hybrid_front_ratio * 100)
+    back_pct = 100 - front_pct
+    max_lines = STOP_PROMPT_CONFIG.max_summary_lines
+    back_max = STOP_PROMPT_CONFIG.back_max_chars
+
+    save_list = "\n".join(f"- {c}" for c in SAVE_CRITERIA.save_when)
+    skip_list = "\n".join(f"- {c}" for c in SAVE_CRITERIA.skip_when)
+
+    return (
+        "대화의 마지막 응답을 분석하여 mem-mesh 저장 여부를 판단하세요.\n\n"
+        "$ARGUMENTS\n\n"
+        "## 루프 방지\n"
+        '- stop_hook_active가 true이면: {"ok": true}\n'
+        "- 이 턴에서 이미 mem-mesh 저장(mcp__mem-mesh__add)이 "
+        '수행되었으면: {"ok": true}\n\n'
+        f"## 저장 기준 (하나라도 해당 시 저장)\n{save_list}\n\n"
+        f"## 스킵 기준 (하나라도 해당 시 스킵)\n{skip_list}\n\n"
+        "## 저장 방식 (하이브리드)\n"
+        "대화 내용을 분할 처리하세요:\n"
+        f"- 전반부(~{front_pct}%): 배경, 탐색, 시행착오를 "
+        f"{max_lines}줄 이내로 추론 요약\n"
+        f"- 후반부(~{back_pct}%): 최종 결과, 코드, 결정을 "
+        f"원본 그대로 유지 (최대 {back_max}자)\n\n"
+        "## 응답\n\n"
+        '저장 불필요: {"ok": true}\n\n'
+        "저장 필요:\n"
+        '{"ok": false, "reason": "mem-mesh에 저장하세요. '
+        "mcp__mem-mesh__add(category='[decision|bug|code_snippet|idea]', "
+        "project_id=[현재 프로젝트명]):\\n\\n"
+        "## 맥락\\n[전반부 요약]\\n\\n"
+        '## 상세\\n[후반부 원본]"}'
+    )
 
 
 def render_reflect_prompt() -> str:

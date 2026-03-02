@@ -22,6 +22,7 @@ from app.cli.prompts.behaviors import PROMPT_VERSION, REFLECT_CONFIG
 from app.cli.prompts.renderers import (
     VERSION_MARKER,
     extract_prompt_version,
+    render_claude_stop_prompt,
     render_cursor_followup,
     render_kiro_auto_create_pin,
     render_kiro_auto_save,
@@ -152,6 +153,114 @@ curl -s -o /dev/null --max-time 5 \
   -d "$PAYLOAD" 2>/dev/null || true
 
 exit 0
+"""
+
+SESSION_START_HOOK_TEMPLATE = r"""#!/bin/bash
+__VERSION_MARKER__
+# Claude Code SessionStart hook: inject mem-mesh session context
+# Fires on session start AND after compaction (context re-injection)
+# Returns additional_context JSON via /api/memories/search
+
+set -euo pipefail
+command -v jq >/dev/null 2>&1 || { echo '{}'; exit 0; }
+command -v curl >/dev/null 2>&1 || { echo '{}'; exit 0; }
+
+API_URL="${MEM_MESH_API_URL:-__DEFAULT_URL__}"
+
+INPUT=$(cat)
+
+# Detect project from CWD
+PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+[ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
+
+# Fetch recent memories for this project via search API
+RESUME_DATA=$(curl -s --max-time 5 \
+  -X POST "${API_URL}/api/memories/search" \
+  -H "Content-Type: application/json" \
+  -d "{\"query\":\"\",\"project_id\":\"${PROJECT_DIR}\",\"limit\":5}" \
+  2>/dev/null) || RESUME_DATA='{"error": "mem-mesh API not available"}'
+
+# Extract compact summary from search results
+SESSION_SUMMARY=$(echo "$RESUME_DATA" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    results = data.get('results', [])
+    if not results:
+        print('No recent memories found.')
+    else:
+        lines = []
+        for r in results:
+            cat = r.get('category', '?')
+            content = r.get('content', '')[:120].replace('\n', ' ')
+            lines.append(f'- [{cat}] {content}')
+        print('\n'.join(lines))
+except Exception:
+    print('mem-mesh not available')
+" 2>/dev/null) || SESSION_SUMMARY="mem-mesh not available"
+
+CONTEXT="## mem-mesh Session Context (Auto-injected)
+
+### Recent Activity (${PROJECT_DIR})
+${SESSION_SUMMARY}
+
+### Rules
+__RULES_TEXT__"
+
+jq -n --arg ctx "$CONTEXT" '{ additional_context: $ctx }'
+"""
+
+LOCAL_SESSION_START_HOOK_TEMPLATE = r"""#!/bin/bash
+__VERSION_MARKER__
+# Claude Code SessionStart hook: inject mem-mesh session context (local mode)
+# Fires on session start AND after compaction (context re-injection)
+# Returns additional_context JSON
+
+set -euo pipefail
+command -v python3 >/dev/null 2>&1 || { echo '{}'; exit 0; }
+
+MEM_MESH_PATH="__MEM_MESH_PATH__"
+
+INPUT=$(cat)
+
+PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+[ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
+
+RESUME_DATA=$(python3 -c "
+import sys, json
+sys.path.insert(0, '$MEM_MESH_PATH')
+try:
+    from app.core.services.pin_service import PinService
+    from app.core.storage.direct import DirectStorageManager
+    import asyncio
+
+    async def get_resume():
+        storage = DirectStorageManager()
+        await storage.initialize()
+        pin_svc = PinService(storage)
+        result = await pin_svc.session_resume('$PROJECT_DIR', expand='smart')
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    print(asyncio.run(get_resume()))
+except Exception as e:
+    print(json.dumps({'error': str(e)}))
+" 2>/dev/null) || RESUME_DATA='{"error": "mem-mesh not available"}'
+
+RULES_TEXT="__RULES_TEXT__"
+
+CONTEXT="## mem-mesh Session Context (Auto-injected)
+
+### Previous Session
+${RESUME_DATA}
+
+### Rules
+${RULES_TEXT}"
+
+python3 -c "
+import json, sys
+ctx = sys.stdin.read()
+print(json.dumps({'additional_context': ctx}))
+" <<< "$CONTEXT"
 """
 
 KIRO_STOP_HOOK_TEMPLATE = r"""#!/bin/bash
@@ -561,16 +670,16 @@ exit 0
 
 HOOK_PROFILES = {
     "standard": {
-        "description": "Full content storage (no truncation)",
-        "hooks": ["track", "stop"],
+        "description": "Smart save via native prompt hook (hybrid summarization)",
+        "hooks": ["session-start", "track", "stop-prompt"],
     },
     "enhanced": {
-        "description": "Standard + LLM reflection (requires ANTHROPIC_API_KEY)",
-        "hooks": ["track", "stop", "reflect"],
+        "description": "Smart save + structured analysis (requires ANTHROPIC_API_KEY)",
+        "hooks": ["session-start", "track", "stop-prompt", "reflect"],
     },
     "minimal": {
-        "description": "Conversation summary only (stop hook)",
-        "hooks": ["stop"],
+        "description": "Simple truncated save (command hook, no LLM cost)",
+        "hooks": ["session-start", "stop"],
     },
 }
 
@@ -581,8 +690,27 @@ HOOK_PROFILES = {
 
 
 def _build_claude_hooks_settings(profile: str = "standard") -> Dict[str, Any]:
-    """Build Claude Code hooks settings dynamically based on profile."""
+    """Build Claude Code hooks settings dynamically based on profile.
+
+    Profiles:
+      - minimal: command-based stop hook (no LLM cost, simple truncation)
+      - standard: native prompt-based stop hook (hybrid summarization via Haiku)
+      - enhanced: prompt stop + async reflect command (structured analysis)
+    """
     settings: Dict[str, Any] = {"hooks": {}}
+
+    # SessionStart: inject session context (all profiles)
+    settings["hooks"]["SessionStart"] = [
+        {
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "~/.claude/hooks/mem-mesh-session-start.sh",
+                    "timeout": 15,
+                }
+            ]
+        }
+    ]
 
     if profile != "minimal":
         settings["hooks"]["PostToolUse"] = [
@@ -599,26 +727,51 @@ def _build_claude_hooks_settings(profile: str = "standard") -> Dict[str, Any]:
             }
         ]
 
-    stop_hooks: List[Dict[str, Any]] = [
-        {
-            "type": "command",
-            "command": "~/.claude/hooks/mem-mesh-stop.sh",
-            "timeout": 10,
-            "async": True,
-        }
-    ]
+    stop_entries: List[Dict[str, Any]] = []
 
-    if profile == "enhanced":
-        stop_hooks.append(
+    if profile in ("standard", "enhanced"):
+        # Native prompt hook: Haiku judges save/skip and produces hybrid content
+        stop_entries.append(
             {
-                "type": "command",
-                "command": "~/.claude/hooks/mem-mesh-reflect.sh",
-                "timeout": 30,
-                "async": True,
+                "hooks": [
+                    {
+                        "type": "prompt",
+                        "prompt": render_claude_stop_prompt(),
+                    }
+                ]
+            }
+        )
+    else:
+        # minimal: old-style command hook (truncate + save via API/local)
+        stop_entries.append(
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/mem-mesh-stop.sh",
+                        "timeout": 10,
+                        "async": True,
+                    }
+                ]
             }
         )
 
-    settings["hooks"]["Stop"] = [{"hooks": stop_hooks}]
+    if profile == "enhanced":
+        # Additional async reflect hook for structured analysis
+        stop_entries.append(
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/mem-mesh-reflect.sh",
+                        "timeout": 30,
+                        "async": True,
+                    }
+                ]
+            }
+        )
+
+    settings["hooks"]["Stop"] = stop_entries
 
     return settings
 
@@ -792,9 +945,28 @@ def _install_claude(
     profile_info = HOOK_PROFILES[profile]
     print(f"[claude] Installing hook scripts (profile: {profile})...")
 
+    session_start_script = CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh"
     track_script = CLAUDE_HOOKS_DIR / "mem-mesh-track.sh"
     stop_script = CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh"
     reflect_script = CLAUDE_HOOKS_DIR / "mem-mesh-reflect.sh"
+
+    # SessionStart hook (all profiles)
+    if mode == "local":
+        _write_script(
+            session_start_script,
+            _render_local_template(LOCAL_SESSION_START_HOOK_TEMPLATE, path),
+        )
+    else:
+        _write_script(
+            session_start_script,
+            _render_template(
+                SESSION_START_HOOK_TEMPLATE,
+                url,
+                source_tag="claude-code-hook",
+                ide_tag="claude",
+            ),
+        )
+    print(f"  -> {session_start_script}")
 
     # Track hook (skip for minimal profile)
     if "track" in profile_info["hooks"]:
@@ -819,22 +991,30 @@ def _install_claude(
             track_script.unlink()
             print(f"  removed {track_script} (not in {profile} profile)")
 
-    # Stop hook (always included)
-    if mode == "local":
-        _write_script(
-            stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path)
-        )
-    else:
-        _write_script(
-            stop_script,
-            _render_template(
-                STOP_HOOK_TEMPLATE,
-                url,
-                source_tag="claude-code-hook",
-                ide_tag="claude",
-            ),
-        )
-    print(f"  -> {stop_script}")
+    # Stop hook
+    if "stop-prompt" in profile_info["hooks"]:
+        # Prompt-based stop: no shell script needed (prompt is in settings.json)
+        if stop_script.exists():
+            stop_script.unlink()
+            print(f"  removed {stop_script} (using native prompt hook)")
+        print("  -> Stop: native prompt hook (hybrid summarization)")
+    elif "stop" in profile_info["hooks"]:
+        # Command-based stop: write shell script (minimal profile)
+        if mode == "local":
+            _write_script(
+                stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path)
+            )
+        else:
+            _write_script(
+                stop_script,
+                _render_template(
+                    STOP_HOOK_TEMPLATE,
+                    url,
+                    source_tag="claude-code-hook",
+                    ide_tag="claude",
+                ),
+            )
+        print(f"  -> {stop_script}")
 
     # Reflect hook (enhanced profile only)
     if "reflect" in profile_info["hooks"]:
@@ -995,7 +1175,12 @@ def _install_cursor(
 def _uninstall_claude() -> None:
     """Remove mem-mesh hooks for Claude Code."""
     print("[claude] Removing hook scripts...")
-    for name in ("mem-mesh-track.sh", "mem-mesh-stop.sh", "mem-mesh-reflect.sh"):
+    for name in (
+        "mem-mesh-session-start.sh",
+        "mem-mesh-track.sh",
+        "mem-mesh-stop.sh",
+        "mem-mesh-reflect.sh",
+    ):
         script = CLAUDE_HOOKS_DIR / name
         if script.exists():
             script.unlink()
@@ -1101,18 +1286,45 @@ def _check_kiro_hook_version(path: Path) -> str:
     return f"installed (prompt-version: {version})"
 
 
-def _detect_profile(hooks_dir: Path) -> str:
-    """Detect installed profile based on which hook scripts exist."""
+def _has_prompt_stop_hook(settings_path: Path) -> bool:
+    """Check if settings.json has a prompt-based Stop hook configured."""
+    if not settings_path.exists():
+        return False
+    try:
+        data = json.loads(settings_path.read_text(encoding="utf-8"))
+        stop_entries = data.get("hooks", {}).get("Stop", [])
+        for entry in stop_entries:
+            for hook in entry.get("hooks", []):
+                if hook.get("type") == "prompt":
+                    return True
+    except (json.JSONDecodeError, OSError, TypeError):
+        pass
+    return False
+
+
+def _detect_profile(hooks_dir: Path, settings_path: Optional[Path] = None) -> str:
+    """Detect installed profile based on hook scripts and settings.
+
+    For standard/enhanced profiles with prompt hooks, the stop.sh script
+    does not exist — detection uses settings.json instead.
+    """
     has_track = (hooks_dir / "mem-mesh-track.sh").exists()
     has_reflect = (hooks_dir / "mem-mesh-reflect.sh").exists()
     has_stop = (hooks_dir / "mem-mesh-stop.sh").exists()
+    has_prompt_stop = (
+        _has_prompt_stop_hook(settings_path) if settings_path else False
+    )
 
-    if has_reflect:
+    if has_reflect or (has_prompt_stop and has_reflect):
         return "enhanced"
+    if has_prompt_stop and has_track:
+        return "standard (prompt)"
     if has_track and has_stop:
-        return "standard"
+        return "standard (legacy)"
     if has_stop and not has_track:
         return "minimal"
+    if has_prompt_stop:
+        return "standard (prompt)"
     return "unknown"
 
 
@@ -1123,17 +1335,26 @@ def cmd_status() -> None:
 
     # Claude Code
     print("[Claude Code]")
+    session_start = CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh"
     track = CLAUDE_HOOKS_DIR / "mem-mesh-track.sh"
     stop = CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh"
     reflect = CLAUDE_HOOKS_DIR / "mem-mesh-reflect.sh"
+    print(f"  session hook: {_check_script_version(session_start)}")
     print(f"  track hook:   {_check_script_version(track)}")
-    print(f"  stop hook:    {_check_script_version(stop)}")
+    if _has_prompt_stop_hook(CLAUDE_SETTINGS):
+        print(f"  stop hook:    native prompt (v{PROMPT_VERSION})")
+    else:
+        print(f"  stop hook:    {_check_script_version(stop)}")
     print(f"  reflect hook: {_check_script_version(reflect)}")
 
-    detected = _detect_profile(CLAUDE_HOOKS_DIR)
+    detected = _detect_profile(CLAUDE_HOOKS_DIR, CLAUDE_SETTINGS)
     print(f"  profile:      {detected}")
 
-    url = _extract_url_from_script(track) or _extract_url_from_script(stop)
+    url = (
+        _extract_url_from_script(session_start)
+        or _extract_url_from_script(track)
+        or _extract_url_from_script(stop)
+    )
     if url:
         print(f"  target URL:   {url}")
 
@@ -1609,7 +1830,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         "--profile",
         choices=["standard", "enhanced", "minimal"],
         default="standard",
-        help="Hook profile: standard (full content), enhanced (+LLM reflection), minimal (stop only)",
+        help="Hook profile: standard (prompt hook, hybrid save), enhanced (+reflect), minimal (command, no LLM)",
     )
     install_parser.add_argument(
         "-i",

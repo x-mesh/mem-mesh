@@ -14,7 +14,7 @@ from typing import List
 # Prompt schema version — bump on ANY behavioral rule change
 # ---------------------------------------------------------------------------
 
-PROMPT_VERSION: int = 2
+PROMPT_VERSION: int = 3
 
 
 # ---------------------------------------------------------------------------
@@ -165,4 +165,28 @@ REFLECT_CONFIG = ReflectConfig(
     model="claude-haiku-4-5-20251001",
     max_tokens=1024,
     timeout_seconds=20,
+)
+
+
+# ---------------------------------------------------------------------------
+# Claude Code native prompt hook configuration (Stop event)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class StopPromptConfig:
+    """Configuration for Claude Code native prompt-based Stop hook.
+
+    Uses hybrid approach: front part summarized + back part raw.
+    """
+
+    hybrid_front_ratio: float  # 0.6 = front 60% summarized
+    max_summary_lines: int  # max lines for front summary
+    back_max_chars: int  # max chars for raw back part
+
+
+STOP_PROMPT_CONFIG = StopPromptConfig(
+    hybrid_front_ratio=0.6,
+    max_summary_lines=7,
+    back_max_chars=3000,
 )
