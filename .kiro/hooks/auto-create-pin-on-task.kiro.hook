@@ -1,7 +1,7 @@
 {
   "name": "Auto Create Pin on Task Start",
   "description": "명확한 작업 요청 시에만 Pin 생성",
-  "version": "2",
+  "version": "4",
   "when": {
     "type": "promptSubmit"
   },

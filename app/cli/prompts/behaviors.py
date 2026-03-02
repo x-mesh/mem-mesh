@@ -14,7 +14,7 @@ from typing import List
 # Prompt schema version — bump on ANY behavioral rule change
 # ---------------------------------------------------------------------------
 
-PROMPT_VERSION: int = 3
+PROMPT_VERSION: int = 4
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ SAVE_CRITERIA = SaveCriteria(
         '단순 질문/답변 ("뭐야?", "보여줘")',
         "파일 읽기만 한 경우",
         "이미 저장된 내용의 반복",
-        "hook 자체에 대한 메타 대화",
+        "hook/설정 자체의 점검·수정·메타 대화 (hook 동작 확인, settings.json 수정 포함)",
     ],
     save_format=(
         'mcp_mem_mesh_add(content="Q: [질문]\\nA: [핵심 답변]", '
@@ -188,5 +188,5 @@ class StopPromptConfig:
 STOP_PROMPT_CONFIG = StopPromptConfig(
     hybrid_front_ratio=0.6,
     max_summary_lines=7,
-    back_max_chars=3000,
+    back_max_chars=1500,
 )

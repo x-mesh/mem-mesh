@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 2
+# mem-mesh-hooks prompt-version: 4
 # mem-mesh Session End Hook for Cursor (project-local)
 
 set -euo pipefail
