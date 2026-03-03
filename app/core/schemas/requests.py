@@ -44,6 +44,7 @@ class AddParams(BaseModel):
     project_id: Optional[str] = Field(default=None)
     category: str = Field(default="task")
     source: Optional[str] = Field(default=None)
+    client: Optional[str] = Field(default=None, max_length=50)
     tags: Optional[List[str]] = Field(default=None)
 
     @field_validator("project_id")

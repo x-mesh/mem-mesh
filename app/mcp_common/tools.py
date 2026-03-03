@@ -52,6 +52,7 @@ class MCPToolHandlers:
         project_id: Optional[str] = None,
         category: str = "task",
         source: str = "mcp",
+        client: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Add a new memory to the memory store
@@ -61,6 +62,7 @@ class MCPToolHandlers:
             project_id: Project identifier (optional)
             category: Memory category (task, bug, idea, decision, incident, code_snippet, git-history)
             source: Memory source
+            client: Client tool name (cursor, kiro, claude_code, etc.)
             tags: Memory tags
 
         Returns:
@@ -68,7 +70,7 @@ class MCPToolHandlers:
         """
         logger.info_with_details(
             "Tool add called",
-            details={"content": content, "tags": tags, "source": source},
+            details={"content": content, "tags": tags, "source": source, "client": client},
             project_id=project_id,
             category=category,
             content_length=len(content),
@@ -80,6 +82,7 @@ class MCPToolHandlers:
                 project_id=project_id,
                 category=category,
                 source=source,
+                client=client,
                 tags=tags,
             )
             result = await self._storage.add_memory(params)

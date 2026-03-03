@@ -517,6 +517,7 @@ class UnifiedSearchService:
                     project_id=row["project_id"],
                     category=row["category"],
                     source=row["source"],
+                    client=row["client"] if "client" in row.keys() else None,
                     tags=self._parse_tags(row),
                 )
             )
@@ -590,6 +591,7 @@ class UnifiedSearchService:
                             project_id=row["project_id"],
                             category=row["category"],
                             source=row["source"],
+                            client=row["client"] if "client" in row.keys() else None,
                             tags=self._parse_tags(row),
                         )
                     )
@@ -763,7 +765,7 @@ class UnifiedSearchService:
 
         # FTS 쿼리 실행
         sql = """
-            SELECT m.id, m.content, m.created_at, m.project_id, m.category, m.source, m.tags
+            SELECT m.id, m.content, m.created_at, m.project_id, m.category, m.source, m.client, m.tags
             FROM memories_fts fts
             JOIN memories m ON fts.id = m.id
             WHERE fts.memories_fts MATCH ?
@@ -798,6 +800,7 @@ class UnifiedSearchService:
                         project_id=row["project_id"],
                         category=row["category"],
                         source=row["source"],
+                        client=row["client"] if "client" in row.keys() else None,
                         tags=self._parse_tags(row),
                     )
                 )
@@ -854,6 +857,7 @@ class UnifiedSearchService:
                     project_id=row["project_id"],
                     category=row["category"],
                     source=row["source"],
+                    client=row["client"] if "client" in row.keys() else None,
                     tags=self._parse_tags(row),
                 )
             )
@@ -936,6 +940,7 @@ class UnifiedSearchService:
                     project_id=row["project_id"],
                     category=row["category"],
                     source=row["source"],
+                    client=row["client"] if "client" in row.keys() else None,
                     tags=self._parse_tags(row),
                 )
             )
@@ -984,6 +989,7 @@ class UnifiedSearchService:
                     project_id=row["project_id"],
                     category=row["category"],
                     source=row["source"],
+                    client=row["client"] if "client" in row.keys() else None,
                     tags=self._parse_tags(row),
                 )
             )
@@ -1016,6 +1022,7 @@ class UnifiedSearchService:
                     "project_id": r.project_id,
                     "category": r.category,
                     "source": r.source,
+                    "client": r.client,
                     "tags": r.tags or [],
                 }
                 for r in result.results
@@ -1039,6 +1046,7 @@ class UnifiedSearchService:
                         project_id=item.get("project_id"),
                         category=item.get("category", ""),
                         source=item.get("source", ""),
+                        client=item.get("client"),
                         tags=item.get("tags"),
                     )
                 )
@@ -1117,7 +1125,7 @@ class UnifiedSearchService:
             # 2단계: 배치 조회로 N+1 제거
             placeholders = ",".join("?" for _ in candidate_ids)
             rows = await self.db.fetchall(
-                f"SELECT id, content, created_at, project_id, category, source, tags FROM memories WHERE id IN ({placeholders})",
+                f"SELECT id, content, created_at, project_id, category, source, client, tags FROM memories WHERE id IN ({placeholders})",
                 tuple(candidate_ids.keys()),
             )
 
@@ -1134,6 +1142,7 @@ class UnifiedSearchService:
                         project_id=row["project_id"],
                         category=row["category"] or "",
                         source=row["source"] or "",
+                        client=row["client"] if "client" in row.keys() else None,
                         tags=tags,
                     )
                 )

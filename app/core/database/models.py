@@ -21,6 +21,7 @@ class Memory(BaseModel):
     project_id: Optional[str] = Field(default=None)
     category: str = Field(default="task")
     source: str
+    client: Optional[str] = Field(default=None)
     embedding: bytes
     tags: Optional[str] = Field(default=None)
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")

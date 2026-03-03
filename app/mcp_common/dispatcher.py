@@ -90,6 +90,7 @@ class MCPDispatcher:
             project_id=args.get("project_id"),
             category=args.get("category", "task"),
             source=args.get("source", "mcp"),
+            client=args.get("client"),
             tags=args.get("tags"),
         )
         return format_tool_response(result)

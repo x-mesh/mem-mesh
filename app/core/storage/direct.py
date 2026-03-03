@@ -190,6 +190,7 @@ class DirectStorageBackend(StorageBackend):
                 project_id=params.project_id,
                 category=params.category,
                 source=params.source or "mcp",
+                client=params.client,
                 tags=params.tags,
             )
 

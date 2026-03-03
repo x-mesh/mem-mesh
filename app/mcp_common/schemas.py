@@ -59,6 +59,11 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "default": "mcp",
                         "maxLength": 50,
                     },
+                    "client": {
+                        "type": "string",
+                        "description": "Client tool name (e.g. cursor, kiro, claude_code)",
+                        "maxLength": 50,
+                    },
                     "tags": {
                         "type": "array",
                         "items": {"type": "string", "minLength": 1, "maxLength": 50},

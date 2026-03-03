@@ -70,8 +70,8 @@ class ContextService:
             cursor = self.db.connection.cursor()
             cursor.execute(
                 """
-                SELECT id, content, created_at, project_id, category, source
-                FROM memories 
+                SELECT id, content, created_at, project_id, category, source, client
+                FROM memories
                 WHERE id = ?
             """,
                 (memory_id,),
@@ -89,6 +89,7 @@ class ContextService:
                 project_id=row[3],
                 category=row[4],
                 source=row[5],
+                client=row[6],
             )
         except Exception as e:
             logger.error(f"Error getting primary memory: {e}")

@@ -49,6 +49,7 @@ class MemoryService:
         project_id: Optional[str] = None,
         category: str = "task",
         source: str = "unknown",
+        client: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ) -> AddResponse:
         """
@@ -95,6 +96,7 @@ class MemoryService:
             project_id=project_id,
             category=category,
             source=source,
+            client=client,
             embedding=embedding_bytes,
             tags=json.dumps(tags) if tags else None,
         )

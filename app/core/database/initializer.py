@@ -67,6 +67,7 @@ class DatabaseInitializer:
                 project_id TEXT,
                 category TEXT NOT NULL DEFAULT 'task',
                 source TEXT NOT NULL,
+                client TEXT,
                 embedding BLOB NOT NULL,
                 tags TEXT,
                 created_at TEXT NOT NULL,
@@ -313,6 +314,7 @@ class DatabaseInitializer:
             "CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)",
             "CREATE INDEX IF NOT EXISTS idx_memories_content_hash ON memories(content_hash)",
+            "CREATE INDEX IF NOT EXISTS idx_memories_client ON memories(client)",
         ]
 
         # Work tracking indexes

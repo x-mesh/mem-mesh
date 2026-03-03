@@ -33,6 +33,7 @@ class SearchResult(BaseModel):
     project_id: Optional[str] = Field(description="프로젝트 ID")
     category: str = Field(description="카테고리")
     source: str = Field(description="생성 소스")
+    client: Optional[str] = Field(default=None, description="생성 도구 (cursor, kiro, claude_code 등)")
     tags: Optional[List[str]] = Field(default=None, description="태그 목록")
 
     model_config = {
@@ -187,6 +188,7 @@ class StatsResponse(BaseModel):
     unique_projects: int = Field(description="고유 프로젝트 수")
     categories_breakdown: Dict[str, int] = Field(description="카테고리별 분포")
     sources_breakdown: Dict[str, int] = Field(description="소스별 분포")
+    clients_breakdown: Dict[str, int] = Field(default_factory=dict, description="클라이언트 도구별 분포")
     projects_breakdown: Dict[str, int] = Field(description="프로젝트별 분포")
     date_range: Optional[Dict[str, str]] = Field(None, description="조회 날짜 범위")
     query_time_ms: float = Field(description="쿼리 실행 시간 (밀리초)")

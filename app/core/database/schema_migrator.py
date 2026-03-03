@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Current schema version - increment when adding new migrations
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 
 class SchemaMigrator:
@@ -37,6 +37,7 @@ class SchemaMigrator:
             2: self._migration_v2_work_tracking_columns,
             3: self._migration_v3_relation_tables,
             4: self._migration_v4_pin_columns_integrity,
+            5: self._migration_v5_client_column,
         }
 
     async def migrate(self) -> None:
@@ -227,3 +228,9 @@ class SchemaMigrator:
             await self._add_column_if_missing("pins", "embedding", "BLOB", "NULL")
             await self._add_column_if_missing("pins", "user_id", "TEXT", "'default'")
             logger.info("Pin columns integrity check completed via migration v4")
+
+    async def _migration_v5_client_column(self, migrator: "SchemaMigrator") -> None:
+        """Add client column to memories table for tracking creation tool."""
+        if await self._table_exists("memories"):
+            await self._add_column_if_missing("memories", "client", "TEXT", "NULL")
+            logger.info("Added client column to memories table via migration v5")

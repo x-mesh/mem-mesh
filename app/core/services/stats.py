@@ -84,6 +84,11 @@ class StatsService:
                 project_id, start_date, end_date
             )
 
+            # 클라이언트 도구별 분포
+            clients_breakdown = await self.get_client_stats(
+                project_id, start_date, end_date
+            )
+
             # 프로젝트별 분포 (project_id 필터가 없는 경우에만)
             projects_breakdown = {}
             if not project_id:
@@ -107,6 +112,7 @@ class StatsService:
                 "unique_projects": unique_projects,
                 "categories_breakdown": categories_breakdown,
                 "sources_breakdown": sources_breakdown,
+                "clients_breakdown": clients_breakdown,
                 "projects_breakdown": projects_breakdown,
                 "date_range": date_range,
                 "query_time_ms": round(query_time_ms, 2),
@@ -249,6 +255,51 @@ class StatsService:
 
         except Exception as e:
             logger.error(f"Failed to get source stats: {e}")
+            raise
+
+    async def get_client_stats(
+        self,
+        project_id: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """클라이언트 도구별 메모리 수 조회"""
+        try:
+            where_conditions = []
+            params = []
+
+            if project_id:
+                where_conditions.append("project_id = ?")
+                params.append(project_id)
+
+            if start_date:
+                where_conditions.append("created_at >= ?")
+                params.append(f"{start_date}T00:00:00Z")
+
+            if end_date:
+                where_conditions.append("created_at <= ?")
+                params.append(f"{end_date}T23:59:59Z")
+
+            where_clause = ""
+            if where_conditions:
+                where_clause = "WHERE " + " AND ".join(where_conditions)
+
+            query = f"""
+                SELECT
+                    COALESCE(client, 'unknown') as client_name,
+                    COUNT(*) as count
+                FROM memories
+                {where_clause}
+                GROUP BY client
+                ORDER BY count DESC
+            """
+
+            results = await self.db.fetchall(query, tuple(params))
+
+            return {row["client_name"]: row["count"] for row in results}
+
+        except Exception as e:
+            logger.error(f"Failed to get client stats: {e}")
             raise
 
     async def get_date_range_stats(

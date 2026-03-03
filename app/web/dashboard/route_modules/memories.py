@@ -40,6 +40,7 @@ async def add_memory(
             project_id=params.project_id,
             category=params.category,
             source=params.source or "api",
+            client=params.client or "web",
             tags=params.tags,
         )
 
@@ -56,6 +57,7 @@ async def add_memory(
                     "category": memory.category,
                     "tags": json.loads(memory.tags) if memory.tags else [],
                     "source": memory.source,
+                    "client": memory.client,
                     "created_at": memory.created_at,
                     "updated_at": memory.updated_at,
                 }
@@ -86,6 +88,7 @@ async def get_memory(
             "category": memory.category,
             "tags": memory.tags,
             "source": memory.source,
+            "client": memory.client,
             "created_at": memory.created_at,
             "updated_at": memory.updated_at,
         }
@@ -143,6 +146,7 @@ async def update_memory(
                     "category": memory.category,
                     "tags": json.loads(memory.tags) if memory.tags else [],
                     "source": memory.source,
+                    "client": memory.client,
                     "created_at": memory.created_at,
                     "updated_at": memory.updated_at,
                 }
