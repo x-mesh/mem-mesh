@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from app.core.database.base import Database
 from app.core.schemas.pins import PinResponse
+from app.core.services.pin import _parse_tags
 from app.core.schemas.sessions import (
     SessionContext,
     SessionResponse,
@@ -344,12 +345,7 @@ class SessionService:
 
     def _pin_row_to_response(self, row) -> PinResponse:
         """DB row를 PinResponse로 변환"""
-        tags = []
-        if row["tags"]:
-            try:
-                tags = json.loads(row["tags"])
-            except json.JSONDecodeError:
-                tags = []
+        tags = _parse_tags(row["tags"])
 
         # lead_time 계산
         lead_time_hours = None

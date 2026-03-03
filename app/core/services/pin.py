@@ -17,6 +17,30 @@ from app.core.utils.user import get_current_user
 logger = logging.getLogger(__name__)
 
 
+def _parse_tags(raw: object) -> List[str]:
+    """DB에서 읽은 tags 값을 List[str]로 안전 변환.
+
+    Cases:
+      - None / empty → []
+      - JSON array string '["a","b"]' → ["a", "b"]
+      - JSON-encoded string '"a, b"'  → ["a", "b"]  (split by comma)
+      - Plain string 'a, b'          → ["a", "b"]  (split by comma)
+    """
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [str(t) for t in raw]
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        parsed = raw
+    if isinstance(parsed, list):
+        return [str(t) for t in parsed]
+    if isinstance(parsed, str):
+        return [t.strip() for t in parsed.split(",") if t.strip()]
+    return []
+
+
 class InvalidStatusTransitionError(Exception):
     """유효하지 않은 상태 전이"""
 
@@ -95,7 +119,9 @@ class PinService:
 
         pin_id = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
-        tags_json = json.dumps(tags) if tags else None
+        # Normalize tags: ensure it's always a list before storing
+        normalized_tags = _parse_tags(tags) if tags else []
+        tags_json = json.dumps(normalized_tags) if normalized_tags else None
 
         await self.db.execute(
             """
@@ -494,12 +520,7 @@ class PinService:
 
     def _row_to_response(self, row) -> PinResponse:
         """DB row를 PinResponse로 변환"""
-        tags = []
-        if row["tags"]:
-            try:
-                tags = json.loads(row["tags"])
-            except json.JSONDecodeError:
-                tags = []
+        tags = _parse_tags(row["tags"])
 
         # lead_time 계산
         lead_time_hours = None
