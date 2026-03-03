@@ -81,4 +81,4 @@ uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 - **버전 정보**: `app.core.version` 단일 소스
 - **커밋 메시지**: `type: description` (feat, fix, refactor, docs, test, chore)
 
-> Hook 기반 자동 저장은 사용하지 않는다. 메모리 저장은 AI가 MCP 도구로 직접 수행한다.
+> Hook이 bash로 직접 콘텐츠를 DB에 저장하지 않는다. Hook은 세션 라이프사이클(SessionStart)과 AI에게 저장 판단을 위임(prompt/followup)하는 용도로만 사용한다.

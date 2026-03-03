@@ -24,6 +24,10 @@ logs/
 .venv/
 **/results/
 
+# Worktrees
+.cursor/worktrees/
+.claude/worktrees/
+
 # Benchmark
 benchmarks/longmemeval/dbs/
 benchmarks/longmemeval/results_v1_backup/

@@ -126,7 +126,11 @@
 
 ## 🔄 Cursor Hooks 지원
 
-Cursor IDE에서도 동일한 mem-mesh 연동이 가능합니다. `.cursor/hooks.json`과 `.cursor/hooks/` 디렉토리에 구성되어 있습니다.
+Cursor IDE에서도 동일한 mem-mesh 연동이 가능합니다.
+
+- 활성 훅 설정: `~/.cursor/hooks.json` (전역)
+- 프로젝트 제공물: `./.cursor/hooks/*.sh`, `./.cursor/hooks.mem-mesh.example.json`
+- 프로젝트 `./.cursor/hooks.json`은 사용자 커스텀 전용으로 유지(자동 sync 시 mem-mesh 엔트리 정리)
 
 ### Kiro vs Cursor 이벤트 매핑
 

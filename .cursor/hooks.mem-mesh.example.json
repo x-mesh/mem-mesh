@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "sessionEnd": [
+      {
+        "command": "/Users/jinwoo/work/project/mem-mesh/.cursor/hooks/mem-mesh-session-end.sh",
+        "timeout": 10,
+        "type": "command"
+      }
+    ],
+    "sessionStart": [
+      {
+        "command": "/Users/jinwoo/work/project/mem-mesh/.cursor/hooks/mem-mesh-session-start.sh",
+        "timeout": 15,
+        "type": "command"
+      }
+    ],
+    "stop": [
+      {
+        "command": "/Users/jinwoo/work/project/mem-mesh/.cursor/hooks/mem-mesh-auto-save.sh",
+        "timeout": 10,
+        "type": "command"
+      }
+    ]
+  },
+  "version": 1
+}

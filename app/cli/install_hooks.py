@@ -13,6 +13,7 @@ Bump PROMPT_VERSION in behaviors.py when rules change, then re-run:
 import argparse
 import json
 import os
+import re
 import stat
 import sys
 from pathlib import Path
@@ -40,75 +41,6 @@ DEFAULT_URL = "https://meme.24x365.online"
 # The __RULES_TEXT__ placeholder is replaced with render_rules_text() output.
 # The __FOLLOWUP_MSG__ placeholder is replaced with render_cursor_followup().
 # The __DEFAULT_URL__ / __MEM_MESH_PATH__ are replaced at install time.
-
-TRACK_HOOK_TEMPLATE = r"""#!/bin/bash
-__VERSION_MARKER__
-# PostToolUse hook: track code changes to mem-mesh
-# stdin: {"tool_name":"Write|Edit","tool_input":{...}} JSON
-
-set -euo pipefail
-command -v jq >/dev/null 2>&1 || exit 0
-
-API_URL="${MEM_MESH_API_URL:-__DEFAULT_URL__}"
-
-INPUT=$(cat)
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
-
-[ -z "$FILE_PATH" ] && exit 0
-
-# Only track known file types
-case "$FILE_PATH" in
-  *.py|*.ts|*.js|*.jsx|*.tsx|*.json|*.md|*.yaml|*.yml|*.toml|*.sh) ;;
-  *) exit 0 ;;
-esac
-
-# Exclude internal files
-case "$FILE_PATH" in
-  */.cursor/*|*/.claude/*|*/.kiro/*) exit 0 ;;
-esac
-
-# Extract project ID from directory name
-PROJECT_DIR=$(basename "$(cd "$(dirname "$FILE_PATH")" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || dirname "$FILE_PATH")")
-[ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
-
-# Build change summary
-if [ "$TOOL_NAME" = "Write" ]; then
-  PREVIEW=$(echo "$INPUT" | jq -r '.tool_input.content // empty' | head -c 8000)
-  CONTENT="file: ${FILE_PATH}\nchange: new file or overwrite\ncontent: ${PREVIEW}"
-elif [ "$TOOL_NAME" = "Edit" ]; then
-  OLD=$(echo "$INPUT" | jq -r '.tool_input.old_string // empty' | head -c 3000)
-  NEW=$(echo "$INPUT" | jq -r '.tool_input.new_string // empty' | head -c 3000)
-  CONTENT="file: ${FILE_PATH}\nchange: '${OLD}' -> '${NEW}'"
-else
-  exit 0
-fi
-
-# Minimum length check (API requires >= 10 chars)
-[ ${#CONTENT} -lt 15 ] && exit 0
-
-EXT="${FILE_PATH##*.}"
-
-PAYLOAD=$(jq -n \
-  --arg content "$CONTENT" \
-  --arg project_id "$PROJECT_DIR" \
-  --arg source "__SOURCE_TAG__" \
-  --arg ext "$EXT" \
-  '{
-    content: $content,
-    project_id: $project_id,
-    category: "code_snippet",
-    source: $source,
-    tags: ["auto-save", "file-change", $ext]
-  }')
-
-curl -s -o /dev/null --max-time 5 \
-  -X POST "${API_URL}/api/memories" \
-  -H "Content-Type: application/json" \
-  -d "$PAYLOAD" 2>/dev/null || true
-
-exit 0
-"""
 
 STOP_HOOK_TEMPLATE = r"""#!/bin/bash
 __VERSION_MARKER__
@@ -376,70 +308,6 @@ fi
 # Local mode hook templates (python direct, no curl)
 # ---------------------------------------------------------------------------
 
-LOCAL_TRACK_HOOK_TEMPLATE = r"""#!/bin/bash
-__VERSION_MARKER__
-# PostToolUse hook: track code changes to mem-mesh (local mode)
-# Writes directly to local SQLite via Python
-
-set -euo pipefail
-command -v python3 >/dev/null 2>&1 || exit 0
-command -v jq >/dev/null 2>&1 || exit 0
-
-MEM_MESH_PATH="__MEM_MESH_PATH__"
-
-INPUT=$(cat)
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
-
-[ -z "$FILE_PATH" ] && exit 0
-
-case "$FILE_PATH" in
-  *.py|*.ts|*.js|*.jsx|*.tsx|*.json|*.md|*.yaml|*.yml|*.toml|*.sh) ;;
-  *) exit 0 ;;
-esac
-
-case "$FILE_PATH" in
-  */.cursor/*|*/.claude/*|*/.kiro/*) exit 0 ;;
-esac
-
-PROJECT_DIR=$(basename "$(cd "$(dirname "$FILE_PATH")" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || dirname "$FILE_PATH")")
-[ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
-
-if [ "$TOOL_NAME" = "Write" ]; then
-  PREVIEW=$(echo "$INPUT" | jq -r '.tool_input.content // empty' | head -c 8000)
-  CONTENT="file: ${FILE_PATH}\nchange: new file or overwrite\ncontent: ${PREVIEW}"
-elif [ "$TOOL_NAME" = "Edit" ]; then
-  OLD=$(echo "$INPUT" | jq -r '.tool_input.old_string // empty' | head -c 3000)
-  NEW=$(echo "$INPUT" | jq -r '.tool_input.new_string // empty' | head -c 3000)
-  CONTENT="file: ${FILE_PATH}\nchange: '${OLD}' -> '${NEW}'"
-else
-  exit 0
-fi
-
-[ ${#CONTENT} -lt 15 ] && exit 0
-
-EXT="${FILE_PATH##*.}"
-
-python3 -c "
-import sys, asyncio, json
-sys.path.insert(0, '$MEM_MESH_PATH')
-from app.core.storage.direct import DirectStorageManager
-async def save():
-    s = DirectStorageManager()
-    await s.initialize()
-    await s.add_memory(
-        content=$(python3 -c "import json; print(json.dumps('''$CONTENT'''))"),
-        project_id='$PROJECT_DIR',
-        category='code_snippet',
-        source='hook-local',
-        tags=['auto-save', 'file-change', '$EXT'],
-    )
-asyncio.run(save())
-" 2>/dev/null || true
-
-exit 0
-"""
-
 LOCAL_STOP_HOOK_TEMPLATE = r"""#!/bin/bash
 __VERSION_MARKER__
 # Stop hook: save conversation summary to mem-mesh (local mode)
@@ -671,11 +539,11 @@ exit 0
 HOOK_PROFILES = {
     "standard": {
         "description": "Smart save via native prompt hook (hybrid summarization)",
-        "hooks": ["session-start", "track", "stop-prompt"],
+        "hooks": ["session-start", "stop-prompt"],
     },
     "enhanced": {
         "description": "Smart save + structured analysis (requires ANTHROPIC_API_KEY)",
-        "hooks": ["session-start", "track", "stop-prompt", "reflect"],
+        "hooks": ["session-start", "stop-prompt", "reflect"],
     },
     "minimal": {
         "description": "Simple truncated save (command hook, no LLM cost)",
@@ -711,21 +579,6 @@ def _build_claude_hooks_settings(profile: str = "standard") -> Dict[str, Any]:
             ]
         }
     ]
-
-    if profile != "minimal":
-        settings["hooks"]["PostToolUse"] = [
-            {
-                "matcher": "Write|Edit",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "~/.claude/hooks/mem-mesh-track.sh",
-                        "timeout": 10,
-                        "async": True,
-                    }
-                ],
-            }
-        ]
 
     stop_entries: List[Dict[str, Any]] = []
 
@@ -811,10 +664,14 @@ def _render_template(
 def _render_local_template(
     template: str,
     mem_mesh_path: str,
+    *,
+    project_id: str = "mem-mesh",
 ) -> str:
     """Replace placeholders for local mode templates."""
     result = template.replace("__MEM_MESH_PATH__", mem_mesh_path)
     result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
+    result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
+    result = result.replace("__FOLLOWUP_MSG__", render_cursor_followup(project_id))
     # Reflect hook placeholders
     result = result.replace("__REFLECT_PROMPT__", render_reflect_prompt())
     result = result.replace("__REFLECT_MODEL__", REFLECT_CONFIG.model)
@@ -825,9 +682,58 @@ def _render_local_template(
 
 def _write_script(path: Path, content: str) -> None:
     """Write a shell script and make it executable."""
+    unresolved = re.findall(r"__[A-Z0-9_]+__", content)
+    if unresolved:
+        tokens = ", ".join(sorted(set(unresolved)))
+        raise ValueError(f"Unresolved template tokens in {path}: {tokens}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def _is_mem_mesh_hook(hook: Dict[str, Any]) -> bool:
+    """Return True if a hook definition belongs to mem-mesh."""
+    hook_type = str(hook.get("type", ""))
+    command = str(hook.get("command", ""))
+    prompt = str(hook.get("prompt", ""))
+    if "mem-mesh-" in command:
+        return True
+    if hook_type == "prompt" and "mcp__mem-mesh__add" in prompt:
+        return True
+    return False
+
+
+def _is_mem_mesh_entry(entry: Dict[str, Any]) -> bool:
+    """Return True if a hook entry contains mem-mesh managed hooks."""
+    if _is_mem_mesh_hook(entry):
+        return True
+    hooks = entry.get("hooks", [])
+    if not isinstance(hooks, list):
+        return False
+    return any(isinstance(hook, dict) and _is_mem_mesh_hook(hook) for hook in hooks)
+
+
+def _merge_hook_entries(
+    existing_entries: List[Dict[str, Any]],
+    patch_entries: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge event entries while preserving non mem-mesh user hooks."""
+    preserved = [
+        entry
+        for entry in existing_entries
+        if isinstance(entry, dict) and not _is_mem_mesh_entry(entry)
+    ]
+    passthrough = [
+        entry
+        for entry in patch_entries
+        if isinstance(entry, dict) and not _is_mem_mesh_entry(entry)
+    ]
+    managed = [
+        entry
+        for entry in patch_entries
+        if isinstance(entry, dict) and _is_mem_mesh_entry(entry)
+    ]
+    return preserved + passthrough + managed
 
 
 def _merge_json_settings(path: Path, patch: Dict[str, Any]) -> None:
@@ -839,16 +745,30 @@ def _merge_json_settings(path: Path, patch: Dict[str, Any]) -> None:
         except (json.JSONDecodeError, OSError):
             existing = {}
 
-    # Deep-merge hooks section only; preserve everything else
+    # Deep-merge hooks section only; preserve everything else.
+    # For each hook event, keep existing non mem-mesh entries and upsert only
+    # mem-mesh-managed entries from patch.
     for key, value in patch.items():
         if key == "hooks" and key in existing and isinstance(existing[key], dict):
-            existing[key].update(value)
+            existing_hooks = existing[key]
+            patch_hooks = value if isinstance(value, dict) else {}
+            merged_hooks = dict(existing_hooks)
+            for event_name, patch_entries in patch_hooks.items():
+                current_entries = existing_hooks.get(event_name, [])
+                if isinstance(current_entries, list) and isinstance(patch_entries, list):
+                    merged_hooks[event_name] = _merge_hook_entries(
+                        current_entries, patch_entries
+                    )
+                else:
+                    merged_hooks[event_name] = patch_entries
+            existing[key] = merged_hooks
         else:
             existing[key] = value
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(existing, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        json.dumps(existing, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
 
 
@@ -865,6 +785,84 @@ def _remove_json_key(path: Path, key: str) -> None:
         path.write_text(
             json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
+
+
+def _remove_hook_event(path: Path, event_name: str) -> None:
+    """Remove a specific hook event from the hooks section of a JSON file."""
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    hooks = data.get("hooks", {})
+    if event_name in hooks:
+        del hooks[event_name]
+        path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+
+def _remove_mem_mesh_hooks_from_json(path: Path) -> None:
+    """Remove mem-mesh hook entries from hooks.json, preserving user entries."""
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+
+    hooks = data.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return
+
+    changed = False
+    for event_name, entries in list(hooks.items()):
+        if not isinstance(entries, list):
+            continue
+        filtered = [
+            entry
+            for entry in entries
+            if not (isinstance(entry, dict) and _is_mem_mesh_entry(entry))
+        ]
+        if len(filtered) != len(entries):
+            hooks[event_name] = filtered
+            changed = True
+        if not hooks[event_name]:
+            del hooks[event_name]
+            changed = True
+
+    if changed:
+        if not hooks:
+            data.pop("hooks", None)
+        path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+
+def _count_mem_mesh_hook_entries(path: Path) -> int:
+    """Count mem-mesh hook entries in hooks.json."""
+    if not path.exists():
+        return 0
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return 0
+
+    hooks = data.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return 0
+
+    count = 0
+    for entries in hooks.values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if isinstance(entry, dict) and _is_mem_mesh_entry(entry):
+                count += 1
+    return count
 
 
 def _remove_kiro_mem_mesh_hooks(path: Path) -> None:
@@ -897,45 +895,58 @@ KIRO_SETTINGS = HOME / ".kiro" / "settings" / "hooks.json"
 CURSOR_HOOKS_DIR = HOME / ".cursor" / "hooks"
 CURSOR_SETTINGS = HOME / ".cursor" / "hooks.json"
 
-CURSOR_HOOKS_SETTINGS: Dict[str, Any] = {
-    "version": 1,
-    "hooks": {
-        "sessionStart": [
-            {
-                "hooks": [
+def _build_cursor_hooks_settings(
+    hooks_dir: Path,
+    scope: str = "global",
+) -> Dict[str, Any]:
+    """Build Cursor hooks settings from a single spec builder."""
+    if scope == "project":
+        return {
+            "version": 1,
+            "hooks": {
+                "sessionStart": [
                     {
                         "type": "command",
-                        "command": str(CURSOR_HOOKS_DIR / "mem-mesh-session-start.sh"),
+                        "command": str(hooks_dir / "mem-mesh-session-start.sh"),
                         "timeout": 15,
                     }
-                ]
-            }
-        ],
-        "postToolUse": [
-            {
-                "matcher": "Write|Edit",
-                "hooks": [
+                ],
+                "sessionEnd": [
                     {
                         "type": "command",
-                        "command": str(CURSOR_HOOKS_DIR / "mem-mesh-track.sh"),
+                        "command": str(hooks_dir / "mem-mesh-session-end.sh"),
                         "timeout": 10,
                     }
                 ],
-            }
-        ],
-        "stop": [
-            {
-                "hooks": [
+                "stop": [
                     {
                         "type": "command",
-                        "command": str(CURSOR_HOOKS_DIR / "mem-mesh-stop.sh"),
+                        "command": str(hooks_dir / "mem-mesh-auto-save.sh"),
                         "timeout": 10,
                     }
-                ]
-            }
-        ],
-    },
-}
+                ],
+            },
+        }
+
+    return {
+        "version": 1,
+        "hooks": {
+            "sessionStart": [
+                {
+                    "type": "command",
+                    "command": str(hooks_dir / "mem-mesh-session-start.sh"),
+                    "timeout": 15,
+                }
+            ],
+            "stop": [
+                {
+                    "type": "command",
+                    "command": str(hooks_dir / "mem-mesh-stop.sh"),
+                    "timeout": 10,
+                }
+            ],
+        },
+    }
 
 
 def _install_claude(
@@ -968,28 +979,10 @@ def _install_claude(
         )
     print(f"  -> {session_start_script}")
 
-    # Track hook (skip for minimal profile)
-    if "track" in profile_info["hooks"]:
-        if mode == "local":
-            _write_script(
-                track_script, _render_local_template(LOCAL_TRACK_HOOK_TEMPLATE, path)
-            )
-        else:
-            _write_script(
-                track_script,
-                _render_template(
-                    TRACK_HOOK_TEMPLATE,
-                    url,
-                    source_tag="claude-code-hook",
-                    ide_tag="claude",
-                ),
-            )
-        print(f"  -> {track_script}")
-    else:
-        # Remove track script if switching to minimal
-        if track_script.exists():
-            track_script.unlink()
-            print(f"  removed {track_script} (not in {profile} profile)")
+    # Remove legacy track script if present
+    if track_script.exists():
+        track_script.unlink()
+        print(f"  removed {track_script} (track hook deprecated)")
 
     # Stop hook
     if "stop-prompt" in profile_info["hooks"]:
@@ -1043,6 +1036,8 @@ def _install_claude(
     print("[claude] Updating settings.json...")
     hooks_settings = _build_claude_hooks_settings(profile)
     _merge_json_settings(CLAUDE_SETTINGS, hooks_settings)
+    # Remove legacy PostToolUse (track hook) from settings
+    _remove_hook_event(CLAUDE_SETTINGS, "PostToolUse")
     print(f"  -> {CLAUDE_SETTINGS}")
 
     if profile == "enhanced":
@@ -1125,10 +1120,7 @@ def _install_cursor(
     if mode == "local":
         _write_script(
             session_start_script,
-            _render_local_template(CURSOR_SESSION_START_TEMPLATE, path),
-        )
-        _write_script(
-            track_script, _render_local_template(LOCAL_TRACK_HOOK_TEMPLATE, path)
+            _render_local_template(LOCAL_SESSION_START_HOOK_TEMPLATE, path),
         )
         _write_script(
             stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path)
@@ -1144,15 +1136,6 @@ def _install_cursor(
             ),
         )
         _write_script(
-            track_script,
-            _render_template(
-                TRACK_HOOK_TEMPLATE,
-                url,
-                source_tag="cursor-hook",
-                ide_tag="cursor",
-            ),
-        )
-        _write_script(
             stop_script,
             _render_template(
                 CURSOR_STOP_TEMPLATE,
@@ -1162,11 +1145,19 @@ def _install_cursor(
             ),
         )
     print(f"  -> {session_start_script}")
-    print(f"  -> {track_script}")
     print(f"  -> {stop_script}")
 
+    # Remove legacy track script if present
+    if track_script.exists():
+        track_script.unlink()
+        print(f"  removed {track_script} (track hook deprecated)")
+
     print("[cursor] Updating hooks.json...")
-    _merge_json_settings(CURSOR_SETTINGS, CURSOR_HOOKS_SETTINGS)
+    _merge_json_settings(
+        CURSOR_SETTINGS, _build_cursor_hooks_settings(CURSOR_HOOKS_DIR, scope="global")
+    )
+    # Remove legacy postToolUse (track hook) from hooks.json
+    _remove_hook_event(CURSOR_SETTINGS, "postToolUse")
     print(f"  -> {CURSOR_SETTINGS}")
 
     print("[cursor] Done.")
@@ -1308,23 +1299,21 @@ def _detect_profile(hooks_dir: Path, settings_path: Optional[Path] = None) -> st
     For standard/enhanced profiles with prompt hooks, the stop.sh script
     does not exist — detection uses settings.json instead.
     """
-    has_track = (hooks_dir / "mem-mesh-track.sh").exists()
+    has_session_start = (hooks_dir / "mem-mesh-session-start.sh").exists()
     has_reflect = (hooks_dir / "mem-mesh-reflect.sh").exists()
     has_stop = (hooks_dir / "mem-mesh-stop.sh").exists()
     has_prompt_stop = (
         _has_prompt_stop_hook(settings_path) if settings_path else False
     )
 
-    if has_reflect or (has_prompt_stop and has_reflect):
+    if has_reflect:
         return "enhanced"
-    if has_prompt_stop and has_track:
-        return "standard (prompt)"
-    if has_track and has_stop:
-        return "standard (legacy)"
-    if has_stop and not has_track:
-        return "minimal"
     if has_prompt_stop:
         return "standard (prompt)"
+    if has_stop:
+        return "minimal"
+    if has_session_start:
+        return "standard (partial)"
     return "unknown"
 
 
@@ -1336,11 +1325,9 @@ def cmd_status() -> None:
     # Claude Code
     print("[Claude Code]")
     session_start = CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh"
-    track = CLAUDE_HOOKS_DIR / "mem-mesh-track.sh"
     stop = CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh"
     reflect = CLAUDE_HOOKS_DIR / "mem-mesh-reflect.sh"
     print(f"  session hook: {_check_script_version(session_start)}")
-    print(f"  track hook:   {_check_script_version(track)}")
     if _has_prompt_stop_hook(CLAUDE_SETTINGS):
         print(f"  stop hook:    native prompt (v{PROMPT_VERSION})")
     else:
@@ -1352,7 +1339,6 @@ def cmd_status() -> None:
 
     url = (
         _extract_url_from_script(session_start)
-        or _extract_url_from_script(track)
         or _extract_url_from_script(stop)
     )
     if url:
@@ -1403,13 +1389,11 @@ def cmd_status() -> None:
     # Cursor
     print("[Cursor]")
     cursor_session = CURSOR_HOOKS_DIR / "mem-mesh-session-start.sh"
-    cursor_track = CURSOR_HOOKS_DIR / "mem-mesh-track.sh"
     cursor_stop = CURSOR_HOOKS_DIR / "mem-mesh-stop.sh"
     print(f"  session hook: {_check_script_version(cursor_session)}")
-    print(f"  track hook:   {_check_script_version(cursor_track)}")
     print(f"  stop hook:    {_check_script_version(cursor_stop)}")
 
-    url = _extract_url_from_script(cursor_track) or _extract_url_from_script(
+    url = _extract_url_from_script(cursor_session) or _extract_url_from_script(
         cursor_stop
     )
     if url:
@@ -1443,9 +1427,24 @@ def cmd_status() -> None:
 
         # Cursor hooks
         cursor_dir = project_root / ".cursor" / "hooks"
-        for name in ("mem-mesh-session-start.sh", "mem-mesh-auto-save.sh"):
+        for name in (
+            "mem-mesh-session-start.sh",
+            "mem-mesh-session-end.sh",
+            "mem-mesh-auto-save.sh",
+        ):
             script = cursor_dir / name
             print(f"  {name}: {_check_script_version(script)}")
+        cursor_settings = project_root / ".cursor" / "hooks.json"
+        cursor_template = project_root / ".cursor" / "hooks.mem-mesh.example.json"
+        if cursor_settings.exists():
+            count = _count_mem_mesh_hook_entries(cursor_settings)
+            print(f"  hooks.json: configured (mem-mesh entries: {count})")
+        else:
+            print("  hooks.json: not found")
+        if cursor_template.exists():
+            print("  hooks.mem-mesh.example.json: available")
+        else:
+            print("  hooks.mem-mesh.example.json: not found")
 
     print()
     print("Run 'mem-mesh-hooks install --target all' to update global hooks.")
@@ -1649,6 +1648,19 @@ except Exception:
         _write_script(cursor_dir / name, content)
         print(f"  -> {cursor_dir / name}")
 
+    template_path = project_root / ".cursor" / "hooks.mem-mesh.example.json"
+    template_data = _build_cursor_hooks_settings(cursor_dir, scope="project")
+    template_path.write_text(
+        json.dumps(template_data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(f"  -> {template_path}")
+
+    settings_path = project_root / ".cursor" / "hooks.json"
+    _remove_mem_mesh_hooks_from_json(settings_path)
+    if settings_path.exists():
+        print(f"  -> cleaned mem-mesh entries from {settings_path}")
+
     print("[cursor] Done.")
 
 
@@ -1722,6 +1734,7 @@ def _prompt_choice(prompt: str, options: List[str], default: int = 0) -> int:
         except ValueError:
             pass
         print(f"  Please enter 1-{len(options)}")
+    raise RuntimeError("unreachable")
 
 
 def cmd_interactive() -> None:
@@ -1796,7 +1809,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     """CLI entry point for mem-mesh-hooks."""
     parser = argparse.ArgumentParser(
         prog="mem-mesh-hooks",
-        description="Install/uninstall mem-mesh auto-tracking hooks for Claude Code, Kiro, and Cursor.",
+        description="Install/uninstall mem-mesh hooks for Claude Code, Kiro, and Cursor.",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
