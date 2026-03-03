@@ -292,11 +292,17 @@ class UnifiedSearchService:
 
         # 5. 검색 모드에 따른 검색 수행
         if is_empty_query:
-            # 빈 쿼리: 최근 메모리 반환 (후처리 없이 바로 반환)
+            # 빈 쿼리: 최근 메모리 반환 (노이즈/품질/정규화 스킵)
             result = await self._get_recent_memories(
                 filters, limit, offset, sort_by, sort_direction
             )
-            # 빈 쿼리는 노이즈 필터링, 품질 스코어링, 점수 정규화 없이 바로 반환
+            # Temporal 필터는 빈 쿼리에서도 적용
+            if result.results and (
+                time_range or date_from or date_to or temporal_mode == "decay"
+            ):
+                result = self._apply_temporal(
+                    result, time_range, date_from, date_to, temporal_mode
+                )
             search_time = time.perf_counter() - start_time
             logger.info(
                 f"Recent memories returned in {search_time:.3f}s - "
