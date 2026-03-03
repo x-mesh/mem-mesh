@@ -149,8 +149,16 @@ def cmd_status() -> None:
         print(f"  stop hook:      {_check_script_version(stop)}")
     session_end = CLAUDE_HOOKS_DIR / "mem-mesh-session-end.sh"
     precompact = CLAUDE_HOOKS_DIR / "mem-mesh-precompact.sh"
+    user_prompt_submit = CLAUDE_HOOKS_DIR / "mem-mesh-user-prompt-submit.sh"
+    subagent_start = CLAUDE_HOOKS_DIR / "mem-mesh-subagent-start.sh"
+    subagent_stop = CLAUDE_HOOKS_DIR / "mem-mesh-subagent-stop.sh"
+    task_completed = CLAUDE_HOOKS_DIR / "mem-mesh-task-completed.sh"
     print(f"  session-end:    {_check_script_version(session_end)}")
     print(f"  precompact:     {_check_script_version(precompact)}")
+    print(f"  prompt-submit:  {_check_script_version(user_prompt_submit)}")
+    print(f"  subagent-start: {_check_script_version(subagent_start)}")
+    print(f"  subagent-stop:  {_check_script_version(subagent_stop)}")
+    print(f"  task-completed: {_check_script_version(task_completed)}")
     print(f"  reflect hook:   {_check_script_version(reflect)} (legacy)")
 
     detected = _detect_profile(CLAUDE_HOOKS_DIR, CLAUDE_SETTINGS)

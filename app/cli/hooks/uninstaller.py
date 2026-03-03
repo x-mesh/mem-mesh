@@ -23,6 +23,10 @@ def _uninstall_claude() -> None:
         "mem-mesh-reflect.sh",
         "mem-mesh-session-end.sh",
         "mem-mesh-precompact.sh",
+        "mem-mesh-user-prompt-submit.sh",
+        "mem-mesh-subagent-start.sh",
+        "mem-mesh-subagent-stop.sh",
+        "mem-mesh-task-completed.sh",
     ):
         script = CLAUDE_HOOKS_DIR / name
         if script.exists():

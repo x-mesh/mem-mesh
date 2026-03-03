@@ -7,11 +7,29 @@ DEFAULT_URL = "https://meme.24x365.online"
 HOOK_PROFILES = {
     "standard": {
         "description": "Keyword matching + structured save (no LLM, no API key, 요약+원본)",
-        "hooks": ["session-start", "stop-decide", "session-end", "precompact"],
+        "hooks": [
+            "session-start",
+            "stop-decide",
+            "user-prompt-submit",
+            "subagent-start",
+            "subagent-stop",
+            "task-completed",
+            "session-end",
+            "precompact",
+        ],
     },
     "enhanced": {
         "description": "Haiku API decision + structured analysis (requires ANTHROPIC_API_KEY)",
-        "hooks": ["session-start", "stop-enhanced", "session-end", "precompact"],
+        "hooks": [
+            "session-start",
+            "stop-enhanced",
+            "user-prompt-submit",
+            "subagent-start",
+            "subagent-stop",
+            "task-completed",
+            "session-end",
+            "precompact",
+        ],
     },
     "minimal": {
         "description": "Simple truncated save (async, no LLM, no decision making)",

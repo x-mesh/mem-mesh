@@ -12,6 +12,10 @@ from app.cli.hooks.templates import (
     KIRO_STOP_HOOK_TEMPLATE,
     SESSION_START_HOOK_TEMPLATE,
     STOP_DECIDE_HOOK_TEMPLATE,
+    SUBAGENT_START_HOOK_TEMPLATE,
+    SUBAGENT_STOP_HOOK_TEMPLATE,
+    TASK_COMPLETED_HOOK_TEMPLATE,
+    USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
 )
 
 SNAPSHOTS_DIR = Path(__file__).parent / "snapshots"
@@ -79,3 +83,35 @@ def test_cursor_stop_snapshot(request):
         source_tag="cursor-hook", ide_tag="cursor", project_id="mem-mesh",
     )
     _check_snapshot(request, "cursor_stop.sh", rendered)
+
+
+def test_user_prompt_submit_snapshot(request):
+    rendered = _render_template(
+        USER_PROMPT_SUBMIT_HOOK_TEMPLATE, SNAPSHOT_URL,
+        source_tag="claude-code-hook", ide_tag="claude", project_id="mem-mesh",
+    )
+    _check_snapshot(request, "claude_user_prompt_submit.sh", rendered)
+
+
+def test_subagent_start_snapshot(request):
+    rendered = _render_template(
+        SUBAGENT_START_HOOK_TEMPLATE, SNAPSHOT_URL,
+        source_tag="claude-code-hook", ide_tag="claude", project_id="mem-mesh",
+    )
+    _check_snapshot(request, "claude_subagent_start.sh", rendered)
+
+
+def test_subagent_stop_snapshot(request):
+    rendered = _render_template(
+        SUBAGENT_STOP_HOOK_TEMPLATE, SNAPSHOT_URL,
+        source_tag="claude-code-hook", ide_tag="claude", project_id="mem-mesh",
+    )
+    _check_snapshot(request, "claude_subagent_stop.sh", rendered)
+
+
+def test_task_completed_snapshot(request):
+    rendered = _render_template(
+        TASK_COMPLETED_HOOK_TEMPLATE, SNAPSHOT_URL,
+        source_tag="claude-code-hook", ide_tag="claude", project_id="mem-mesh",
+    )
+    _check_snapshot(request, "claude_task_completed.sh", rendered)

@@ -25,3 +25,13 @@ SESSION_END_HOOK_TEMPLATE = _load_template("session-end.sh")
 LOCAL_SESSION_END_HOOK_TEMPLATE = _load_template("local-session-end.sh")
 PRECOMPACT_HOOK_TEMPLATE = _load_template("precompact.sh")
 LOCAL_PRECOMPACT_HOOK_TEMPLATE = _load_template("local-precompact.sh")
+
+# UserPromptSubmit / SubagentStart / SubagentStop / TaskCompleted hook templates
+USER_PROMPT_SUBMIT_HOOK_TEMPLATE = _load_template("user-prompt-submit.sh")
+LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE = _load_template("local-user-prompt-submit.sh")
+SUBAGENT_START_HOOK_TEMPLATE = _load_template("subagent-start.sh")
+LOCAL_SUBAGENT_START_HOOK_TEMPLATE = _load_template("local-subagent-start.sh")
+SUBAGENT_STOP_HOOK_TEMPLATE = _load_template("subagent-stop.sh")
+LOCAL_SUBAGENT_STOP_HOOK_TEMPLATE = _load_template("local-subagent-stop.sh")
+TASK_COMPLETED_HOOK_TEMPLATE = _load_template("task-completed.sh")
+LOCAL_TASK_COMPLETED_HOOK_TEMPLATE = _load_template("local-task-completed.sh")

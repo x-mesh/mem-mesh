@@ -25,11 +25,19 @@ from app.cli.hooks.templates import (
     LOCAL_SESSION_END_HOOK_TEMPLATE,
     LOCAL_SESSION_START_HOOK_TEMPLATE,
     LOCAL_STOP_HOOK_TEMPLATE,
+    LOCAL_SUBAGENT_START_HOOK_TEMPLATE,
+    LOCAL_SUBAGENT_STOP_HOOK_TEMPLATE,
+    LOCAL_TASK_COMPLETED_HOOK_TEMPLATE,
+    LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
     PRECOMPACT_HOOK_TEMPLATE,
     SESSION_END_HOOK_TEMPLATE,
     SESSION_START_HOOK_TEMPLATE,
     STOP_DECIDE_HOOK_TEMPLATE,
     STOP_HOOK_TEMPLATE,
+    SUBAGENT_START_HOOK_TEMPLATE,
+    SUBAGENT_STOP_HOOK_TEMPLATE,
+    TASK_COMPLETED_HOOK_TEMPLATE,
+    USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
 )
 from app.cli.hooks.renderer import _render_template, _render_local_template, _write_script
 from app.cli.hooks.json_ops import _merge_json_settings, _remove_hook_event
@@ -104,6 +112,64 @@ def _build_claude_hooks_settings(profile: str = "standard") -> Dict[str, Any]:
         )
 
     settings["hooks"]["Stop"] = stop_entries
+
+    # UserPromptSubmit: keyword-filtered context search (standard/enhanced only)
+    if profile != "minimal":
+        settings["hooks"]["UserPromptSubmit"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/mem-mesh-user-prompt-submit.sh",
+                        "timeout": 5,
+                    }
+                ]
+            }
+        ]
+
+    # SubagentStart: inject project context (standard/enhanced only)
+    if profile != "minimal":
+        settings["hooks"]["SubagentStart"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/mem-mesh-subagent-start.sh",
+                        "timeout": 5,
+                    }
+                ]
+            }
+        ]
+
+    # SubagentStop: auto-save important results (standard/enhanced only)
+    if profile != "minimal":
+        settings["hooks"]["SubagentStop"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/mem-mesh-subagent-stop.sh",
+                        "timeout": 10,
+                        "async": True,
+                    }
+                ]
+            }
+        ]
+
+    # TaskCompleted: auto-save completed tasks (standard/enhanced only)
+    if profile != "minimal":
+        settings["hooks"]["TaskCompleted"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/mem-mesh-task-completed.sh",
+                        "timeout": 10,
+                        "async": True,
+                    }
+                ]
+            }
+        ]
 
     # SessionEnd: auto-end session on exit (all profiles)
     settings["hooks"]["SessionEnd"] = [
@@ -284,6 +350,86 @@ def _install_claude(
                 ),
             )
         print(f"  -> {stop_script}")
+
+    # UserPromptSubmit hook (standard/enhanced only)
+    if "user-prompt-submit" in profile_info["hooks"]:
+        ups_script = CLAUDE_HOOKS_DIR / "mem-mesh-user-prompt-submit.sh"
+        if mode == "local":
+            _write_script(
+                ups_script,
+                _render_local_template(LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE, path),
+            )
+        else:
+            _write_script(
+                ups_script,
+                _render_template(
+                    USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
+                    url,
+                    source_tag="claude-code-hook",
+                    ide_tag="claude",
+                ),
+            )
+        print(f"  -> {ups_script}")
+
+    # SubagentStart hook (standard/enhanced only)
+    if "subagent-start" in profile_info["hooks"]:
+        sa_start_script = CLAUDE_HOOKS_DIR / "mem-mesh-subagent-start.sh"
+        if mode == "local":
+            _write_script(
+                sa_start_script,
+                _render_local_template(LOCAL_SUBAGENT_START_HOOK_TEMPLATE, path),
+            )
+        else:
+            _write_script(
+                sa_start_script,
+                _render_template(
+                    SUBAGENT_START_HOOK_TEMPLATE,
+                    url,
+                    source_tag="claude-code-hook",
+                    ide_tag="claude",
+                ),
+            )
+        print(f"  -> {sa_start_script}")
+
+    # SubagentStop hook (standard/enhanced only)
+    if "subagent-stop" in profile_info["hooks"]:
+        sa_stop_script = CLAUDE_HOOKS_DIR / "mem-mesh-subagent-stop.sh"
+        if mode == "local":
+            _write_script(
+                sa_stop_script,
+                _render_local_template(LOCAL_SUBAGENT_STOP_HOOK_TEMPLATE, path),
+            )
+        else:
+            _write_script(
+                sa_stop_script,
+                _render_template(
+                    SUBAGENT_STOP_HOOK_TEMPLATE,
+                    url,
+                    source_tag="claude-code-hook",
+                    ide_tag="claude",
+                ),
+            )
+        print(f"  -> {sa_stop_script}")
+
+    # TaskCompleted hook (standard/enhanced only)
+    if "task-completed" in profile_info["hooks"]:
+        tc_script = CLAUDE_HOOKS_DIR / "mem-mesh-task-completed.sh"
+        if mode == "local":
+            _write_script(
+                tc_script,
+                _render_local_template(LOCAL_TASK_COMPLETED_HOOK_TEMPLATE, path),
+            )
+        else:
+            _write_script(
+                tc_script,
+                _render_template(
+                    TASK_COMPLETED_HOOK_TEMPLATE,
+                    url,
+                    source_tag="claude-code-hook",
+                    ide_tag="claude",
+                ),
+            )
+        print(f"  -> {tc_script}")
 
     # SessionEnd hook (all profiles)
     session_end_script = CLAUDE_HOOKS_DIR / "mem-mesh-session-end.sh"

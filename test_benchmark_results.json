@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-03 23:57:03",
+  "timestamp": "2026-03-04 01:04:00",
   "test_queries": [
     "버그 수정",
     "성능 최적화",
@@ -19,9 +19,9 @@
     {
       "model_name": "all-MiniLM-L6-v2",
       "dimension": 384,
-      "embedding_time": 0.008210420608520508,
-      "search_time": 0.04742561853848971,
-      "memory_usage": 5.140625,
+      "embedding_time": 0.010402107238769531,
+      "search_time": 0.04896259307861328,
+      "memory_usage": 5.90625,
       "avg_relevance_score": 0.0,
       "accuracy_scores": {
         "버그 수정": 0.0,
