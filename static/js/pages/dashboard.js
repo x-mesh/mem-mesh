@@ -44,6 +44,8 @@ class DashboardPage extends HTMLElement {
     // Peek state
     this._peekId = null;
     this._peekData = null;
+    // Pins
+    this.activePins = [];
     // Client viz state
     this._vizMode = localStorage.getItem('mem-mesh-client-viz') || 'orbit';
     this._vizEvents = []; // recent events for pulse/ticker
@@ -212,10 +214,11 @@ class DashboardPage extends HTMLElement {
       searchParams.date_from = from.toISOString().split('T')[0];
       searchParams.temporal_mode = 'filter';
 
-      const [statsR, memR, sessR] = await Promise.allSettled([
+      const [statsR, memR, sessR, pinsR] = await Promise.allSettled([
         api.getStats(),
         api.searchMemories(' ', searchParams),
         api.get('/work/sessions?limit=3'),
+        api.get('/work/pins', { limit: 50 }),
       ]);
 
       this.stats = statsR.status === 'fulfilled' ? statsR.value : null;
@@ -224,6 +227,9 @@ class DashboardPage extends HTMLElement {
       else this.memories = [...this.memories, ...results];
       this.hasMore = results.length >= this.pageSize;
       this.sessions = sessR.status === 'fulfilled' ? (sessR.value.sessions || []) : [];
+      this.activePins = pinsR.status === 'fulfilled'
+        ? (pinsR.value.pins || []).filter(p => p.status !== 'completed')
+        : [];
     } catch (_) {}
     this.isLoading = false;
     this.renderContent();
@@ -260,6 +266,7 @@ class DashboardPage extends HTMLElement {
     this.className = 'dash';
     this.innerHTML = `
       <div class="dash-session" id="dash-session"></div>
+      <div class="dash-pins" id="dash-pins"></div>
       <div class="dash-insights" id="dash-insights"></div>
       <div class="client-viz-section" id="client-viz">
         <div class="client-viz-header">
@@ -298,6 +305,7 @@ class DashboardPage extends HTMLElement {
 
   renderContent() {
     this.renderSession();
+    this.renderPins();
     this.renderInsights();
     this.renderClientViz();
     this.renderProjects();
@@ -321,6 +329,46 @@ class DashboardPage extends HTMLElement {
       <span class="session-meta">${t}</span>
       <button class="session-link">View</button>
       <button class="session-end-btn">End</button>
+    `;
+  }
+
+  renderPins() {
+    const el = this.querySelector('#dash-pins');
+    if (!el) return;
+
+    const allPins = this.activePins || [];
+    if (allPins.length === 0) { el.innerHTML = ''; return; }
+
+    // Sort: importance DESC, then newest first. Show top 5.
+    const sorted = [...allPins].sort((a, b) => (b.importance || 3) - (a.importance || 3) || new Date(b.created_at) - new Date(a.created_at));
+    const pins = sorted.slice(0, 5);
+    const hasMore = allPins.length > 5;
+
+    const statusColors = { open: 'var(--text-muted)', in_progress: '#d97706' };
+
+    const pinRows = pins.map(pin => {
+      const proj = pin.project_id || '—';
+      const importance = pin.importance || 3;
+      const statusColor = statusColors[pin.status] || 'var(--text-muted)';
+      const preview = (pin.content || '').length > 40 ? pin.content.substring(0, 40) + '…' : pin.content;
+
+      return `<div class="pin-row">
+        <span class="pin-status-dot" style="background:${statusColor}"></span>
+        <span class="pin-imp pin-imp-${importance}">P${importance}</span>
+        <span class="pin-project">${this.esc(proj)}</span>
+        <span class="pin-content">${this.esc(preview)}</span>
+      </div>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div class="pins-section">
+        <div class="pins-header">
+          <span class="pins-title">Active Pins</span>
+          <span class="pins-count">${allPins.length}</span>
+          ${hasMore ? '<a class="pins-more" href="#/work">View all</a>' : ''}
+        </div>
+        <div class="pins-list">${pinRows}</div>
+      </div>
     `;
   }
 
