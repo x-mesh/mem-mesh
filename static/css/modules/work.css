@@ -1,4 +1,38 @@
-/* Connection Status Styles */
+/* ── Compact Connection Status (header icon) ── */
+connection-status[compact] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+}
+
+connection-status[compact] .ws-icon {
+  width: 16px;
+  height: 16px;
+  transition: color 0.3s ease, opacity 0.3s ease;
+  color: var(--text-tertiary, #999);
+}
+
+connection-status[compact] .ws-icon[data-status="connected"] {
+  color: var(--success-color, #22c55e);
+}
+
+connection-status[compact] .ws-icon[data-status="connecting"] {
+  color: var(--info, #3b82f6);
+  animation: pulse 1.2s infinite;
+}
+
+connection-status[compact] .ws-icon[data-status="disconnected"],
+connection-status[compact] .ws-icon[data-status="offline"] {
+  color: var(--error-color, #ef4444);
+}
+
+connection-status[compact] .ws-icon[data-status="error"] {
+  color: var(--warning-color, #f59e0b);
+}
+
+/* ── Full Connection Status Styles ── */
 .connection-status {
   display: flex;
   align-items: center;

@@ -2,6 +2,8 @@
  * Chroma-style Header Component
  * Clean, modern header with navigation and user actions
  */
+import '../components/connection-status.js';
+
 class ChromaHeader extends HTMLElement {
   constructor() {
     super();
@@ -187,6 +189,9 @@ class ChromaHeader extends HTMLElement {
                 <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
               </svg>
             </button>
+
+            <!-- WebSocket Status -->
+            <connection-status compact></connection-status>
 
             <!-- Create Memory Button -->
             <button class="btn-primary create-memory-btn" id="create-memory-btn" data-route="/create">

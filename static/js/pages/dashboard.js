@@ -4,7 +4,6 @@
  */
 
 import { wsClient } from '../services/websocket-client.js';
-import '../components/connection-status.js';
 
 const CAT_ICONS = {
   task: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>',
@@ -386,15 +385,11 @@ class DashboardPage extends HTMLElement {
     if (!el) return;
     const s = this.stats;
     const total = s?.total_memories?.toLocaleString() || '—';
-    const today = s?.categories_breakdown ? Object.values(s.categories_breakdown).reduce((a, b) => a + b, 0) : '—';
     const projects = s?.unique_projects || '—';
-    const ws = wsClient.getConnectionStatus().isConnected;
     el.innerHTML = `
       <span>${total} memories</span>
       <span class="footer-sep">&middot;</span>
       <span>${projects} projects</span>
-      <span class="footer-sep">&middot;</span>
-      <connection-status></connection-status>
     `;
   }
 
