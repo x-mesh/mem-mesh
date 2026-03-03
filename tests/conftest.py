@@ -16,6 +16,20 @@ from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 
 # manual/과 benchmarks/ 하위 테스트는 자동 수집에서 제외 (수동 실행용)
+# ---------------------------------------------------------------------------
+# Custom pytest options
+# ---------------------------------------------------------------------------
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--update-snapshots",
+        action="store_true",
+        default=False,
+        help="Update snapshot golden files instead of comparing",
+    )
+
+
 collect_ignore = [
     str(Path(__file__).parent / "manual"),
     str(Path(__file__).parent / "benchmarks"),

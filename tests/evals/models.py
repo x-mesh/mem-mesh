@@ -83,6 +83,10 @@ class EvalScenario(BaseModel):
         default_factory=list, description="Regex patterns that must NOT appear"
     )
 
+    # IDE / hook event metadata (optional)
+    ide: Optional[str] = None  # "claude" | "kiro" | "cursor"
+    hook_event: Optional[str] = None  # "SessionStart" | "Stop" | "SessionEnd" | "PreCompact"
+
 
 # ---------------------------------------------------------------------------
 # Result: raw evaluation output

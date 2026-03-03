@@ -55,12 +55,19 @@ def collect_scenarios(*tiers: EvalTier) -> List[EvalScenario]:
         ALL_SCENARIOS as WS_SCENARIOS,
     )
 
+    from tests.evals.scenarios.kiro_hooks import ALL_SCENARIOS as KIRO_SCENARIOS
+    from tests.evals.scenarios.cursor_hooks import ALL_SCENARIOS as CURSOR_SCENARIOS
+    from tests.evals.scenarios.hook_events import ALL_SCENARIOS as HOOK_EVENT_SCENARIOS
+
     all_scenarios = (
         HOOK_SCENARIOS
         + CONTENT_SCENARIOS
         + SKIP_SCENARIOS
         + SESSION_SCENARIOS
         + WS_SCENARIOS
+        + KIRO_SCENARIOS
+        + CURSOR_SCENARIOS
+        + HOOK_EVENT_SCENARIOS
     )
 
     if tiers:

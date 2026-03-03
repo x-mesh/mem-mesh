@@ -301,6 +301,134 @@ def grade_action_correct(
 
 
 # ---------------------------------------------------------------------------
+# IDE hook format grader
+# ---------------------------------------------------------------------------
+
+
+def grade_ide_hook_format(
+    scenario: EvalScenario,
+    result: EvalResult,
+) -> CheckResult:
+    """IDE-specific hook output format verification.
+
+    Checks based on scenario.ide and scenario.hook_event:
+    - kiro: JSON array format, mem-mesh: prefix, rules text
+    - cursor: additional_context JSON, followup message, sessionEnd API
+    - hook_event: SessionEnd/PreCompact template content
+    """
+    ide = scenario.ide
+    hook_event = scenario.hook_event
+
+    if not ide and not hook_event:
+        return CheckResult(
+            check_name="ide_hook_format",
+            passed=True,
+            message="No IDE/hook_event specified — skipped",
+            weight=0.0,
+        )
+
+    from app.cli.hooks.renderer import _load_template
+
+    if hook_event == "SessionEnd":
+        template = _load_template("session-end.sh")
+        issues: List[str] = []
+        if "end-by-project" not in template:
+            issues.append("missing end-by-project API call")
+        if "exit 0" not in template:
+            issues.append("missing exit 0 (non-blocking)")
+        if issues:
+            return CheckResult(
+                check_name="ide_hook_format",
+                passed=False,
+                message=f"SessionEnd template issues: {issues}",
+                weight=1.5,
+            )
+        return CheckResult(
+            check_name="ide_hook_format",
+            passed=True,
+            message="SessionEnd template has correct format",
+            weight=1.5,
+        )
+
+    if hook_event == "PreCompact":
+        template = _load_template("precompact.sh")
+        issues = []
+        if "end-by-project" not in template:
+            issues.append("missing end-by-project API call")
+        if "Auto-ended" not in template:
+            issues.append("missing Auto-ended summary")
+        if "|| true" not in template:
+            issues.append("missing || true (non-blocking)")
+        if issues:
+            return CheckResult(
+                check_name="ide_hook_format",
+                passed=False,
+                message=f"PreCompact template issues: {issues}",
+                weight=1.5,
+            )
+        return CheckResult(
+            check_name="ide_hook_format",
+            passed=True,
+            message="PreCompact template has correct format",
+            weight=1.5,
+        )
+
+    if ide == "kiro":
+        template = _load_template("kiro-stop.sh")
+        issues = []
+        if "jq" not in template:
+            issues.append("missing jq for JSON handling")
+        if "KIRO_RESULT" not in template:
+            issues.append("missing KIRO_RESULT env var")
+        if issues:
+            return CheckResult(
+                check_name="ide_hook_format",
+                passed=False,
+                message=f"Kiro template issues: {issues}",
+                weight=1.5,
+            )
+        return CheckResult(
+            check_name="ide_hook_format",
+            passed=True,
+            message="Kiro template has correct format",
+            weight=1.5,
+        )
+
+    if ide == "cursor":
+        if hook_event == "SessionStart":
+            template = _load_template("cursor-session-start.sh")
+            if "additional_context" not in template:
+                return CheckResult(
+                    check_name="ide_hook_format",
+                    passed=False,
+                    message="Cursor session-start missing additional_context",
+                    weight=1.5,
+                )
+        elif hook_event == "Stop":
+            template = _load_template("cursor-stop.sh")
+            if "followup_message" not in template:
+                return CheckResult(
+                    check_name="ide_hook_format",
+                    passed=False,
+                    message="Cursor stop missing followup_message",
+                    weight=1.5,
+                )
+        return CheckResult(
+            check_name="ide_hook_format",
+            passed=True,
+            message=f"Cursor {hook_event} template has correct format",
+            weight=1.5,
+        )
+
+    return CheckResult(
+        check_name="ide_hook_format",
+        passed=True,
+        message=f"IDE format check passed for {ide}/{hook_event}",
+        weight=1.0,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Composite grader
 # ---------------------------------------------------------------------------
 
@@ -317,6 +445,7 @@ def grade_scenario(
         grade_category_correct(scenario, result),
         grade_no_sensitive_data(scenario, result),
         grade_expected_patterns(scenario, result),
+        grade_ide_hook_format(scenario, result),
     ]
     return GradeResult.from_checks(
         scenario_id=scenario.id,

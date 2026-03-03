@@ -270,6 +270,39 @@ class SessionService:
 
         return await self.get_session(session_id)
 
+    async def end_session_by_project(
+        self, project_id: str, summary: Optional[str] = None
+    ) -> Optional[SessionResponse]:
+        """End the most recent active session for a project.
+
+        Used by SessionEnd/PreCompact hooks which only know the project_id,
+        not the session_id.
+
+        Args:
+            project_id: Project identifier
+            summary: Optional session summary
+
+        Returns:
+            SessionResponse or None if no active session found
+        """
+        effective_user_id = get_current_user()
+
+        row = await self.db.fetchone(
+            """
+            SELECT id FROM sessions
+            WHERE project_id = ? AND user_id = ? AND status = 'active'
+            ORDER BY started_at DESC
+            LIMIT 1
+            """,
+            (project_id, effective_user_id),
+        )
+
+        if not row:
+            logger.info(f"No active session found for project: {project_id}")
+            return None
+
+        return await self.end_session(row["id"], summary)
+
     async def pause_inactive_sessions(self, inactive_hours: int = 4) -> int:
         """
         비활성 세션 일시정지.

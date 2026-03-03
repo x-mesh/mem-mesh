@@ -31,6 +31,12 @@ from app.cli.prompts.renderers import (
     render_reflect_prompt,
     render_rules_text,
 )
+from app.cli.hooks.templates import (
+    LOCAL_PRECOMPACT_HOOK_TEMPLATE,
+    LOCAL_SESSION_END_HOOK_TEMPLATE,
+    PRECOMPACT_HOOK_TEMPLATE,
+    SESSION_END_HOOK_TEMPLATE,
+)
 
 DEFAULT_URL = "https://meme.24x365.online"
 
@@ -992,6 +998,32 @@ def _build_claude_hooks_settings(profile: str = "standard") -> Dict[str, Any]:
 
     settings["hooks"]["Stop"] = stop_entries
 
+    # SessionEnd: auto-end session on exit (all profiles)
+    settings["hooks"]["SessionEnd"] = [
+        {
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "~/.claude/hooks/mem-mesh-session-end.sh",
+                    "timeout": 10,
+                }
+            ]
+        }
+    ]
+
+    # PreCompact: auto-end session before context compaction (all profiles)
+    settings["hooks"]["PreCompact"] = [
+        {
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "~/.claude/hooks/mem-mesh-precompact.sh",
+                    "timeout": 10,
+                }
+            ]
+        }
+    ]
+
     return settings
 
 
@@ -1408,6 +1440,44 @@ def _install_claude(
             )
         print(f"  -> {stop_script}")
 
+    # SessionEnd hook (all profiles)
+    session_end_script = CLAUDE_HOOKS_DIR / "mem-mesh-session-end.sh"
+    if mode == "local":
+        _write_script(
+            session_end_script,
+            _render_local_template(LOCAL_SESSION_END_HOOK_TEMPLATE, path),
+        )
+    else:
+        _write_script(
+            session_end_script,
+            _render_template(
+                SESSION_END_HOOK_TEMPLATE,
+                url,
+                source_tag="claude-code-hook",
+                ide_tag="claude",
+            ),
+        )
+    print(f"  -> {session_end_script}")
+
+    # PreCompact hook (all profiles)
+    precompact_script = CLAUDE_HOOKS_DIR / "mem-mesh-precompact.sh"
+    if mode == "local":
+        _write_script(
+            precompact_script,
+            _render_local_template(LOCAL_PRECOMPACT_HOOK_TEMPLATE, path),
+        )
+    else:
+        _write_script(
+            precompact_script,
+            _render_template(
+                PRECOMPACT_HOOK_TEMPLATE,
+                url,
+                source_tag="claude-code-hook",
+                ide_tag="claude",
+            ),
+        )
+    print(f"  -> {precompact_script}")
+
     # Clean up legacy scripts not belonging to current profile
     legacy_cleanup = {
         "standard": [stop_script, enhanced_stop_script, reflect_script],
@@ -1504,6 +1574,8 @@ def _install_cursor(
     track_script = CURSOR_HOOKS_DIR / "mem-mesh-track.sh"
     stop_script = CURSOR_HOOKS_DIR / "mem-mesh-stop.sh"
 
+    session_end_script = CURSOR_HOOKS_DIR / "mem-mesh-session-end.sh"
+
     if mode == "local":
         _write_script(
             session_start_script,
@@ -1511,6 +1583,10 @@ def _install_cursor(
         )
         _write_script(
             stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path)
+        )
+        _write_script(
+            session_end_script,
+            _render_local_template(LOCAL_SESSION_END_HOOK_TEMPLATE, path),
         )
     else:
         _write_script(
@@ -1531,8 +1607,18 @@ def _install_cursor(
                 ide_tag="cursor",
             ),
         )
+        _write_script(
+            session_end_script,
+            _render_template(
+                SESSION_END_HOOK_TEMPLATE,
+                url,
+                source_tag="cursor-hook",
+                ide_tag="cursor",
+            ),
+        )
     print(f"  -> {session_start_script}")
     print(f"  -> {stop_script}")
+    print(f"  -> {session_end_script}")
 
     # Remove legacy track script if present
     if track_script.exists():
@@ -1557,8 +1643,11 @@ def _uninstall_claude() -> None:
         "mem-mesh-session-start.sh",
         "mem-mesh-track.sh",
         "mem-mesh-stop.sh",
+        "mem-mesh-stop-decide.sh",
         "mem-mesh-stop-enhanced.sh",
         "mem-mesh-reflect.sh",
+        "mem-mesh-session-end.sh",
+        "mem-mesh-precompact.sh",
     ):
         script = CLAUDE_HOOKS_DIR / name
         if script.exists():
@@ -1592,6 +1681,7 @@ def _uninstall_cursor() -> None:
         "mem-mesh-session-start.sh",
         "mem-mesh-track.sh",
         "mem-mesh-stop.sh",
+        "mem-mesh-session-end.sh",
     ):
         script = CURSOR_HOOKS_DIR / name
         if script.exists():
@@ -1727,6 +1817,8 @@ def cmd_status() -> None:
     stop_decide = CLAUDE_HOOKS_DIR / "mem-mesh-stop-decide.sh"
     enhanced_stop = CLAUDE_HOOKS_DIR / "mem-mesh-stop-enhanced.sh"
     reflect = CLAUDE_HOOKS_DIR / "mem-mesh-reflect.sh"
+    session_end = CLAUDE_HOOKS_DIR / "mem-mesh-session-end.sh"
+    precompact = CLAUDE_HOOKS_DIR / "mem-mesh-precompact.sh"
     print(f"  session hook:   {_check_script_version(session_start)}")
     if enhanced_stop.exists():
         print(f"  stop hook:      {_check_script_version(enhanced_stop)} (enhanced)")
@@ -1736,6 +1828,8 @@ def cmd_status() -> None:
         print(f"  stop hook:      native prompt (v{PROMPT_VERSION})")
     else:
         print(f"  stop hook:      {_check_script_version(stop)}")
+    print(f"  session-end:    {_check_script_version(session_end)}")
+    print(f"  precompact:     {_check_script_version(precompact)}")
     print(f"  reflect hook:   {_check_script_version(reflect)} (legacy)")
 
     detected = _detect_profile(CLAUDE_HOOKS_DIR, CLAUDE_SETTINGS)
@@ -1794,8 +1888,10 @@ def cmd_status() -> None:
     print("[Cursor]")
     cursor_session = CURSOR_HOOKS_DIR / "mem-mesh-session-start.sh"
     cursor_stop = CURSOR_HOOKS_DIR / "mem-mesh-stop.sh"
+    cursor_session_end = CURSOR_HOOKS_DIR / "mem-mesh-session-end.sh"
     print(f"  session hook: {_check_script_version(cursor_session)}")
     print(f"  stop hook:    {_check_script_version(cursor_stop)}")
+    print(f"  session-end:  {_check_script_version(cursor_session_end)}")
 
     url = _extract_url_from_script(cursor_session) or _extract_url_from_script(
         cursor_stop

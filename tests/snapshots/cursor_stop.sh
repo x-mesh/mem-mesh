@@ -1,11 +1,13 @@
 #!/bin/bash
 # mem-mesh-hooks prompt-version: 8
-# mem-mesh Auto-Save Hook for Cursor (stop event, project-local)
+# Cursor stop hook: conditionally suggest saving to mem-mesh
+# stdin: {"last_assistant_message":"...", "transcript":[...]} JSON
 
 set -euo pipefail
 
 INPUT=$(cat)
 
+# Check if there were meaningful tool uses (file edits, code changes)
 HAS_TOOL_USE=$(echo "$INPUT" | python3 -c "
 import json, sys
 try:
