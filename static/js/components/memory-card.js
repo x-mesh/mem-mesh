@@ -6,8 +6,8 @@
 class MemoryCard extends HTMLElement {
   static get observedAttributes() {
     return [
-      'memory-id', 'content', 'project', 'category', 
-      'created-at', 'updated-at', 'similarity-score', 'tags', 'source', 'search-query'
+      'memory-id', 'content', 'project', 'category',
+      'created-at', 'updated-at', 'similarity-score', 'tags', 'source', 'client', 'search-query'
     ];
   }
   
@@ -105,7 +105,8 @@ class MemoryCard extends HTMLElement {
       updated_at: this.getAttribute('updated-at'),
       similarity_score: parseFloat(this.getAttribute('similarity-score')) || null,
       tags: this.parseTags(this.getAttribute('tags')),
-      source: this.getAttribute('source') || 'unknown'
+      source: this.getAttribute('source') || 'unknown',
+      client: this.getAttribute('client') || ''
     };
   }
   
@@ -466,6 +467,7 @@ class MemoryCard extends HTMLElement {
               ${formattedDate}
             </time>
             ${memory.source !== 'unknown' ? `<span class="source">via ${memory.source}</span>` : ''}
+            ${memory.client ? `<span class="client-badge client-${memory.client}">${memory.client}</span>` : ''}
           </div>
         </div>
       </div>
@@ -774,7 +776,21 @@ style.textContent = `
   .source {
     font-style: italic;
   }
-  
+
+  .client-badge {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-weight: 500;
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    background: var(--bg-tertiary, #374151);
+    color: var(--text-primary);
+  }
+  .client-claude_code { background: #d97706; color: #fff; }
+  .client-cursor { background: #7c3aed; color: #fff; }
+  .client-kiro { background: #059669; color: #fff; }
+  .client-web { background: #2563eb; color: #fff; }
+
   .hidden {
     display: none !important;
   }

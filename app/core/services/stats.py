@@ -112,8 +112,8 @@ class StatsService:
                 "unique_projects": unique_projects,
                 "categories_breakdown": categories_breakdown,
                 "sources_breakdown": sources_breakdown,
-                "clients_breakdown": clients_breakdown,
                 "projects_breakdown": projects_breakdown,
+                "clients_breakdown": clients_breakdown,
                 "date_range": date_range,
                 "query_time_ms": round(query_time_ms, 2),
             }
@@ -265,8 +265,8 @@ class StatsService:
     ) -> Dict[str, int]:
         """클라이언트 도구별 메모리 수 조회"""
         try:
-            where_conditions = []
-            params = []
+            where_conditions: list[str] = []
+            params: list[str] = []
 
             if project_id:
                 where_conditions.append("project_id = ?")

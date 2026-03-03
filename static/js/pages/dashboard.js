@@ -16,6 +16,17 @@ const CAT_ICONS = {
 };
 const DEFAULT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
 
+const CLIENT_COLORS = {
+  claude_code: '#d97706',
+  cursor: '#7c3aed',
+  kiro: '#059669',
+  web: '#2563eb',
+  unknown: '#6b7280',
+};
+
+const VIZ_MODES = ['pulse', 'orbit', 'ticker'];
+const VIZ_LABELS = { pulse: 'Pulse', orbit: 'Orbit', ticker: 'Ticker' };
+
 class DashboardPage extends HTMLElement {
   constructor() {
     super();
@@ -33,6 +44,10 @@ class DashboardPage extends HTMLElement {
     // Peek state
     this._peekId = null;
     this._peekData = null;
+    // Client viz state
+    this._vizMode = localStorage.getItem('mem-mesh-client-viz') || 'pulse';
+    this._vizEvents = []; // recent events for pulse/ticker
+    this._orbitAnim = null; // orbit animation frame id
   }
 
   connectedCallback() {
@@ -46,6 +61,7 @@ class DashboardPage extends HTMLElement {
   }
 
   disconnectedCallback() {
+    if (this._orbitAnim) { cancelAnimationFrame(this._orbitAnim); this._orbitAnim = null; }
     if (this.refreshInterval) clearInterval(this.refreshInterval);
     if (this._bh) {
       wsClient.off('memory_created', this._bh.c);
@@ -81,6 +97,8 @@ class DashboardPage extends HTMLElement {
     this.memories.unshift(memory);
     this.renderMemoryList();
     this.refreshStats();
+    // Push viz event
+    this._pushVizEvent(memory);
   }
 
   onMemoryUpdated({ memory_id, memory }) {
@@ -119,6 +137,15 @@ class DashboardPage extends HTMLElement {
         return;
       }
       if (e.target.closest('.load-more-btn')) { this.loadMore(); return; }
+      if (e.target.closest('.viz-mode-btn')) {
+        const mode = e.target.closest('.viz-mode-btn').dataset.mode;
+        if (mode && VIZ_MODES.includes(mode)) {
+          this._vizMode = mode;
+          localStorage.setItem('mem-mesh-client-viz', mode);
+          this.renderClientViz();
+        }
+        return;
+      }
       if (e.target.closest('.session-end-btn')) { this.endSession(); return; }
       if (e.target.closest('.session-link')) {
         if (window.app?.router) window.app.router.navigate('/work');
@@ -234,6 +261,13 @@ class DashboardPage extends HTMLElement {
     this.innerHTML = `
       <div class="dash-session" id="dash-session"></div>
       <div class="dash-insights" id="dash-insights"></div>
+      <div class="client-viz-section" id="client-viz">
+        <div class="client-viz-header">
+          <span class="client-viz-title">Client Activity</span>
+          <div class="client-viz-switcher" id="viz-switcher"></div>
+        </div>
+        <div class="client-viz-body" id="client-viz-body"></div>
+      </div>
       <div class="dash-toolbar">
         <span class="dash-title">Recent Memories</span>
         <div class="dash-filters">
@@ -264,6 +298,7 @@ class DashboardPage extends HTMLElement {
   renderContent() {
     this.renderSession();
     this.renderInsights();
+    this.renderClientViz();
     this.renderMemoryList();
     this.renderFooter();
   }
@@ -375,10 +410,12 @@ class DashboardPage extends HTMLElement {
     const truncated = preview.length > 120 ? preview.substring(0, 120) + '...' : preview;
     const time = this.relTime(m.created_at);
     const source = m.source && m.source !== 'unknown' ? m.source : '';
+    const client = m.client || '';
     return `<div class="recent-item" data-id="${m.id}" role="button" tabindex="0">
       <span class="recent-item-icon cat-${m.category}">${icon}</span>
       <span class="recent-item-badge">${m.category}</span>
       ${m.project_id ? `<span class="recent-item-project">${this.esc(m.project_id)}</span>` : ''}
+      ${client ? `<span class="recent-item-client client-${client}">${client}</span>` : ''}
       <span class="recent-item-content">${this.esc(truncated)}</span>
       <span class="recent-item-time">${time}${source ? ' \u00b7 ' + source : ''}</span>
     </div>`;
@@ -395,6 +432,276 @@ class DashboardPage extends HTMLElement {
       <span class="footer-sep">&middot;</span>
       <span>${projects} projects</span>
     `;
+  }
+
+  // ── Client Visualization ──
+
+  _pushVizEvent(memory) {
+    this._vizEvents.unshift({
+      client: memory.client || 'unknown',
+      category: memory.category || 'task',
+      content: (memory.content || '').substring(0, 60),
+      time: Date.now(),
+    });
+    if (this._vizEvents.length > 40) this._vizEvents.length = 40;
+    // Live-update current viz
+    if (this._vizMode === 'pulse') this._appendPulseDot(this._vizEvents[0]);
+    if (this._vizMode === 'ticker') this._appendTickerItem(this._vizEvents[0]);
+  }
+
+  renderClientViz() {
+    const section = this.querySelector('#client-viz');
+    if (!section) return;
+
+    const clients = this.stats?.clients_breakdown || {};
+    const hasClients = Object.keys(clients).length > 0;
+    if (!hasClients && this.memories.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+
+    // Render switcher
+    const switcher = this.querySelector('#viz-switcher');
+    if (switcher) {
+      switcher.innerHTML = VIZ_MODES.map(m =>
+        `<button class="viz-mode-btn${this._vizMode === m ? ' active' : ''}" data-mode="${m}">${VIZ_LABELS[m]}</button>`
+      ).join('');
+    }
+
+    // Seed viz events from memories if empty
+    if (this._vizEvents.length === 0 && this.memories.length > 0) {
+      this._vizEvents = this.memories.slice(0, 30).map(m => ({
+        client: m.client || 'unknown',
+        category: m.category || 'task',
+        content: (m.content || '').substring(0, 60),
+        time: new Date(m.created_at).getTime(),
+      }));
+    }
+
+    // Stop orbit if switching away
+    if (this._vizMode !== 'orbit' && this._orbitAnim) {
+      cancelAnimationFrame(this._orbitAnim);
+      this._orbitAnim = null;
+    }
+
+    const body = this.querySelector('#client-viz-body');
+    if (!body) return;
+
+    if (this._vizMode === 'pulse') this._renderPulseStrip(body);
+    else if (this._vizMode === 'orbit') this._renderOrbitRing(body);
+    else if (this._vizMode === 'ticker') this._renderStreamTicker(body);
+  }
+
+  // ── 1. Pulse Strip ──
+
+  _renderPulseStrip(container) {
+    const clients = this.stats?.clients_breakdown || {};
+    const entries = Object.entries(clients).sort(([,a],[,b]) => b - a);
+
+    // Client legend + dot timeline
+    const legend = entries.map(([name, count]) => {
+      const color = CLIENT_COLORS[name] || CLIENT_COLORS.unknown;
+      return `<span class="pulse-client" style="--c:${color}">
+        <span class="pulse-client-dot"></span>
+        <span class="pulse-client-name">${this.esc(name)}</span>
+        <span class="pulse-client-count">${count}</span>
+      </span>`;
+    }).join('');
+
+    // Build dot timeline from events
+    const dots = this._vizEvents.slice(0, 30).map((ev, i) => {
+      const color = CLIENT_COLORS[ev.client] || CLIENT_COLORS.unknown;
+      const age = (Date.now() - ev.time) / 3600000; // hours
+      const opacity = Math.max(0.25, 1 - age / 168); // fade over 7 days
+      const catIcon = CAT_ICONS[ev.category] ? 'has-icon' : '';
+      return `<span class="pulse-dot ${catIcon}" style="--c:${color};opacity:${opacity.toFixed(2)}" title="${this.esc(ev.client)}: ${this.esc(ev.content)}" data-idx="${i}"></span>`;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="pulse-legend">${legend}</div>
+      <div class="pulse-timeline" id="pulse-timeline">${dots}</div>
+    `;
+  }
+
+  _appendPulseDot(ev) {
+    const timeline = this.querySelector('#pulse-timeline');
+    if (!timeline || this._vizMode !== 'pulse') return;
+    const color = CLIENT_COLORS[ev.client] || CLIENT_COLORS.unknown;
+    const dot = document.createElement('span');
+    dot.className = 'pulse-dot pulse-dot-enter';
+    dot.style.setProperty('--c', color);
+    dot.title = `${ev.client}: ${ev.content}`;
+    timeline.prepend(dot);
+    // Remove excess
+    while (timeline.children.length > 30) timeline.lastElementChild.remove();
+    // Trigger animation
+    requestAnimationFrame(() => dot.classList.remove('pulse-dot-enter'));
+  }
+
+  // ── 2. Orbit Ring ──
+
+  _renderOrbitRing(container) {
+    const clients = this.stats?.clients_breakdown || {};
+    const entries = Object.entries(clients).sort(([,a],[,b]) => b - a);
+    const total = Object.values(clients).reduce((a, b) => a + b, 0) || 1;
+
+    container.innerHTML = `<canvas id="orbit-canvas" width="600" height="180"></canvas>`;
+    const canvas = container.querySelector('#orbit-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    // Build orbit nodes — size circle to fit label text
+    const fontSize = 9;
+    ctx.font = `600 ${fontSize}px system-ui, sans-serif`;
+    const nodes = entries.map(([name, count], i) => {
+      const textW = ctx.measureText(name).width;
+      const minR = (textW / 2) + 6; // text half-width + padding
+      const countR = Math.max(12, (count / total) * 50);
+      return {
+        name,
+        count,
+        color: CLIENT_COLORS[name] || CLIENT_COLORS.unknown,
+        radius: Math.max(minR, countR),
+        angle: (i / entries.length) * Math.PI * 2,
+        speed: 0.003 + (i * 0.002),
+        pulsePhase: Math.random() * Math.PI * 2,
+        fontSize,
+      };
+    });
+
+    // Particles for recent events
+    const particles = [];
+    this._vizEvents.slice(0, 15).forEach((ev, i) => {
+      particles.push({
+        color: CLIENT_COLORS[ev.client] || CLIENT_COLORS.unknown,
+        angle: Math.random() * Math.PI * 2,
+        dist: 30 + Math.random() * 40,
+        speed: 0.01 + Math.random() * 0.015,
+        size: 2 + Math.random() * 2,
+        alpha: 0.3 + Math.random() * 0.5,
+      });
+    });
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvas.offsetWidth * dpr;
+    canvas.height = 180 * dpr;
+    canvas.style.width = canvas.offsetWidth + 'px';
+    canvas.style.height = '180px';
+    ctx.scale(dpr, dpr);
+    const W = canvas.offsetWidth;
+    const H = 180;
+    const cx = W / 2;
+    const cy = H / 2;
+    const orbitRx = Math.min(W * 0.35, 120);
+    const orbitRy = orbitRx * 0.45;
+
+    const draw = (t) => {
+      ctx.clearRect(0, 0, W, H);
+
+      // Draw orbit path
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, orbitRx, orbitRy, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(128,128,128,0.15)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Draw center label
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#888';
+      ctx.font = '600 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('mem-mesh', cx, cy);
+
+      // Draw particles
+      particles.forEach(p => {
+        p.angle += p.speed;
+        const px = cx + Math.cos(p.angle) * (orbitRx * p.dist / 70);
+        const py = cy + Math.sin(p.angle) * (orbitRy * p.dist / 70);
+        ctx.beginPath();
+        ctx.arc(px, py, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.alpha * (0.5 + 0.5 * Math.sin(t * 0.002 + p.angle));
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      });
+
+      // Draw client nodes
+      nodes.forEach(node => {
+        node.angle += node.speed;
+        const nx = cx + Math.cos(node.angle) * orbitRx;
+        const ny = cy + Math.sin(node.angle) * orbitRy;
+        const pulse = 1 + 0.12 * Math.sin(t * 0.003 + node.pulsePhase);
+        const r = node.radius * pulse;
+
+        // Glow
+        ctx.beginPath();
+        ctx.arc(nx, ny, r + 4, 0, Math.PI * 2);
+        ctx.fillStyle = node.color;
+        ctx.globalAlpha = 0.12;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // Circle
+        ctx.beginPath();
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
+        ctx.fillStyle = node.color;
+        ctx.fill();
+
+        // Label
+        ctx.fillStyle = '#fff';
+        ctx.font = `600 ${node.fontSize}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(node.name, nx, ny);
+      });
+
+      this._orbitAnim = requestAnimationFrame(draw);
+    };
+
+    this._orbitAnim = requestAnimationFrame(draw);
+  }
+
+  // ── 3. Stream Ticker ──
+
+  _renderStreamTicker(container) {
+    const items = this._vizEvents.slice(0, 20).map(ev => {
+      const color = CLIENT_COLORS[ev.client] || CLIENT_COLORS.unknown;
+      const catIcon = CAT_ICONS[ev.category] || DEFAULT_ICON;
+      const preview = ev.content.length > 40 ? ev.content.substring(0, 40) + '...' : ev.content;
+      const ago = this.relTime(new Date(ev.time).toISOString());
+      return `<span class="ticker-item">
+        <span class="ticker-client" style="background:${color}">${this.esc(ev.client)}</span>
+        <span class="ticker-cat">${catIcon}</span>
+        <span class="ticker-text">${this.esc(preview)}</span>
+        <span class="ticker-time">${ago}</span>
+      </span>`;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="ticker-track" id="ticker-track">
+        <div class="ticker-scroll">${items}${items}</div>
+      </div>
+    `;
+  }
+
+  _appendTickerItem(ev) {
+    const scroll = this.querySelector('.ticker-scroll');
+    if (!scroll || this._vizMode !== 'ticker') return;
+    const color = CLIENT_COLORS[ev.client] || CLIENT_COLORS.unknown;
+    const catIcon = CAT_ICONS[ev.category] || DEFAULT_ICON;
+    const preview = ev.content.length > 40 ? ev.content.substring(0, 40) + '...' : ev.content;
+    const html = `<span class="ticker-item ticker-item-enter">
+      <span class="ticker-client" style="background:${color}">${this.esc(ev.client)}</span>
+      <span class="ticker-cat">${catIcon}</span>
+      <span class="ticker-text">${this.esc(preview)}</span>
+      <span class="ticker-time">now</span>
+    </span>`;
+    scroll.insertAdjacentHTML('afterbegin', html);
+    requestAnimationFrame(() => {
+      const el = scroll.firstElementChild;
+      if (el) el.classList.remove('ticker-item-enter');
+    });
   }
 
   // ── Helpers ──
@@ -469,6 +776,7 @@ class DashboardPage extends HTMLElement {
       <div class="dash-peek-meta">
         ${m.project_id ? `<span class="dash-peek-project">${this.esc(m.project_id)}</span>` : ''}
         ${m.source && m.source !== 'unknown' ? `<span class="dash-peek-source">${this.esc(m.source)}</span>` : ''}
+        ${m.client ? `<span class="dash-peek-client client-${m.client}">${this.esc(m.client)}</span>` : ''}
         <span class="dash-peek-time">${time}</span>
       </div>
       ${(m.tags || []).length ? `<div class="dash-peek-tags">${m.tags.map(t => `<span class="dash-peek-tag">#${this.esc(t)}</span>`).join('')}</div>` : ''}

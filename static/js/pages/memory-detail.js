@@ -930,6 +930,12 @@ class MemoryDetailPage extends HTMLElement {
                 <span class="meta-value">${this.memory.source}</span>
               </div>
             ` : ''}
+            ${this.memory.client ? `
+              <div class="meta-item">
+                <span class="meta-label">Client:</span>
+                <span class="client-badge client-${this.memory.client}">${this.memory.client}</span>
+              </div>
+            ` : ''}
           </div>
           
           <div class="memory-body">
@@ -1194,7 +1200,21 @@ style.textContent = `
     font-size: 0.875rem;
     font-weight: 500;
   }
-  
+
+  .client-badge {
+    background: var(--bg-tertiary, #374151);
+    color: var(--text-primary);
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--border-radius-sm);
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+  }
+  .client-claude_code { background: #d97706; color: #fff; }
+  .client-cursor { background: #7c3aed; color: #fff; }
+  .client-kiro { background: #059669; color: #fff; }
+  .client-web { background: #2563eb; color: #fff; }
+
   .memory-body {
     padding: 2rem;
   }

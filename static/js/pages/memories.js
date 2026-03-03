@@ -262,6 +262,8 @@ class MemoriesPage extends HTMLElement {
     const isSelected = this._selected.has(mem.id);
     const isFav = this._favorites.has(mem.id);
     const srcBadge = source ? `<span class="mem-source-badge mem-clickable-filter" data-filter-type="source" data-filter-value="${esc(source)}">${esc(source)}</span>` : '';
+    const client = mem.client || '';
+    const clientBadge = client ? `<span class="mem-client-badge client-${client}">${esc(client)}</span>` : '';
 
     return `
       <div class="recent-item mem-row${isSelected ? ' mem-selected' : ''}" data-memory-id="${esc(mem.id)}" role="button" tabindex="0">
@@ -274,6 +276,7 @@ class MemoriesPage extends HTMLElement {
         <span class="recent-item-icon">${icon}</span>
         <span class="recent-item-badge mem-clickable-filter" data-filter-type="category" data-filter-value="${esc(mem.category)}">${esc(mem.category)}</span>
         ${mem.project_id ? `<span class="recent-item-project mem-clickable-filter" data-filter-type="project_id" data-filter-value="${esc(mem.project_id)}">${esc(mem.project_id)}</span>` : ''}
+        ${clientBadge}
         <span class="recent-item-content">${contentHtml}</span>
         ${tags.length ? `<span class="mem-tags">${tags.map(t => `<span class="mem-tag mem-clickable-filter" data-filter-type="tag" data-filter-value="${esc(t)}">#${esc(t)}</span>`).join('')}</span>` : ''}
         ${srcBadge}
@@ -1593,6 +1596,7 @@ class MemoriesPage extends HTMLElement {
       <div class="mem-peek-meta">
         ${m.project_id ? `<span class="mem-peek-project">${esc(m.project_id)}</span>` : ''}
         ${m.source ? `<span class="mem-peek-source">${esc(m.source)}</span>` : ''}
+        ${m.client ? `<span class="mem-client-badge client-${m.client}">${esc(m.client)}</span>` : ''}
         <span class="mem-peek-time">${relTime(m.created_at)}</span>
         ${m.updated_at && m.updated_at !== m.created_at ? `<span class="mem-peek-updated">updated ${relTime(m.updated_at)}</span>` : ''}
       </div>
@@ -2673,6 +2677,23 @@ style.textContent = `
     letter-spacing: 0.02em;
     text-transform: uppercase;
   }
+
+  /* ── Client badge ─────────────────────── */
+  .mem-client-badge {
+    flex-shrink: 0;
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 500;
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    background: var(--bg-tertiary, #374151);
+    color: var(--text-primary);
+    white-space: nowrap;
+  }
+  .mem-client-badge.client-claude_code { background: #d97706; color: #fff; }
+  .mem-client-badge.client-cursor { background: #7c3aed; color: #fff; }
+  .mem-client-badge.client-kiro { background: #059669; color: #fff; }
+  .mem-client-badge.client-web { background: #2563eb; color: #fff; }
 
   /* ── P2: Source select ────────────────── */
   .mem-source-select {
