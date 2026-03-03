@@ -66,6 +66,8 @@
 
 .main-content {
   width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
   padding: 0 40px; /* 좌우 15px 여백 추가 */
 }
 

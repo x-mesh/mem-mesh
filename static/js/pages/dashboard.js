@@ -24,8 +24,8 @@ const CLIENT_COLORS = {
   unknown: '#6b7280',
 };
 
-const VIZ_MODES = ['pulse', 'orbit', 'ticker'];
-const VIZ_LABELS = { pulse: 'Pulse', orbit: 'Orbit', ticker: 'Ticker' };
+const VIZ_MODES = ['pulse', 'orbit', 'ticker', 'heatmap', 'stats', 'timeline', 'flow', 'calendar', 'leaderboard'];
+const VIZ_LABELS = { pulse: 'Pulse', orbit: 'Orbit', ticker: 'Ticker', heatmap: 'Heatmap', stats: 'Stats', timeline: 'Timeline', flow: 'Flow', calendar: 'Calendar', leaderboard: 'Board' };
 
 class DashboardPage extends HTMLElement {
   constructor() {
@@ -45,7 +45,7 @@ class DashboardPage extends HTMLElement {
     this._peekId = null;
     this._peekData = null;
     // Client viz state
-    this._vizMode = localStorage.getItem('mem-mesh-client-viz') || 'pulse';
+    this._vizMode = localStorage.getItem('mem-mesh-client-viz') || 'orbit';
     this._vizEvents = []; // recent events for pulse/ticker
     this._orbitAnim = null; // orbit animation frame id
   }
@@ -268,6 +268,7 @@ class DashboardPage extends HTMLElement {
         </div>
         <div class="client-viz-body" id="client-viz-body"></div>
       </div>
+      <div class="dash-projects" id="dash-projects"></div>
       <div class="dash-toolbar">
         <span class="dash-title">Recent Memories</span>
         <div class="dash-filters">
@@ -299,6 +300,7 @@ class DashboardPage extends HTMLElement {
     this.renderSession();
     this.renderInsights();
     this.renderClientViz();
+    this.renderProjects();
     this.renderMemoryList();
     this.renderFooter();
   }
@@ -379,6 +381,42 @@ class DashboardPage extends HTMLElement {
         <span class="insight-title">This week</span>
         <div class="insight-spark">${sparkBars}</div>
         <span class="insight-count">${weekTotal}</span>
+      </div>
+    `;
+  }
+
+  renderProjects() {
+    const el = this.querySelector('#dash-projects');
+    if (!el || !this.stats) return;
+
+    const breakdown = this.stats.projects_breakdown || {};
+    const entries = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
+    if (entries.length === 0) { el.innerHTML = ''; return; }
+
+    const total = entries.reduce((s, [, c]) => s + c, 0) || 1;
+    const topN = entries.slice(0, 6);
+    const rest = entries.length - topN.length;
+
+    const bars = topN.map(([name, count]) => {
+      const pct = Math.round((count / total) * 100);
+      const w = Math.max(pct, 3);
+      return `<div class="proj-row" data-route="/project/${encodeURIComponent(name)}">
+        <span class="proj-name" title="${this.esc(name)}">${this.esc(name)}</span>
+        <div class="proj-bar-track"><div class="proj-bar-fill" style="width:${w}%"></div></div>
+        <span class="proj-count">${count}</span>
+      </div>`;
+    }).join('');
+
+    const restLabel = rest > 0 ? `<span class="proj-rest">+${rest} more projects</span>` : '';
+
+    el.innerHTML = `
+      <div class="proj-section">
+        <div class="proj-header">
+          <span class="proj-title">Projects</span>
+          <span class="proj-total">${entries.length} projects · ${total.toLocaleString()} memories</span>
+        </div>
+        <div class="proj-list">${bars}</div>
+        ${restLabel}
       </div>
     `;
   }
@@ -491,6 +529,12 @@ class DashboardPage extends HTMLElement {
     if (this._vizMode === 'pulse') this._renderPulseStrip(body);
     else if (this._vizMode === 'orbit') this._renderOrbitRing(body);
     else if (this._vizMode === 'ticker') this._renderStreamTicker(body);
+    else if (this._vizMode === 'heatmap') this._renderHeatmap(body);
+    else if (this._vizMode === 'stats') this._renderStatsCards(body);
+    else if (this._vizMode === 'timeline') this._renderTimeline(body);
+    else if (this._vizMode === 'flow') this._renderFlow(body);
+    else if (this._vizMode === 'calendar') this._renderCalendar(body);
+    else if (this._vizMode === 'leaderboard') this._renderLeaderboard(body);
   }
 
   // ── 1. Pulse Strip ──
@@ -702,6 +746,310 @@ class DashboardPage extends HTMLElement {
       const el = scroll.firstElementChild;
       if (el) el.classList.remove('ticker-item-enter');
     });
+  }
+
+  // ── Heatmap ──
+
+  _renderHeatmap(container) {
+    const hours = Array.from({ length: 24 }, (_, i) => i);
+    const clients = Object.keys(this.stats?.clients_breakdown || {});
+    if (!clients.length) {
+      container.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:var(--text-xs);padding:var(--space-4)">No client data</div>';
+      return;
+    }
+
+    // Build hour×client matrix from memories
+    const matrix = {};
+    clients.forEach(c => { matrix[c] = new Array(24).fill(0); });
+    (this.memories || []).forEach(m => {
+      const client = m.client || 'unknown';
+      if (!matrix[client]) matrix[client] = new Array(24).fill(0);
+      const h = new Date(m.created_at).getHours();
+      matrix[client][h]++;
+    });
+
+    // Find max for opacity scaling
+    let max = 0;
+    clients.forEach(c => hours.forEach(h => { if (matrix[c]?.[h] > max) max = matrix[c][h]; }));
+    if (max === 0) max = 1;
+
+    // Hour labels (show every 3h)
+    const hourLabels = hours.map(h =>
+      h % 3 === 0 ? `<span class="heatmap-hour-label">${String(h).padStart(2, '0')}</span>` : '<span class="heatmap-hour-label"></span>'
+    ).join('');
+
+    // Rows
+    const rows = clients.map(client => {
+      const color = CLIENT_COLORS[client] || CLIENT_COLORS.unknown;
+      const cells = hours.map(h => {
+        const count = matrix[client]?.[h] || 0;
+        const opacity = count === 0 ? 0.08 : 0.2 + (count / max) * 0.8;
+        const title = `${client} · ${String(h).padStart(2, '0')}:00 — ${count} memor${count === 1 ? 'y' : 'ies'}`;
+        return `<span class="heatmap-cell" style="background:${color};opacity:${opacity}" title="${title}"></span>`;
+      }).join('');
+      return `<div class="heatmap-row">
+        <span class="heatmap-client" style="color:${color}">${this.esc(client)}</span>
+        <div class="heatmap-cells">${cells}</div>
+      </div>`;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="heatmap-grid">
+        <div class="heatmap-row heatmap-header-row">
+          <span class="heatmap-client"></span>
+          <div class="heatmap-cells heatmap-hours">${hourLabels}</div>
+        </div>
+        ${rows}
+      </div>
+    `;
+  }
+
+  // ── Stats Cards ──
+
+  _renderStatsCards(container) {
+    const breakdown = this.stats?.clients_breakdown || {};
+    const clients = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
+    const total = clients.reduce((s, [, c]) => s + c, 0) || 1;
+
+    if (!clients.length) {
+      container.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:var(--text-xs);padding:var(--space-4)">No client data</div>';
+      return;
+    }
+
+    // Per-client category breakdown from memories
+    const clientCats = {};
+    (this.memories || []).forEach(m => {
+      const c = m.client || 'unknown';
+      if (!clientCats[c]) clientCats[c] = {};
+      const cat = m.category || 'other';
+      clientCats[c][cat] = (clientCats[c][cat] || 0) + 1;
+    });
+
+    // Recent activity (last 24h)
+    const now = Date.now();
+    const recentCounts = {};
+    (this.memories || []).forEach(m => {
+      const c = m.client || 'unknown';
+      if (now - new Date(m.created_at).getTime() < 86400000) {
+        recentCounts[c] = (recentCounts[c] || 0) + 1;
+      }
+    });
+
+    const cards = clients.map(([client, count]) => {
+      const color = CLIENT_COLORS[client] || CLIENT_COLORS.unknown;
+      const pct = ((count / total) * 100).toFixed(0);
+      const recent = recentCounts[client] || 0;
+      const cats = clientCats[client] || {};
+      const topCats = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      const catTags = topCats.map(([cat, n]) =>
+        `<span class="stats-cat-tag">${this.esc(cat)} <em>${n}</em></span>`
+      ).join('');
+
+      return `<div class="stats-card">
+        <div class="stats-card-header">
+          <span class="stats-card-dot" style="background:${color}"></span>
+          <span class="stats-card-name">${this.esc(client)}</span>
+          <span class="stats-card-count">${count}</span>
+        </div>
+        <div class="stats-card-bar-track">
+          <div class="stats-card-bar-fill" style="width:${pct}%;background:${color}"></div>
+        </div>
+        <div class="stats-card-meta">
+          <span class="stats-card-pct">${pct}%</span>
+          <span class="stats-card-recent">${recent > 0 ? `${recent} today` : 'idle'}</span>
+        </div>
+        ${catTags ? `<div class="stats-card-cats">${catTags}</div>` : ''}
+      </div>`;
+    }).join('');
+
+    container.innerHTML = `<div class="stats-grid">${cards}</div>`;
+  }
+
+  // ── Timeline ──
+
+  _renderTimeline(container) {
+    const events = (this._vizEvents || []).slice(0, 20);
+    if (!events.length) {
+      container.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:var(--text-xs);padding:var(--space-4)">No recent events</div>';
+      return;
+    }
+
+    const items = events.map((ev, i) => {
+      const color = CLIENT_COLORS[ev.client] || CLIENT_COLORS.unknown;
+      const catIcon = CAT_ICONS[ev.category] || DEFAULT_ICON;
+      const preview = ev.content.length > 60 ? ev.content.substring(0, 60) + '...' : ev.content;
+      const timeStr = this.relTime(ev.time);
+      return `<div class="tl-item" style="--delay:${i * 40}ms">
+        <div class="tl-line"><span class="tl-dot" style="background:${color}"></span></div>
+        <div class="tl-body">
+          <div class="tl-head">
+            <span class="tl-client" style="background:${color}">${this.esc(ev.client)}</span>
+            <span class="tl-cat">${catIcon}</span>
+            <span class="tl-time">${timeStr}</span>
+          </div>
+          <div class="tl-text">${this.esc(preview)}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    container.innerHTML = `<div class="tl-container">${items}</div>`;
+  }
+
+  // ── Flow (Sankey) ──
+
+  _renderFlow(container) {
+    const breakdown = this.stats?.clients_breakdown || {};
+    const clients = Object.keys(breakdown);
+    if (!clients.length) {
+      container.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:var(--text-xs);padding:var(--space-4)">No client data</div>';
+      return;
+    }
+
+    // Build client→category flow from memories
+    const flows = {};
+    const catTotals = {};
+    (this.memories || []).forEach(m => {
+      const c = m.client || 'unknown';
+      const cat = m.category || 'other';
+      const key = `${c}→${cat}`;
+      flows[key] = (flows[key] || 0) + 1;
+      catTotals[cat] = (catTotals[cat] || 0) + 1;
+    });
+
+    const total = Object.values(flows).reduce((s, v) => s + v, 0) || 1;
+    const categories = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
+
+    // SVG-based sankey
+    const svgW = 400;
+    const svgH = Math.max(120, clients.length * 28, categories.length * 28);
+    const leftX = 90;
+    const rightX = svgW - 90;
+
+    // Position nodes
+    const clientNodes = clients.map((c, i) => ({
+      name: c, y: (i + 0.5) * (svgH / clients.length), count: breakdown[c] || 0,
+      color: CLIENT_COLORS[c] || CLIENT_COLORS.unknown
+    }));
+    const catNodes = categories.map(([cat, count], i) => ({
+      name: cat, y: (i + 0.5) * (svgH / categories.length), count
+    }));
+
+    // Draw paths
+    const paths = Object.entries(flows).map(([key, count]) => {
+      const [cName, catName] = key.split('→');
+      const cNode = clientNodes.find(n => n.name === cName);
+      const catNode = catNodes.find(n => n.name === catName);
+      if (!cNode || !catNode) return '';
+      const thickness = Math.max(1, (count / total) * 40);
+      const color = cNode.color;
+      const midX = (leftX + rightX) / 2;
+      return `<path d="M${leftX + 4},${cNode.y} C${midX},${cNode.y} ${midX},${catNode.y} ${rightX - 4},${catNode.y}"
+        fill="none" stroke="${color}" stroke-width="${thickness}" opacity="0.25"/>`;
+    }).join('');
+
+    // Client labels
+    const cLabels = clientNodes.map(n =>
+      `<text x="${leftX - 6}" y="${n.y + 3}" text-anchor="end" fill="${n.color}" class="flow-label">${this.esc(n.name)}</text>`
+    ).join('');
+
+    // Category labels
+    const catLabels = catNodes.map(n =>
+      `<text x="${rightX + 6}" y="${n.y + 3}" text-anchor="start" fill="var(--text-secondary)" class="flow-label">${this.esc(n.name)} <tspan fill="var(--text-muted)" font-size="9">${n.count}</tspan></text>`
+    ).join('');
+
+    // Client dots
+    const cDots = clientNodes.map(n =>
+      `<circle cx="${leftX}" cy="${n.y}" r="4" fill="${n.color}"/>`
+    ).join('');
+
+    // Category dots
+    const catDots = catNodes.map(n =>
+      `<circle cx="${rightX}" cy="${n.y}" r="4" fill="var(--text-muted)"/>`
+    ).join('');
+
+    container.innerHTML = `
+      <svg class="flow-svg" viewBox="0 0 ${svgW} ${svgH}" preserveAspectRatio="xMidYMid meet">
+        ${paths}${cDots}${catDots}${cLabels}${catLabels}
+      </svg>`;
+  }
+
+  // ── Calendar ──
+
+  _renderCalendar(container) {
+    // Build 30-day calendar from memories
+    const now = new Date();
+    const days = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      days.push({ date: d, key, count: 0 });
+    }
+
+    const dayMap = {};
+    days.forEach(d => { dayMap[d.key] = d; });
+
+    (this.memories || []).forEach(m => {
+      const key = (m.created_at || '').slice(0, 10);
+      if (dayMap[key]) dayMap[key].count++;
+    });
+
+    const max = Math.max(1, ...days.map(d => d.count));
+
+    const cells = days.map(d => {
+      const opacity = d.count === 0 ? 0.08 : 0.2 + (d.count / max) * 0.8;
+      const dayNum = d.date.getDate();
+      const weekday = ['S', 'M', 'T', 'W', 'T', 'F', 'S'][d.date.getDay()];
+      const isToday = d.key === now.toISOString().slice(0, 10);
+      return `<div class="cal-cell${isToday ? ' cal-today' : ''}" title="${d.key}: ${d.count} memories">
+        <span class="cal-day-label">${dayNum === 1 || d === days[0] ? d.date.toLocaleDateString('en', { month: 'short' }) : ''}</span>
+        <span class="cal-block" style="opacity:${opacity}"></span>
+        <span class="cal-weekday">${weekday}</span>
+      </div>`;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="cal-strip">
+        ${cells}
+      </div>
+      <div class="cal-legend">
+        <span class="cal-legend-label">Less</span>
+        ${[0.08, 0.3, 0.55, 0.8, 1].map(o => `<span class="cal-legend-block" style="opacity:${o}"></span>`).join('')}
+        <span class="cal-legend-label">More</span>
+      </div>
+    `;
+  }
+
+  // ── Leaderboard ──
+
+  _renderLeaderboard(container) {
+    const breakdown = this.stats?.clients_breakdown || {};
+    const clients = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
+    const total = clients.reduce((s, [, c]) => s + c, 0) || 1;
+
+    if (!clients.length) {
+      container.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:var(--text-xs);padding:var(--space-4)">No client data</div>';
+      return;
+    }
+
+    const rows = clients.map(([client, count], i) => {
+      const color = CLIENT_COLORS[client] || CLIENT_COLORS.unknown;
+      const pct = ((count / total) * 100).toFixed(1);
+      const rank = i + 1;
+      const medal = rank === 1 ? '●' : rank === 2 ? '◐' : rank === 3 ? '○' : '';
+      return `<div class="lb-row" style="--delay:${i * 60}ms">
+        <span class="lb-rank">${medal || rank}</span>
+        <span class="lb-dot" style="background:${color}"></span>
+        <span class="lb-name">${this.esc(client)}</span>
+        <div class="lb-bar-track">
+          <div class="lb-bar-fill" style="width:${pct}%;background:${color}"></div>
+        </div>
+        <span class="lb-count">${count}</span>
+        <span class="lb-pct">${pct}%</span>
+      </div>`;
+    }).join('');
+
+    container.innerHTML = `<div class="lb-container">${rows}</div>`;
   }
 
   // ── Helpers ──
