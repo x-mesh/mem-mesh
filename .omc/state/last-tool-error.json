@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"claude mcp add -e \\\"EXA_API_KEY=dbfe9e8a-37fc-46b5-bd46-cb60fc77ce2d\\\" exa -- npx -y exa-mcp-server 2>&1\",\"description\":\"Add Exa MCP server (fix env var format)\"}",
-  "error": "Exit code 1\nInvalid environment variable format: exa, environment variables should be added as: -e KEY1=value1 -e KEY2=value2\n\nInvalid environment variable format: exa, environment variables should be added as: -e KEY1=value1 -e KEY2=value2",
-  "timestamp": "2026-03-03T08:20:17.863Z",
-  "retry_count": 2
-}

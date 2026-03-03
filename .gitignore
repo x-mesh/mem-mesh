@@ -32,4 +32,5 @@ logs/
 benchmarks/longmemeval/dbs/
 benchmarks/longmemeval/results_v1_backup/
 
-.omc/
+**/.omc/**
+
