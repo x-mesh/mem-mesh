@@ -18,6 +18,7 @@ export class SettingsPage extends HTMLElement {
     connectedCallback() {
         this.render();
         this.bindEvents();
+        this.loadSystemInfo();
         this.loadStatus();
         this.loadRulesIndex();
     }
@@ -37,6 +38,19 @@ export class SettingsPage extends HTMLElement {
         this.innerHTML = `
       <div class="settings-toolbar">
         <span class="settings-title">Settings</span>
+      </div>
+
+      <!-- System Info -->
+      <div class="settings-section">
+        <div class="section-header">
+          <span class="section-label">System</span>
+        </div>
+        <div class="section-body" id="system-info">
+          <div class="settings-loading">
+            <div class="settings-spinner"></div>
+            <span>Loading system info...</span>
+          </div>
+        </div>
       </div>
 
       <!-- Embedding Status -->
@@ -76,6 +90,32 @@ export class SettingsPage extends HTMLElement {
           <div id="migration-progress" class="mig-progress hidden">
             <div class="mig-bar-track"><div class="mig-bar-fill" id="progress-bar"></div></div>
             <div class="mig-stats" id="progress-stats"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Data Management -->
+      <div class="settings-section">
+        <div class="section-header">
+          <span class="section-label">Data Management</span>
+        </div>
+        <div class="section-body">
+          <p class="section-desc">Export memories for backup or analysis.</p>
+          <div class="data-actions">
+            <div class="data-action-row">
+              <div class="data-action-info">
+                <span class="data-action-title">Export All Memories</span>
+                <span class="data-action-desc">Download all memories as JSON</span>
+              </div>
+              <button id="export-json-btn" class="settings-btn">Export JSON</button>
+            </div>
+            <div class="data-action-row">
+              <div class="data-action-info">
+                <span class="data-action-title">Export as CSV</span>
+                <span class="data-action-desc">Spreadsheet-compatible format</span>
+              </div>
+              <button id="export-csv-btn" class="settings-btn">Export CSV</button>
+            </div>
           </div>
         </div>
       </div>
@@ -136,27 +176,57 @@ export class SettingsPage extends HTMLElement {
         </div>
       </div>
 
-      <!-- Info -->
+      <!-- Info (Accordion) -->
       <div class="settings-section">
         <div class="section-header">
           <span class="section-label">Information</span>
         </div>
         <div class="section-body settings-info">
-          <div class="info-block">
-            <span class="info-heading">Embedding Models</span>
-            <p>Uses <code>sentence-transformers</code> for text-to-vector conversion.</p>
-            <ul>
-              <li><strong>all-MiniLM-L6-v2</strong> — Fast, lightweight English (384d)</li>
-              <li><strong>intfloat/multilingual-e5-small</strong> — Multilingual (384d)</li>
-            </ul>
-          </div>
-          <div class="info-block">
-            <span class="info-heading">Migration</span>
-            <p>When the model changes, existing memories need re-embedding. Runs in batches with live progress.</p>
-          </div>
-          <div class="info-block">
-            <span class="info-heading">Configuration</span>
-            <p>Set model via <code>MEM_MESH_EMBEDDING_MODEL</code> in <code>.env</code>.</p>
+          <details class="info-accordion">
+            <summary class="info-summary">Embedding Models</summary>
+            <div class="info-details">
+              <p>Uses <code>sentence-transformers</code> for text-to-vector conversion.</p>
+              <ul>
+                <li><strong>all-MiniLM-L6-v2</strong> — Fast, lightweight English (384d)</li>
+                <li><strong>intfloat/multilingual-e5-small</strong> — Multilingual (384d)</li>
+              </ul>
+            </div>
+          </details>
+          <details class="info-accordion">
+            <summary class="info-summary">Migration</summary>
+            <div class="info-details">
+              <p>When the model changes, existing memories need re-embedding. Runs in batches with live progress.</p>
+            </div>
+          </details>
+          <details class="info-accordion">
+            <summary class="info-summary">Configuration</summary>
+            <div class="info-details">
+              <p>Set model via <code>MEM_MESH_EMBEDDING_MODEL</code> in <code>.env</code>.</p>
+            </div>
+          </details>
+          <details class="info-accordion">
+            <summary class="info-summary">API Documentation</summary>
+            <div class="info-details">
+              <p>Full API reference available at <a href="/docs" target="_blank" class="info-link">/docs</a> (OpenAPI/Swagger).</p>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <!-- Danger Zone -->
+      <div class="settings-section settings-danger">
+        <div class="section-header">
+          <span class="section-label">Danger Zone</span>
+        </div>
+        <div class="section-body">
+          <div class="data-actions">
+            <div class="data-action-row">
+              <div class="data-action-info">
+                <span class="data-action-title">Delete All Memories</span>
+                <span class="data-action-desc">Permanently remove all memories. This cannot be undone.</span>
+              </div>
+              <button id="delete-all-btn" class="settings-btn-danger">Delete All</button>
+            </div>
           </div>
         </div>
       </div>
@@ -171,6 +241,68 @@ export class SettingsPage extends HTMLElement {
         this.querySelector('#copy-rules-btn')?.addEventListener('click', () => this.copyMergedRules());
         this.querySelector('#download-rules-btn')?.addEventListener('click', () => this.downloadMergedRules());
         this.querySelector('#save-rules-btn')?.addEventListener('click', () => this.saveMergedRules());
+        this.querySelector('#export-json-btn')?.addEventListener('click', () => this.exportMemories('json'));
+        this.querySelector('#export-csv-btn')?.addEventListener('click', () => this.exportMemories('csv'));
+        this.querySelector('#delete-all-btn')?.addEventListener('click', () => this.deleteAllMemories());
+    }
+
+    // ── System Info ──
+
+    async loadSystemInfo() {
+        const el = this.querySelector('#system-info');
+        if (!el) return;
+        try {
+            const info = await window.app.apiClient.get('/system/info');
+            this.renderSystemInfo(el, info);
+        } catch (error) {
+            el.innerHTML = `<div class="settings-error">Failed to load system info</div>`;
+        }
+    }
+
+    renderSystemInfo(container, info) {
+        const formatBytes = (bytes) => {
+            if (!bytes || bytes === 0) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(1024));
+            return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+        };
+
+        container.innerHTML = `
+      <div class="sysinfo-grid">
+        <div class="sysinfo-item">
+          <span class="sysinfo-label">Version</span>
+          <span class="sysinfo-value sysinfo-version">${info.version}</span>
+        </div>
+        <div class="sysinfo-item">
+          <span class="sysinfo-label">MCP Protocol</span>
+          <span class="sysinfo-value">${info.mcp_protocol}</span>
+        </div>
+        <div class="sysinfo-item">
+          <span class="sysinfo-label">Python</span>
+          <span class="sysinfo-value">${info.python_version}</span>
+        </div>
+        <div class="sysinfo-item">
+          <span class="sysinfo-label">SQLite</span>
+          <span class="sysinfo-value">${info.sqlite_version}</span>
+        </div>
+        <div class="sysinfo-item">
+          <span class="sysinfo-label">Platform</span>
+          <span class="sysinfo-value">${info.platform} ${info.platform_version}</span>
+        </div>
+        <div class="sysinfo-item">
+          <span class="sysinfo-label">DB Size</span>
+          <span class="sysinfo-value">${formatBytes(info.db_size_bytes)}</span>
+        </div>
+        <div class="sysinfo-item">
+          <span class="sysinfo-label">DB Path</span>
+          <span class="sysinfo-value sysinfo-path">${info.db_path}</span>
+        </div>
+        <div class="sysinfo-item">
+          <span class="sysinfo-label">PID</span>
+          <span class="sysinfo-value">${info.pid}</span>
+        </div>
+      </div>
+    `;
     }
 
     // ── Status ──
@@ -197,40 +329,47 @@ export class SettingsPage extends HTMLElement {
     renderStatus(container) {
         const d = this.statusData;
         const ok = !d.needs_migration;
+        const modelMatch = d.stored_model === d.current_model;
+        const dimMatch = d.stored_dimension === d.current_dimension;
+        const coverage = d.total_memories > 0 ? Math.round((d.vector_count / d.total_memories) * 100) : 100;
+        const coverageOk = coverage >= 95;
+
+        const indicator = (match) => match
+            ? '<span class="status-indicator status-ok" title="Match">&#10003;</span>'
+            : '<span class="status-indicator status-mismatch" title="Mismatch">&#9888;</span>';
 
         container.innerHTML = `
+      <div class="status-overview">
+        <div class="status-badge ${ok ? 'badge-ok' : 'badge-warn'}">
+          ${ok ? 'Healthy' : 'Migration Needed'}
+        </div>
+      </div>
       <div class="status-grid">
         <div class="status-cell">
-          <span class="status-label">DB Model</span>
+          <span class="status-label">DB Model ${indicator(modelMatch)}</span>
           <span class="status-value">${d.stored_model || '(not set)'}</span>
-        </div>
-        <div class="status-cell">
-          <span class="status-label">DB Dimension</span>
-          <span class="status-value">${d.stored_dimension || '(not set)'}</span>
         </div>
         <div class="status-cell">
           <span class="status-label">Current Model</span>
           <span class="status-value status-highlight">${d.current_model}</span>
         </div>
         <div class="status-cell">
-          <span class="status-label">Current Dimension</span>
-          <span class="status-value">${d.current_dimension}</span>
-        </div>
-        <div class="status-cell">
-          <span class="status-label">Memories</span>
-          <span class="status-value">${d.total_memories.toLocaleString()}</span>
-        </div>
-        <div class="status-cell">
-          <span class="status-label">Vectors</span>
-          <span class="status-value">${d.vector_count.toLocaleString()}</span>
+          <span class="status-label">Dimension ${indicator(dimMatch)}</span>
+          <span class="status-value">${d.stored_dimension || '?'} / ${d.current_dimension}</span>
         </div>
         <div class="status-cell">
           <span class="status-label">Last Migration</span>
           <span class="status-value">${d.last_migration ? new Date(d.last_migration).toLocaleString() : '(never)'}</span>
         </div>
-        <div class="status-cell">
-          <span class="status-label">Status</span>
-          <span class="status-value ${ok ? '' : 'status-warn'}">${ok ? 'OK' : 'Migration needed'}</span>
+      </div>
+      <div class="status-coverage">
+        <div class="coverage-header">
+          <span class="coverage-title">Vector Coverage</span>
+          <span class="coverage-stats">${d.vector_count.toLocaleString()} / ${d.total_memories.toLocaleString()} memories</span>
+          <span class="coverage-pct ${coverageOk ? '' : 'status-warn'}">${coverage}%</span>
+        </div>
+        <div class="coverage-bar-track">
+          <div class="coverage-bar-fill ${coverageOk ? '' : 'coverage-warn'}" style="width:${coverage}%"></div>
         </div>
       </div>
     `;
@@ -473,6 +612,87 @@ export class SettingsPage extends HTMLElement {
             showToast(`Save failed: ${error.message}`, 'error');
         }
     }
+
+    // ── Data Management ──
+
+    async exportMemories(format) {
+        const btn = this.querySelector(format === 'csv' ? '#export-csv-btn' : '#export-json-btn');
+        if (btn) { btn.disabled = true; btn.textContent = 'Exporting...'; }
+
+        try {
+            const api = window.app.apiClient;
+            // Fetch all memories via search with large limit
+            const result = await api.get('/memories/search', { query: ' ', limit: 10000, recency_weight: 1.0 });
+            const memories = result.results || [];
+
+            if (memories.length === 0) {
+                showToast('No memories to export.', 'warning');
+                return;
+            }
+
+            let blob, filename;
+            if (format === 'csv') {
+                const headers = ['id', 'content', 'category', 'project_id', 'client', 'source', 'tags', 'created_at'];
+                const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+                const rows = memories.map(m =>
+                    headers.map(h => h === 'tags' ? escape((m.tags || []).join('; ')) : escape(m[h])).join(',')
+                );
+                const csv = [headers.join(','), ...rows].join('\n');
+                blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+                filename = `mem-mesh-export-${new Date().toISOString().slice(0, 10)}.csv`;
+            } else {
+                const json = JSON.stringify(memories, null, 2);
+                blob = new Blob([json], { type: 'application/json' });
+                filename = `mem-mesh-export-${new Date().toISOString().slice(0, 10)}.json`;
+            }
+
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+            URL.revokeObjectURL(link.href);
+            showToast(`Exported ${memories.length} memories.`, 'success');
+        } catch (error) {
+            console.error('Export failed:', error);
+            showToast(`Export failed: ${error.message}`, 'error');
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = format === 'csv' ? 'Export CSV' : 'Export JSON'; }
+        }
+    }
+
+    // ── Danger Zone ──
+
+    async deleteAllMemories() {
+        const count = this.statusData?.total_memories || '?';
+        if (!confirm(`Delete ALL ${count} memories? This cannot be undone.`)) return;
+        if (!confirm('Are you absolutely sure? Type the button again to confirm.')) return;
+
+        const btn = this.querySelector('#delete-all-btn');
+        if (btn) { btn.disabled = true; btn.textContent = 'Deleting...'; }
+
+        try {
+            const api = window.app.apiClient;
+            // Fetch all memory IDs
+            const result = await api.get('/memories/search', { query: ' ', limit: 10000, recency_weight: 1.0 });
+            const memories = result.results || [];
+
+            let deleted = 0;
+            for (const m of memories) {
+                try {
+                    await api.delete(`/memories/${m.id}`);
+                    deleted++;
+                } catch (_) {}
+            }
+
+            showToast(`Deleted ${deleted} memories.`, 'success');
+            await this.loadStatus();
+        } catch (error) {
+            console.error('Delete failed:', error);
+            showToast(`Delete failed: ${error.message}`, 'error');
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = 'Delete All'; }
+        }
+    }
 }
 
 customElements.define('settings-page', SettingsPage);
@@ -561,12 +781,81 @@ style.textContent = `
   line-height: 1.5;
 }
 
+/* System Info */
+
+.sysinfo-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+}
+
+.sysinfo-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2);
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+}
+
+.sysinfo-label {
+  font-size: 10px;
+  font-weight: var(--font-medium);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sysinfo-value {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.sysinfo-version {
+  font-weight: var(--font-bold, 700);
+  font-size: var(--text-base, 16px);
+}
+
+.sysinfo-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
 /* Status grid */
+
+.status-overview {
+  margin-bottom: var(--space-3);
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+}
+
+.badge-ok {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.badge-warn {
+  background: var(--bg-primary);
+  color: var(--text-muted);
+  border: 1px solid var(--text-muted);
+  font-style: italic;
+}
 
 .status-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 
 .status-cell {
@@ -584,6 +873,9 @@ style.textContent = `
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .status-value {
@@ -600,6 +892,70 @@ style.textContent = `
 .status-warn {
   color: var(--text-muted);
   font-style: italic;
+}
+
+.status-indicator {
+  font-size: 11px;
+}
+
+.status-ok {
+  color: var(--text-primary);
+}
+
+.status-mismatch {
+  color: var(--text-muted);
+}
+
+/* Coverage bar */
+
+.status-coverage {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-color);
+}
+
+.coverage-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: 6px;
+}
+
+.coverage-title {
+  font-size: 10px;
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.coverage-stats {
+  flex: 1;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.coverage-pct {
+  font-size: var(--text-sm);
+  font-weight: var(--font-bold, 700);
+  color: var(--text-primary);
+}
+
+.coverage-bar-track {
+  height: 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.coverage-bar-fill {
+  height: 100%;
+  background: var(--text-primary);
+  border-radius: 3px;
+  transition: width 400ms ease;
+}
+
+.coverage-warn {
+  background: var(--text-muted);
 }
 
 /* Migration */
@@ -939,6 +1295,161 @@ style.textContent = `
   border-radius: 2px;
 }
 
+/* Data Management */
+
+.data-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.data-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2);
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+  gap: var(--space-3);
+}
+
+.data-action-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.data-action-title {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+}
+
+.data-action-desc {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Info Accordion */
+
+.info-accordion {
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.info-accordion:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.info-summary {
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  padding: var(--space-1) 0;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.info-summary::-webkit-details-marker { display: none; }
+
+.info-summary::before {
+  content: '+';
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-muted);
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+details[open] .info-summary::before {
+  content: '-';
+}
+
+.info-details {
+  padding: var(--space-1) 0 0 calc(16px + var(--space-2));
+}
+
+.info-details p {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin: 0 0 var(--space-1);
+  line-height: 1.5;
+}
+
+.info-details ul {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.info-details li {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.info-details code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  background: var(--bg-tertiary);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.info-link {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.info-link:hover {
+  color: var(--text-secondary);
+}
+
+/* Danger Zone */
+
+.settings-danger {
+  border-color: var(--text-muted);
+}
+
+.settings-danger .section-header {
+  border-bottom-color: var(--text-muted);
+}
+
+.settings-danger .section-label {
+  color: var(--text-muted);
+}
+
+.settings-btn-danger {
+  padding: 4px var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 80ms ease;
+  border: 1px solid var(--text-muted);
+  background: transparent;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.settings-btn-danger:hover {
+  background: var(--text-muted);
+  color: var(--bg-primary);
+}
+
+.settings-btn-danger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* Loading & Error */
 
 .settings-loading {
@@ -977,6 +1488,10 @@ style.textContent = `
 @media (max-width: 640px) {
   .settings {
     padding: 0 var(--space-3);
+  }
+
+  .sysinfo-grid {
+    grid-template-columns: 1fr 1fr;
   }
 
   .status-grid {
