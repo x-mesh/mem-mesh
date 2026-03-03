@@ -99,6 +99,40 @@ async def health_check():
     }
 
 
+@router.get("/system/info")
+async def system_info():
+    """Detailed system information for settings page"""
+    import os
+    import platform
+    import sqlite3
+    import sys
+    from datetime import datetime, timezone
+
+    from app.core.version import __VERSION__, MCP_PROTOCOL_VERSION
+
+    # DB file size
+    db_path = os.environ.get("MEM_MESH_DB_PATH", "data/mem_mesh.db")
+    db_size = 0
+    try:
+        if os.path.exists(db_path):
+            db_size = os.path.getsize(db_path)
+    except OSError:
+        pass
+
+    return {
+        "version": __VERSION__,
+        "mcp_protocol": MCP_PROTOCOL_VERSION,
+        "python_version": sys.version.split()[0],
+        "sqlite_version": sqlite3.sqlite_version,
+        "platform": platform.system(),
+        "platform_version": platform.release(),
+        "db_path": db_path,
+        "db_size_bytes": db_size,
+        "pid": os.getpid(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @router.get("/rules")
 async def list_rules():
     """List all rules"""

@@ -316,7 +316,7 @@ code, pre, pre code, .inline-code {
   min-height: 100vh;
   display: grid;
   grid-template-rows: auto 1fr;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 /* Chroma Header Styles */
