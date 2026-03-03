@@ -93,7 +93,7 @@ STOP_DECIDE_HOOK_TEMPLATE = r"""#!/bin/bash
 __VERSION_MARKER__
 # Stop hook: keyword-based category matching + structured save (요약+원본)
 # stdin: {"stop_hook_active":bool,"last_assistant_message":"...","transcript_path":"..."} JSON
-# No LLM, no API key — regex keyword matching with fallback to "task" category
+# No LLM, no API key — regex keyword matching, skip if no match
 
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
@@ -128,6 +128,7 @@ save_rules = [
     (r'(전환|migration|마이그레이션)', 'decision'),
     (r'(구현|implement).*(완료|했습니다|done)', 'code_snippet'),
     (r'(장애|incident|outage).*(발생|occurred|detected)', 'incident'),
+    (r'(아이디어|idea).*(제안|suggest|고려|consider)', 'idea'),
 ]
 
 for pat, cat in save_rules:
@@ -138,8 +139,8 @@ for pat, cat in save_rules:
 print('SKIP')
 " <<< "$MESSAGE" 2>/dev/null) || CATEGORY="SKIP"
 
-# No keyword match -> save as "task" (don't lose context)
-[ "$CATEGORY" = "SKIP" ] && CATEGORY="task"
+# No keyword match -> skip saving (M3: task is system-only category)
+[ "$CATEGORY" = "SKIP" ] && exit 0
 
 # Build content: Q&A from transcript + answer (no LLM summary)
 CONTENT=$(python3 -c "
@@ -204,7 +205,7 @@ SESSION_START_HOOK_TEMPLATE = r"""#!/bin/bash
 __VERSION_MARKER__
 # Claude Code SessionStart hook: inject mem-mesh session context
 # Fires on session start AND after compaction (context re-injection)
-# Returns additional_context JSON via /api/memories/search
+# Returns additional_context JSON via /api/work/sessions/resume/{project_id}
 
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || { echo '{}'; exit 0; }
@@ -218,27 +219,36 @@ INPUT=$(cat)
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 
-# Fetch recent memories for this project via search API
+# Fetch session resume data (same API as Cursor — consistent cross-IDE)
 RESUME_DATA=$(curl -s --max-time 5 \
-  -X POST "${API_URL}/api/memories/search" \
-  -H "Content-Type: application/json" \
-  -d "{\"query\":\"\",\"project_id\":\"${PROJECT_DIR}\",\"limit\":5}" \
+  "${API_URL}/api/work/sessions/resume/${PROJECT_DIR}?expand=smart" \
   2>/dev/null) || RESUME_DATA='{"error": "mem-mesh API not available"}'
 
-# Extract compact summary from search results
+# Extract compact summary from session_resume response
 SESSION_SUMMARY=$(echo "$RESUME_DATA" | python3 -c "
 import json, sys
 try:
     data = json.load(sys.stdin)
-    results = data.get('results', [])
-    if not results:
-        print('No recent memories found.')
+    if 'error' in data:
+        print('[WARNING] mem-mesh API 연결 실패 — 오프라인 모드')
     else:
         lines = []
-        for r in results:
-            cat = r.get('category', '?')
-            content = r.get('content', '')[:120].replace('\n', ' ')
-            lines.append(f'- [{cat}] {content}')
+        pins = data.get('pins', [])
+        open_list = [p for p in pins if p.get('status') in ('open', 'in_progress')]
+        if open_list:
+            lines.append('**미완료 작업:**')
+            for p in open_list:
+                content = p.get('content', '?')[:100]
+                lines.append(f'- [pin] {content}')
+        recent = data.get('recent_memories', [])
+        if recent:
+            lines.append('**최근 맥락:**')
+            for r in recent:
+                cat = r.get('category', '?')
+                content = r.get('content', '')[:120].replace('\n', ' ')
+                lines.append(f'- [{cat}] {content}')
+        if not lines:
+            lines.append('No recent activity.')
         print('\n'.join(lines))
 except Exception:
     print('mem-mesh not available')
@@ -310,7 +320,7 @@ print(json.dumps({'additional_context': ctx}))
 
 KIRO_STOP_HOOK_TEMPLATE = r"""#!/bin/bash
 __VERSION_MARKER__
-# Kiro agentResponse hook: save conversation summary to mem-mesh
+# Kiro agentResponse hook: keyword-based category matching + save to mem-mesh
 
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
@@ -320,22 +330,51 @@ API_URL="${MEM_MESH_API_URL:-__DEFAULT_URL__}"
 RESPONSE="${KIRO_RESULT:-}"
 [ ${#RESPONSE} -lt 50 ] && exit 0
 
-SUMMARY=$(echo "$RESPONSE" | head -c 9500)
-
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+
+# Keyword decision (same logic as Claude Code stop-decide)
+CATEGORY=$(python3 -c "
+import sys, re
+msg = sys.stdin.read().lower()
+
+save_rules = [
+    (r'(버그|bug).*(수정|fix|해결|resolved|patch)', 'bug'),
+    (r'(수정|fix).*(버그|bug|에러|error|오류)', 'bug'),
+    (r'(에러|error|exception|오류).*(해결|수정|fixed|resolved)', 'bug'),
+    (r'(결정|decision).*(변경|선택|채택|chose|decided)', 'decision'),
+    (r'(아키텍처|architecture|설계).*(결정|변경|선택)', 'decision'),
+    (r'(전환|migration|마이그레이션)', 'decision'),
+    (r'(구현|implement).*(완료|했습니다|done)', 'code_snippet'),
+    (r'(장애|incident|outage).*(발생|occurred|detected)', 'incident'),
+    (r'(아이디어|idea).*(제안|suggest|고려|consider)', 'idea'),
+]
+
+for pat, cat in save_rules:
+    if re.search(pat, msg):
+        print(cat)
+        sys.exit(0)
+
+print('SKIP')
+" <<< "$RESPONSE" 2>/dev/null) || CATEGORY="SKIP"
+
+# No keyword match -> skip saving (M3: task is system-only category)
+[ "$CATEGORY" = "SKIP" ] && exit 0
+
+SUMMARY=$(echo "$RESPONSE" | head -c 9500)
 
 PAYLOAD=$(jq -n \
   --arg content "[kiro response] $SUMMARY" \
   --arg project_id "$PROJECT_DIR" \
+  --arg category "$CATEGORY" \
   --arg source "kiro-hook" \
   --arg client "kiro" \
   '{
     content: $content,
     project_id: $project_id,
-    category: "git-history",
+    category: $category,
     source: $source,
     client: $client,
-    tags: ["auto-save", "conversation", "kiro"]
+    tags: ["auto-save", "keyword", $category, "kiro"]
   }')
 
 curl -s -o /dev/null --max-time 5 \
@@ -367,7 +406,7 @@ PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
 # Try to fetch session resume data from API
 RESUME_DATA=$(curl -s --max-time 5 \
-  "${API_URL}/api/pins/session/resume?project_id=${PROJECT_DIR}&expand=smart" \
+  "${API_URL}/api/work/sessions/resume/${PROJECT_DIR}?expand=smart" \
   2>/dev/null) || RESUME_DATA='{"error": "mem-mesh API not available"}'
 
 CONTEXT="## mem-mesh Memory Integration (Auto-loaded)
@@ -1647,12 +1686,14 @@ def _detect_profile(hooks_dir: Path, settings_path: Optional[Path] = None) -> st
 
     Detection priority:
     1. mem-mesh-stop-enhanced.sh → "enhanced"
-    2. settings.json has prompt stop hook → "standard"
-    3. mem-mesh-stop.sh → "minimal"
-    4. mem-mesh-reflect.sh → "legacy"
+    2. mem-mesh-stop-decide.sh → "standard"
+    3. settings.json has prompt stop hook → "standard (prompt)"
+    4. mem-mesh-stop.sh → "minimal"
+    5. mem-mesh-reflect.sh → "legacy"
     """
     has_session_start = (hooks_dir / "mem-mesh-session-start.sh").exists()
     has_enhanced_stop = (hooks_dir / "mem-mesh-stop-enhanced.sh").exists()
+    has_stop_decide = (hooks_dir / "mem-mesh-stop-decide.sh").exists()
     has_reflect = (hooks_dir / "mem-mesh-reflect.sh").exists()
     has_stop = (hooks_dir / "mem-mesh-stop.sh").exists()
     has_prompt_stop = (
@@ -1661,6 +1702,8 @@ def _detect_profile(hooks_dir: Path, settings_path: Optional[Path] = None) -> st
 
     if has_enhanced_stop:
         return "enhanced"
+    if has_stop_decide:
+        return "standard"
     if has_prompt_stop:
         return "standard (prompt)"
     if has_stop:
@@ -1681,13 +1724,16 @@ def cmd_status() -> None:
     print("[Claude Code]")
     session_start = CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh"
     stop = CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh"
+    stop_decide = CLAUDE_HOOKS_DIR / "mem-mesh-stop-decide.sh"
     enhanced_stop = CLAUDE_HOOKS_DIR / "mem-mesh-stop-enhanced.sh"
     reflect = CLAUDE_HOOKS_DIR / "mem-mesh-reflect.sh"
     print(f"  session hook:   {_check_script_version(session_start)}")
-    if _has_prompt_stop_hook(CLAUDE_SETTINGS):
-        print(f"  stop hook:      native prompt (v{PROMPT_VERSION})")
-    elif enhanced_stop.exists():
+    if enhanced_stop.exists():
         print(f"  stop hook:      {_check_script_version(enhanced_stop)} (enhanced)")
+    elif stop_decide.exists():
+        print(f"  stop hook:      {_check_script_version(stop_decide)} (standard)")
+    elif _has_prompt_stop_hook(CLAUDE_SETTINGS):
+        print(f"  stop hook:      native prompt (v{PROMPT_VERSION})")
     else:
         print(f"  stop hook:      {_check_script_version(stop)}")
     print(f"  reflect hook:   {_check_script_version(reflect)} (legacy)")
