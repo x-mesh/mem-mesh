@@ -26,7 +26,7 @@ class DashboardPage extends HTMLElement {
     this.isInitialized = false;
     this.refreshInterval = null;
     this.filterCategory = 'all';
-    this.filterDays = 7;
+    this.filterDays = 30;
     this.page = 0;
     this.pageSize = 30;
     this.hasMore = true;
@@ -180,6 +180,11 @@ class DashboardPage extends HTMLElement {
       const searchParams = { limit: this.pageSize, recency_weight: 1.0 };
       if (this.filterCategory !== 'all') searchParams.category = this.filterCategory;
 
+      // Server-side date filtering
+      const from = new Date(Date.now() - this.filterDays * 86400000);
+      searchParams.date_from = from.toISOString().split('T')[0];
+      searchParams.temporal_mode = 'filter';
+
       const [statsR, memR, sessR] = await Promise.allSettled([
         api.getStats(),
         api.searchMemories(' ', searchParams),
@@ -242,7 +247,7 @@ class DashboardPage extends HTMLElement {
           </select>
           <select class="filter-days">
             <option value="7">7d</option>
-            <option value="30">30d</option>
+            <option value="30" selected>30d</option>
             <option value="90">90d</option>
             <option value="365">1y</option>
           </select>
@@ -359,8 +364,7 @@ class DashboardPage extends HTMLElement {
       return;
     }
 
-    const filtered = this.filterByDays(this.memories);
-    const rows = filtered.map(m => this.buildRow(m)).join('');
+    const rows = this.memories.map(m => this.buildRow(m)).join('');
     const more = this.hasMore ? '<button class="load-more-btn">Load more</button>' : '';
     el.innerHTML = rows + more;
   }
@@ -394,11 +398,6 @@ class DashboardPage extends HTMLElement {
   }
 
   // ── Helpers ──
-
-  filterByDays(memories) {
-    const cutoff = Date.now() - this.filterDays * 86400000;
-    return memories.filter(m => new Date(m.created_at).getTime() >= cutoff);
-  }
 
   relTime(d) {
     if (!d) return '';
