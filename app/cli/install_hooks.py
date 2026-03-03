@@ -23,8 +23,8 @@ from app.cli.prompts.behaviors import PROMPT_VERSION, REFLECT_CONFIG
 from app.cli.prompts.renderers import (
     VERSION_MARKER,
     extract_prompt_version,
-    render_claude_stop_prompt,
     render_cursor_followup,
+    render_enhanced_stop_prompt,
     render_kiro_auto_create_pin,
     render_kiro_auto_save,
     render_kiro_load_context,
@@ -77,6 +77,115 @@ PAYLOAD=$(jq -n \
     category: "git-history",
     source: $source,
     tags: ["auto-save", "conversation", "__IDE_TAG__"]
+  }')
+
+curl -s -o /dev/null --max-time 5 \
+  -X POST "${API_URL}/api/memories" \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD" 2>/dev/null || true
+
+exit 0
+"""
+
+STOP_DECIDE_HOOK_TEMPLATE = r"""#!/bin/bash
+__VERSION_MARKER__
+# Stop hook: keyword-based category matching + structured save (요약+원본)
+# stdin: {"stop_hook_active":bool,"last_assistant_message":"...","transcript_path":"..."} JSON
+# No LLM, no API key — regex keyword matching with fallback to "task" category
+
+set -euo pipefail
+command -v jq >/dev/null 2>&1 || exit 0
+
+API_URL="${MEM_MESH_API_URL:-__DEFAULT_URL__}"
+
+INPUT=$(cat)
+
+# Guard: prevent infinite loop
+ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
+[ "$ACTIVE" = "true" ] && exit 0
+
+# Extract fields
+MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
+TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
+[ ${#MESSAGE} -lt 50 ] && exit 0
+
+# Already saved via MCP
+echo "$MESSAGE" | grep -q 'mcp__mem-mesh__add' && exit 0
+
+# Keyword decision (regex matching, SAVE patterns first)
+CATEGORY=$(python3 -c "
+import sys, re
+msg = sys.stdin.read().lower()
+
+save_rules = [
+    (r'(버그|bug).*(수정|fix|해결|resolved|patch)', 'bug'),
+    (r'(수정|fix).*(버그|bug|에러|error|오류)', 'bug'),
+    (r'(에러|error|exception|오류).*(해결|수정|fixed|resolved)', 'bug'),
+    (r'(결정|decision).*(변경|선택|채택|chose|decided)', 'decision'),
+    (r'(아키텍처|architecture|설계).*(결정|변경|선택)', 'decision'),
+    (r'(전환|migration|마이그레이션)', 'decision'),
+    (r'(구현|implement).*(완료|했습니다|done)', 'code_snippet'),
+    (r'(장애|incident|outage).*(발생|occurred|detected)', 'incident'),
+]
+
+for pat, cat in save_rules:
+    if re.search(pat, msg):
+        print(cat)
+        sys.exit(0)
+
+print('SKIP')
+" <<< "$MESSAGE" 2>/dev/null) || CATEGORY="SKIP"
+
+# No keyword match -> save as "task" (don't lose context)
+[ "$CATEGORY" = "SKIP" ] && CATEGORY="task"
+
+# Build content: Q&A from transcript + answer (no LLM summary)
+CONTENT=$(python3 -c "
+import sys, json
+
+message = sys.argv[1]
+transcript_path = sys.argv[2]
+
+# Extract last user question from transcript
+user_question = ''
+if transcript_path:
+    try:
+        with open(transcript_path, 'r') as f:
+            for line in f:
+                try:
+                    entry = json.loads(line.strip())
+                    if entry.get('role') == 'human':
+                        content = entry.get('content', '')
+                        if isinstance(content, list):
+                            texts = [c.get('text','') for c in content if c.get('type')=='text']
+                            content = ' '.join(texts)
+                        if isinstance(content, str) and len(content.strip()) > 5:
+                            user_question = content.strip()[:500]
+                except:
+                    pass
+    except:
+        pass
+
+if user_question:
+    print(f'Q: {user_question}\n\nA: {message[:9000]}'[:9500])
+else:
+    print(message[:9500])
+" "$MESSAGE" "$TRANSCRIPT_PATH" 2>/dev/null) || CONTENT="$MESSAGE"
+
+PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+
+# Save to mem-mesh API
+PAYLOAD=$(jq -n \
+  --arg content "$CONTENT" \
+  --arg project_id "$PROJECT_DIR" \
+  --arg category "$CATEGORY" \
+  --arg source "__SOURCE_TAG__" \
+  '{
+    content: $content,
+    project_id: $project_id,
+    category: $category,
+    source: $source,
+    tags: ["auto-save", "keyword", $category]
   }')
 
 curl -s -o /dev/null --max-time 5 \
@@ -533,20 +642,229 @@ exit 0
 
 
 # ---------------------------------------------------------------------------
+# Enhanced stop hook templates (Haiku API → save/skip → mem-mesh API)
+# ---------------------------------------------------------------------------
+
+# __ENHANCED_PROMPT__ is replaced with render_enhanced_stop_prompt() output.
+
+ENHANCED_STOP_HOOK_TEMPLATE = r"""#!/bin/bash
+__VERSION_MARKER__
+# Stop hook (enhanced): Haiku API decides save/skip, then saves via mem-mesh API
+# Requires ANTHROPIC_API_KEY env var
+# stdin: {"stop_hook_active":bool,"last_assistant_message":"..."} JSON
+
+set -euo pipefail
+command -v jq >/dev/null 2>&1 || exit 0
+
+[ -z "${ANTHROPIC_API_KEY:-}" ] && exit 0
+
+API_URL="${MEM_MESH_API_URL:-__DEFAULT_URL__}"
+
+INPUT=$(cat)
+
+# Prevent infinite loop
+ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
+[ "$ACTIVE" = "true" ] && exit 0
+
+# Extract message + minimum length filter
+MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
+[ ${#MESSAGE} -lt 100 ] && exit 0
+
+# Check if already saved in this turn
+echo "$MESSAGE" | grep -q 'mcp__mem-mesh__add' && exit 0
+
+# Truncate to fit within API limits
+CONVERSATION=$(echo "$MESSAGE" | head -c 6000)
+
+PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+
+# Call Haiku for save/skip decision, then save if needed
+python3 -c "
+import json, urllib.request, urllib.error, os, sys
+
+api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+if not api_key:
+    sys.exit(0)
+
+conversation = sys.stdin.read()
+prompt = '''__ENHANCED_PROMPT__'''
+
+payload = json.dumps({
+    'model': '__REFLECT_MODEL__',
+    'max_tokens': 100,
+    'messages': [{'role': 'user', 'content': f'{prompt}\n\n---\n\n{conversation}'}],
+}).encode()
+
+req = urllib.request.Request(
+    'https://api.anthropic.com/v1/messages',
+    data=payload,
+    headers={
+        'Content-Type': 'application/json',
+        'x-api-key': api_key,
+        'anthropic-version': '2023-06-01',
+    },
+)
+
+try:
+    with urllib.request.urlopen(req, timeout=__REFLECT_TIMEOUT__) as resp:
+        result = json.loads(resp.read())
+        text = result.get('content', [{}])[0].get('text', '').strip()
+except Exception:
+    sys.exit(0)
+
+if not text or text == 'SKIP' or not text.startswith('SAVE|'):
+    sys.exit(0)
+
+# Parse SAVE|category|summary
+parts = text.split('|', 2)
+if len(parts) < 3:
+    sys.exit(0)
+
+category = parts[1].strip()
+summary = parts[2].strip()[:200]
+
+valid_categories = ('bug', 'decision', 'code_snippet', 'idea', 'incident')
+if category not in valid_categories:
+    category = 'decision'
+
+# Build payload with json.dumps for safety
+content = summary + '\n\n---\n\n' + conversation[:3000]
+save_payload = json.dumps({
+    'content': content[:9500],
+    'project_id': '$PROJECT_DIR',
+    'category': category,
+    'source': 'hook-enhanced',
+    'tags': ['auto-save', 'enhanced', category],
+})
+
+# Save via mem-mesh API
+save_req = urllib.request.Request(
+    '$API_URL' + '/api/memories',
+    data=save_payload.encode(),
+    headers={'Content-Type': 'application/json'},
+)
+try:
+    with urllib.request.urlopen(save_req, timeout=5) as resp:
+        pass
+except Exception:
+    pass
+" <<< "$CONVERSATION" 2>/dev/null || true
+
+exit 0
+"""
+
+LOCAL_ENHANCED_STOP_HOOK_TEMPLATE = r"""#!/bin/bash
+__VERSION_MARKER__
+# Stop hook (enhanced, local): Haiku API decides save/skip, saves to local SQLite
+# Requires ANTHROPIC_API_KEY env var
+
+set -euo pipefail
+command -v python3 >/dev/null 2>&1 || exit 0
+command -v jq >/dev/null 2>&1 || exit 0
+
+[ -z "${ANTHROPIC_API_KEY:-}" ] && exit 0
+
+MEM_MESH_PATH="__MEM_MESH_PATH__"
+
+INPUT=$(cat)
+
+ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
+[ "$ACTIVE" = "true" ] && exit 0
+
+MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
+[ ${#MESSAGE} -lt 100 ] && exit 0
+
+echo "$MESSAGE" | grep -q 'mcp__mem-mesh__add' && exit 0
+
+CONVERSATION=$(echo "$MESSAGE" | head -c 6000)
+PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+
+python3 -c "
+import sys, asyncio, json, urllib.request, urllib.error, os
+
+api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+if not api_key:
+    sys.exit(0)
+
+conversation = sys.stdin.read()
+prompt = '''__ENHANCED_PROMPT__'''
+
+payload = json.dumps({
+    'model': '__REFLECT_MODEL__',
+    'max_tokens': 100,
+    'messages': [{'role': 'user', 'content': f'{prompt}\n\n---\n\n{conversation}'}],
+}).encode()
+
+req = urllib.request.Request(
+    'https://api.anthropic.com/v1/messages',
+    data=payload,
+    headers={
+        'Content-Type': 'application/json',
+        'x-api-key': api_key,
+        'anthropic-version': '2023-06-01',
+    },
+)
+
+try:
+    with urllib.request.urlopen(req, timeout=__REFLECT_TIMEOUT__) as resp:
+        result = json.loads(resp.read())
+        text = result.get('content', [{}])[0].get('text', '').strip()
+except Exception:
+    sys.exit(0)
+
+if not text or text == 'SKIP' or not text.startswith('SAVE|'):
+    sys.exit(0)
+
+parts = text.split('|', 2)
+if len(parts) < 3:
+    sys.exit(0)
+
+category = parts[1].strip()
+summary = parts[2].strip()[:200]
+
+valid_categories = ('bug', 'decision', 'code_snippet', 'idea', 'incident')
+if category not in valid_categories:
+    category = 'decision'
+
+content = summary + '\n\n---\n\n' + conversation[:3000]
+content = content[:9500]
+
+sys.path.insert(0, '$MEM_MESH_PATH')
+from app.core.storage.direct import DirectStorageManager
+
+async def save():
+    s = DirectStorageManager()
+    await s.initialize()
+    await s.add_memory(
+        content=content,
+        project_id='$PROJECT_DIR',
+        category=category,
+        source='hook-enhanced',
+        tags=['auto-save', 'enhanced', category],
+    )
+
+asyncio.run(save())
+" <<< "$CONVERSATION" 2>/dev/null || true
+
+exit 0
+"""
+
+
+# ---------------------------------------------------------------------------
 # Hook profiles
 # ---------------------------------------------------------------------------
 
 HOOK_PROFILES = {
     "standard": {
-        "description": "Smart save via native prompt hook (hybrid summarization)",
-        "hooks": ["session-start", "stop-prompt"],
+        "description": "Keyword matching + structured save (no LLM, no API key, 요약+원본)",
+        "hooks": ["session-start", "stop-decide"],
     },
     "enhanced": {
-        "description": "Smart save + structured analysis (requires ANTHROPIC_API_KEY)",
-        "hooks": ["session-start", "stop-prompt", "reflect"],
+        "description": "Haiku API decision + structured analysis (requires ANTHROPIC_API_KEY)",
+        "hooks": ["session-start", "stop-enhanced"],
     },
     "minimal": {
-        "description": "Simple truncated save (command hook, no LLM cost)",
+        "description": "Simple truncated save (async, no LLM, no decision making)",
         "hooks": ["session-start", "stop"],
     },
 }
@@ -582,14 +900,30 @@ def _build_claude_hooks_settings(profile: str = "standard") -> Dict[str, Any]:
 
     stop_entries: List[Dict[str, Any]] = []
 
-    if profile in ("standard", "enhanced"):
-        # Native prompt hook: Haiku judges save/skip and produces hybrid content
+    if profile == "standard":
+        # Keyword matching command hook (no LLM, no API key)
         stop_entries.append(
             {
                 "hooks": [
                     {
-                        "type": "prompt",
-                        "prompt": render_claude_stop_prompt(),
+                        "type": "command",
+                        "command": "~/.claude/hooks/mem-mesh-stop-decide.sh",
+                        "timeout": 10,
+                        "async": True,
+                    }
+                ]
+            }
+        )
+    elif profile == "enhanced":
+        # Async command hook: Haiku API decides save/skip, saves directly
+        stop_entries.append(
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "~/.claude/hooks/mem-mesh-stop-enhanced.sh",
+                        "timeout": 20,
+                        "async": True,
                     }
                 ]
             }
@@ -603,21 +937,6 @@ def _build_claude_hooks_settings(profile: str = "standard") -> Dict[str, Any]:
                         "type": "command",
                         "command": "~/.claude/hooks/mem-mesh-stop.sh",
                         "timeout": 10,
-                        "async": True,
-                    }
-                ]
-            }
-        )
-
-    if profile == "enhanced":
-        # Additional async reflect hook for structured analysis
-        stop_entries.append(
-            {
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "~/.claude/hooks/mem-mesh-reflect.sh",
-                        "timeout": 30,
                         "async": True,
                     }
                 ]
@@ -658,6 +977,8 @@ def _render_template(
     result = result.replace("__REFLECT_MODEL__", REFLECT_CONFIG.model)
     result = result.replace("__REFLECT_MAX_TOKENS__", str(REFLECT_CONFIG.max_tokens))
     result = result.replace("__REFLECT_TIMEOUT__", str(REFLECT_CONFIG.timeout_seconds))
+    # Enhanced stop hook prompt
+    result = result.replace("__ENHANCED_PROMPT__", render_enhanced_stop_prompt())
     return result
 
 
@@ -677,6 +998,8 @@ def _render_local_template(
     result = result.replace("__REFLECT_MODEL__", REFLECT_CONFIG.model)
     result = result.replace("__REFLECT_MAX_TOKENS__", str(REFLECT_CONFIG.max_tokens))
     result = result.replace("__REFLECT_TIMEOUT__", str(REFLECT_CONFIG.timeout_seconds))
+    # Enhanced stop hook prompt
+    result = result.replace("__ENHANCED_PROMPT__", render_enhanced_stop_prompt())
     return result
 
 
@@ -959,6 +1282,7 @@ def _install_claude(
     session_start_script = CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh"
     track_script = CLAUDE_HOOKS_DIR / "mem-mesh-track.sh"
     stop_script = CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh"
+    enhanced_stop_script = CLAUDE_HOOKS_DIR / "mem-mesh-stop-enhanced.sh"
     reflect_script = CLAUDE_HOOKS_DIR / "mem-mesh-reflect.sh"
 
     # SessionStart hook (all profiles)
@@ -984,13 +1308,39 @@ def _install_claude(
         track_script.unlink()
         print(f"  removed {track_script} (track hook deprecated)")
 
+    decide_script = CLAUDE_HOOKS_DIR / "mem-mesh-stop-decide.sh"
+
     # Stop hook
-    if "stop-prompt" in profile_info["hooks"]:
-        # Prompt-based stop: no shell script needed (prompt is in settings.json)
-        if stop_script.exists():
-            stop_script.unlink()
-            print(f"  removed {stop_script} (using native prompt hook)")
-        print("  -> Stop: native prompt hook (hybrid summarization)")
+    if "stop-decide" in profile_info["hooks"]:
+        # Keyword matching command hook (no LLM, no API key)
+        _write_script(
+            decide_script,
+            _render_template(
+                STOP_DECIDE_HOOK_TEMPLATE,
+                url,
+                source_tag="claude-code-hook",
+                ide_tag="claude",
+            ),
+        )
+        print(f"  -> {decide_script}")
+    elif "stop-enhanced" in profile_info["hooks"]:
+        # Enhanced: async command hook with Haiku API
+        if mode == "local":
+            _write_script(
+                enhanced_stop_script,
+                _render_local_template(LOCAL_ENHANCED_STOP_HOOK_TEMPLATE, path),
+            )
+        else:
+            _write_script(
+                enhanced_stop_script,
+                _render_template(
+                    ENHANCED_STOP_HOOK_TEMPLATE,
+                    url,
+                    source_tag="claude-code-hook",
+                    ide_tag="claude",
+                ),
+            )
+        print(f"  -> {enhanced_stop_script}")
     elif "stop" in profile_info["hooks"]:
         # Command-based stop: write shell script (minimal profile)
         if mode == "local":
@@ -1009,29 +1359,16 @@ def _install_claude(
             )
         print(f"  -> {stop_script}")
 
-    # Reflect hook (enhanced profile only)
-    if "reflect" in profile_info["hooks"]:
-        if mode == "local":
-            _write_script(
-                reflect_script,
-                _render_local_template(LOCAL_REFLECT_HOOK_TEMPLATE, path),
-            )
-        else:
-            _write_script(
-                reflect_script,
-                _render_template(
-                    REFLECT_HOOK_TEMPLATE,
-                    url,
-                    source_tag="claude-code-hook",
-                    ide_tag="claude",
-                ),
-            )
-        print(f"  -> {reflect_script}")
-    else:
-        # Remove reflect script if switching from enhanced
-        if reflect_script.exists():
-            reflect_script.unlink()
-            print(f"  removed {reflect_script} (not in {profile} profile)")
+    # Clean up legacy scripts not belonging to current profile
+    legacy_cleanup = {
+        "standard": [stop_script, enhanced_stop_script, reflect_script],
+        "enhanced": [stop_script, decide_script, reflect_script],
+        "minimal": [enhanced_stop_script, decide_script, reflect_script],
+    }
+    for script in legacy_cleanup.get(profile, []):
+        if script.exists():
+            script.unlink()
+            print(f"  removed {script} (not in {profile} profile)")
 
     print("[claude] Updating settings.json...")
     hooks_settings = _build_claude_hooks_settings(profile)
@@ -1170,6 +1507,7 @@ def _uninstall_claude() -> None:
         "mem-mesh-session-start.sh",
         "mem-mesh-track.sh",
         "mem-mesh-stop.sh",
+        "mem-mesh-stop-enhanced.sh",
         "mem-mesh-reflect.sh",
     ):
         script = CLAUDE_HOOKS_DIR / name
@@ -1296,22 +1634,28 @@ def _has_prompt_stop_hook(settings_path: Path) -> bool:
 def _detect_profile(hooks_dir: Path, settings_path: Optional[Path] = None) -> str:
     """Detect installed profile based on hook scripts and settings.
 
-    For standard/enhanced profiles with prompt hooks, the stop.sh script
-    does not exist — detection uses settings.json instead.
+    Detection priority:
+    1. mem-mesh-stop-enhanced.sh → "enhanced"
+    2. settings.json has prompt stop hook → "standard"
+    3. mem-mesh-stop.sh → "minimal"
+    4. mem-mesh-reflect.sh → "legacy"
     """
     has_session_start = (hooks_dir / "mem-mesh-session-start.sh").exists()
+    has_enhanced_stop = (hooks_dir / "mem-mesh-stop-enhanced.sh").exists()
     has_reflect = (hooks_dir / "mem-mesh-reflect.sh").exists()
     has_stop = (hooks_dir / "mem-mesh-stop.sh").exists()
     has_prompt_stop = (
         _has_prompt_stop_hook(settings_path) if settings_path else False
     )
 
-    if has_reflect:
+    if has_enhanced_stop:
         return "enhanced"
     if has_prompt_stop:
         return "standard (prompt)"
     if has_stop:
         return "minimal"
+    if has_reflect:
+        return "legacy"
     if has_session_start:
         return "standard (partial)"
     return "unknown"
@@ -1326,13 +1670,16 @@ def cmd_status() -> None:
     print("[Claude Code]")
     session_start = CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh"
     stop = CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh"
+    enhanced_stop = CLAUDE_HOOKS_DIR / "mem-mesh-stop-enhanced.sh"
     reflect = CLAUDE_HOOKS_DIR / "mem-mesh-reflect.sh"
-    print(f"  session hook: {_check_script_version(session_start)}")
+    print(f"  session hook:   {_check_script_version(session_start)}")
     if _has_prompt_stop_hook(CLAUDE_SETTINGS):
-        print(f"  stop hook:    native prompt (v{PROMPT_VERSION})")
+        print(f"  stop hook:      native prompt (v{PROMPT_VERSION})")
+    elif enhanced_stop.exists():
+        print(f"  stop hook:      {_check_script_version(enhanced_stop)} (enhanced)")
     else:
-        print(f"  stop hook:    {_check_script_version(stop)}")
-    print(f"  reflect hook: {_check_script_version(reflect)}")
+        print(f"  stop hook:      {_check_script_version(stop)}")
+    print(f"  reflect hook:   {_check_script_version(reflect)} (legacy)")
 
     detected = _detect_profile(CLAUDE_HOOKS_DIR, CLAUDE_SETTINGS)
     print(f"  profile:      {detected}")

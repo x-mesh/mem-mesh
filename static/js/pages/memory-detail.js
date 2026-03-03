@@ -1226,21 +1226,31 @@ style.textContent = `
     margin-bottom: 2rem;
     text-transform: none !important;
   }
-  
+
+  .memory-text strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  .memory-text em {
+    color: var(--text-primary);
+  }
+
   .memory-text code {
     background: var(--bg-secondary);
+    color: var(--text-primary);
     padding: 0.125rem 0.25rem;
     border-radius: var(--border-radius-sm);
     font-family: var(--font-mono);
     font-size: 0.875rem;
     text-transform: none !important;
   }
-  
+
   .memory-text a {
     color: var(--primary-color);
     text-decoration: none;
   }
-  
+
   .memory-text a:hover {
     text-decoration: underline;
   }
@@ -1250,12 +1260,14 @@ style.textContent = `
     border-collapse: collapse;
     margin: 0.75rem 0;
     font-size: 0.875rem;
+    color: var(--text-primary);
   }
   .memory-text .md-table th,
   .memory-text .md-table td {
     border: 1px solid var(--border-color, #e0e0e0);
     padding: 0.5rem 0.75rem;
     text-align: left;
+    color: var(--text-primary);
   }
   .memory-text .md-table th {
     background: var(--bg-secondary, #f5f5f5);

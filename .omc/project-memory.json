@@ -1,0 +1,251 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1772525282522,
+  "projectRoot": "/Users/jinwoo/work/project/mem-mesh",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "pyproject.toml",
+          "requirements.txt"
+        ]
+      },
+      {
+        "name": "C/C++",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "Makefile"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "fastapi",
+        "version": null,
+        "category": "backend"
+      },
+      {
+        "name": "pytest",
+        "version": null,
+        "category": "testing"
+      }
+    ],
+    "packageManager": "pip",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "make build",
+    "testCommand": "make test",
+    "lintCommand": "ruff check",
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "app",
+      "docs",
+      "scripts",
+      "static",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "__pycache__": {
+      "path": "__pycache__",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1772525282511,
+      "keyFiles": [
+        "test_mcp_git_history.cpython-313-pytest-9.0.1.pyc"
+      ]
+    },
+    "app": {
+      "path": "app",
+      "purpose": "Application code",
+      "fileCount": 1,
+      "lastAccessed": 1772525282513,
+      "keyFiles": [
+        "__init__.py"
+      ]
+    },
+    "benchmarks": {
+      "path": "benchmarks",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1772525282513,
+      "keyFiles": [
+        "__init__.py"
+      ]
+    },
+    "data": {
+      "path": "data",
+      "purpose": "Data files",
+      "fileCount": 4,
+      "lastAccessed": 1772525282514,
+      "keyFiles": [
+        "memories.db",
+        "memories.db-shm",
+        "memories.db-wal",
+        "test_init.db"
+      ]
+    },
+    "data_bak": {
+      "path": "data_bak",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1772525282515,
+      "keyFiles": [
+        "memories.db",
+        "memories.db-shm",
+        "memories.db-wal",
+        "test_init.db"
+      ]
+    },
+    "data_bak_0122": {
+      "path": "data_bak_0122",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1772525282515,
+      "keyFiles": [
+        "memories.db",
+        "memories.db-shm",
+        "memories.db-wal",
+        "test_init.db"
+      ]
+    },
+    "docker": {
+      "path": "docker",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1772525282515,
+      "keyFiles": [
+        "Dockerfile.dashboard",
+        "Dockerfile.mcp",
+        "README.md",
+        "docker-compose.yml"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 29,
+      "lastAccessed": 1772525282515,
+      "keyFiles": [
+        "CODE_REVIEW_2026-02-26.md",
+        "CODE_REVIEW_FIX_PLAN.md",
+        "DOCKER_SETUP.md",
+        "IDE_INTEGRATION.md",
+        "KOREAN_SEARCH_SOLUTION.md"
+      ]
+    },
+    "imports": {
+      "path": "imports",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1772525282515,
+      "keyFiles": [
+        "kiro_chats.tar.gz"
+      ]
+    },
+    "logs": {
+      "path": "logs",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1772525282516,
+      "keyFiles": [
+        "access.log",
+        "dashboard-access.log",
+        "mcp-access.log",
+        "mem-mesh.log"
+      ]
+    },
+    "mcp_prompts": {
+      "path": "mcp_prompts",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1772525282516,
+      "keyFiles": [
+        "auto_project_prompt.md",
+        "optimized_search.md"
+      ]
+    },
+    "mem_mesh.egg-info": {
+      "path": "mem_mesh.egg-info",
+      "purpose": null,
+      "fileCount": 6,
+      "lastAccessed": 1772525282517,
+      "keyFiles": [
+        "PKG-INFO",
+        "SOURCES.txt",
+        "dependency_links.txt",
+        "entry_points.txt",
+        "requires.txt"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 55,
+      "lastAccessed": 1772525282518,
+      "keyFiles": [
+        "AGENTS.md",
+        "README.md",
+        "README_debug_mcp_sse.md",
+        "ab_test_embeddings.py",
+        "analyze_conversations.py"
+      ]
+    },
+    "static": {
+      "path": "static",
+      "purpose": "Static files",
+      "fileCount": 3,
+      "lastAccessed": 1772525282518,
+      "keyFiles": [
+        "AGENTS.md",
+        "test-api.js",
+        "test-search.html"
+      ]
+    },
+    "templates": {
+      "path": "templates",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1772525282518,
+      "keyFiles": [
+        "index.html"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 61,
+      "lastAccessed": 1772525282519,
+      "keyFiles": [
+        "AGENTS.md",
+        "conftest.py",
+        "test-projects.html",
+        "test-runner.html",
+        "test_ab_test.py"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}

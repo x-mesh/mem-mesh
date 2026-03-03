@@ -37,7 +37,7 @@ uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 
 ---
 
-## MUST (반드시)
+## MUST (반드시
 
 **M1. 세션 복원** — 새 대화의 첫 응답 직후 `session_resume` 호출. 미완료 핀이 있으면 사용자에게 알린다.
 

@@ -11,19 +11,18 @@ from pathlib import Path
 
 def _read_version() -> str:
     """pyproject.toml → importlib.metadata → fallback 순으로 버전을 읽는다."""
-    # 1) installed package metadata (pip install -e . 등)
-    try:
-        return _pkg_version("mem-mesh")
-    except PackageNotFoundError:
-        pass
-
-    # 2) pyproject.toml 직접 파싱 (개발 모드, 미설치 상태)
+    # 1) pyproject.toml 직접 파싱 (개발 모드에서 make bump 즉시 반영)
     pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
     if pyproject.exists():
         for line in pyproject.read_text().splitlines():
             if line.strip().startswith("version"):
-                # version = "1.0.8"
                 return line.split("=", 1)[1].strip().strip('"').strip("'")
+
+    # 2) installed package metadata (Docker/production 등)
+    try:
+        return _pkg_version("mem-mesh")
+    except PackageNotFoundError:
+        pass
 
     return "0.0.0"
 

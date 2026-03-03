@@ -198,48 +198,62 @@ VERSION_MARKER = f"# mem-mesh-hooks prompt-version: {PROMPT_VERSION}"
 def render_claude_stop_prompt() -> str:
     """Render the prompt for Claude Code's native ``type: "prompt"`` Stop hook.
 
-    Hybrid approach: front ~60% summarized by LLM, back ~40% kept raw.
-    The prompt instructs Haiku to decide save/skip and produce hybrid content.
+    Keyword-based approach: Haiku picks a category enum token only.
+    No free-form text in reason — guaranteed JSON-safe output.
     Claude Code replaces ``$ARGUMENTS`` with stop-hook input at runtime.
     """
-    front_pct = int(STOP_PROMPT_CONFIG.hybrid_front_ratio * 100)
-    back_pct = 100 - front_pct
-    max_lines = STOP_PROMPT_CONFIG.max_summary_lines
-    back_max = STOP_PROMPT_CONFIG.back_max_chars
-
+    categories = ", ".join(STOP_PROMPT_CONFIG.valid_categories)
     save_list = "\n".join(f"- {c}" for c in SAVE_CRITERIA.save_when)
     skip_list = "\n".join(f"- {c}" for c in SAVE_CRITERIA.skip_when)
 
     return (
         "대화의 마지막 응답을 분석하여 mem-mesh 저장 여부를 판단하세요.\n\n"
         "$ARGUMENTS\n\n"
-        "## 루프 방지\n"
-        '- stop_hook_active가 true이면: {"ok": true}\n'
-        "- 이 턴에서 이미 mem-mesh 저장(mcp__mem-mesh__add)이 "
-        '수행되었으면: {"ok": true}\n\n'
+        "## 판단 순서 (위에서 아래로, 첫 매치 시 즉시 응답)\n\n"
+        '1. stop_hook_active가 true → {"ok": true}\n'
+        "2. 이 턴에서 이미 mcp__mem-mesh__add가 호출됨 "
+        '→ {"ok": true}\n'
+        f"3. 스킵 기준 해당 → {'{'}\"ok\": true{'}'}\n"
+        f"4. 저장 기준 해당 → {'{'}\"ok\": false, \"reason\": "
+        f"\"mcp__mem-mesh__add(category=CATEGORY) 요약+원본 저장\"{'}'}  \n"
+        f"   CATEGORY는 다음 중 하나: {categories}\n"
+        f'5. 기본값 → {{"ok": true}}\n\n'
         f"## 저장 기준 (하나라도 해당 시 저장)\n{save_list}\n\n"
-        f"## 스킵 기준 (저장 기준보다 우선 — 하나라도 해당 시 즉시 스킵)\n{skip_list}\n\n"
-        "## 저장 방식 (하이브리드)\n"
-        "대화 내용을 분할 처리하세요:\n"
-        f"- 전반부(~{front_pct}%): 배경, 탐색, 시행착오를 "
-        f"{max_lines}줄 이내로 추론 요약\n"
-        f"- 후반부(~{back_pct}%): 최종 결과, 코드, 결정을 "
-        f"원본 그대로 유지 (최대 {back_max}자)\n\n"
-        "## JSON 출력 규칙 (반드시 준수)\n"
-        "- 반드시 유효한 JSON 한 줄만 출력. 코드블록(```)이나 설명 텍스트 금지\n"
-        "- reason 값 안의 쌍따옴표는 반드시 \\\"로 이스케이프\n"
-        "- reason 값 안의 줄바꿈은 반드시 \\n 리터럴로 표현\n"
-        f"- reason 전체 길이는 {back_max}자 이하로 유지\n"
-        "- 마크다운 테이블(|), diff stat 등 복잡한 포맷은 "
-        "간결한 불릿 리스트로 변환\n\n"
-        "## 응답\n\n"
-        '저장 불필요: {"ok": true}\n\n'
-        "저장 필요:\n"
-        '{"ok": false, "reason": "mem-mesh에 저장하세요. '
-        "mcp__mem-mesh__add(category='[decision|bug|code_snippet|idea]', "
-        "project_id=[현재 프로젝트명]):\\n\\n"
-        "## 맥락\\n[전반부 요약]\\n\\n"
-        '## 상세\\n[후반부 원본]"}'
+        f"## 스킵 기준 (저장 기준보다 우선)\n{skip_list}\n\n"
+        "## 저장 형식\n"
+        "Opus가 mcp__mem-mesh__add 호출 시 content에 다음을 포함:\n"
+        "- 1~3줄 요약 (## 요약)\n"
+        "- 원본 대화 핵심 부분 (## 원본)\n\n"
+        "## JSON 출력 규칙\n"
+        "- 유효한 JSON 한 줄만 출력\n"
+        "- reason에는 mcp__mem-mesh__add(category=X) 요약+원본 저장 형식만 허용\n"
+        f"- reason 최대 {STOP_PROMPT_CONFIG.max_reason_chars}자\n"
+        "- 코드블록, 설명 텍스트, 줄바꿈 금지"
+    )
+
+
+def render_enhanced_stop_prompt() -> str:
+    """Render the prompt for the Enhanced profile's Haiku API stop hook.
+
+    Haiku outputs plain-text ``SAVE|category|summary`` or ``SKIP``.
+    Python wraps the result with json.dumps() for JSON safety.
+    """
+    categories = ", ".join(STOP_PROMPT_CONFIG.valid_categories)
+    save_list = "\n".join(f"- {c}" for c in SAVE_CRITERIA.save_when)
+    skip_list = "\n".join(f"- {c}" for c in SAVE_CRITERIA.skip_when)
+
+    return (
+        "Analyze the conversation and decide whether to save it to mem-mesh.\n\n"
+        f"## Save criteria (save if ANY match)\n{save_list}\n\n"
+        f"## Skip criteria (skip takes priority)\n{skip_list}\n\n"
+        "## Output format (EXACTLY one line, no markdown)\n"
+        f"Save: SAVE|CATEGORY|one-line summary (50 chars max)\n"
+        f"  CATEGORY: {categories}\n"
+        "Skip: SKIP\n\n"
+        "Examples:\n"
+        "  SAVE|bug|Fixed ZeroDivisionError in search tests\n"
+        "  SAVE|decision|Chose hybrid approach for stop hook\n"
+        "  SKIP"
     )
 
 

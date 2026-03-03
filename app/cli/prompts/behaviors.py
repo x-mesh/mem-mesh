@@ -14,7 +14,7 @@ from typing import List
 # Prompt schema version — bump on ANY behavioral rule change
 # ---------------------------------------------------------------------------
 
-PROMPT_VERSION: int = 4
+PROMPT_VERSION: int = 6
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +109,6 @@ SAVE_CRITERIA = SaveCriteria(
     save_when=[
         "버그 진단/해결",
         "아키텍처 또는 설계 결정",
-        "재사용 가능한 코드 패턴",
         "중요 설정 변경 또는 마이그레이션",
     ],
     skip_when=[
@@ -175,18 +174,12 @@ REFLECT_CONFIG = ReflectConfig(
 
 @dataclass(frozen=True)
 class StopPromptConfig:
-    """Configuration for Claude Code native prompt-based Stop hook.
+    """Keyword-based prompt hook config. Haiku picks category enum only."""
 
-    Uses hybrid approach: front part summarized + back part raw.
-    """
-
-    hybrid_front_ratio: float  # 0.6 = front 60% summarized
-    max_summary_lines: int  # max lines for front summary
-    back_max_chars: int  # max chars for raw back part
-
+    max_reason_chars: int
+    valid_categories: tuple
 
 STOP_PROMPT_CONFIG = StopPromptConfig(
-    hybrid_front_ratio=0.6,
-    max_summary_lines=7,
-    back_max_chars=1500,
+    max_reason_chars=80,
+    valid_categories=("bug", "decision", "code_snippet", "idea", "incident"),
 )
