@@ -1331,7 +1331,7 @@ style.textContent = `
   /* ── Layout ─────────────────────────────── */
   .wk {
     display: block;
-    max-width: 960px;
+    max-width: var(--container-xl, 1280px);
     width: 100%;
     margin: 0 auto;
     padding: var(--space-6, 1.5rem) var(--space-4, 1rem);

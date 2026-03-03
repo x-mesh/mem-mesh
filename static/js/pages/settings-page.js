@@ -487,7 +487,7 @@ style.textContent = `
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 60px);
-  max-width: 960px;
+  max-width: var(--container-xl, 1280px);
   margin: 0 auto;
   padding: 0 var(--space-4);
 }

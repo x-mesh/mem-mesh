@@ -71,7 +71,7 @@
 
 .page-container {
   display: block;
-  max-width: 960px;
+  max-width: var(--container-xl);
   margin: 0 auto;
   padding: var(--space-6) 0;
 }

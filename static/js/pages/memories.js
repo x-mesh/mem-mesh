@@ -850,10 +850,11 @@ class MemoriesPage extends HTMLElement {
           if (cb) cb.checked = !isSelected;
         }
       }
-      // Space = toggle peek on keyboard-selected row
+      // Space = toggle peek on keyboard-selected OR hovered row
       if (e.key === ' ') {
         e.preventDefault();
-        const sel = this.querySelector('.mem-row.keyboard-selected');
+        const sel = this.querySelector('.mem-row.keyboard-selected')
+          || this.querySelector('.mem-row:hover');
         if (sel) {
           const id = sel.dataset.memoryId;
           if (id) {
@@ -1739,7 +1740,7 @@ style.textContent = `
   /* ── Layout ─────────────────────────────── */
   .mem {
     display: block;
-    max-width: 960px;
+    max-width: var(--container-xl, 1280px);
     width: 100%;
     margin: 0 auto;
     padding: var(--space-6, 1.5rem) var(--space-4, 1rem);

@@ -31,6 +31,9 @@ class DashboardPage extends HTMLElement {
     this.page = 0;
     this.pageSize = 30;
     this.hasMore = true;
+    // Peek state
+    this._peekId = null;
+    this._peekData = null;
   }
 
   connectedCallback() {
@@ -49,6 +52,10 @@ class DashboardPage extends HTMLElement {
       wsClient.off('memory_created', this._bh.c);
       wsClient.off('memory_updated', this._bh.u);
       wsClient.off('memory_deleted', this._bh.d);
+    }
+    if (this._boundKeydown) {
+      document.removeEventListener('keydown', this._boundKeydown);
+      this._boundKeydown = null;
     }
   }
 
@@ -89,10 +96,24 @@ class DashboardPage extends HTMLElement {
 
   setupEventListeners() {
     this.addEventListener('click', (e) => {
+      // Peek panel actions
+      if (e.target.closest('.dash-peek-close')) { this.closePeek(); return; }
+      if (e.target.closest('.dash-peek-open')) {
+        const id = e.target.closest('.dash-peek-open').dataset.id;
+        if (id && window.app?.router) { this.closePeek(); window.app.router.navigate(`/memory/${id}`); }
+        return;
+      }
+
       const row = e.target.closest('.recent-item');
       if (row) {
         const id = row.dataset.id;
-        if (id && window.app?.router) window.app.router.navigate(`/memory/${id}`);
+        if (!id) return;
+        // If peek is open, switch peek target; otherwise navigate
+        if (this._peekId) {
+          this.openPeek(id);
+        } else if (window.app?.router) {
+          window.app.router.navigate(`/memory/${id}`);
+        }
         return;
       }
       if (e.target.closest('.load-more-btn')) { this.loadMore(); return; }
@@ -112,6 +133,28 @@ class DashboardPage extends HTMLElement {
         this.page = 0; this.memories = []; this.loadData();
       }
     });
+
+    // Keyboard: Space = peek on hovered row, Escape = close peek
+    this._boundKeydown = (e) => {
+      if (!this.isConnected) return;
+      if (e.target.matches('input, select, textarea') && e.key !== 'Escape') return;
+
+      if (e.key === ' ') {
+        e.preventDefault();
+        const row = this.querySelector('.recent-item:hover');
+        if (row) {
+          const id = row.dataset.id;
+          if (id) {
+            if (this._peekId === id) this.closePeek();
+            else this.openPeek(id);
+          }
+        }
+      }
+      if (e.key === 'Escape' && this._peekId) {
+        this.closePeek();
+      }
+    };
+    document.addEventListener('keydown', this._boundKeydown);
   }
 
   // ── Data ──
@@ -203,7 +246,10 @@ class DashboardPage extends HTMLElement {
           </select>
         </div>
       </div>
-      <div class="dash-list" id="dash-list"></div>
+      <div class="dash-content-area" id="dash-content-area">
+        <div class="dash-list" id="dash-list"></div>
+        <div class="dash-peek-panel" id="dash-peek" style="display:none"></div>
+      </div>
       <div class="dash-footer" id="dash-footer"></div>
     `;
   }
@@ -372,6 +418,81 @@ class DashboardPage extends HTMLElement {
   esc(t) {
     if (t == null) return '';
     return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ── Peek panel ──
+
+  async openPeek(memoryId) {
+    if (this._peekId === memoryId) { this.closePeek(); return; }
+    this._peekId = memoryId;
+
+    const panel = this.querySelector('#dash-peek');
+    if (!panel) return;
+
+    panel.style.display = 'block';
+    panel.innerHTML = '<div class="dash-peek-loading">Loading...</div>';
+    this.querySelector('#dash-content-area')?.classList.add('peek-open');
+
+    try {
+      const api = window.app?.apiClient;
+      if (!api) return;
+      const mem = await api.getMemory(memoryId);
+      if (!mem || this._peekId !== memoryId) return;
+      this._peekData = mem;
+      this.renderPeekPanel();
+    } catch {
+      panel.innerHTML = '<div class="dash-peek-loading">Failed to load</div>';
+    }
+  }
+
+  closePeek() {
+    this._peekId = null;
+    this._peekData = null;
+    const panel = this.querySelector('#dash-peek');
+    if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
+    this.querySelector('#dash-content-area')?.classList.remove('peek-open');
+  }
+
+  renderPeekPanel() {
+    const panel = this.querySelector('#dash-peek');
+    if (!panel || !this._peekData) return;
+
+    const m = this._peekData;
+    if (typeof m.tags === 'string') {
+      try { m.tags = JSON.parse(m.tags); } catch { m.tags = []; }
+    }
+    const icon = CAT_ICONS[m.category] || DEFAULT_ICON;
+    const time = this.relTime(m.created_at);
+
+    panel.innerHTML = `
+      <div class="dash-peek-header">
+        <span class="dash-peek-cat">${icon} ${this.esc(m.category)}</span>
+        <button class="dash-peek-close" title="Close (Esc)">&times;</button>
+      </div>
+      <div class="dash-peek-meta">
+        ${m.project_id ? `<span class="dash-peek-project">${this.esc(m.project_id)}</span>` : ''}
+        ${m.source && m.source !== 'unknown' ? `<span class="dash-peek-source">${this.esc(m.source)}</span>` : ''}
+        <span class="dash-peek-time">${time}</span>
+      </div>
+      ${(m.tags || []).length ? `<div class="dash-peek-tags">${m.tags.map(t => `<span class="dash-peek-tag">#${this.esc(t)}</span>`).join('')}</div>` : ''}
+      <div class="dash-peek-body">${this._renderMarkdown(m.content || '')}</div>
+      <div class="dash-peek-footer">
+        <span class="dash-peek-id">${m.id.substring(0, 8)}...</span>
+        <button class="dash-peek-open" data-id="${this.esc(m.id)}">Open full →</button>
+      </div>
+    `;
+  }
+
+  _renderMarkdown(text) {
+    return this.esc(text)
+      .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+      .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/^- (.+)$/gm, '<li>$1</li>')
+      .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
+      .replace(/\n\n/g, '<br><br>')
+      .replace(/\n/g, '<br>');
   }
 }
 
