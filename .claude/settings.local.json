@@ -21,7 +21,8 @@
       "mcp__mem-mesh__add",
       "Bash(chmod +x /Users/jinwoo/.claude/hooks/mem-mesh-stop-decide.sh)",
       "Bash(curl -s --max-time 5 -X POST \"https://meme.24x365.online/api/memories/search\" -H \"Content-Type: application/json\" -d '{\"query\":\"\", \"project_id\":\"mem-mesh\", \"limit\":3}' | python3 -c \"\nimport json, sys\ndata = json.load\\(sys.stdin\\)\nfor r in data.get\\('results', []\\):\n    print\\(f\\\\\"[{r.get\\('category'\\)}] {r.get\\('source','?'\\)} | {r.get\\('created_at','?'\\)[:19]}\\\\\"\\)\n    print\\(f\\\\\"  {r.get\\('content',''\\)[:100]}\\\\\"\\)\n    print\\(\\)\n\")",
-      "Bash(sleep 8 && curl -s --max-time 5 -X POST \"https://meme.24x365.online/api/memories/search\" -H \"Content-Type: application/json\" -d '{\"query\":\"\", \"project_id\":\"mem-mesh\", \"limit\":2}' | python3 -c \"\nimport json, sys\ndata = json.load\\(sys.stdin\\)\nfor r in data.get\\('results', []\\):\n    print\\(f'=== [{r.get\\(\\\\\"category\\\\\"\\)}] {r.get\\(\\\\\"source\\\\\",\\\\\"?\\\\\"\\)} | {r.get\\(\\\\\"created_at\\\\\",\\\\\"?\\\\\"\\)[:19]} ==='\\)\n    content = r.get\\('content',''\\)\n    print\\(content[:500]\\)\n    print\\(\\)\n\")"
+      "Bash(sleep 8 && curl -s --max-time 5 -X POST \"https://meme.24x365.online/api/memories/search\" -H \"Content-Type: application/json\" -d '{\"query\":\"\", \"project_id\":\"mem-mesh\", \"limit\":2}' | python3 -c \"\nimport json, sys\ndata = json.load\\(sys.stdin\\)\nfor r in data.get\\('results', []\\):\n    print\\(f'=== [{r.get\\(\\\\\"category\\\\\"\\)}] {r.get\\(\\\\\"source\\\\\",\\\\\"?\\\\\"\\)} | {r.get\\(\\\\\"created_at\\\\\",\\\\\"?\\\\\"\\)[:19]} ==='\\)\n    content = r.get\\('content',''\\)\n    print\\(content[:500]\\)\n    print\\(\\)\n\")",
+      "Bash(python3 -m app.cli.install_hooks install --target claude --profile standard 2>&1)"
     ]
   }
 }

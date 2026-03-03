@@ -71,11 +71,13 @@ PAYLOAD=$(jq -n \
   --arg content "[conversation summary] $SUMMARY" \
   --arg project_id "$PROJECT_DIR" \
   --arg source "__SOURCE_TAG__" \
+  --arg client "__CLIENT_TAG__" \
   '{
     content: $content,
     project_id: $project_id,
     category: "git-history",
     source: $source,
+    client: $client,
     tags: ["auto-save", "conversation", "__IDE_TAG__"]
   }')
 
@@ -180,11 +182,13 @@ PAYLOAD=$(jq -n \
   --arg project_id "$PROJECT_DIR" \
   --arg category "$CATEGORY" \
   --arg source "__SOURCE_TAG__" \
+  --arg client "__CLIENT_TAG__" \
   '{
     content: $content,
     project_id: $project_id,
     category: $category,
     source: $source,
+    client: $client,
     tags: ["auto-save", "keyword", $category]
   }')
 
@@ -324,11 +328,13 @@ PAYLOAD=$(jq -n \
   --arg content "[kiro response] $SUMMARY" \
   --arg project_id "$PROJECT_DIR" \
   --arg source "kiro-hook" \
+  --arg client "kiro" \
   '{
     content: $content,
     project_id: $project_id,
     category: "git-history",
     source: $source,
+    client: $client,
     tags: ["auto-save", "conversation", "kiro"]
   }')
 
@@ -542,11 +548,13 @@ CONTENT=$(echo "$CONTENT" | head -c 9500)
 PAYLOAD=$(jq -n \
   --arg content "$CONTENT" \
   --arg project_id "$PROJECT_DIR" \
+  --arg client "__CLIENT_TAG__" \
   '{
     content: $content,
     project_id: $project_id,
     category: "decision",
     source: "hook-reflect",
+    client: $client,
     tags: ["auto-save", "llm-reflection", "enhanced"]
   }')
 
@@ -962,6 +970,7 @@ def _render_template(
     *,
     source_tag: str = "claude-code-hook",
     ide_tag: str = "claude",
+    client_tag: str = "claude_code",
     project_id: str = "mem-mesh",
 ) -> str:
     """Replace all placeholders in a template string."""
@@ -969,6 +978,7 @@ def _render_template(
     result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
     result = result.replace("__SOURCE_TAG__", source_tag)
     result = result.replace("__IDE_TAG__", ide_tag)
+    result = result.replace("__CLIENT_TAG__", client_tag)
     # Inject renderer-generated text
     result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
     result = result.replace("__FOLLOWUP_MSG__", render_cursor_followup(project_id))
@@ -1407,6 +1417,7 @@ def _install_kiro(url: str, mode: str = "api", path: str = "") -> None:
                 url,
                 source_tag="kiro-hook",
                 ide_tag="kiro",
+                client_tag="kiro",
             ),
         )
     print(f"  -> {stop_script}")
