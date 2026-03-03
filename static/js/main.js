@@ -95,7 +95,12 @@ class App {
       
       // Start router
       this.router.start();
-      
+
+      // P5: 전역 WebSocket 연결 — 모든 페이지에서 실시간 업데이트 수신
+      wsClient.connect().catch(err => {
+        console.warn('Initial WebSocket connection failed:', err);
+      });
+
       console.log('mem-mesh Web UI initialized successfully');
       
     } catch (error) {

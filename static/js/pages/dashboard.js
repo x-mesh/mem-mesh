@@ -52,6 +52,7 @@ class DashboardPage extends HTMLElement {
       wsClient.off('memory_created', this._bh.c);
       wsClient.off('memory_updated', this._bh.u);
       wsClient.off('memory_deleted', this._bh.d);
+      wsClient.off('reconnected', this._bh.r);
     }
     if (this._boundKeydown) {
       document.removeEventListener('keydown', this._boundKeydown);
@@ -66,11 +67,13 @@ class DashboardPage extends HTMLElement {
       c: this.onMemoryCreated.bind(this),
       u: this.onMemoryUpdated.bind(this),
       d: this.onMemoryDeleted.bind(this),
+      r: () => { this.page = 0; this.memories = []; this.loadData(); },
     };
     wsClient.on('memory_created', this._bh.c);
     wsClient.on('memory_updated', this._bh.u);
     wsClient.on('memory_deleted', this._bh.d);
-    if (!wsClient.getConnectionStatus().isConnected) wsClient.connect().catch(() => {});
+    wsClient.on('reconnected', this._bh.r);
+    // P5: connect()는 main.js에서 전역으로 호출됨
   }
 
   onMemoryCreated({ memory }) {

@@ -31,21 +31,21 @@ class ConnectionStatus extends HTMLElement {
       connected: () => this.updateStatus('connected'),
       disconnected: () => this.updateStatus('disconnected'),
       reconnecting: (data) => {
-        console.log(`Reconnecting (${data.attempt}/${data.max})...`);
+        console.log(`Reconnecting (attempt ${data.attempt}, delay ${data.delay}ms)...`);
         this.updateStatus('connecting');
       },
-      error: () => this.updateStatus('error'),
-      maxReconnectAttemptsReached: () => {
+      error: () => {
         this.updateStatus('error');
         this.showReconnectButton();
-      }
+      },
+      networkOffline: () => this.updateStatus('offline'),
     };
-    
+
     wsClient.on('connected', this._boundHandlers.connected);
     wsClient.on('disconnected', this._boundHandlers.disconnected);
     wsClient.on('reconnecting', this._boundHandlers.reconnecting);
     wsClient.on('error', this._boundHandlers.error);
-    wsClient.on('max_reconnect_attempts_reached', this._boundHandlers.maxReconnectAttemptsReached);
+    wsClient.on('network_offline', this._boundHandlers.networkOffline);
   }
   
   /**
@@ -57,7 +57,7 @@ class ConnectionStatus extends HTMLElement {
       wsClient.off('disconnected', this._boundHandlers.disconnected);
       wsClient.off('reconnecting', this._boundHandlers.reconnecting);
       wsClient.off('error', this._boundHandlers.error);
-      wsClient.off('max_reconnect_attempts_reached', this._boundHandlers.maxReconnectAttemptsReached);
+      wsClient.off('network_offline', this._boundHandlers.networkOffline);
     }
   }
   
@@ -99,14 +99,15 @@ class ConnectionStatus extends HTMLElement {
     if (!statusEl) return;
     
     // Remove all status classes
-    statusEl.classList.remove('connected', 'disconnected', 'connecting', 'error');
+    statusEl.classList.remove('connected', 'disconnected', 'connecting', 'error', 'offline');
     statusEl.classList.add(status);
-    
+
     // Update text and icon
     const labels = {
       connected: 'Connected',
       connecting: 'Connecting...',
       disconnected: 'Disconnected',
+      offline: 'Offline',
       error: 'Connection Error'
     };
     
@@ -118,7 +119,7 @@ class ConnectionStatus extends HTMLElement {
     // Hide reconnect button if connected
     const reconnectBtn = this.querySelector('.reconnect-btn');
     if (reconnectBtn) {
-      reconnectBtn.style.display = status === 'error' ? 'inline-flex' : 'none';
+      reconnectBtn.style.display = (status === 'error' || status === 'offline') ? 'inline-flex' : 'none';
     }
     
     console.log('Connection status updated:', status);

@@ -115,6 +115,7 @@ class MemoriesPage extends HTMLElement {
       wsClient.off('memory_created', this._boundHandlers.memoryCreated);
       wsClient.off('memory_updated', this._boundHandlers.memoryUpdated);
       wsClient.off('memory_deleted', this._boundHandlers.memoryDeleted);
+      wsClient.off('reconnected', this._boundHandlers.reconnected);
     }
     if (this._boundKeydown) {
       document.removeEventListener('keydown', this._boundKeydown);
@@ -889,18 +890,18 @@ class MemoriesPage extends HTMLElement {
     this._boundHandlers = {
       memoryCreated: this.handleMemoryCreated.bind(this),
       memoryUpdated: this.handleMemoryUpdated.bind(this),
-      memoryDeleted: this.handleMemoryDeleted.bind(this)
+      memoryDeleted: this.handleMemoryDeleted.bind(this),
+      reconnected: () => this.loadMemories(),
     };
     wsClient.on('memory_created', this._boundHandlers.memoryCreated);
     wsClient.on('memory_updated', this._boundHandlers.memoryUpdated);
     wsClient.on('memory_deleted', this._boundHandlers.memoryDeleted);
+    wsClient.on('reconnected', this._boundHandlers.reconnected);
   }
 
-  async connectWebSocket() {
-    try {
-      await wsClient.connect();
-      if (this.viewParams.project_id) wsClient.subscribeToProject(this.viewParams.project_id);
-    } catch { /* ignore */ }
+  connectWebSocket() {
+    // P5: connect()는 main.js에서 전역으로 호출됨
+    if (this.viewParams.project_id) wsClient.subscribeToProject(this.viewParams.project_id);
   }
 
   handleMemoryCreated(data) {
