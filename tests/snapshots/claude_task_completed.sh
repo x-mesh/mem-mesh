@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 8
+# mem-mesh-hooks prompt-version: 9
 # TaskCompleted hook: auto-save completed tasks to mem-mesh
 # stdin: {task_id, task_subject, task_description, teammate_name, team_name, ...}
 

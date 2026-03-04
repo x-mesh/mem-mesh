@@ -1,8 +1,12 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 8
+# mem-mesh-hooks prompt-version: 9
 # Claude Code SessionStart hook: inject mem-mesh session context
 # Fires on session start AND after compaction (context re-injection)
 # Returns additional_context JSON via /api/work/sessions/resume/{project_id}
+#
+# Features:
+# 1. Session resume data injection (existing)
+# 2. Context continuation detection — reminds AI to call session_resume (new)
 
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || { echo '{}'; exit 0; }
@@ -15,6 +19,36 @@ INPUT=$(cat)
 # Detect project from CWD
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
+
+# ── Detect context continuation ──
+# Claude Code fires SessionStart both on fresh start AND after context compaction.
+# After compaction, the transcript_path still exists with prior entries,
+# and session_id is preserved. We detect this to inject a stronger reminder.
+IS_CONTINUATION="false"
+TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
+if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+  # If transcript has assistant entries, this is a continuation (post-compaction)
+  HAS_ASSISTANT=$(python3 -c "
+import json, sys
+try:
+    count = 0
+    with open(sys.argv[1], 'r') as f:
+        for line in f:
+            try:
+                entry = json.loads(line.strip())
+                if entry.get('type') == 'assistant':
+                    count += 1
+                    if count >= 2:
+                        print('true')
+                        sys.exit(0)
+            except (ValueError, KeyError, TypeError):
+                pass
+    print('false')
+except Exception:
+    print('false')
+" "$TRANSCRIPT_PATH" 2>/dev/null) || HAS_ASSISTANT="false"
+  IS_CONTINUATION="$HAS_ASSISTANT"
+fi
 
 # Fetch session resume data (same API as Cursor — consistent cross-IDE)
 RESUME_DATA=$(curl -s --max-time 5 \
@@ -51,8 +85,19 @@ except Exception:
     print('mem-mesh not available')
 " 2>/dev/null) || SESSION_SUMMARY="mem-mesh not available"
 
-CONTEXT="## mem-mesh Session Context (Auto-injected)
+# Build context with continuation-aware reminder
+CONTINUATION_REMINDER=""
+if [ "$IS_CONTINUATION" = "true" ]; then
+  CONTINUATION_REMINDER="
+### [IMPORTANT] Context Continuation Detected
+This session was compacted and resumed. Previous context may be lost.
+**You MUST call \`session_resume(project_id=\"${PROJECT_DIR}\", expand=\"smart\")\` immediately** to restore mem-mesh context.
+If there were unsaved decisions, bugs, or design changes in the previous context, save them with \`mcp__mem-mesh__add\` before continuing.
+"
+fi
 
+CONTEXT="## mem-mesh Session Context (Auto-injected)
+${CONTINUATION_REMINDER}
 ### Recent Activity (${PROJECT_DIR})
 ${SESSION_SUMMARY}
 
