@@ -46,7 +46,6 @@ class SearchWarmupService:
             워밍업 결과 딕셔너리
         """
         self.warmup_start_time = datetime.now()
-        logger.info("Starting search warmup...")
 
         results = {
             "embedding_preload": False,
@@ -55,6 +54,20 @@ class SearchWarmupService:
             "total_time_ms": 0,
             "errors": [],
         }
+
+        # 임베딩 모델이 준비되지 않은 경우 warmup 스킵
+        if not embedding_service.is_ready:
+            logger.info(
+                "Search warmup skipped: embedding model not ready "
+                f"(status: {embedding_service.status})"
+            )
+            results["errors"].append("Embedding model not ready, warmup skipped")
+            self.warmup_end_time = datetime.now()
+            total_time = (self.warmup_end_time - self.warmup_start_time).total_seconds()
+            results["total_time_ms"] = int(total_time * 1000)
+            return results
+
+        logger.info("Starting search warmup...")
 
         try:
             # 1. 임베딩 모델 preload

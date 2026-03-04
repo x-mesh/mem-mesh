@@ -26,6 +26,7 @@ from app.core.services.stats import StatsService
 
 from ..common.dependencies import (
     get_embedding_manager,
+    get_embedding_service,
     get_pin_service,
     get_project_service,
     get_session_service,
@@ -90,13 +91,44 @@ async def api_root():
 
 @router.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint (always 200, even during model loading)"""
     from datetime import datetime, timezone
 
-    return {
+    from ..lifespan import get_services
+
+    services = get_services()
+    es = services.get("embedding_service")
+    db = services.get("db")
+    embedding_ready = es.is_ready if es else False
+    embedding_status = es.status if es else "not_initialized"
+
+    result = {
         "status": "healthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "embedding_ready": embedding_ready,
+        "embedding_status": embedding_status,
     }
+
+    # 모델 일관성 체크 (DB vs settings)
+    if db and es:
+        try:
+            model_check = await db.check_embedding_model_consistency(
+                current_model=es.model_name,
+                current_dim=es.dimension,
+            )
+            if model_check["needs_migration"]:
+                result["needs_migration"] = True
+                result["migration_info"] = {
+                    "stored_model": model_check["stored_model"],
+                    "stored_dim": model_check["stored_dim"],
+                    "current_model": model_check["current_model"],
+                    "current_dim": model_check["current_dim"],
+                    "message": model_check["message"],
+                }
+        except Exception:
+            pass
+
+    return result
 
 
 @router.get("/system/info")
@@ -195,6 +227,89 @@ async def update_rule(rule_id: str, params: RuleUpdateParams):
 
 
 # ===== Embedding Management API =====
+
+
+@router.get("/embeddings/models")
+async def list_available_models():
+    """List available embedding models for onboarding selection."""
+    from app.core.embeddings.service import AVAILABLE_MODELS, is_model_cached
+
+    models = []
+    for m in AVAILABLE_MODELS:
+        models.append({**m, "cached": is_model_cached(m["name"])})
+    return {"models": models}
+
+
+@router.get("/embeddings/loading-status")
+async def get_embedding_loading_status(
+    embedding_service=Depends(get_embedding_service),
+):
+    """Get current model loading/download status for onboarding progress."""
+    return embedding_service.get_status_info()
+
+
+@router.post("/embeddings/select")
+async def select_embedding_model(
+    body: dict,
+    embedding_service=Depends(get_embedding_service),
+):
+    """Select and start downloading an embedding model.
+
+    Body: {"model": "intfloat/multilingual-e5-large"}
+    """
+    model_name = body.get("model")
+    if not model_name:
+        raise HTTPException(status_code=400, detail="model field is required")
+
+    from app.core.embeddings.service import AVAILABLE_MODELS, MODEL_ALIASES
+
+    # 유효한 모델인지 확인
+    resolved = MODEL_ALIASES.get(model_name, model_name)
+    valid_names = [m["name"] for m in AVAILABLE_MODELS]
+    if resolved not in valid_names:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid model. Choose from: {valid_names}",
+        )
+
+    # 이미 로딩 중이면 현재 상태 반환
+    if embedding_service.status in ("downloading", "loading"):
+        return embedding_service.get_status_info()
+
+    # 모델 변경 + DB에 선택 저장 + 백그라운드 다운로드 시작
+    embedding_service.switch_model(resolved)
+
+    # DB에 선택한 모델 저장 (재시작 시 자동 로드용)
+    from ..lifespan import get_services
+    services = get_services()
+    db = services.get("db")
+    if db:
+        try:
+            from app.core.embeddings.service import MODEL_DIMENSIONS
+            dim = MODEL_DIMENSIONS.get(resolved, 384)
+            await db._migrator.set_embedding_metadata("embedding_model", resolved)
+            await db._migrator.set_embedding_metadata("embedding_dimension", str(dim))
+        except Exception as e:
+            logger.warning(f"Failed to persist model selection: {e}")
+
+    def _on_progress(progress: float, status: str) -> None:
+        try:
+            from ..websocket.realtime import notifier
+            import asyncio
+
+            loop = asyncio.get_running_loop()
+            loop.call_soon_threadsafe(
+                asyncio.ensure_future,
+                notifier.broadcast(
+                    "model_download",
+                    {"progress": progress, "status": status, "model": resolved},
+                ),
+            )
+        except Exception:
+            pass
+
+    embedding_service.load_model_background(on_progress=_on_progress)
+    return embedding_service.get_status_info()
 
 
 @router.get("/embeddings/status")

@@ -6,13 +6,15 @@
 *.egg-info
 __pycache__/
 .hypothesis/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 .coverage.*
-.cache
-imports/**
-.vscode
+.cache/
+imports/
+.vscode/
 .idea
-.vscode
 # Directories to ignore
 data/
 data_bak/

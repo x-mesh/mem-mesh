@@ -5,8 +5,10 @@ FastAPI 의존성 함수들.
 """
 
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 
 from app.core.database.base import Database
+from app.core.embeddings.service import EmbeddingService
 from app.core.services.context import ContextService
 from app.core.services.embedding_manager import EmbeddingManagerService
 from app.core.services.memory import MemoryService
@@ -20,6 +22,34 @@ from app.core.services.unified_search import UnifiedSearchService
 from ..lifespan import get_services
 
 
+def _require_embedding_ready() -> None:
+    """임베딩 모델이 로드되었는지 확인. 미로딩 시 503."""
+    services = get_services()
+    es: EmbeddingService | None = services.get("embedding_service")
+    if es is None:
+        raise HTTPException(status_code=500, detail="Embedding service not initialized")
+    if not es.is_ready:
+        info = es.get_status_info()
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "model_loading",
+                "status": info["status"],
+                "progress": info["progress"],
+                "model": info["model"],
+                "message": "Embedding model is not ready. Please select a model via onboarding or wait for download to complete.",
+            },
+        )
+
+
+def get_embedding_service() -> EmbeddingService:
+    """임베딩 서비스 의존성 (모델 로딩 상태 무관)"""
+    services = get_services()
+    if services["embedding_service"] is None:
+        raise HTTPException(status_code=500, detail="Embedding service not initialized")
+    return services["embedding_service"]
+
+
 def get_database() -> Database:
     """데이터베이스 의존성"""
     services = get_services()
@@ -29,7 +59,8 @@ def get_database() -> Database:
 
 
 def get_memory_service() -> MemoryService:
-    """메모리 서비스 의존성"""
+    """메모리 서비스 의존성 (임베딩 필요)"""
+    _require_embedding_ready()
     services = get_services()
     if services["memory_service"] is None:
         raise HTTPException(status_code=500, detail="Memory service not initialized")
@@ -37,7 +68,8 @@ def get_memory_service() -> MemoryService:
 
 
 def get_search_service() -> UnifiedSearchService:
-    """검색 서비스 의존성"""
+    """검색 서비스 의존성 (임베딩 필요)"""
+    _require_embedding_ready()
     services = get_services()
     if services["search_service"] is None:
         raise HTTPException(status_code=500, detail="Search service not initialized")
@@ -45,7 +77,8 @@ def get_search_service() -> UnifiedSearchService:
 
 
 def get_context_service() -> ContextService:
-    """컨텍스트 서비스 의존성"""
+    """컨텍스트 서비스 의존성 (임베딩 필요)"""
+    _require_embedding_ready()
     services = get_services()
     if services["context_service"] is None:
         raise HTTPException(status_code=500, detail="Context service not initialized")

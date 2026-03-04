@@ -38,29 +38,6 @@ def _detect_target() -> str:
     return "all"
 
 
-def _check_mcp_config(url: str) -> tuple[bool, str]:
-    """Check if MCP server is configured in claude_desktop_config.json."""
-    config_path = Path.home() / ".claude" / "claude_desktop_config.json"
-    if not config_path.exists():
-        return False, "not found"
-    try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return False, "parse error"
-
-    mcp_servers = data.get("mcpServers", {})
-    for name, server in mcp_servers.items():
-        if "mem-mesh" in name.lower() or "mem_mesh" in name.lower():
-            return True, f"configured as '{name}'"
-        cmd = server.get("command", "")
-        args = server.get("args", [])
-        if "mem-mesh" in cmd or any(
-            "mem-mesh" in str(a) or "mem_mesh" in str(a) for a in args
-        ):
-            return True, f"configured as '{name}'"
-
-    return False, "no mem-mesh entry"
-
 
 def _has_docker() -> bool:
     """Check if docker and docker-compose are available."""
@@ -384,7 +361,9 @@ def cmd_onboarding(
         if answer in ("n", "no"):
             print(dim("  Skipping hook installation."))
             print()
-            _step3_mcp(resolved_url)
+            from app.cli.mcp_config import run_mcp_setup
+
+            run_mcp_setup(url=resolved_url, yes=yes)
             _print_summary(resolved_url, reachable, False, target)
             return
 
@@ -402,24 +381,13 @@ def cmd_onboarding(
     print()
 
     # --- Step 3: MCP config ---
-    _step3_mcp(resolved_url)
+    from app.cli.mcp_config import run_mcp_setup
+
+    run_mcp_setup(url=resolved_url, yes=yes)
 
     # --- Summary ---
     _print_summary(resolved_url, reachable, hooks_installed, target)
 
-
-def _step3_mcp(url: str) -> None:
-    """Step 3: Check MCP configuration."""
-    print(bold("[3/3] MCP Configuration"))
-
-    configured, mcp_message = _check_mcp_config(url)
-    if configured:
-        print(f"  claude_desktop_config.json: {ok(mcp_message)}")
-    else:
-        print(f"  claude_desktop_config.json: {warn(mcp_message)}")
-        print(dim("  To add MCP server, update ~/.claude/claude_desktop_config.json"))
-        print(dim("  with a mem-mesh server entry pointing to your API URL."))
-    print()
 
 
 def _print_summary(url: str, server_ok: bool, hooks_ok: bool, target: str) -> None:

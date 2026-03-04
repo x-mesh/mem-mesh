@@ -3,12 +3,14 @@ Embedding Service for mem-mesh
 텍스트를 벡터로 변환하는 서비스
 """
 
+import asyncio
 import logging
 import os
 import ssl
 import struct
+import threading
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import urllib3
 
@@ -69,6 +71,7 @@ logger = logging.getLogger(__name__)
 
 # 모델별 임베딩 차원 매핑
 MODEL_DIMENSIONS = {
+    # English lightweight
     "all-MiniLM-L6-v2": 384,
     "all-MiniLM-L12-v2": 384,
     "all-mpnet-base-v2": 768,
@@ -77,9 +80,22 @@ MODEL_DIMENSIONS = {
     "distiluse-base-multilingual-cased-v2": 512,
     "multi-qa-MiniLM-L6-cos-v1": 384,
     "multi-qa-mpnet-base-cos-v1": 768,
+    # BGE English
+    "BAAI/bge-small-en-v1.5": 384,
+    "BAAI/bge-base-en-v1.5": 768,
+    "BAAI/bge-large-en-v1.5": 1024,
+    # Multilingual E5
     "intfloat/multilingual-e5-small": 384,
     "intfloat/multilingual-e5-base": 768,
     "intfloat/multilingual-e5-large": 1024,
+    # BGE-M3 multilingual
+    "BAAI/bge-m3": 1024,
+    # Korean specialized
+    "nlpai-lab/KURE-v1": 1024,
+    "nlpai-lab/KoE5": 1024,
+    "dragonkue/BGE-m3-ko": 1024,
+    "snunlp/KR-SBERT-V40K-klueNLI-augSTS": 768,
+    "jhgan/ko-sroberta-sts": 768,
 }
 
 # 모델 이름 별칭 (짧은 이름 -> 전체 이름)
@@ -90,6 +106,15 @@ MODEL_ALIASES = {
     "e5-small": "intfloat/multilingual-e5-small",
     "e5-base": "intfloat/multilingual-e5-base",
     "e5-large": "intfloat/multilingual-e5-large",
+    "bge-m3": "BAAI/bge-m3",
+    "kure": "nlpai-lab/KURE-v1",
+    "koe5": "nlpai-lab/KoE5",
+    "bge-m3-ko": "dragonkue/BGE-m3-ko",
+    "kr-sbert": "snunlp/KR-SBERT-V40K-klueNLI-augSTS",
+    "ko-sroberta": "jhgan/ko-sroberta-sts",
+    "bge-small-en": "BAAI/bge-small-en-v1.5",
+    "bge-base-en": "BAAI/bge-base-en-v1.5",
+    "bge-large-en": "BAAI/bge-large-en-v1.5",
 }
 
 
@@ -103,6 +128,162 @@ def _is_e5_model(model_name: str) -> bool:
     return any(pat in name_lower for pat in _E5_MODEL_PATTERNS)
 
 
+def is_model_cached(model_name: str) -> bool:
+    """HuggingFace 캐시에 모델이 존재하는지 확인"""
+    resolved = MODEL_ALIASES.get(model_name, model_name)
+    try:
+        from huggingface_hub import scan_cache_dir
+
+        cache_info = scan_cache_dir()
+        for repo in cache_info.repos:
+            if repo.repo_id == resolved:
+                # 최소한 하나의 revision이 있으면 캐시됨
+                if repo.revisions:
+                    return True
+        return False
+    except Exception:
+        # huggingface_hub 미설치 또는 캐시 스캔 실패
+        return False
+
+
+# 선택 가능한 모델 목록 (온보딩 UI용)
+AVAILABLE_MODELS = [
+    # ── Korean Specialized ──
+    {
+        "name": "nlpai-lab/KURE-v1",
+        "dimension": 1024,
+        "size": "~2.2GB",
+        "description": "Korean retrieval SOTA. Fine-tuned BGE-M3 with Korean data. Best for Korean-heavy workflows.",
+        "recommended": True,
+        "category": "korean",
+        "lang": "ko/en",
+        "max_tokens": 8192,
+    },
+    {
+        "name": "nlpai-lab/KoE5",
+        "dimension": 1024,
+        "size": "~1.1GB",
+        "description": "Korean-tuned E5-large. Excellent Korean retrieval with smaller footprint than KURE.",
+        "recommended": False,
+        "category": "korean",
+        "lang": "ko/en",
+        "max_tokens": 512,
+    },
+    {
+        "name": "dragonkue/BGE-m3-ko",
+        "dimension": 1024,
+        "size": "~2.2GB",
+        "description": "BGE-M3 fine-tuned for Korean. Strong Korean + multilingual performance.",
+        "recommended": False,
+        "category": "korean",
+        "lang": "ko/en",
+        "max_tokens": 8192,
+    },
+    {
+        "name": "snunlp/KR-SBERT-V40K-klueNLI-augSTS",
+        "dimension": 768,
+        "size": "~440MB",
+        "description": "Korean SBERT by SNU NLP. Lightweight Korean semantic similarity model.",
+        "recommended": False,
+        "category": "korean",
+        "lang": "ko",
+        "max_tokens": 512,
+    },
+    {
+        "name": "jhgan/ko-sroberta-sts",
+        "dimension": 768,
+        "size": "~440MB",
+        "description": "Korean SRoBERTa for semantic similarity. Good for short Korean texts.",
+        "recommended": False,
+        "category": "korean",
+        "lang": "ko",
+        "max_tokens": 512,
+    },
+    # ── Multilingual ──
+    {
+        "name": "BAAI/bge-m3",
+        "dimension": 1024,
+        "size": "~2.2GB",
+        "description": "Top multilingual model. 100+ languages, 8K tokens. Dense + sparse retrieval.",
+        "recommended": False,
+        "category": "multilingual",
+        "lang": "100+ langs",
+        "max_tokens": 8192,
+    },
+    {
+        "name": "intfloat/multilingual-e5-large",
+        "dimension": 1024,
+        "size": "~1.1GB",
+        "description": "Strong multilingual embeddings. Good balance for mixed-language content.",
+        "recommended": False,
+        "category": "multilingual",
+        "lang": "100+ langs",
+        "max_tokens": 512,
+    },
+    {
+        "name": "intfloat/multilingual-e5-base",
+        "dimension": 768,
+        "size": "~470MB",
+        "description": "Mid-size multilingual E5. Good quality with moderate resource usage.",
+        "recommended": False,
+        "category": "multilingual",
+        "lang": "100+ langs",
+        "max_tokens": 512,
+    },
+    {
+        "name": "intfloat/multilingual-e5-small",
+        "dimension": 384,
+        "size": "~118MB",
+        "description": "Smallest multilingual E5. Fast inference, low memory footprint.",
+        "recommended": False,
+        "category": "multilingual",
+        "lang": "100+ langs",
+        "max_tokens": 512,
+    },
+    # ── English Optimized ──
+    {
+        "name": "BAAI/bge-large-en-v1.5",
+        "dimension": 1024,
+        "size": "~1.3GB",
+        "description": "Top English retrieval model. Excellent for English-only environments.",
+        "recommended": False,
+        "category": "english",
+        "lang": "en",
+        "max_tokens": 512,
+    },
+    {
+        "name": "all-mpnet-base-v2",
+        "dimension": 768,
+        "size": "~420MB",
+        "description": "Best all-round English model. High quality sentence embeddings.",
+        "recommended": False,
+        "category": "english",
+        "lang": "en",
+        "max_tokens": 384,
+    },
+    {
+        "name": "BAAI/bge-small-en-v1.5",
+        "dimension": 384,
+        "size": "~130MB",
+        "description": "Compact English model with strong performance. Great for low-resource setups.",
+        "recommended": False,
+        "category": "english",
+        "lang": "en",
+        "max_tokens": 512,
+    },
+    {
+        "name": "all-MiniLM-L6-v2",
+        "dimension": 384,
+        "size": "~80MB",
+        "description": "Most popular English model. Ultra-fast, minimal resource usage.",
+        "recommended": False,
+        "category": "english",
+        "lang": "en",
+        "max_tokens": 256,
+    },
+]
+
+
 class EmbeddingService:
     """임베딩 생성 서비스"""
 
@@ -110,6 +291,7 @@ class EmbeddingService:
         self,
         model_name: Optional[str] = None,
         preload: bool = True,
+        defer_loading: bool = False,
         metrics_collector: Optional["MetricsCollector"] = None,
     ):
         """
@@ -118,6 +300,7 @@ class EmbeddingService:
         Args:
             model_name: 사용할 sentence-transformers 모델 이름 (None이면 설정에서 읽음)
             preload: True면 초기화 시 모델을 미리 로드 (기본값: True)
+            defer_loading: True면 embed() 호출 시 자동 로딩 차단 (Web 서버용)
             metrics_collector: 메트릭 수집기 (선택적)
         """
         if not SENTENCE_TRANSFORMERS_AVAILABLE:
@@ -128,6 +311,13 @@ class EmbeddingService:
 
         self.model: Optional[SentenceTransformer] = None
         self.metrics_collector = metrics_collector
+
+        # 다운로드/로딩 상태 추적
+        self._status: str = "not_loaded"  # not_loaded | downloading | loading | ready | error
+        self._download_progress: float = 0.0
+        self._error_message: Optional[str] = None
+        self._load_lock = threading.Lock()
+        self._defer_loading = defer_loading
 
         # 설정에서 모델 이름 가져오기
         if model_name is None:
@@ -158,14 +348,45 @@ class EmbeddingService:
         if preload:
             self._preload_model()
 
+    @property
+    def is_ready(self) -> bool:
+        """모델이 로드되어 사용 가능한지 여부"""
+        return self._status == "ready" and self.model is not None
+
+    @property
+    def status(self) -> str:
+        """현재 상태: not_loaded | downloading | loading | ready | error"""
+        return self._status
+
+    @property
+    def download_progress(self) -> float:
+        """다운로드 진행률 (0.0 ~ 1.0)"""
+        return self._download_progress
+
+    @property
+    def error_message(self) -> Optional[str]:
+        """에러 메시지 (에러 상태일 때)"""
+        return self._error_message
+
+    def get_status_info(self) -> dict:
+        """현재 상태 정보를 딕셔너리로 반환"""
+        return {
+            "status": self._status,
+            "progress": self._download_progress,
+            "model": self.model_name,
+            "dimension": self.dimension,
+            "error": self._error_message,
+        }
+
     def _preload_model(self) -> None:
         """시작 시 모델 미리 로드 및 검증"""
         logger.info(f"Preloading embedding model: {self.model_name}")
-        # MCP 서버에서는 stdout을 JSON-RPC 전용으로 사용해야 하므로 print 대신 logger 사용
-        logger.info(f"Loading embedding model: {self.model_name}...")
+        self._status = "loading"
+        self._download_progress = 0.0
 
         try:
             self.model = SentenceTransformer(self.model_name)
+            self._download_progress = 0.9
 
             # 모델 차원 자동 감지
             actual_dim = self.model.get_sentence_embedding_dimension()
@@ -180,13 +401,15 @@ class EmbeddingService:
                     f"Model dimension mismatch: expected {self.dimension}, got {len(test_embedding)}"
                 )
 
-            logger.info(f"Model loaded successfully (dimension: {self.dimension})")
+            self._status = "ready"
+            self._download_progress = 1.0
             logger.info(
                 f"Model {self.model_name} preloaded successfully (dimension: {self.dimension})"
             )
 
         except Exception as e:
-            logger.error(f"Failed to load model: {e}")
+            self._status = "error"
+            self._error_message = str(e)
             logger.error(f"Failed to preload model {self.model_name}: {e}")
             raise
 
@@ -194,6 +417,102 @@ class EmbeddingService:
         """모델 로드 (lazy loading - preload=False인 경우 사용)"""
         if self.model is None:
             self._preload_model()
+
+    def load_model_background(
+        self,
+        on_progress: Optional[Callable[[float, str], None]] = None,
+    ) -> threading.Thread:
+        """백그라운드 스레드에서 모델 로드. 완료/에러 시 status가 업데이트됨.
+
+        Args:
+            on_progress: 진행률 콜백 (progress: float, status: str)
+
+        Returns:
+            시작된 Thread 객체
+        """
+        def _worker() -> None:
+            with self._load_lock:
+                if self._status == "ready":
+                    return
+
+                self._status = "downloading"
+                self._download_progress = 0.0
+                self._error_message = None
+
+                try:
+                    logger.info(f"Background loading model: {self.model_name}")
+
+                    # 캐시 여부에 따라 상태 결정
+                    cached = is_model_cached(self.model_name)
+                    if cached:
+                        self._status = "loading"
+                        self._download_progress = 0.5
+                        if on_progress:
+                            on_progress(0.5, "loading")
+                    else:
+                        self._download_progress = 0.1
+                        if on_progress:
+                            on_progress(0.1, "downloading")
+
+                    self.model = SentenceTransformer(self.model_name)
+                    self._download_progress = 0.9
+                    self._status = "loading"
+                    if on_progress:
+                        on_progress(0.9, "loading")
+
+                    # 차원 자동 감지
+                    actual_dim = self.model.get_sentence_embedding_dimension()
+                    if actual_dim != self.dimension:
+                        logger.info(
+                            f"Updating dimension from {self.dimension} to {actual_dim}"
+                        )
+                        self.dimension = actual_dim
+
+                    # 검증
+                    test_embedding = self.model.encode(
+                        "test", convert_to_tensor=False
+                    )
+                    if len(test_embedding) != self.dimension:
+                        raise ValueError(
+                            f"Model dimension mismatch: expected {self.dimension}, "
+                            f"got {len(test_embedding)}"
+                        )
+
+                    self._status = "ready"
+                    self._download_progress = 1.0
+                    if on_progress:
+                        on_progress(1.0, "ready")
+                    logger.info(
+                        f"Model {self.model_name} loaded in background "
+                        f"(dimension: {self.dimension})"
+                    )
+
+                except Exception as e:
+                    self._status = "error"
+                    self._error_message = str(e)
+                    self._download_progress = 0.0
+                    if on_progress:
+                        on_progress(0.0, "error")
+                    logger.error(f"Background model load failed: {e}")
+
+        thread = threading.Thread(target=_worker, daemon=True, name="model-loader")
+        thread.start()
+        return thread
+
+    def switch_model(self, new_model_name: str) -> None:
+        """모델 변경 (온보딩에서 사용자가 모델을 선택한 경우)"""
+        resolved = MODEL_ALIASES.get(new_model_name, new_model_name)
+        if resolved == self.model_name and self._status == "ready":
+            return
+
+        self.model = None
+        self.model_name = resolved
+        self._is_e5 = _is_e5_model(self.model_name)
+        self.dimension = MODEL_DIMENSIONS.get(self.model_name, 384)
+        self._status = "not_loaded"
+        self._download_progress = 0.0
+        self._error_message = None
+        logger.info(f"Model switched to: {self.model_name}")
 
     def _prepare_text(self, text: str, is_query: bool) -> str:
         """E5 모델일 경우 query/passage prefix를 자동 적용"""
@@ -211,6 +530,11 @@ class EmbeddingService:
             is_query: True면 검색 쿼리용 임베딩 (E5 모델에서 "query:" prefix 적용)
         """
         if self.model is None:
+            if self._defer_loading and self._status in ("not_loaded", "downloading", "loading"):
+                raise RuntimeError(
+                    f"Embedding model not ready (status: {self._status}). "
+                    "Please select a model via onboarding first."
+                )
             self.load_model()
 
         assert self.model is not None, "Model should be loaded"
@@ -248,6 +572,11 @@ class EmbeddingService:
             is_query: True면 검색 쿼리용 임베딩 (E5 모델에서 "query:" prefix 적용)
         """
         if self.model is None:
+            if self._defer_loading and self._status in ("not_loaded", "downloading", "loading"):
+                raise RuntimeError(
+                    f"Embedding model not ready (status: {self._status}). "
+                    "Please select a model via onboarding first."
+                )
             self.load_model()
 
         assert self.model is not None, "Model should be loaded"

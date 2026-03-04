@@ -468,3 +468,53 @@ a:focus {
   }
 }
 
+/* Migration Alert Banner */
+.migration-alert {
+  margin: 0.75rem 1.5rem;
+}
+.migration-alert-content {
+  position: relative;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  padding: 0.75rem 2.5rem 0.75rem 1rem;
+  font-size: 0.85rem;
+  color: #92400e;
+}
+.migration-alert-content strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+}
+.migration-alert-content p {
+  margin: 0.2rem 0;
+}
+.migration-alert-content code {
+  background: rgba(0,0,0,0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+.migration-dismiss {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  cursor: pointer;
+  color: #92400e;
+  line-height: 1;
+}
+[data-theme="dark"] .migration-alert-content {
+  background: #422006;
+  border-color: #b45309;
+  color: #fde68a;
+}
+[data-theme="dark"] .migration-alert-content code {
+  background: rgba(255,255,255,0.1);
+}
+[data-theme="dark"] .migration-dismiss {
+  color: #fde68a;
+}
+
