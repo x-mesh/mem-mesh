@@ -279,7 +279,9 @@ async def select_embedding_model(
     # 모델 변경 + DB에 선택 저장 + 백그라운드 다운로드 시작
     embedding_service.switch_model(resolved)
 
-    # DB에 선택한 모델 저장 (재시작 시 자동 로드용)
+    # DB에 선택한 모델 저장
+    # target_embedding_model: 사용자가 선택한 목표 모델 (재시작 시 자동 로드용)
+    # embedding_model: 실제 데이터의 모델 (마이그레이션 완료 후 업데이트)
     from ..lifespan import get_services
     services = get_services()
     db = services.get("db")
@@ -287,8 +289,17 @@ async def select_embedding_model(
         try:
             from app.core.embeddings.service import MODEL_DIMENSIONS
             dim = MODEL_DIMENSIONS.get(resolved, 384)
-            await db._migrator.set_embedding_metadata("embedding_model", resolved)
-            await db._migrator.set_embedding_metadata("embedding_dimension", str(dim))
+
+            # 항상 target 저장 (재시작 시 이 모델로 로드)
+            await db._migrator.set_embedding_metadata("target_embedding_model", resolved)
+            await db._migrator.set_embedding_metadata("target_embedding_dimension", str(dim))
+
+            # 기존 메모리가 없으면 embedding_model도 바로 업데이트 (fresh DB)
+            cursor = await db.execute("SELECT COUNT(*) as count FROM memories")
+            memory_count = cursor.fetchone()["count"]
+            if memory_count == 0:
+                await db._migrator.set_embedding_metadata("embedding_model", resolved)
+                await db._migrator.set_embedding_metadata("embedding_dimension", str(dim))
         except Exception as e:
             logger.warning(f"Failed to persist model selection: {e}")
 

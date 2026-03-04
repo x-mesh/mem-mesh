@@ -115,14 +115,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Database connected successfully")
 
         # 임베딩 서비스 초기화 (deferred loading — 서버 즉시 시작)
-        # 1. DB에 저장된 모델이 있으면 우선 사용 (이전 온보딩에서 선택한 모델)
-        # 2. 없으면 settings의 모델 사용
+        # 우선순위: target_embedding_model (온보딩 선택) > embedding_model (DB) > settings
         embedding_model = settings.embedding_model
         try:
+            target_model = await db._migrator.get_embedding_metadata("target_embedding_model")
             db_model = await db._migrator.get_embedding_metadata("embedding_model")
-            if db_model and db_model != embedding_model:
+            if target_model:
+                if target_model != embedding_model:
+                    logger.info(
+                        "Using target model from onboarding selection",
+                        target_model=target_model,
+                        settings_model=embedding_model,
+                    )
+                embedding_model = target_model
+            elif db_model and db_model != embedding_model:
                 logger.info(
-                    "Using model from DB metadata (previously selected via onboarding)",
+                    "Using model from DB metadata",
                     db_model=db_model,
                     settings_model=embedding_model,
                 )
