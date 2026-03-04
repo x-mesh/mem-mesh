@@ -328,6 +328,20 @@ class RealtimeNotifier:
             logger.debug(f"Memory deleted notification sent to {total_sent} clients")
 
     @staticmethod
+    async def broadcast(event_type: str, data: Dict[str, Any]) -> int:
+        """범용 이벤트 브로드캐스트 (model_download 등)"""
+        message = {
+            "type": event_type,
+            "data": {
+                **data,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+        total_sent = await connection_manager.broadcast_to_all(message)
+        logger.debug(f"Broadcast '{event_type}' sent to {total_sent} clients")
+        return total_sent
+
+    @staticmethod
     async def notify_stats_updated(stats_data: Dict[str, Any]) -> None:
         """통계 업데이트 알림"""
         message = {

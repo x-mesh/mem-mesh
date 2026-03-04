@@ -132,6 +132,11 @@ class DatabaseMigrator:
     async def migrate_embeddings_to_vector_table(self) -> int:
         """Migrate existing embeddings to sqlite-vec vector table.
 
+        Skips migration if:
+        - No memories with embeddings exist
+        - Vector table already has entries
+        - BLOB dimension doesn't match vector table dimension (pending model migration)
+
         Returns:
             Number of embeddings migrated
         """
@@ -153,6 +158,29 @@ class DatabaseMigrator:
             if existing_count > 0:
                 logger.info(
                     f"Vector table already has {existing_count} embeddings, skipping migration"
+                )
+                return 0
+
+            # Check dimension compatibility: BLOB dim vs vector table dim
+            # If a model migration is pending, BLOB dim won't match the new table dim
+            first_blob = memories[0]["embedding"]
+            blob_dim = len(np.frombuffer(first_blob, dtype=np.float32))
+            table_dim_str = await self.get_embedding_metadata("embedding_dimension")
+            target_dim_str = await self.get_embedding_metadata(
+                "target_embedding_dimension"
+            )
+            target_dim = int(target_dim_str) if target_dim_str else None
+            if target_dim and target_dim != blob_dim:
+                logger.info(
+                    f"Skipping auto-migration: BLOB dim ({blob_dim}) != target dim ({target_dim}), "
+                    f"model migration pending"
+                )
+                return 0
+            table_dim = int(table_dim_str) if table_dim_str else blob_dim
+            if blob_dim != table_dim:
+                logger.info(
+                    f"Skipping auto-migration: BLOB dim ({blob_dim}) != table dim ({table_dim}), "
+                    f"model migration required"
                 )
                 return 0
 
