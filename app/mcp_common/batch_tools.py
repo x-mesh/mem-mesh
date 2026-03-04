@@ -9,11 +9,16 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from typing import TYPE_CHECKING
+
 from ..core.database.base import Database
 from ..core.embeddings.service import EmbeddingService
 from ..core.services.cache_manager import get_cache_manager
 from ..core.services.memory import MemoryService
 from ..core.services.search import SearchService
+
+if TYPE_CHECKING:
+    from ..web.websocket.realtime import RealtimeNotifier
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +35,14 @@ class BatchOperationHandler:
         search_service: SearchService,
         embedding_service: EmbeddingService,
         db: Database,
+        notifier: "Optional[RealtimeNotifier]" = None,
     ):
         """Initialize batch operation handler"""
         self.memory_service = memory_service
         self.search_service = search_service
         self.embedding_service = embedding_service
         self.db = db
+        self._notifier = notifier
         self.cache_manager = get_cache_manager()
 
     async def batch_add_memories(
@@ -90,6 +97,23 @@ class BatchOperationHandler:
                             "status": "success",
                         }
                     )
+
+                    # WebSocket 실시간 알림
+                    if self._notifier:
+                        try:
+                            memory_data = {
+                                "id": memory.id,
+                                "content": memory.content,
+                                "project_id": memory.project_id,
+                                "category": memory.category,
+                                "tags": json.loads(memory.tags) if memory.tags else [],
+                                "source": memory.source,
+                                "created_at": memory.created_at,
+                                "updated_at": memory.updated_at,
+                            }
+                            await self._notifier.notify_memory_created(memory_data)
+                        except Exception as e:
+                            logger.warning(f"Failed to send batch realtime notification: {e}")
                 except Exception as e:
                     logger.error(f"Failed to add memory {i}: {e}")
                     errors.append(

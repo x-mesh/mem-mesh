@@ -247,7 +247,11 @@ class RealtimeNotifier:
 
     @staticmethod
     async def notify_memory_created(memory_data: Dict[str, Any]) -> None:
-        """메모리 생성 알림"""
+        """메모리 생성 알림
+
+        broadcast_to_all로 모든 연결된 클라이언트에게 1회만 전송.
+        (이전에는 broadcast_to_all + broadcast_to_project 이중 전송 버그 있었음)
+        """
         message = {
             "type": EventType.MEMORY_CREATED,
             "data": {
@@ -256,23 +260,10 @@ class RealtimeNotifier:
             },
         }
 
-        # 디버깅: 전송되는 메모리 데이터 로깅
-        logger.info(f"WebSocket notify_memory_created - Memory data: {memory_data}")
-
-        # 전체 브로드캐스트
         total_sent = await connection_manager.broadcast_to_all(message)
-
-        # 프로젝트별 브로드캐스트 (있는 경우)
-        project_id = memory_data.get("project_id")
-        if project_id:
-            project_sent = await connection_manager.broadcast_to_project(
-                project_id, message
-            )
-            logger.debug(
-                f"Memory created notification sent to {total_sent} clients ({project_sent} project subscribers)"
-            )
-        else:
-            logger.debug(f"Memory created notification sent to {total_sent} clients")
+        logger.debug(
+            f"Memory created notification sent to {total_sent} clients",
+        )
 
     @staticmethod
     async def notify_memory_updated(
@@ -289,17 +280,7 @@ class RealtimeNotifier:
         }
 
         total_sent = await connection_manager.broadcast_to_all(message)
-
-        project_id = memory_data.get("project_id")
-        if project_id:
-            project_sent = await connection_manager.broadcast_to_project(
-                project_id, message
-            )
-            logger.debug(
-                f"Memory updated notification sent to {total_sent} clients ({project_sent} project subscribers)"
-            )
-        else:
-            logger.debug(f"Memory updated notification sent to {total_sent} clients")
+        logger.debug(f"Memory updated notification sent to {total_sent} clients")
 
     @staticmethod
     async def notify_memory_deleted(
@@ -316,16 +297,7 @@ class RealtimeNotifier:
         }
 
         total_sent = await connection_manager.broadcast_to_all(message)
-
-        if project_id:
-            project_sent = await connection_manager.broadcast_to_project(
-                project_id, message
-            )
-            logger.debug(
-                f"Memory deleted notification sent to {total_sent} clients ({project_sent} project subscribers)"
-            )
-        else:
-            logger.debug(f"Memory deleted notification sent to {total_sent} clients")
+        logger.debug(f"Memory deleted notification sent to {total_sent} clients")
 
     @staticmethod
     async def broadcast(event_type: str, data: Dict[str, Any]) -> int:

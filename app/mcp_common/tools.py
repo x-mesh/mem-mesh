@@ -640,6 +640,39 @@ class MCPToolHandlers:
                 pin_id=pin_id,
                 memory_id=result["memory_id"],
             )
+
+            # 실시간 알림 전송 (pin → memory 승격)
+            if self._notifier:
+                try:
+                    has_memory_service = (
+                        hasattr(self._storage, "memory_service")
+                        and self._storage.memory_service
+                    )
+                    if has_memory_service:
+                        memory = await self._storage.memory_service.get(
+                            result["memory_id"]
+                        )
+                        if memory:
+                            import json as _json
+
+                            memory_data = {
+                                "id": memory.id,
+                                "content": memory.content,
+                                "project_id": memory.project_id,
+                                "category": memory.category,
+                                "tags": (
+                                    _json.loads(memory.tags) if memory.tags else []
+                                ),
+                                "source": memory.source,
+                                "created_at": memory.created_at,
+                                "updated_at": memory.updated_at,
+                            }
+                            await self._notifier.notify_memory_created(memory_data)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to send pin_promote realtime notification: {e}"
+                    )
+
             return result
         except Exception as e:
             logger.error("Error in pin_promote", error=str(e))

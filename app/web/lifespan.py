@@ -255,6 +255,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # WebSocket notifier 가져오기
         from .websocket.realtime import notifier
 
+        # BatchOperationHandler에 notifier 주입
+        if batch_handler:
+            batch_handler._notifier = notifier
+
         # MCP 도구 핸들러에 notifier 주입
         sse.set_tool_handlers(
             MCPToolHandlers(mcp_storage, notifier), batch_handler=batch_handler
