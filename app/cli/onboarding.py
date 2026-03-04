@@ -68,10 +68,10 @@ def _has_docker() -> bool:
 
 
 def _find_compose_file() -> Optional[Path]:
-    """Find docker-compose.yml in current dir or project root."""
+    """Find docker-compose.yml in current working directory."""
     candidates = [
         Path.cwd() / "docker-compose.yml",
-        Path(__file__).resolve().parents[2] / "docker-compose.yml",
+        Path.cwd() / "docker-compose.mem-mesh.yml",
     ]
     for p in candidates:
         if p.exists():
