@@ -19,6 +19,10 @@ INPUT=$(cat)
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 
+# ── Extract IDE session_id from hook stdin ──
+IDE_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
+
 # ── Detect context continuation ──
 IS_CONTINUATION="false"
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
@@ -49,16 +53,26 @@ RESUME_DATA=$(python3 -c "
 import sys, json
 sys.path.insert(0, '$MEM_MESH_PATH')
 try:
-    from app.core.services.pin_service import PinService
-    from app.core.storage.direct import DirectStorageManager
+    from app.core.services.session import SessionService
+    from app.core.database.base import Database
     import asyncio
 
     async def get_resume():
-        storage = DirectStorageManager()
-        await storage.initialize()
-        pin_svc = PinService(storage)
-        result = await pin_svc.session_resume('$PROJECT_DIR', expand='smart')
-        return json.dumps(result, ensure_ascii=False, default=str)
+        db = Database()
+        await db.initialize()
+        svc = SessionService(db)
+
+        # IDE session_id가 있으면 세션에 연결
+        ide_sid = '$IDE_SESSION_ID' or None
+        if ide_sid:
+            await svc.get_or_create_active_session(
+                '$PROJECT_DIR', ide_session_id=ide_sid, client_type='claude-ai'
+            )
+
+        ctx = await svc.resume_last_session('$PROJECT_DIR', expand='smart')
+        if ctx is None:
+            return json.dumps({'status': 'no_session'})
+        return json.dumps(ctx.model_dump(), ensure_ascii=False, default=str)
 
     print(asyncio.run(get_resume()))
 except Exception as e:

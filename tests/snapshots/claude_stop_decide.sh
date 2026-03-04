@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 9
+# mem-mesh-hooks prompt-version: 10
 # Stop hook: keyword-based category matching + structured save (요약+원본)
 # stdin: {"stop_hook_active":bool,"last_assistant_message":"...","transcript_path":"..."} JSON
 # No LLM, no API key — regex keyword matching, skip if no match

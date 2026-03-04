@@ -92,6 +92,8 @@ class PinService:
         tags: Optional[List[str]] = None,
         user_id: Optional[str] = None,
         auto_importance: bool = False,
+        ide_session_id: Optional[str] = None,
+        client_type: Optional[str] = None,
     ) -> PinResponse:
         """
         새 Pin 생성.
@@ -103,6 +105,8 @@ class PinService:
             tags: 태그 목록
             user_id: 사용자 ID
             auto_importance: 자동 중요도 추정 여부
+            ide_session_id: IDE 네이티브 세션 ID
+            client_type: IDE/도구 유형
 
         Returns:
             PinResponse
@@ -111,7 +115,9 @@ class PinService:
 
         # 활성 세션 가져오기 (없으면 자동 생성)
         session = await self.session_service.get_or_create_active_session(
-            project_id, effective_user_id
+            project_id, effective_user_id,
+            ide_session_id=ide_session_id,
+            client_type=client_type,
         )
 
         # 중요도 기본값

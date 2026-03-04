@@ -102,12 +102,14 @@ class DatabaseInitializer:
             )
         """)
 
-        # sessions 테이블 생성 (context-token-optimization 컬럼 포함)
+        # sessions 테이블 생성 (context-token-optimization + IDE session 컬럼 포함)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL REFERENCES projects(id),
                 user_id TEXT NOT NULL DEFAULT 'default',
+                ide_session_id TEXT,
+                client_type TEXT,
                 started_at TEXT NOT NULL,
                 ended_at TEXT,
                 status TEXT NOT NULL DEFAULT 'active',
@@ -321,6 +323,8 @@ class DatabaseInitializer:
         work_tracking_indexes = [
             "CREATE INDEX IF NOT EXISTS idx_sessions_project_status ON sessions(project_id, status)",
             "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_ide ON sessions(project_id, ide_session_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_client_type ON sessions(client_type)",
             "CREATE INDEX IF NOT EXISTS idx_pins_session ON pins(session_id)",
             "CREATE INDEX IF NOT EXISTS idx_pins_project_status ON pins(project_id, status)",
             "CREATE INDEX IF NOT EXISTS idx_pins_importance ON pins(importance DESC)",

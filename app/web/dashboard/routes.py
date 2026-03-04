@@ -469,6 +469,8 @@ async def resume_session(
     expand: Union[bool, str] = False,
     limit: int = 10,
     user_id: str = None,
+    ide_session_id: str = None,
+    client_type: str = None,
     session_service: SessionService = Depends(get_session_service),
 ):
     """
@@ -479,11 +481,29 @@ async def resume_session(
         expand: If True, return full pin content; if False, return summary only
         limit: Number of pins to return (default 10)
         user_id: User ID (optional)
+        ide_session_id: IDE native session ID (optional, for session correlation)
+        client_type: IDE/tool type (optional, e.g. "claude-ai", "Cursor")
     """
     try:
+        # 1. 먼저 resume로 기존 맥락 로드 (cross-session 포함)
         context = await session_service.resume_last_session(
             project_id=project_id, user_id=user_id, expand=expand, limit=limit
         )
+
+        # 2. IDE session_id가 있으면 활성 세션에 연결 (resume 이후)
+        if ide_session_id:
+            await session_service.get_or_create_active_session(
+                project_id=project_id,
+                user_id=user_id,
+                ide_session_id=ide_session_id,
+                client_type=client_type,
+            )
+
+        if context is None:
+            return {
+                "status": "no_session",
+                "message": f"No session found for project: {project_id}",
+            }
         return context.dict()
     except NoActiveSessionError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -504,6 +524,29 @@ async def end_session(
         return session.dict()
     except Exception as e:
         logger.error(f"End session error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/work/sessions/end-by-project/{project_id}")
+async def end_session_by_project(
+    project_id: str,
+    summary: str = None,
+    session_service: SessionService = Depends(get_session_service),
+):
+    """End the most recent active session for a project.
+
+    Used by PreCompact/SessionEnd hooks which only know project_id.
+    """
+    try:
+        session = await session_service.end_session_by_project(project_id, summary)
+        if not session:
+            return {
+                "status": "no_active_session",
+                "message": f"No active session found for project: {project_id}",
+            }
+        return session.dict()
+    except Exception as e:
+        logger.error(f"End session by project error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 9
+# mem-mesh-hooks prompt-version: 10
 # Cursor stop hook: conditionally suggest saving to mem-mesh
 # stdin: {"last_assistant_message":"...", "transcript":[...]} JSON
 
