@@ -2,20 +2,44 @@
 
 import json
 import os
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from app.cli.prompts.behaviors import PROMPT_VERSION
 from app.cli.prompts.renderers import extract_prompt_version
+from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
 from app.cli.hooks.constants import (
     CLAUDE_HOOKS_DIR,
     CLAUDE_SETTINGS,
     CURSOR_HOOKS_DIR,
     CURSOR_SETTINGS,
+    DEFAULT_URL,
     KIRO_HOOKS_DIR,
     KIRO_SETTINGS,
 )
 from app.cli.hooks.json_ops import _count_mem_mesh_hook_entries
+
+
+def _colorize_status(status: str) -> str:
+    """Apply color to a status string based on its content."""
+    if "not installed" in status or "not found" in status or "not configured" in status:
+        return err(status)
+    if "NOT executable" in status:
+        return err(status)
+    if "parse error" in status:
+        return err(status)
+    if "outdated" in status:
+        return warn(status)
+    if "not set" in status:
+        return warn(status)
+    if "installed" in status or "configured" in status or "available" in status:
+        return ok(status)
+    if status == "set":
+        return ok(status)
+    return status
 
 
 def _check_script(path: Path) -> str:
@@ -80,7 +104,10 @@ def _has_prompt_stop_hook(settings_path: Path) -> bool:
         return False
     try:
         data = json.loads(settings_path.read_text(encoding="utf-8"))
-        stop_entries = data.get("hooks", {}).get("Stop", [])
+        hooks = data.get("hooks", {})
+        if not isinstance(hooks, dict):
+            return False
+        stop_entries = hooks.get("Stop", [])
         for entry in stop_entries:
             for hook in entry.get("hooks", []):
                 if hook.get("type") == "prompt":
@@ -94,11 +121,11 @@ def _detect_profile(hooks_dir: Path, settings_path: Optional[Path] = None) -> st
     """Detect installed profile based on hook scripts and settings.
 
     Detection priority:
-    1. mem-mesh-stop-enhanced.sh → "enhanced"
-    2. mem-mesh-stop-decide.sh → "standard"
-    3. settings.json has prompt stop hook → "standard (prompt)"
-    4. mem-mesh-stop.sh → "minimal"
-    5. mem-mesh-reflect.sh → "legacy"
+    1. mem-mesh-stop-enhanced.sh -> "enhanced"
+    2. mem-mesh-stop-decide.sh -> "standard"
+    3. settings.json has prompt stop hook -> "standard (prompt)"
+    4. mem-mesh-stop.sh -> "minimal"
+    5. mem-mesh-reflect.sh -> "legacy"
     """
     has_session_start = (hooks_dir / "mem-mesh-session-start.sh").exists()
     has_enhanced_stop = (hooks_dir / "mem-mesh-stop-enhanced.sh").exists()
@@ -124,78 +151,118 @@ def _detect_profile(hooks_dir: Path, settings_path: Optional[Path] = None) -> st
     return "unknown"
 
 
+def resolve_api_url(baked_url: Optional[str] = None) -> Tuple[str, str]:
+    """Resolve the API URL from environment or baked value.
+
+    Returns (url, source) where source describes where the URL came from.
+    Priority: MEM_MESH_API_URL env > API_URL env > baked URL > DEFAULT_URL.
+    """
+    env_url = os.environ.get("MEM_MESH_API_URL")
+    if env_url:
+        return env_url.rstrip("/"), "MEM_MESH_API_URL env"
+
+    env_url = os.environ.get("API_URL")
+    if env_url:
+        return env_url.rstrip("/"), "API_URL env"
+
+    if baked_url:
+        return baked_url.rstrip("/"), "installed script"
+
+    return DEFAULT_URL.rstrip("/"), "default"
+
+
+def check_connectivity(url: str, timeout: int = 5) -> Tuple[bool, str]:
+    """Check API connectivity by hitting /health endpoint.
+
+    Returns (reachable, message).
+    """
+    health_url = f"{url.rstrip('/')}/health"
+    try:
+        start = time.monotonic()
+        req = urllib.request.Request(health_url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            return True, f"reachable ({resp.status}, {elapsed_ms}ms)"
+    except urllib.error.HTTPError as e:
+        return False, f"HTTP {e.code}"
+    except urllib.error.URLError as e:
+        reason = str(e.reason) if hasattr(e, "reason") else str(e)
+        return False, f"unreachable: {reason}"
+    except Exception as e:
+        return False, f"error: {e}"
+
+
 def cmd_status() -> None:
-    """Print installation status."""
+    """Print installation status with color output."""
     from app.cli.hooks.sync import _find_project_root
 
-    print("=== mem-mesh hooks status ===")
-    print(f"Prompt version: {PROMPT_VERSION} (current)\n")
+    print(header("=== mem-mesh hooks status ==="))
+    print(f"Prompt version: {bold(str(PROMPT_VERSION))} (current)\n")
 
     # Claude Code
-    print("[Claude Code]")
+    print(header("[Claude Code]"))
     session_start = CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh"
     stop = CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh"
     stop_decide = CLAUDE_HOOKS_DIR / "mem-mesh-stop-decide.sh"
     enhanced_stop = CLAUDE_HOOKS_DIR / "mem-mesh-stop-enhanced.sh"
     reflect = CLAUDE_HOOKS_DIR / "mem-mesh-reflect.sh"
-    print(f"  session hook:   {_check_script_version(session_start)}")
+    print(f"  session hook:   {_colorize_status(_check_script_version(session_start))}")
     if enhanced_stop.exists():
-        print(f"  stop hook:      {_check_script_version(enhanced_stop)} (enhanced)")
+        print(f"  stop hook:      {_colorize_status(_check_script_version(enhanced_stop))} {dim('(enhanced)')}")
     elif stop_decide.exists():
-        print(f"  stop hook:      {_check_script_version(stop_decide)} (standard)")
+        print(f"  stop hook:      {_colorize_status(_check_script_version(stop_decide))} {dim('(standard)')}")
     elif _has_prompt_stop_hook(CLAUDE_SETTINGS):
-        print(f"  stop hook:      native prompt (v{PROMPT_VERSION})")
+        print(f"  stop hook:      {ok(f'native prompt (v{PROMPT_VERSION})')}")
     else:
-        print(f"  stop hook:      {_check_script_version(stop)}")
+        print(f"  stop hook:      {_colorize_status(_check_script_version(stop))}")
     session_end = CLAUDE_HOOKS_DIR / "mem-mesh-session-end.sh"
     precompact = CLAUDE_HOOKS_DIR / "mem-mesh-precompact.sh"
     user_prompt_submit = CLAUDE_HOOKS_DIR / "mem-mesh-user-prompt-submit.sh"
     subagent_start = CLAUDE_HOOKS_DIR / "mem-mesh-subagent-start.sh"
     subagent_stop = CLAUDE_HOOKS_DIR / "mem-mesh-subagent-stop.sh"
     task_completed = CLAUDE_HOOKS_DIR / "mem-mesh-task-completed.sh"
-    print(f"  session-end:    {_check_script_version(session_end)}")
-    print(f"  precompact:     {_check_script_version(precompact)}")
-    print(f"  prompt-submit:  {_check_script_version(user_prompt_submit)}")
-    print(f"  subagent-start: {_check_script_version(subagent_start)}")
-    print(f"  subagent-stop:  {_check_script_version(subagent_stop)}")
-    print(f"  task-completed: {_check_script_version(task_completed)}")
-    print(f"  reflect hook:   {_check_script_version(reflect)} (legacy)")
+    print(f"  session-end:    {_colorize_status(_check_script_version(session_end))}")
+    print(f"  precompact:     {_colorize_status(_check_script_version(precompact))}")
+    print(f"  prompt-submit:  {_colorize_status(_check_script_version(user_prompt_submit))}")
+    print(f"  subagent-start: {_colorize_status(_check_script_version(subagent_start))}")
+    print(f"  subagent-stop:  {_colorize_status(_check_script_version(subagent_stop))}")
+    print(f"  task-completed: {_colorize_status(_check_script_version(task_completed))}")
+    print(f"  reflect hook:   {_colorize_status(_check_script_version(reflect))} {dim('(legacy)')}")
 
     detected = _detect_profile(CLAUDE_HOOKS_DIR, CLAUDE_SETTINGS)
-    print(f"  profile:      {detected}")
+    print(f"  profile:        {bold(detected)}")
 
-    url = (
+    baked_url = (
         _extract_url_from_script(session_start)
         or _extract_url_from_script(stop)
     )
-    if url:
-        print(f"  target URL:   {url}")
+    if baked_url:
+        print(f"  target URL:     {info(baked_url)}")
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    print(f"  ANTHROPIC_API_KEY: {'set' if api_key else 'not set'}")
+    print(f"  ANTHROPIC_API_KEY: {_colorize_status('set' if api_key else 'not set')}")
 
     if CLAUDE_SETTINGS.exists():
         try:
             settings = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
             has_hooks = "hooks" in settings
-            print(
-                f"  settings.json hooks: {'configured' if has_hooks else 'not configured'}"
-            )
+            status_text = "configured" if has_hooks else "not configured"
+            print(f"  settings.json hooks: {_colorize_status(status_text)}")
         except (json.JSONDecodeError, OSError):
-            print("  settings.json: parse error")
+            print(f"  settings.json: {err('parse error')}")
     else:
-        print("  settings.json: not found")
+        print(f"  settings.json: {err('not found')}")
 
     print()
 
     # Kiro
-    print("[Kiro]")
+    print(header("[Kiro]"))
     kiro_stop = KIRO_HOOKS_DIR / "mem-mesh-stop.sh"
-    print(f"  stop hook:   {_check_script_version(kiro_stop)}")
+    print(f"  stop hook:   {_colorize_status(_check_script_version(kiro_stop))}")
 
-    url = _extract_url_from_script(kiro_stop)
-    if url:
-        print(f"  target URL:  {url}")
+    kiro_url = _extract_url_from_script(kiro_stop)
+    if kiro_url:
+        print(f"  target URL:  {info(kiro_url)}")
 
     if KIRO_SETTINGS.exists():
         try:
@@ -205,44 +272,45 @@ def cmd_status() -> None:
                 for h in data.get("hooks", [])
                 if h.get("name", "").startswith("mem-mesh:")
             ]
-            print(f"  hooks.json:  {len(mem_hooks)} mem-mesh hook(s) registered")
+            print(f"  hooks.json:  {ok(f'{len(mem_hooks)} mem-mesh hook(s) registered')}")
         except (json.JSONDecodeError, OSError):
-            print("  hooks.json: parse error")
+            print(f"  hooks.json: {err('parse error')}")
     else:
-        print("  hooks.json: not found")
+        print(f"  hooks.json: {dim('not found')}")
 
     print()
 
     # Cursor
-    print("[Cursor]")
+    print(header("[Cursor]"))
     cursor_session = CURSOR_HOOKS_DIR / "mem-mesh-session-start.sh"
     cursor_stop = CURSOR_HOOKS_DIR / "mem-mesh-stop.sh"
     cursor_session_end = CURSOR_HOOKS_DIR / "mem-mesh-session-end.sh"
-    print(f"  session hook: {_check_script_version(cursor_session)}")
-    print(f"  stop hook:    {_check_script_version(cursor_stop)}")
-    print(f"  session-end:  {_check_script_version(cursor_session_end)}")
+    print(f"  session hook: {_colorize_status(_check_script_version(cursor_session))}")
+    print(f"  stop hook:    {_colorize_status(_check_script_version(cursor_stop))}")
+    print(f"  session-end:  {_colorize_status(_check_script_version(cursor_session_end))}")
 
-    url = _extract_url_from_script(cursor_session) or _extract_url_from_script(
+    cursor_url = _extract_url_from_script(cursor_session) or _extract_url_from_script(
         cursor_stop
     )
-    if url:
-        print(f"  target URL:   {url}")
+    if cursor_url:
+        print(f"  target URL:   {info(cursor_url)}")
 
     if CURSOR_SETTINGS.exists():
         try:
             settings = json.loads(CURSOR_SETTINGS.read_text(encoding="utf-8"))
             has_hooks = "hooks" in settings
-            print(f"  hooks.json:   {'configured' if has_hooks else 'not configured'}")
+            status_text = "configured" if has_hooks else "not configured"
+            print(f"  hooks.json:   {_colorize_status(status_text)}")
         except (json.JSONDecodeError, OSError):
-            print("  hooks.json:   parse error")
+            print(f"  hooks.json:   {err('parse error')}")
     else:
-        print("  hooks.json:   not found")
+        print(f"  hooks.json:   {dim('not found')}")
 
     # Project-local hooks
     project_root = _find_project_root()
     if project_root:
         print()
-        print("[Project Local]")
+        print(header("[Project Local]"))
 
         # Kiro hooks
         kiro_dir = project_root / ".kiro" / "hooks"
@@ -252,7 +320,7 @@ def cmd_status() -> None:
             "load-project-context",
         ):
             hook_file = kiro_dir / f"{name}.kiro.hook"
-            print(f"  {name}: {_check_kiro_hook_version(hook_file)}")
+            print(f"  {name}: {_colorize_status(_check_kiro_hook_version(hook_file))}")
 
         # Cursor hooks
         cursor_dir = project_root / ".cursor" / "hooks"
@@ -262,19 +330,31 @@ def cmd_status() -> None:
             "mem-mesh-auto-save.sh",
         ):
             script = cursor_dir / name
-            print(f"  {name}: {_check_script_version(script)}")
+            print(f"  {name}: {_colorize_status(_check_script_version(script))}")
         cursor_settings = project_root / ".cursor" / "hooks.json"
         cursor_template = project_root / ".cursor" / "hooks.mem-mesh.example.json"
         if cursor_settings.exists():
             count = _count_mem_mesh_hook_entries(cursor_settings)
-            print(f"  hooks.json: configured (mem-mesh entries: {count})")
+            print(f"  hooks.json: {ok(f'configured (mem-mesh entries: {count})')}")
         else:
-            print("  hooks.json: not found")
+            print(f"  hooks.json: {dim('not found')}")
         if cursor_template.exists():
-            print("  hooks.mem-mesh.example.json: available")
+            print(f"  hooks.mem-mesh.example.json: {ok('available')}")
         else:
-            print("  hooks.mem-mesh.example.json: not found")
+            print(f"  hooks.mem-mesh.example.json: {dim('not found')}")
+
+    # Connectivity check
+    print()
+    print(header("[Connectivity]"))
+    url, source = resolve_api_url(baked_url)
+    print(f"  API URL:        {info(url)} {dim(f'(from {source})')}")
+    reachable, message = check_connectivity(url)
+    if reachable:
+        print(f"  Health check:   {ok(message)}")
+    else:
+        print(f"  Health check:   {err(message)}")
 
     print()
-    print("Run 'mem-mesh-hooks install --target all' to update global hooks.")
-    print("Run 'mem-mesh-hooks sync-project' to update project-local hooks.")
+    print(dim("Run 'mem-mesh-hooks install --target all' to update global hooks."))
+    print(dim("Run 'mem-mesh-hooks sync-project' to update project-local hooks."))
+    print(dim("Run 'mem-mesh-hooks doctor' for full diagnostics."))

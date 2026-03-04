@@ -23,24 +23,25 @@ classifiers = [
 ]
 
 dependencies = [
+    # CLI-only deps (lightweight)
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+server = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
     "sentence-transformers>=2.2.2",
     "sqlite-vec>=0.0.1a12",
-    "pydantic>=2.5.0",
-    "pydantic-settings>=2.1.0",
     "mcp>=1.0.0",
     "sqlmodel>=0.0.14",
     "python-multipart>=0.0.6",
-    "python-dotenv>=1.0.0",
-    # New dependencies for FastMCP architecture
     "fastmcp>=0.1.0",
     "httpx>=0.25.0",
-    # SQLite with better performance and features
     "pysqlite3>=0.5.0",
 ]
-
-[project.optional-dependencies]
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
@@ -58,9 +59,10 @@ dev = [
 ]
 
 [project.scripts]
-mem-mesh = "src.main:main"
+mem-mesh = "app.cli.main:main"
+# Legacy entry points (backward compat)
 mem-mesh-mcp = "src.__main__:main"
-# New entry points for app/ architecture
+# App architecture entry points
 mem-mesh-mcp-stdio = "app.mcp_stdio.__main__:main"
 mem-mesh-mcp-pure = "app.mcp_stdio_pure.__main__:main"
 mem-mesh-web = "app.web.__main__:main"

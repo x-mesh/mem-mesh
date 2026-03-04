@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-DEFAULT_URL = "https://meme.24x365.online"
+DEFAULT_URL = "http://localhost:8000"
 
 HOOK_PROFILES = {
     "standard": {

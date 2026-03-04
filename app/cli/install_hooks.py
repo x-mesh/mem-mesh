@@ -46,7 +46,7 @@ from app.cli.hooks.templates import (
     USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
 )
 
-DEFAULT_URL = "https://meme.24x365.online"
+DEFAULT_URL = "http://localhost:8000"
 
 # ---------------------------------------------------------------------------
 # Hook script templates — bash boilerplate only; prompt text comes from renderers
@@ -1975,157 +1975,10 @@ def _detect_profile(hooks_dir: Path, settings_path: Optional[Path] = None) -> st
 
 
 def cmd_status() -> None:
-    """Print installation status."""
-    print("=== mem-mesh hooks status ===")
-    print(f"Prompt version: {PROMPT_VERSION} (current)\n")
+    """Print installation status. Delegates to app.cli.hooks.status."""
+    from app.cli.hooks.status import cmd_status as _cmd_status
 
-    # Claude Code
-    print("[Claude Code]")
-    session_start = CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh"
-    stop = CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh"
-    stop_decide = CLAUDE_HOOKS_DIR / "mem-mesh-stop-decide.sh"
-    enhanced_stop = CLAUDE_HOOKS_DIR / "mem-mesh-stop-enhanced.sh"
-    reflect = CLAUDE_HOOKS_DIR / "mem-mesh-reflect.sh"
-    session_end = CLAUDE_HOOKS_DIR / "mem-mesh-session-end.sh"
-    precompact = CLAUDE_HOOKS_DIR / "mem-mesh-precompact.sh"
-    user_prompt_submit = CLAUDE_HOOKS_DIR / "mem-mesh-user-prompt-submit.sh"
-    subagent_start = CLAUDE_HOOKS_DIR / "mem-mesh-subagent-start.sh"
-    subagent_stop = CLAUDE_HOOKS_DIR / "mem-mesh-subagent-stop.sh"
-    task_completed = CLAUDE_HOOKS_DIR / "mem-mesh-task-completed.sh"
-    print(f"  session hook:   {_check_script_version(session_start)}")
-    if enhanced_stop.exists():
-        print(f"  stop hook:      {_check_script_version(enhanced_stop)} (enhanced)")
-    elif stop_decide.exists():
-        print(f"  stop hook:      {_check_script_version(stop_decide)} (standard)")
-    elif _has_prompt_stop_hook(CLAUDE_SETTINGS):
-        print(f"  stop hook:      native prompt (v{PROMPT_VERSION})")
-    else:
-        print(f"  stop hook:      {_check_script_version(stop)}")
-    print(f"  session-end:    {_check_script_version(session_end)}")
-    print(f"  precompact:     {_check_script_version(precompact)}")
-    print(f"  prompt-submit:  {_check_script_version(user_prompt_submit)}")
-    print(f"  subagent-start: {_check_script_version(subagent_start)}")
-    print(f"  subagent-stop:  {_check_script_version(subagent_stop)}")
-    print(f"  task-completed: {_check_script_version(task_completed)}")
-    print(f"  reflect hook:   {_check_script_version(reflect)} (legacy)")
-
-    detected = _detect_profile(CLAUDE_HOOKS_DIR, CLAUDE_SETTINGS)
-    print(f"  profile:      {detected}")
-
-    url = (
-        _extract_url_from_script(session_start)
-        or _extract_url_from_script(stop)
-    )
-    if url:
-        print(f"  target URL:   {url}")
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    print(f"  ANTHROPIC_API_KEY: {'set' if api_key else 'not set'}")
-
-    if CLAUDE_SETTINGS.exists():
-        try:
-            settings = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
-            has_hooks = "hooks" in settings
-            print(
-                f"  settings.json hooks: {'configured' if has_hooks else 'not configured'}"
-            )
-        except (json.JSONDecodeError, OSError):
-            print("  settings.json: parse error")
-    else:
-        print("  settings.json: not found")
-
-    print()
-
-    # Kiro
-    print("[Kiro]")
-    kiro_stop = KIRO_HOOKS_DIR / "mem-mesh-stop.sh"
-    print(f"  stop hook:   {_check_script_version(kiro_stop)}")
-
-    url = _extract_url_from_script(kiro_stop)
-    if url:
-        print(f"  target URL:  {url}")
-
-    if KIRO_SETTINGS.exists():
-        try:
-            data = json.loads(KIRO_SETTINGS.read_text(encoding="utf-8"))
-            mem_hooks = [
-                h
-                for h in data.get("hooks", [])
-                if h.get("name", "").startswith("mem-mesh:")
-            ]
-            print(f"  hooks.json:  {len(mem_hooks)} mem-mesh hook(s) registered")
-        except (json.JSONDecodeError, OSError):
-            print("  hooks.json: parse error")
-    else:
-        print("  hooks.json: not found")
-
-    print()
-
-    # Cursor
-    print("[Cursor]")
-    cursor_session = CURSOR_HOOKS_DIR / "mem-mesh-session-start.sh"
-    cursor_stop = CURSOR_HOOKS_DIR / "mem-mesh-stop.sh"
-    cursor_session_end = CURSOR_HOOKS_DIR / "mem-mesh-session-end.sh"
-    print(f"  session hook: {_check_script_version(cursor_session)}")
-    print(f"  stop hook:    {_check_script_version(cursor_stop)}")
-    print(f"  session-end:  {_check_script_version(cursor_session_end)}")
-
-    url = _extract_url_from_script(cursor_session) or _extract_url_from_script(
-        cursor_stop
-    )
-    if url:
-        print(f"  target URL:   {url}")
-
-    if CURSOR_SETTINGS.exists():
-        try:
-            settings = json.loads(CURSOR_SETTINGS.read_text(encoding="utf-8"))
-            has_hooks = "hooks" in settings
-            print(f"  hooks.json:   {'configured' if has_hooks else 'not configured'}")
-        except (json.JSONDecodeError, OSError):
-            print("  hooks.json:   parse error")
-    else:
-        print("  hooks.json:   not found")
-
-    # Project-local hooks
-    project_root = _find_project_root()
-    if project_root:
-        print()
-        print("[Project Local]")
-
-        # Kiro hooks
-        kiro_dir = project_root / ".kiro" / "hooks"
-        for name in (
-            "auto-save-conversations",
-            "auto-create-pin-on-task",
-            "load-project-context",
-        ):
-            hook_file = kiro_dir / f"{name}.kiro.hook"
-            print(f"  {name}: {_check_kiro_hook_version(hook_file)}")
-
-        # Cursor hooks
-        cursor_dir = project_root / ".cursor" / "hooks"
-        for name in (
-            "mem-mesh-session-start.sh",
-            "mem-mesh-session-end.sh",
-            "mem-mesh-auto-save.sh",
-        ):
-            script = cursor_dir / name
-            print(f"  {name}: {_check_script_version(script)}")
-        cursor_settings = project_root / ".cursor" / "hooks.json"
-        cursor_template = project_root / ".cursor" / "hooks.mem-mesh.example.json"
-        if cursor_settings.exists():
-            count = _count_mem_mesh_hook_entries(cursor_settings)
-            print(f"  hooks.json: configured (mem-mesh entries: {count})")
-        else:
-            print("  hooks.json: not found")
-        if cursor_template.exists():
-            print("  hooks.mem-mesh.example.json: available")
-        else:
-            print("  hooks.mem-mesh.example.json: not found")
-
-    print()
-    print("Run 'mem-mesh-hooks install --target all' to update global hooks.")
-    print("Run 'mem-mesh-hooks sync-project' to update project-local hooks.")
+    _cmd_status()
 
 
 # ---------------------------------------------------------------------------
@@ -2541,6 +2394,9 @@ def main(argv: Optional[List[str]] = None) -> None:
     # status
     subparsers.add_parser("status", help="Show installation status")
 
+    # doctor
+    subparsers.add_parser("doctor", help="Run diagnostics and connectivity checks")
+
     # sync-project
     sync_parser = subparsers.add_parser(
         "sync-project",
@@ -2573,6 +2429,10 @@ def main(argv: Optional[List[str]] = None) -> None:
         cmd_uninstall(args.target)
     elif args.command == "status":
         cmd_status()
+    elif args.command == "doctor":
+        from app.cli.hooks.doctor import cmd_doctor
+
+        cmd_doctor()
     elif args.command == "sync-project":
         cmd_sync_project(args.target, args.project_id)
 
