@@ -169,6 +169,25 @@ class EmbeddingManagerService:
         finally:
             self._migration_in_progress = False
 
+    async def _recreate_vector_table(self, new_dim: int) -> None:
+        """차원 변경 시 memory_embeddings 가상 테이블 DROP → 재생성"""
+        conn = self.db.connection
+        try:
+            conn.execute("DROP TABLE IF EXISTS memory_embeddings")
+            conn.execute(f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings USING vec0(
+                    memory_id TEXT PRIMARY KEY,
+                    embedding FLOAT[{new_dim}]
+                )
+            """)
+            conn.commit()
+            logger.info(
+                f"Recreated memory_embeddings virtual table with dimension {new_dim}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to recreate vector table: {e}")
+            raise
+
     async def _run_migration(
         self,
         batch_size: int,
@@ -181,6 +200,18 @@ class EmbeddingManagerService:
             "failed": 0,
             "skipped": 0,
         }
+
+        # 차원 변경 시 벡터 테이블 재생성
+        new_dim = self.embedding_service.dimension
+        stored_dim_str = await self.db.get_embedding_metadata("embedding_dimension")
+        stored_dim = int(stored_dim_str) if stored_dim_str else None
+        if stored_dim and stored_dim != new_dim:
+            self._migration_progress["message"] = (
+                f"Recreating vector table ({stored_dim} → {new_dim})..."
+            )
+            if progress_callback:
+                progress_callback(self._migration_progress)
+            await self._recreate_vector_table(new_dim)
 
         offset = 0
         batch_num = 0

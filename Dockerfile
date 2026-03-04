@@ -31,9 +31,9 @@ RUN pip install --no-cache-dir torch --extra-index-url https://download.pytorch.
 COPY requirements.txt pyproject.toml ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download embedding model (avoids download on every container start)
-ARG EMBEDDING_MODEL="intfloat/multilingual-e5-large"
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}')"
+# Note: Embedding model is NOT pre-downloaded.
+# Users select their preferred model via the onboarding page on first run.
+# Use docker-compose volume mount to persist the HuggingFace cache across restarts.
 
 # Stage 2: Runtime
 FROM python:3.13-slim
@@ -57,8 +57,9 @@ RUN useradd -m -u 1000 -s /bin/bash memmesh
 # Set working directory
 WORKDIR /app
 
-# Create data directory
-RUN mkdir -p /app/data && chown memmesh:memmesh /app/data
+# Create data and HuggingFace cache directories
+RUN mkdir -p /app/data /home/memmesh/.cache/huggingface && \
+    chown -R memmesh:memmesh /app/data /home/memmesh/.cache
 
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv

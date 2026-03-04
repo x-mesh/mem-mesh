@@ -12,6 +12,7 @@ services:
       - /app/__pycache__
       - /app/.pytest_cache
       - /app/.hypothesis
+      - model-cache:/home/memmesh/.cache/huggingface
     environment:
       - DATABASE_PATH=/app/data/memories.db
       - LOG_LEVEL=DEBUG
@@ -24,6 +25,10 @@ services:
     stdin_open: true
     tty: true
     command: python -m app.web --reload
+
+volumes:
+  model-cache:
+    name: mem-mesh-model-cache
 
 networks:
   default:

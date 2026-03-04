@@ -11,6 +11,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      - model-cache:/home/memmesh/.cache/huggingface
     environment:
       - DATABASE_PATH=/app/data/memories.db
       - LOG_LEVEL=INFO
@@ -25,4 +26,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 10s
+
+volumes:
+  model-cache:
+    name: mem-mesh-model-cache

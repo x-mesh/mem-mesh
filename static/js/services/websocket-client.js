@@ -212,7 +212,11 @@ export class WebSocketClient {
             this._pongTimeout = null;
           }
           break;
-          
+
+        case 'model_download':
+          this.emit('model_download', data);
+          break;
+
         default:
           console.warn('Unknown WebSocket message type:', type);
       }
