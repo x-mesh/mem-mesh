@@ -72,9 +72,33 @@ class DirectStorageBackend(StorageBackend):
             await self.db.connect()
 
             # 임베딩 서비스 초기화 (MCP 서버에서는 preload 하지 않음)
+            # DB metadata의 target/stored 모델을 우선 사용 (마이그레이션 완료 상태 반영)
             settings = get_settings()
+            embedding_model = settings.embedding_model
+            try:
+                target_model = await self.db._migrator.get_embedding_metadata(
+                    "target_embedding_model"
+                )
+                db_model = await self.db._migrator.get_embedding_metadata(
+                    "embedding_model"
+                )
+                if target_model:
+                    embedding_model = target_model
+                    logger.info(
+                        "Using target model from DB metadata",
+                        target_model=target_model,
+                    )
+                elif db_model and db_model != embedding_model:
+                    embedding_model = db_model
+                    logger.info(
+                        "Using stored model from DB metadata",
+                        db_model=db_model,
+                    )
+            except Exception:
+                pass  # DB metadata not available, use settings default
+
             self.embedding_service = EmbeddingService(
-                model_name=settings.embedding_model,
+                model_name=embedding_model,
                 preload=False,  # MCP 서버에서는 lazy loading 사용
             )
 
