@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 10
+# mem-mesh-hooks prompt-version: 11
 # Claude Code SessionStart hook: inject mem-mesh session context
 # Fires on session start AND after compaction (context re-injection)
 # Returns additional_context JSON via /api/work/sessions/resume/{project_id}
@@ -78,13 +78,6 @@ try:
             for p in open_list:
                 content = p.get('content', '?')[:100]
                 lines.append(f'- [pin] {content}')
-        recent = data.get('recent_memories', [])
-        if recent:
-            lines.append('**최근 맥락:**')
-            for r in recent:
-                cat = r.get('category', '?')
-                content = r.get('content', '')[:120].replace('\n', ' ')
-                lines.append(f'- [{cat}] {content}')
         if not lines:
             lines.append('No recent activity.')
         print('\n'.join(lines))

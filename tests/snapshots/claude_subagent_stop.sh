@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 10
+# mem-mesh-hooks prompt-version: 11
 # SubagentStop hook: auto-save important subagent results
 # stdin: {stop_hook_active, agent_id, agent_type, last_assistant_message, ...}
 # Reuses keyword matching logic from stop-decide

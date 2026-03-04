@@ -14,7 +14,7 @@ from typing import List
 # Prompt schema version — bump on ANY behavioral rule change
 # ---------------------------------------------------------------------------
 
-PROMPT_VERSION: int = 10
+PROMPT_VERSION: int = 11
 
 
 # ---------------------------------------------------------------------------

@@ -69,7 +69,7 @@ except Exception:
   fi
 fi
 
-# ── Part 2: Save reminder after N turns without mem-mesh save ──
+# ── Part 2: Save reminder + Pin completion reminder ──
 SAVE_REMINDER_INTERVAL="${MEM_MESH_SAVE_REMINDER_TURNS:-5}"
 
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
@@ -83,6 +83,8 @@ try:
     assistant_turns = 0
     last_save_turn = 0
     turn = 0
+    pin_add_count = 0
+    pin_complete_count = 0
 
     with open(transcript_path, 'r') as f:
         for line in f:
@@ -104,13 +106,25 @@ try:
                         for c in content
                         if isinstance(c, dict)
                     )
-                if 'mcp__mem-mesh__add' in str(content) or 'mcp__mem-mesh__pin_add' in str(content):
+                content_str = str(content)
+                if 'mcp__mem-mesh__add' in content_str or 'mcp__mem-mesh__pin_add' in content_str:
                     last_save_turn = turn
+                if 'mcp__mem-mesh__pin_add' in content_str or 'pin_add' in content_str:
+                    pin_add_count += content_str.count('pin_add')
+                if 'mcp__mem-mesh__pin_complete' in content_str or 'pin_complete' in content_str:
+                    pin_complete_count += content_str.count('pin_complete')
                 assistant_turns = turn
 
+    parts = []
     turns_since_save = assistant_turns - last_save_turn
     if turns_since_save >= interval and assistant_turns >= interval:
-        print(f'mem-mesh에 {turns_since_save}턴 동안 저장하지 않았습니다. 중요한 결정/버그 수정/설계 변경이 있었다면 mcp__mem-mesh__add로 저장하세요.')
+        parts.append(f'mem-mesh에 {turns_since_save}턴 동안 저장하지 않았습니다. 중요한 결정/버그 수정/설계 변경이 있었다면 mcp__mem-mesh__add로 저장하세요.')
+
+    if pin_add_count > 0 and pin_complete_count == 0 and assistant_turns >= 3:
+        parts.append(f'이 세션에서 pin_add가 {pin_add_count}회 호출되었지만 pin_complete는 0회입니다. 완료된 작업이 있다면 pin_complete를 호출하세요.')
+
+    if parts:
+        print('\n'.join(parts))
 except Exception:
     pass
 " "$TRANSCRIPT_PATH" "$SAVE_REMINDER_INTERVAL" 2>/dev/null) || REMINDER=""
