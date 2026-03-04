@@ -66,6 +66,9 @@ def main(argv: Optional[List[str]] = None) -> None:
     update_parser.add_argument("--skip-hooks", action="store_true", help="Skip hook re-installation")
     update_parser.add_argument("--pre", action="store_true", help="Include pre-release versions")
 
+    # --- mem-mesh config ---
+    sub.add_parser("config", help="Show configuration and environment variables")
+
     # --- mem-mesh status ---
     sub.add_parser("status", help="Full system status (server + hooks + MCP)")
 
@@ -125,6 +128,11 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     elif args.command == "hooks":
         _dispatch_hooks(args)
+
+    elif args.command == "config":
+        from app.cli.config_cmd import cmd_config
+
+        cmd_config()
 
     elif args.command == "status":
         from app.cli.system_status import cmd_system_status
