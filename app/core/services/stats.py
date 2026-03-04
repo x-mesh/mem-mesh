@@ -344,14 +344,14 @@ class StatsService:
         try:
             # 프로젝트별 기본 통계
             query = """
-                SELECT 
+                SELECT
                     COALESCE(project_id, 'default') as project_id,
                     COUNT(*) as memory_count,
                     SUM(LENGTH(content)) as total_size,
                     MIN(created_at) as created_at,
                     MAX(created_at) as updated_at
                 FROM memories
-                GROUP BY project_id
+                GROUP BY COALESCE(project_id, 'default')
                 ORDER BY memory_count DESC
             """
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 __VERSION_MARKER__
-# UserPromptSubmit hook: keyword-filtered context search + save reminder (local mode)
+# UserPromptSubmit hook: keyword-filtered context search + save reminder + auto pin (local mode)
 # stdin: {prompt, session_id, transcript_path, cwd, ...}
 # Output: {hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: "..."}} or exit 0
 
@@ -130,6 +130,90 @@ except Exception:
 " "$TRANSCRIPT_PATH" "$SAVE_REMINDER_INTERVAL" 2>/dev/null) || REMINDER=""
 
   [ -n "$REMINDER" ] && PARTS+=("$REMINDER")
+fi
+
+# ── Part 3: Auto pin creation for task-like prompts ──
+AUTO_PIN_ENABLED="${MEM_MESH_AUTO_PIN:-true}"
+LOCAL_API_URL="${MEM_MESH_API_URL:-http://localhost:8000}"
+
+if [ "$AUTO_PIN_ENABLED" = "true" ] && [ ${#PROMPT} -ge 15 ]; then
+  PIN_RESULT=$(python3 -c "
+import sys, re, json, os
+try:
+    import urllib.request
+except ImportError:
+    sys.exit(0)
+
+prompt = sys.argv[1]
+api_url = sys.argv[2]
+prompt_lower = prompt.lower().strip()
+
+# Skip: questions, greetings, short commands
+skip_patterns = [
+    r'^(what|how|why|where|when|who|which|can |does |is |are |do )',
+    r'^(뭐|무엇|어떻|왜|어디|언제|누가|몇|할 수)',
+    r'^(hi|hello|hey|안녕|ㅎㅇ|감사|고마워|ㄳ|ok|ㅇㅋ)',
+    r'^(ls|cd|cat|git (log|status|diff)|pwd)',
+    r'^(show|list|print|display|explain|describe|tell)',
+    r'^(보여|알려|설명|확인해|점검|리뷰|분석)',
+    r'^(계속|continue|yes|no|네|아니|ㅇㅇ|ㄴㄴ)',
+]
+if any(re.search(p, prompt_lower) for p in skip_patterns):
+    sys.exit(0)
+
+# Detect: task-like prompts (imperative action)
+task_patterns = [
+    r'(수정|고쳐|fix|patch|hotfix)',
+    r'(구현|만들어|만들자|implement|build|create)',
+    r'(추가|넣어|add|include)',
+    r'(삭제|제거|remove|delete)',
+    r'(변경|바꿔|change|update|modify|rename)',
+    r'(리팩토링|refactor|개선|improve|optimize|최적화)',
+    r'(배포|deploy|release)',
+    r'(설치|install|setup|설정)',
+    r'(테스트|test|검증)',
+    r'(이동|move|migrate|전환)',
+    r'(해줘|해봐|하자|해주세요|합시다)',
+    r'(write|작성)',
+]
+
+extra_task_kw = os.environ.get('MEM_MESH_AUTO_PIN_KEYWORDS', '')
+if extra_task_kw:
+    task_patterns.extend(extra_task_kw.split(','))
+
+if not any(re.search(p, prompt_lower) for p in task_patterns):
+    sys.exit(0)
+
+content = prompt.strip()[:200]
+if len(content) < 10:
+    content = content + ' (auto-pin)'
+
+project_dir = os.path.basename(os.popen('git rev-parse --show-toplevel 2>/dev/null || pwd').read().strip())
+
+payload = json.dumps({
+    'content': content,
+    'project_id': project_dir,
+    'importance': 3,
+    'tags': ['auto-pin'],
+}).encode()
+
+req = urllib.request.Request(
+    f'{api_url}/api/work/pins',
+    data=payload,
+    headers={'Content-Type': 'application/json'},
+    method='POST',
+)
+try:
+    resp = urllib.request.urlopen(req, timeout=3)
+    data = json.loads(resp.read())
+    pin_id = data.get('id', '')
+    if pin_id:
+        print(f'[Auto-Pin] 작업 핀 생성됨: {pin_id} — 작업 완료 시 pin_complete(\"{pin_id}\")를 호출하세요. 별도로 pin_add를 호출하지 마세요.')
+except Exception:
+    sys.exit(0)
+" "$PROMPT" "$LOCAL_API_URL" 2>/dev/null) || PIN_RESULT=""
+
+  [ -n "$PIN_RESULT" ] && PARTS+=("$PIN_RESULT")
 fi
 
 # ── Combine and output ──

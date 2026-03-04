@@ -1,7 +1,7 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 11
+# mem-mesh-hooks prompt-version: 12
 # Cursor sessionStart hook: load mem-mesh session context
-# Returns additional_context JSON for the agent
+# Returns hookSpecificOutput JSON for the agent
 
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || { echo '{}'; exit 0; }
@@ -32,4 +32,9 @@ ${RESUME_DATA}
 4. **맥락 검색 활용** — 과거 결정/작업/설계가 언급되면 코드 작성 전에 search()로 기존 맥락 확인.
 5. **세션 종료** — 사용자가 완료를 명시하면 요청 처리 후 session_end(project_id="mem-mesh")."
 
-jq -n --arg ctx "$CONTEXT" '{ additional_context: $ctx }'
+jq -n --arg ctx "$CONTEXT" '{
+  hookSpecificOutput: {
+    hookEventName: "SessionStart",
+    additionalContext: $ctx
+  }
+}'
