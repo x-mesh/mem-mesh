@@ -7,8 +7,12 @@
 PYTHON := python
 PIP := pip
 PYTEST := pytest
-DOCKER_COMPOSE := docker compose -f docker/docker-compose.yml
 VERSION := $(shell grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+DOCKER_REGISTRY := jinwoo
+DOCKER_IMAGE := $(DOCKER_REGISTRY)/mem-mesh
+DOCKER_TAG_VERSION := $(DOCKER_IMAGE):$(VERSION)
+DOCKER_TAG_LATEST := $(DOCKER_IMAGE):latest
+DOCKER_COMPOSE := docker compose -f docker/docker-compose.yml
 
 help: ## Show this help message
 	@echo "mem-mesh - AI Memory Management System"
@@ -90,9 +94,13 @@ clean: ## Clean up generated files
 	find . -type f -name ".coverage" -delete 2>/dev/null || true
 	@echo "✓ Cleaned up generated files"
 
-docker-build: ## Build Docker images
+docker-build: ## Build Docker image (tagged version + latest)
+	docker build -t $(DOCKER_TAG_VERSION) -t $(DOCKER_TAG_LATEST) .
+	@echo "✓ Built $(DOCKER_TAG_VERSION) and $(DOCKER_TAG_LATEST)"
+
+docker-build-compose: ## Build Docker images via compose
 	$(DOCKER_COMPOSE) build
-	@echo "✓ Docker images built"
+	@echo "✓ Docker compose images built"
 
 docker-build-mcp: ## Build MCP server Docker image
 	$(DOCKER_COMPOSE) build mcp-server
@@ -101,6 +109,11 @@ docker-build-mcp: ## Build MCP server Docker image
 docker-build-dashboard: ## Build dashboard Docker image
 	$(DOCKER_COMPOSE) build dashboard
 	@echo "✓ Dashboard image built"
+
+docker-push: ## Push Docker image to registry
+	docker push $(DOCKER_TAG_VERSION)
+	docker push $(DOCKER_TAG_LATEST)
+	@echo "✓ Pushed $(DOCKER_TAG_VERSION) and $(DOCKER_TAG_LATEST)"
 
 docker-up: ## Start Docker containers (dashboard only)
 	$(DOCKER_COMPOSE) up -d dashboard

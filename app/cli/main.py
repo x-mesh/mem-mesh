@@ -30,6 +30,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     install_parser.add_argument("--target", choices=["claude", "kiro", "cursor", "all", "auto"], default="auto", help="Target IDE (default: auto-detect)")
     install_parser.add_argument("--profile", choices=["standard", "enhanced", "minimal"], default="standard", help="Hook profile")
     install_parser.add_argument("-y", "--yes", action="store_true", help="Non-interactive mode (use defaults)")
+    install_parser.add_argument("--force", action="store_true", help="Continue despite errors")
 
     # --- mem-mesh serve ---
     serve_parser = sub.add_parser("serve", help="Start API server (dashboard + SSE + MCP)")
@@ -93,6 +94,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             target=args.target,
             profile=args.profile,
             yes=args.yes,
+            force=args.force,
         )
 
     elif args.command == "serve":

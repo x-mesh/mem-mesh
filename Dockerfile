@@ -1,37 +1,53 @@
+# syntax=docker/dockerfile:1
+
 # mem-mesh Docker Image
 # Multi-stage build for optimized production image
 
 # Stage 1: Builder
-FROM python:3.13-slim as builder
+FROM python:3.13-slim AS builder
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     make \
-    curl \
     libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /build
 
-# Copy dependency files
-COPY requirements.txt pyproject.toml ./
-
-# Create virtual environment and install dependencies
+# Create virtual environment
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt
+# Upgrade pip
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Install torch CPU first (largest dependency, separate layer for cache)
+RUN pip install --no-cache-dir torch --extra-index-url https://download.pytorch.org/whl/cpu
+
+# Copy dependency files and install remaining dependencies
+COPY requirements.txt pyproject.toml ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Pre-download embedding model (avoids download on every container start)
+ARG EMBEDDING_MODEL="intfloat/multilingual-e5-large"
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}')"
 
 # Stage 2: Runtime
 FROM python:3.13-slim
 
+LABEL org.opencontainers.image.title="mem-mesh" \
+      org.opencontainers.image.description="AI Memory Management MCP Server" \
+      org.opencontainers.image.source="https://github.com/JINWOO-J/mem-mesh"
+
+# Python runtime settings
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -41,6 +57,9 @@ RUN useradd -m -u 1000 -s /bin/bash memmesh
 # Set working directory
 WORKDIR /app
 
+# Create data directory
+RUN mkdir -p /app/data && chown memmesh:memmesh /app/data
+
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
@@ -48,11 +67,8 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy application code
 COPY --chown=memmesh:memmesh . .
 
-# Create data directory
-RUN mkdir -p /app/data && chown -R memmesh:memmesh /app/data
-
 # Switch to non-root user
-# USER memmesh
+USER memmesh
 
 # Expose ports
 # 8000: Web Dashboard + REST API

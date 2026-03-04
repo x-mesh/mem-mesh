@@ -285,11 +285,22 @@ def _setup_server_source() -> tuple[bool, str]:
     return False, DEFAULT_URL  # Not running yet, user must start manually
 
 
+def _fail(message: str, force: bool) -> None:
+    """Print error and exit unless --force is set."""
+    print(f"  {err(message)}")
+    if force:
+        print(f"  {dim('--force: continuing despite error')}")
+    else:
+        print(f"  {dim('Use --force to continue despite errors.')}")
+        sys.exit(1)
+
+
 def cmd_onboarding(
     url: Optional[str] = None,
     target: str = "auto",
     profile: str = "standard",
     yes: bool = False,
+    force: bool = False,
 ) -> None:
     """Run the onboarding wizard."""
     print()
@@ -350,8 +361,11 @@ def cmd_onboarding(
             print()
             if chosen_key == "docker":
                 reachable, resolved_url = _setup_server_docker(resolved_url)
+                if not reachable:
+                    _fail("Server setup failed.", force)
             elif chosen_key == "source":
                 reachable, resolved_url = _setup_server_source()
+                # Source install doesn't start server, not a failure
             # else: skip
     print()
 
@@ -383,8 +397,8 @@ def cmd_onboarding(
         hooks_installed = True
         print(f"  {ok('Hooks installed successfully.')}")
     except Exception as e:
-        print(f"  {err(f'Hook installation failed: {e}')}")
         hooks_installed = False
+        _fail(f"Hook installation failed: {e}", force)
     print()
 
     # --- Step 3: MCP config ---
