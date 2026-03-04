@@ -201,17 +201,15 @@ class EmbeddingManagerService:
             "skipped": 0,
         }
 
-        # 차원 변경 시 벡터 테이블 재생성
+        # 마이그레이션은 모든 벡터를 재생성하므로 항상 vec 테이블을 DROP+CREATE
+        # (메타데이터가 손상된 경우에도 안전하게 동작)
         new_dim = self.embedding_service.dimension
-        stored_dim_str = await self.db.get_embedding_metadata("embedding_dimension")
-        stored_dim = int(stored_dim_str) if stored_dim_str else None
-        if stored_dim and stored_dim != new_dim:
-            self._migration_progress["message"] = (
-                f"Recreating vector table ({stored_dim} → {new_dim})..."
-            )
-            if progress_callback:
-                progress_callback(self._migration_progress)
-            await self._recreate_vector_table(new_dim)
+        self._migration_progress["message"] = (
+            f"Recreating vector table (dim={new_dim})..."
+        )
+        if progress_callback:
+            progress_callback(self._migration_progress)
+        await self._recreate_vector_table(new_dim)
 
         offset = 0
         batch_num = 0
