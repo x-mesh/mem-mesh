@@ -319,7 +319,7 @@ class PinService:
         from app.core.services.memory import MemoryService
 
         # EmbeddingService: DI된 인스턴스 재사용, 없으면 새로 생성
-        embedding_service = self._embedding_service or EmbeddingService()
+        embedding_service = self._embedding_service or EmbeddingService(preload=False)
         memory_service = MemoryService(self.db, embedding_service)
 
         # importance를 tags에 보존 (Memory에는 importance 필드가 없음)

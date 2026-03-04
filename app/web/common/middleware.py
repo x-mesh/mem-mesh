@@ -56,9 +56,17 @@ def setup_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request, exc: HTTPException):
         """HTTP 예외 핸들러"""
-        error_response = ErrorResponse(
-            error=f"HTTP_{exc.status_code}", message=exc.detail
-        )
+        if isinstance(exc.detail, dict):
+            detail = dict(exc.detail)
+            message = detail.pop("message", str(exc.detail))
+            error_code = detail.pop("error", f"HTTP_{exc.status_code}")
+            error_response = ErrorResponse(
+                error=error_code, message=message, details=detail or None
+            )
+        else:
+            error_response = ErrorResponse(
+                error=f"HTTP_{exc.status_code}", message=exc.detail
+            )
         return JSONResponse(
             status_code=exc.status_code, content=error_response.model_dump()
         )

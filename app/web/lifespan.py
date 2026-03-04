@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from app.core.auth.service import OAuthService
 from app.core.config import Settings
 from app.core.database.base import Database
-from app.core.embeddings.service import EmbeddingService
+from app.core.embeddings.service import EmbeddingService, is_model_cached
 from app.core.services.context import ContextService
 from app.core.services.embedding_manager import EmbeddingManagerService
 from app.core.services.memory import MemoryService
@@ -92,23 +92,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             log_format=log_format,
         )
 
-        # 설정 정보 출력
-        from app.core.version import __VERSION__, MCP_PROTOCOL_VERSION
+        # 설정 정보 (배너는 __main__.py에서 출력하므로 여기서는 로그만)
+        from app.core.version import __VERSION__
 
-        print("\n" + "=" * 60)
-        print(f"  mem-mesh Web Server v{__VERSION__}")
-        print("=" * 60)
-        print(f"  Version:         {__VERSION__}")
-        print(f"  MCP Protocol:    {MCP_PROTOCOL_VERSION}")
-        print(f"  Database Path:   {settings.database_path}")
-        print(f"  LOG_LEVEL:       {log_level}")
-        print(f"  LOG_FILE:        {log_file if log_file else 'console only'}")
-        print(f"  LOG_FORMAT:      {log_format}")
-        print(f"  Storage Mode:    {settings.storage_mode}")
-        print(f"  API Base URL:    {settings.api_base_url}")
-        print(f"  Embedding Model: {settings.embedding_model}")
-        print("  MCP SSE:         /mcp/sse")
-        print("=" * 60 + "\n")
+        logger.info(
+            "Worker starting",
+            version=__VERSION__,
+            pid=os.getpid(),
+            database_path=settings.database_path,
+            embedding_model=settings.embedding_model,
+            storage_mode=settings.storage_mode,
+        )
 
         logger.info(
             "Initializing database connection", database_path=settings.database_path
@@ -120,11 +114,57 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         logger.info("Database connected successfully")
 
-        # 임베딩 서비스 초기화 (모델 미리 로드)
-        logger.info("Loading embedding model", model=settings.embedding_model)
-        embedding_service = EmbeddingService(
-            model_name=settings.embedding_model, preload=True
+        # 임베딩 서비스 초기화 (deferred loading — 서버 즉시 시작)
+        # 1. DB에 저장된 모델이 있으면 우선 사용 (이전 온보딩에서 선택한 모델)
+        # 2. 없으면 settings의 모델 사용
+        embedding_model = settings.embedding_model
+        try:
+            db_model = await db._migrator.get_embedding_metadata("embedding_model")
+            if db_model and db_model != embedding_model:
+                logger.info(
+                    "Using model from DB metadata (previously selected via onboarding)",
+                    db_model=db_model,
+                    settings_model=embedding_model,
+                )
+                embedding_model = db_model
+        except Exception:
+            pass  # DB not ready or metadata table missing
+
+        model_cached = is_model_cached(embedding_model)
+        logger.info(
+            "Initializing embedding service",
+            model=embedding_model,
+            cached=model_cached,
         )
+        embedding_service = EmbeddingService(
+            model_name=embedding_model, preload=False, defer_loading=True
+        )
+
+        # 캐시된 모델이 있으면 백그라운드로 로딩 시작
+        if model_cached:
+            logger.info("Model cached, loading in background")
+
+            _bg_model_name = embedding_model
+
+            def _on_model_progress(progress: float, status: str) -> None:
+                from .websocket.realtime import notifier
+                import asyncio
+
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.call_soon_threadsafe(
+                        asyncio.ensure_future,
+                        notifier.broadcast(
+                            "model_download",
+                            {"progress": progress, "status": status, "model": _bg_model_name},
+                        ),
+                    )
+                except Exception:
+                    pass  # WebSocket not ready yet during startup
+
+            embedding_service.load_model_background(on_progress=_on_model_progress)
+        else:
+            logger.info("Model not cached, waiting for user selection via onboarding")
 
         # 비즈니스 서비스들 초기화
         logger.info("Initializing business services")
