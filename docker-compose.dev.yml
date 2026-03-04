@@ -6,7 +6,7 @@ services:
     image: mem-mesh:dev
     container_name: mem-mesh-dev
     ports:
-      - "8001:8000"
+      - "8000:8000"
     volumes:
       - .:/app
       - /app/__pycache__
