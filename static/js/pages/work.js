@@ -286,7 +286,7 @@ class WorkPage extends HTMLElement {
       <div class="wk-session-inner">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         <span class="wk-session-text">
-          <strong>${esc(this.activeSession.project_id)}</strong> · ${elapsed} · ${pinCount} pins
+          <strong>${esc(this.activeSession.project_id)}</strong>${this.activeSession.client_type ? ` <span class="wk-client-badge">${esc(this.activeSession.client_type)}</span>` : ''} · ${elapsed} · ${pinCount} pins
         </span>
         <button class="wk-session-end-btn">End Session</button>
       </div>
@@ -485,7 +485,7 @@ class WorkPage extends HTMLElement {
           const duration = s.started_at && s.ended_at ? timeDiff(s.started_at, s.ended_at) : '-';
           return `
             <div class="wk-session-item" data-session-id="${esc(s.id)}">
-              <strong>${esc(s.project_id)}</strong>
+              <strong>${esc(s.project_id)}</strong>${s.client_type ? ` <span class="wk-client-badge">${esc(s.client_type)}</span>` : ''}
               <span class="wk-session-item-meta">${relTime(s.started_at)} · ${duration}</span>
               ${s.summary ? `<span class="wk-session-item-summary">${esc(truncate(s.summary, 80))}</span>` : ''}
               <button class="wk-session-pins-btn" data-session-id="${esc(s.id)}">Pins</button>
@@ -1500,6 +1500,18 @@ style.textContent = `
     cursor: pointer;
   }
   .wk-session-end-btn:hover { border-color: var(--text-primary); color: var(--text-primary); }
+  .wk-client-badge {
+    display: inline-block;
+    padding: 0.0625rem 0.375rem;
+    border-radius: 3px;
+    background: var(--accent-color, #6366f1);
+    color: #fff;
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+    line-height: 1.4;
+  }
 
   /* ── Batch bar ──────────────────────────── */
   .wk-batch-bar {
