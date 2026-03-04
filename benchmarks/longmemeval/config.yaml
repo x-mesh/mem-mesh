@@ -1,0 +1,42 @@
+# LongMemEval Benchmark Configuration
+
+experiment_name: "mem-mesh-longmemeval"
+
+# Dataset settings
+dataset:
+  name: "xiaowu0162/longmemeval-cleaned"
+  split: "test"
+  language: "en"  # en or ko
+
+# Indexing settings
+indexing:
+  strategy: "session"  # session, window, turn
+  window_size: 5
+  window_overlap: 1
+  include_date_in_content: true
+  max_content_length: 9500  # AddParams max is 10000, leave margin
+
+# Retrieval settings
+retrieval:
+  top_k: 10
+  search_mode: "hybrid"
+  recency_weight: 0.0
+
+# Generation settings
+generation:
+  model: "claude-sonnet-4-20250514"
+  temperature: 0.0
+  max_tokens: 256
+
+# Evaluation settings
+evaluation:
+  judge_model: "gpt-4o"
+  temperature: 0.0
+
+# Benchmark execution settings
+execution:
+  db_path: "benchmarks/longmemeval/data/benchmark_lme.db"
+  checkpoint_interval: 50
+  max_questions: null  # null = all questions
+  resume_from_checkpoint: true
+  results_dir: "benchmarks/longmemeval/results"

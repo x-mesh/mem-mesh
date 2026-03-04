@@ -1,21 +1,18 @@
 # mem-mesh: AI Memory Management System
 
 ## Project Context & Operations
-
-**Business Goal:** AI 에이전트를 위한 중앙 집중식 메모리 서버. 벡터 검색과 컨텍스트 조회를 통한 지능형 메모리 관리.
-
-**Tech Stack:** Python 3.9+, FastAPI, SQLite + sqlite-vec, sentence-transformers, MCP Protocol
-
+**Business Goal:** 중앙 집중식 메모리 서버를 통해 AI 도구가 벡터 검색과 컨텍스트 조회를 활용하여 실시간으로 기억을 저장·조정하도록 지원합니다.  
+**Tech Stack:** Python 3.9+, FastAPI, FastMCP, sqlite-vec, sentence-transformers, MCP Protocol 2024-11-05/2025-03-26 transports.  
 **Operational Commands:**
 ```bash
 # Development
-python -m app.web --reload              # Web Dashboard + SSE MCP
-python -m app.mcp_stdio                 # FastMCP-based MCP Server
-python -m app.mcp_stdio_pure            # Pure MCP Implementation
+python -m app.web --reload              # FastAPI + SSE MCP dashboard
+python -m app.mcp_stdio                 # FastMCP 기반 stdio MCP 서버
+python -m app.mcp_stdio_pure            # Pure MCP stdio MCP 서버
 
 # Testing
-python -m pytest tests/                 # Run test suite
-python -c "from app.web.app import app" # Quick import test
+python -m pytest tests/                 # 전체 테스트
+python -c "from app.web.app import app"  # FastAPI import check
 
 # Database Migration
 python scripts/migrate_embeddings.py --check-only
@@ -25,238 +22,161 @@ python scripts/migrate_embeddings.py --dry-run
 uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 ```
 
-## Golden Rules
+Note: If port 8000 is already in use locally, it indicates the FastAPI server is already running in reload mode. Do not restart it.
 
+## Golden Rules
 **Immutable Constraints:**
-- SQLite with sqlite-vec for vector operations - NO external vector databases
-- MCP Protocol 2024-11-05 compliance mandatory
-- All embeddings use sentence-transformers models only
-- Database path: `./data/memories.db` (configurable via Settings)
+- SQLite + sqlite-vec virtual tables are the sole vector store; no external vector DBs allowed.
+- MCP Protocol compliance (2024-11-05 core tools, 2025-03-26 Streamable HTTP transport) must be enforced through shared schemas/dispatchers.
+- sentence-transformers models are the only source of embeddings; model changes require migration.
+- The canonical database file is `./data/memories.db` (override only via Settings).
 
 **Do's:**
-- Use `app.core.version` for all version/server info references
-- Implement proper async/await patterns for all database operations
-- Use `mcp_common` module for shared MCP tool logic
-- Apply text logging format by default (`MCP_LOG_FORMAT=text`)
-- Validate all user inputs through Pydantic schemas
+- Use `app.core.version` for all version metadata exposed across MCP transports and APIs.
+- Implement every SQL/vector operation via async/await flows inside the Database classes.
+- Route shared MCP logic through `mcp_common` (tools, dispatcher, transport) to avoid duplicated protocol handling.
+- Emit text log format by default (`MCP_LOG_FORMAT=text`) and keep logs structured for tracing.
+- Validate external input through Pydantic schemas before touching services or storage.
 
 **Don'ts:**
-- Never use `INSERT OR REPLACE` on sqlite-vec virtual tables (use DELETE + INSERT)
-- Never hardcode version numbers or server info in multiple places
-- Never bypass the storage backend abstraction layer
-- Never use JSON logging in MCP servers without explicit configuration
-- Never create direct database connections outside of Database class
+- Never use `INSERT OR REPLACE` with sqlite-vec virtual tables; prefer DELETE+INSERT.
+- Avoid embedding hardcoded version/server info outside of centralized modules.
+- Do not bypass the storage abstraction or open raw sqlite connections outside the Database classes.
+- Do not enable JSON logging inside MCP transports unless explicitly configured.
+- Do not perform database work from synchronous functions or from route handlers directly.
 
 ## Standards & References
-
 **Code Conventions:**
-- Python: Black formatting, type hints mandatory
-- Import order: stdlib, third-party, local (absolute imports preferred)
-- Async functions: Always use proper error handling and logging
+- Format Python with Black and include type hints in public APIs.
+- Maintain import order: stdlib → third-party → local (favor absolute imports).
+- Wrap async functions in try/except, log failures, and propagate structured errors.
 
 **Git Strategy:**
-- Commit format: `type: description` (feat, fix, refactor, docs, test, chore)
-- Korean explanations with English technical terms
-- Use `git --no-pager` for log viewing commands
+- Commit message format: `type: description` (feat, fix, refactor, docs, test, chore).
+- Whenever Korean explanations are needed, pair them with English technical terms for clarity.
+- Use `git --no-pager` variants (`git --no-pager log`, `git --no-pager status`) when reviewing history.
+
+## Workflow
+**Thinking Process (CoT)**
+
+Before generating code or executing commands, you must perform a brief <Thinking> step:
+1. Identify Intent: What is the user's specific goal? (Feat/Fix/Refactor/Query)
+2. Check Context: Which AGENTS.md or module is relevant? (Refer to Context Map)
+3. Verify Constraints: Does this action violate any Golden Rules?
+4. Plan: Outline the step-by-step execution plan.
 
 **Maintenance Policy:**
-규칙과 코드 간 괴리 발견 시 즉시 업데이트를 제안하고 구현하라. 중앙 집중식 관리를 통해 일관성을 유지한다.
+규칙과 코드 사이에 괴리가 보이면 즉시 개선 제안을 제출하고, 중앙 통제 루트(이 AGENTS.md) 및 관련 AGENT 하위 파일을 동시에 업데이트합니다.
 
 ## Context Map (Action-Based Routing)
-
-- **[Core Services & Database](./app/core/AGENTS.md)** — 데이터베이스, 임베딩, 비즈니스 로직 서비스 수정 시
-- **[MCP Protocol Implementation](./app/mcp_common/AGENTS.md)** — MCP 서버 구현, 프로토콜 호환성 작업 시
-- **[Web Dashboard & API](./app/web/AGENTS.md)** — FastAPI 웹 서버, REST API, SSE MCP 엔드포인트 작업 시
-- **[MCP Stdio Servers](./app/mcp_stdio/AGENTS.md)** — FastMCP 기반 stdio MCP 서버 작업 시
-- **[MCP Pure Implementation](./app/mcp_stdio_pure/AGENTS.md)** — 순수 MCP 프로토콜 구현 작업 시
-- **[Frontend UI Components](./static/AGENTS.md)** — 웹 UI, JavaScript 컴포넌트, CSS 스타일링 작업 시
-- **[Migration & Scripts](./scripts/AGENTS.md)** — 데이터 마이그레이션, 유틸리티 스크립트 작업 시
-- **[Testing & Quality](./tests/AGENTS.md)** — 테스트 코드 작성, 품질 보증 작업 시
-
-
-# Context Optimization with mem-mesh Pins
+- **[Core Services & Database](./app/core/AGENTS.md)** — 데이터/임베딩/서비스 변경 시.
+- **[MCP Protocol Implementation](./app/mcp_common/AGENTS.md)** — 공통 MCP 도구, 스토리지, 스키마 작업 시.
+- **[Web API & Dashboard](./app/web/AGENTS.md)** — FastAPI 앱, WebSocket, 전반 UI 라우팅 또는 템플릿 변경 시.
+- **[SSE MCP Transport](./app/web/mcp/AGENTS.md)** — Streamable HTTP/SSE MCP 전송 계층 수정 시.
+- **[FastMCP stdio Server](./app/mcp_stdio/AGENTS.md)** — FastMCP 기반 stdio 서버 작업 시.
+- **[Pure MCP stdio Server](./app/mcp_stdio_pure/AGENTS.md)** — 직접 MCP 프로토콜 구현/디스패처 조정 시.
+- **[Frontend Static Assets](./static/AGENTS.md)** — JavaScript/CSS/프론트엔드 로직 수정 시.
+- **[Migration & Utility Scripts](./scripts/AGENTS.md)** — 마이그레이션, 임베딩/QA/모니터링 유틸리티 작성 또는 실행 시.
+- **[Testing & Quality](./tests/AGENTS.md)** — pytest suites, 통합/회귀 테스트, 테스트 지원 도구 업데이트 시.
+- **[Web Dashboard Pages](./app/web/dashboard/AGENTS.md)** — 대시보드 라우트, 페이지 템플릿, SSE MCP endpoint 고도화 시.
 
 ## Session Context Management
 
-You have access to mem-mesh MCP tools for managing session context efficiently.
+> CLAUDE.md의 Checklist와 MUST/SHOULD/MAY 규칙에 대한 상세 구현 가이드.
 
-### Session Start (Minimal Context Loading)
-
-When starting a new session or resuming work:
+### Session Lifecycle
 
 ```
-Use: mcp_mem_mesh_session_resume
-Parameters:
-  - project_id: [current-project]
-  - expand: false  # Load summary only (~100 tokens)
-  - limit: 10
-
-Action: Display session summary (pins_count, open_pins, completed_pins)
-Do NOT load full pin contents unless specifically needed.
+세션 시작 ──→ 작업 추적 ──→ 세션 종료
+   │              │              │
+   ▼              ▼              ▼
+session_resume  pin_add       지식 보존 판단
+   │            pin_complete     │
+   │            pin_promote    session_end
+   │              │
+   └──── search (과거 맥락) ────┘
 ```
 
-### During Work (Track as Pins) - MANDATORY
-
-**CRITICAL RULE: You MUST create a pin for EVERY task/work item you start.**
-
-When starting ANY task (bug fix, feature, refactor, investigation):
-
+### Session Start
 ```
-MANDATORY: mcp_mem_mesh_pin_add
-Parameters:
-  - project_id: [current-project]
-  - content: [1-line task description]
-  - importance: [1-5]
-    * 5: Critical feature/architecture
-    * 4: Important bug fix/feature
-    * 3: Regular task (default)
-    * 2: Minor improvement
-    * 1: Trivial fix
-  - tags: [relevant, technical, keywords]
-
-REQUIRED: Acknowledge pin creation with pin_id in your response.
+mcp_mem_mesh_session_resume(project_id="mem-mesh", expand="smart", limit=10)
 ```
+Report: `pins_count`, `open_pins`, `completed_pins`
 
-**Importance Guidelines:**
-- 5: Architecture decisions, critical features, breaking changes
-- 4: Important bugs, significant features, API changes
-- 3: Regular tasks, standard bug fixes, refactoring (DEFAULT)
-- 2: Minor improvements, documentation updates
-- 1: Typo fixes, trivial changes
+**Token Optimization — expand 모드:**
+- `expand="smart"` (권장): status × importance 4-Tier 매트릭스
+  - T1: active + important(≥4) → full content + tags + created_at
+  - T2: active + normal(<4) → content[:200] + tags
+  - T3: completed + important → content[:80]
+  - T4: completed + normal → id + importance + status only
+- `expand=false`: All pins as 80-char compact summary — saves ~90% tokens
+- `expand=true`: Full pin content loaded
+- `token_info` shows: `loaded_tokens`, `unloaded_tokens`, `estimated_total`
 
-When task is completed:
+### Task Start
 ```
-MANDATORY: mcp_mem_mesh_pin_complete
-Parameters:
-  - pin_id: [pin-id]
+mcp_mem_mesh_pin_add(content="<description>", project_id="mem-mesh", importance=3, tags=[...])
+```
+- `3`: normal, `4`: important, `5`: architecture
+- Wait for `pin_id` before proceeding
 
-If importance >= 4: MUST suggest promotion to permanent memory.
+### Task Complete
+```
+mcp_mem_mesh_pin_complete(pin_id="<pin_id>")
+```
+If importance ≥ 4: `mcp_mem_mesh_pin_promote(pin_id)`
+
+### Session End & Knowledge Preservation
+```
+mcp_mem_mesh_session_end(project_id="mem-mesh")
 ```
 
-**Enforcement:**
-- NO work without pin creation
-- ALWAYS report pin_id after creation
-- ALWAYS complete pins when work is done
-- NEVER skip pin creation for "small" tasks
+**세션 종료 시 지식 보존 판단 기준:**
 
-### Session End (Selective Persistence)
+| 세션에서 발생한 일 | 저장 방법 | 예시 |
+|-----------------|---------|------|
+| 아키텍처 결정 합의 | `add(category="decision")` | "SQLite + sqlite-vec 유일 벡터 저장소 확정" |
+| 복잡한 버그 해결 | `add(category="bug")` | "sqlite-vec INSERT OR REPLACE 금지 — DELETE+INSERT" |
+| 시스템 장애 복구 | `add(category="incident")` | "포트 8000 충돌로 서버 이중 기동 발생" |
+| 개선 아이디어 | `add(category="idea")` | "한국어 검색에 E5 prefix encoding 검토" |
+| 재사용 패턴 발견 | `add(category="code_snippet")` | batch_operations 사용 패턴 |
+| Pin으로 추적 중인 작업 | `pin_complete` + 필요시 `pin_promote` | — |
 
-When ending a session:
+**저장하지 않는 것**: 단순 Q&A, 파일 읽기, 이미 저장된 내용 반복, 모든 코드 변경 기록.
+저장 시 반드시 **변경 이유(WHY)** 포함.
 
+### Security — 민감 정보 저장 금지
+
+메모리(`add`, `pin_add`)에 아래 정보를 **절대 저장하지 않는다**:
+- API 키, 토큰, 시크릿, 비밀번호
+- 개인식별정보(PII): 이메일, 전화번호, 주민등록번호
+- `.env` 파일 내용, 인증 정보
+- 코드 스니펫 저장 시 민감 값은 `<REDACTED>`로 치환
+
+### Batch Operations (30-50% token savings)
 ```
-1. Review completed pins
-2. For pins with importance >= 4:
-   Use: mcp_mem_mesh_pin_promote
-   Parameters:
-     - pin_id: [pin-id]
-   
-3. End session:
-   Use: mcp_mem_mesh_session_end
-   Parameters:
-     - project_id: [current-project]
-     - summary: [brief session summary]
-
-4. Report promoted memory IDs
-```
-
-### Context Retrieval Strategy
-
-**Layered Loading:**
-- Level 1 (Always): Session summary only (expand=false)
-- Level 2 (On-demand): Full pins when needed (expand=true, limit=5)
-- Level 3 (Search): Use mcp_mem_mesh_search for historical context
-
-**Token Budget:**
-- Session start: ~100 tokens (summary only)
-- Active work: ~50 tokens per pin
-- Session end: ~200 tokens (promotion + summary)
-- Total: ~350 tokens/session (vs 8000+ without optimization)
-
-### Rules
-
-1. **MANDATORY: Create pin for every task** - NO work without pin_add
-2. **Never load full context by default** - Use expand=false for session_resume
-3. **Track work incrementally** - Create pins for each significant task
-4. **Report pin_id immediately** - Always acknowledge pin creation
-5. **Complete pins when done** - Call pin_complete for every finished task
-6. **Filter by importance** - Only promote importance >= 4 to permanent memory
-7. **Search when needed** - Use mcp_mem_mesh_search instead of loading everything
-8. **Clean up sessions** - End sessions properly to maintain context hygiene
-
-### Workflow Enforcement
-
-**Before ANY work:**
-```
-1. Check if task already has a pin (session_resume)
-2. If not, MUST create pin (pin_add)
-3. Report pin_id to user
-4. Proceed with work
+mcp_mem_mesh_batch_operations(operations=[
+  {"type": "add", "content": "...", "project_id": "...", "category": "task"},
+  {"type": "search", "query": "...", "limit": 5}
+])
 ```
 
-**After work completion:**
-```
-1. MUST call pin_complete
-2. If importance >= 4, suggest promotion
-3. Report completion status
-```
+### Memory Relations
+- `link(source_id, target_id, relation_type)` - Create relation
+- `get_links(memory_id)` - Get relations
+- Types: `related` | `parent` | `child` | `supersedes` | `references` | `depends_on` | `similar`
 
-**Violations:**
-- Starting work without pin → STOP and create pin first
-- Completing work without pin_complete → STOP and complete pin
-- Not reporting pin_id → Invalid workflow
+### Search Patterns
+- Recent: `search(query="", limit=5)`
+- Project: `search(query="...", project_id="...")`
+- Recency: `search(query="...", recency_weight=0.3)`
+- Category: `search(query="", category="decision")`
 
-### Example Workflow
+### Categories
+`task` | `bug` | `idea` | `decision` | `incident` | `code_snippet` | `git-history`
 
-```
-User: "Start working on feature X"
-→ session_resume(expand=false) → "Previous session: 3 pins (1 open, 2 completed)"
-→ MANDATORY: pin_add(content="Implement feature X", importance=4, project_id="mem-mesh")
-→ Report: "Created pin [pin-id-123] for feature X"
-→ Proceed with implementation
-
-User: "Feature X done"
-→ MANDATORY: pin_complete(pin_id="pin-id-123")
-→ Suggest: "Pin completed (importance 4). Promote to memory?"
-
-User: "Yes, end session"
-→ pin_promote(pin_id="pin-id-123") → Memory ID: abc123
-→ session_end(summary="Feature X implemented")
-→ Report: "Session ended. 1 pin promoted to memory (ID: abc123)"
-
-Next session:
-User: "What did I do last time?"
-→ session_resume(expand=false) → "Last session: Feature X implemented"
-→ search_memories(query="feature X") → Detailed context from Memory abc123
-```
-
-**Anti-Pattern (WRONG):**
-```
-User: "Fix the bug"
-→ ❌ Start fixing without creating pin
-→ ❌ Complete work without pin_complete
-→ ❌ No tracking, no context preservation
-```
-
-**Correct Pattern:**
-```
-User: "Fix the bug"
-→ ✅ pin_add(content="Fix login validation bug", importance=3)
-→ ✅ Report: "Created pin [pin-id-456]"
-→ ✅ Fix the bug
-→ ✅ pin_complete(pin_id="pin-id-456")
-→ ✅ Report: "Pin completed"
-```
-
-## Integration Points
-
-- **Session hooks**: Auto-load context on session start
-- **Work tracking**: Auto-create pins when tasks begin
-- **Session cleanup**: Auto-promote important pins on session end
-- **Context search**: Use memory search instead of full history loading
-
-## Benefits
-
-- **95% token reduction**: From ~8000 to ~350 tokens per session
-- **Automatic filtering**: Importance-based memory promotion
-- **Incremental tracking**: Real-time work progress without context bloat
-- **Persistent context**: Important work preserved, trivial work discarded
+### Anti-Patterns (하지 말 것)
+- Hook 기반 자동 저장 — 바이트 절단으로 63.4% truncation, 검색 오염 20-30%
+- 모든 파일 변경을 메모리에 기록 — 검색 슬롯 낭비
+- 세션 요약을 head -c로 잘라 저장 — UTF-8 깨짐
+- 맥락 없이 코드 조각만 저장 — WHY 없으면 나중에 무의미

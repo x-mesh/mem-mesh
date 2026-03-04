@@ -9,13 +9,23 @@ export class WebSocketClient {
     this.clientId = this.generateClientId();
     this.isConnected = false;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
-    this.reconnectDelay = 1000; // 1초
+    this.maxReconnectDelay = 60000; // 60초 상한
+    this.reconnectDelay = 1000; // 초기 1초
     this.eventListeners = new Map();
     this.subscribedProjects = new Set();
     this.heartbeatInterval = null;
     this.connectionPromise = null;
     this.isReconnecting = false; // 재연결 중 플래그
+
+    // P4: Pong tracking for dead connection detection
+    this._lastPongTime = 0;
+    this._missedPongs = 0;
+    this._awaitingPong = false;
+    this._pongTimeout = null;
+    this._reconnectTimer = null;
+
+    // P6: Disconnection timestamp for catch-up
+    this._disconnectedAt = null;
   }
   
   /**
@@ -59,20 +69,30 @@ export class WebSocketClient {
         
         this.ws.onopen = () => {
           clearTimeout(timeout);
+          const wasReconnect = this.reconnectAttempts > 0 || this._disconnectedAt;
           this.isConnected = true;
           this.reconnectAttempts = 0;
           this.isReconnecting = false;
           this.connectionPromise = null;
-          
+
           console.log('WebSocket connected successfully');
           this.emit('connected', { clientId: this.clientId });
-          
+
           // 하트비트 시작
           this.startHeartbeat();
-          
+
           // 기존 프로젝트 구독 복원
           this.restoreSubscriptions();
-          
+
+          // 브라우저 이벤트 리스너 (최초 1회)
+          this.setupBrowserListeners();
+
+          // P6: 재연결 시 catch-up 이벤트
+          if (wasReconnect && this._disconnectedAt) {
+            this.emit('reconnected', { disconnectedAt: this._disconnectedAt });
+            this._disconnectedAt = null;
+          }
+
           resolve();
         };
         
@@ -115,13 +135,23 @@ export class WebSocketClient {
   disconnect() {
     if (this.ws) {
       this.isConnected = false;
-      this.ws.close();
+      this.ws.close(1000, 'Client disconnect');
       this.ws = null;
     }
-    
+
     this.stopHeartbeat();
+    this.removeBrowserListeners();
     this.connectionPromise = null;
-    
+
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+    if (this._pongTimeout) {
+      clearTimeout(this._pongTimeout);
+      this._pongTimeout = null;
+    }
+
     console.log('WebSocket disconnected');
     this.emit('disconnected');
   }
@@ -168,11 +198,19 @@ export class WebSocketClient {
           break;
           
         case 'heartbeat':
-          // 하트비트 응답 - 특별한 처리 불필요
+          // 서버 하트비트도 연결 활성 증거
+          this._lastPongTime = Date.now();
+          this._missedPongs = 0;
           break;
-          
+
         case 'pong':
-          // ping에 대한 응답
+          this._lastPongTime = Date.now();
+          this._missedPongs = 0;
+          this._awaitingPong = false;
+          if (this._pongTimeout) {
+            clearTimeout(this._pongTimeout);
+            this._pongTimeout = null;
+          }
           break;
           
         default:
@@ -193,22 +231,24 @@ export class WebSocketClient {
       console.log('Already reconnecting, skipping duplicate handleDisconnect');
       return;
     }
-    
+
     this.isConnected = false;
     this.stopHeartbeat();
-    
+
+    // P6: 끊김 시점 기록 (재연결 후 catch-up용)
+    if (!this._disconnectedAt) {
+      this._disconnectedAt = new Date().toISOString();
+    }
+
     console.log('WebSocket disconnected:', event.code, event.reason, 'Attempt:', this.reconnectAttempts);
     this.emit('disconnected', { code: event.code, reason: event.reason });
-    
-    // 자동 재연결 시도 (reconnectAttempts는 scheduleReconnect에서 증가)
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+
+    // 정상 종료(code 1000)가 아니면 항상 재연결 시도 — 포기 없음
+    if (event.code !== 1000) {
       this.isReconnecting = true;
-      this.emit('reconnecting', { attempt: this.reconnectAttempts + 1, max: this.maxReconnectAttempts });
+      const delay = this._getReconnectDelay();
+      this.emit('reconnecting', { attempt: this.reconnectAttempts + 1, delay });
       this.scheduleReconnect();
-    } else {
-      console.error('Max reconnection attempts reached');
-      this.isReconnecting = false;
-      this.emit('max_reconnect_attempts_reached');
     }
   }
   
@@ -217,21 +257,29 @@ export class WebSocketClient {
    */
   scheduleReconnect() {
     this.reconnectAttempts++;
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1); // 지수 백오프
-    
+    const delay = this._getReconnectDelay();
+
     console.log(`Scheduling reconnection attempt ${this.reconnectAttempts} in ${delay}ms`);
-    
-    setTimeout(async () => {
-      // 다음 재연결 시도를 위해 플래그 리셋
+
+    this._reconnectTimer = setTimeout(async () => {
       this.isReconnecting = false;
-      
+
       try {
         await this.connect();
       } catch (error) {
         console.error('Reconnection failed:', error);
-        // 에러 발생해도 handleDisconnect에서 다음 재연결을 스케줄링함
+        // connect() 실패 시 onerror → handleDisconnect → 다시 scheduleReconnect
       }
     }, delay);
+  }
+
+  /**
+   * 지수 백오프 + 상한 60초
+   * 1s → 2s → 4s → 8s → 16s → 32s → 60s → 60s → ...
+   */
+  _getReconnectDelay() {
+    const exponential = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+    return Math.min(exponential, this.maxReconnectDelay);
   }
   
   /**
@@ -239,16 +287,30 @@ export class WebSocketClient {
    */
   startHeartbeat() {
     this.stopHeartbeat();
-    
+    this._lastPongTime = Date.now();
+    this._missedPongs = 0;
+
     this.heartbeatInterval = setInterval(() => {
-      if (this.isConnected) {
-        this.send({
-          type: 'ping',
-          data: {
-            timestamp: new Date().toISOString()
-          }
-        });
+      if (!this.isConnected) return;
+
+      // Check if previous pings were answered
+      const timeSinceLastPong = Date.now() - this._lastPongTime;
+      if (timeSinceLastPong > 65000) {
+        // No pong for over 65s (missed 2+ heartbeats) — connection likely dead
+        this._missedPongs++;
+        console.warn(`WebSocket: no pong for ${Math.round(timeSinceLastPong / 1000)}s (missed: ${this._missedPongs})`);
+
+        if (this._missedPongs >= 2) {
+          console.error('WebSocket connection confirmed dead, force reconnecting');
+          this._forceReconnect();
+          return;
+        }
       }
+
+      this.send({
+        type: 'ping',
+        data: { timestamp: new Date().toISOString() }
+      });
     }, 30000); // 30초마다 ping
   }
   
@@ -262,6 +324,55 @@ export class WebSocketClient {
     }
   }
   
+  /**
+   * 강제 재연결 — 소켓 종료 + 상태 초기화 + 즉시 connect
+   */
+  _forceReconnect() {
+    console.log('WebSocket: force reconnecting...');
+    this.isConnected = false;
+    this.isReconnecting = false;
+    this.reconnectAttempts = 0;
+    this.stopHeartbeat();
+
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+    if (this._pongTimeout) {
+      clearTimeout(this._pongTimeout);
+      this._pongTimeout = null;
+    }
+
+    if (this.ws) {
+      try { this.ws.close(); } catch (e) { /* ignore */ }
+      this.ws = null;
+    }
+
+    this.connectionPromise = null;
+    this.connect().catch(() => {});
+  }
+
+  /**
+   * 연결 검증 — ping 보내고 5초 내 pong 확인
+   */
+  _validateConnection() {
+    if (this._awaitingPong) return; // 이미 검증 중
+    this._awaitingPong = true;
+
+    this._pongTimeout = setTimeout(() => {
+      if (this._awaitingPong) {
+        console.warn('WebSocket validation failed: no pong within 5s');
+        this._awaitingPong = false;
+        this._forceReconnect();
+      }
+    }, 5000);
+
+    this.send({
+      type: 'ping',
+      data: { timestamp: new Date().toISOString() }
+    });
+  }
+
   /**
    * 메시지 전송
    */
@@ -330,6 +441,65 @@ export class WebSocketClient {
     }
   }
   
+  /**
+   * 브라우저 visibility / network 이벤트 리스너 (최초 1회)
+   */
+  setupBrowserListeners() {
+    if (this._visibilityHandler) return; // 이미 등록됨
+
+    // P1: 탭 활성화 시 연결 검증
+    this._visibilityHandler = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('Tab became visible, checking WebSocket health...');
+        if (!this.isConnected) {
+          this.reconnectAttempts = 0;
+          this.connect().catch(() => {});
+        } else {
+          this._validateConnection();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', this._visibilityHandler);
+
+    // P2: 네트워크 복구 시 재연결
+    this._onlineHandler = () => {
+      console.log('Network came online, checking WebSocket...');
+      if (!this.isConnected) {
+        this.reconnectAttempts = 0;
+        this.connect().catch(() => {});
+      } else {
+        this._validateConnection();
+      }
+    };
+    window.addEventListener('online', this._onlineHandler);
+
+    // P2: 네트워크 끊김 시 heartbeat 일시 중지
+    this._offlineHandler = () => {
+      console.log('Network went offline');
+      this.emit('network_offline');
+      this.stopHeartbeat();
+    };
+    window.addEventListener('offline', this._offlineHandler);
+  }
+
+  /**
+   * 브라우저 이벤트 리스너 제거
+   */
+  removeBrowserListeners() {
+    if (this._visibilityHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+      this._visibilityHandler = null;
+    }
+    if (this._onlineHandler) {
+      window.removeEventListener('online', this._onlineHandler);
+      this._onlineHandler = null;
+    }
+    if (this._offlineHandler) {
+      window.removeEventListener('offline', this._offlineHandler);
+      this._offlineHandler = null;
+    }
+  }
+
   /**
    * 이벤트 리스너 등록
    */

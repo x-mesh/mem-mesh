@@ -1,0 +1,69 @@
+{
+  "summary": {
+    "total_questions": 500,
+    "overall_accuracy": 0.832,
+    "task_averaged_accuracy": 0.8359,
+    "abstention_accuracy": 0.8333,
+    "abstention_count": 30
+  },
+  "by_category": {
+    "single-session-user": {
+      "count": 70,
+      "correct": 63,
+      "accuracy": 0.9,
+      "recall_any": 0.9143,
+      "recall_all": 0.9143
+    },
+    "single-session-assistant": {
+      "count": 56,
+      "correct": 55,
+      "accuracy": 0.9821,
+      "recall_any": 0.9821,
+      "recall_all": 0.9821
+    },
+    "single-session-preference": {
+      "count": 30,
+      "correct": 20,
+      "accuracy": 0.6667,
+      "recall_any": 0.9667,
+      "recall_all": 0.9667
+    },
+    "multi-session": {
+      "count": 133,
+      "correct": 101,
+      "accuracy": 0.7594,
+      "recall_any": 1.0,
+      "recall_all": 0.9398
+    },
+    "temporal-reasoning": {
+      "count": 133,
+      "correct": 106,
+      "accuracy": 0.797,
+      "recall_any": 0.9774,
+      "recall_all": 0.9173
+    },
+    "knowledge-update": {
+      "count": 78,
+      "correct": 71,
+      "accuracy": 0.9103,
+      "recall_any": 1.0,
+      "recall_all": 0.9487
+    }
+  },
+  "retrieval_metrics": {
+    "recall_any_avg": 0.978,
+    "recall_all_avg": 0.938
+  },
+  "timing": {
+    "avg_search_ms": 697.3,
+    "avg_generation_s": 15.1,
+    "total_questions": 500
+  },
+  "config": {
+    "variant": "s",
+    "topk": 5,
+    "search_mode": "hybrid",
+    "use_cot": false,
+    "claude_model": "sonnet"
+  }
+}

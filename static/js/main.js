@@ -27,6 +27,7 @@ import { ChromaSearchBar } from './components/chroma-search-bar.js';
 import { DashboardPreview } from './components/dashboard-preview.js';
 import { SearchableCombobox } from './components/searchable-combobox.js';
 import { ConnectionStatus } from './components/connection-status.js';
+import { AlertPanel } from './components/alert-panel.js';
 
 // Import chart components
 import './components/chroma-charts.js';
@@ -46,6 +47,8 @@ import { SettingsPage } from './pages/settings-page.js';
 import { WorkPage } from './pages/work.js';
 import { MonitoringPage } from './pages/monitoring.js';
 import { ProjectAnalyticsPage } from './pages/project-analytics.js';
+import { OAuthPage } from './pages/oauth.js';
+import { OnboardingPage } from './pages/onboarding.js';
 
 /**
  * Main Application Class
@@ -93,7 +96,15 @@ class App {
       
       // Start router
       this.router.start();
-      
+
+      // P5: 전역 WebSocket 연결 — 모든 페이지에서 실시간 업데이트 수신
+      wsClient.connect().catch(err => {
+        console.warn('Initial WebSocket connection failed:', err);
+      });
+
+      // Check embedding model status — redirect to onboarding if not ready
+      this.checkEmbeddingStatus();
+
       console.log('mem-mesh Web UI initialized successfully');
       
     } catch (error) {
@@ -121,6 +132,8 @@ class App {
     this.pages.set('work', WorkPage);
     this.pages.set('monitoring', MonitoringPage);
     this.pages.set('project-analytics', ProjectAnalyticsPage);
+    this.pages.set('oauth', OAuthPage);
+    this.pages.set('onboarding', OnboardingPage);
   }
   
   /**
@@ -142,8 +155,71 @@ class App {
     this.router.register('/settings', () => this.renderPage('settings'));
     this.router.register('/monitoring', () => this.renderPage('monitoring'));
     this.router.register('/project-analytics', () => this.renderPage('project-analytics'));
+    this.router.register('/oauth', () => this.renderPage('oauth'));
+    this.router.register('/onboarding', () => this.renderPage('onboarding'));
   }
-  
+
+  /**
+   * Check if embedding model is ready. Redirect to onboarding if not.
+   */
+  async checkEmbeddingStatus() {
+    // Don't redirect if already on onboarding
+    if (window.location.pathname === '/onboarding') return;
+
+    try {
+      const res = await fetch('/api/embeddings/loading-status');
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (data.status === 'not_loaded') {
+        this.router.navigate('/onboarding');
+        return;
+      } else if (data.status === 'downloading' || data.status === 'loading') {
+        this.router.navigate('/onboarding');
+        return;
+      }
+      // 'ready' — check for model migration
+      this.checkMigrationStatus();
+    } catch (e) {
+      console.warn('Could not check embedding status:', e);
+    }
+  }
+
+  /**
+   * Check if DB model differs from current model and show migration alert.
+   */
+  async checkMigrationStatus() {
+    try {
+      const res = await fetch('/api/health');
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const alertEl = document.getElementById('migration-alert');
+      if (!alertEl) return;
+
+      if (data.needs_migration && data.migration_info) {
+        const info = data.migration_info;
+        alertEl.innerHTML = `
+          <div class="migration-alert-content">
+            <strong>Embedding Model Mismatch</strong>
+            <p>DB: <code>${info.stored_model}</code> (dim: ${info.stored_dim})
+               &rarr; Current: <code>${info.current_model}</code> (dim: ${info.current_dim})</p>
+            <p>Run migration: <code>python scripts/migrate_embeddings.py</code></p>
+            <button id="dismiss-migration" class="migration-dismiss">&times;</button>
+          </div>
+        `;
+        alertEl.style.display = '';
+        alertEl.querySelector('#dismiss-migration')?.addEventListener('click', () => {
+          alertEl.style.display = 'none';
+        });
+      } else {
+        alertEl.style.display = 'none';
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
   /**
    * Setup global event listeners
    */
@@ -296,6 +372,12 @@ class App {
           break;
         case 'project-analytics':
           pageElement = document.createElement('project-analytics-page');
+          break;
+        case 'oauth':
+          pageElement = document.createElement('oauth-page');
+          break;
+        case 'onboarding':
+          pageElement = document.createElement('onboarding-page');
           break;
         default:
           throw new Error(`Unknown page: ${pageName}`);

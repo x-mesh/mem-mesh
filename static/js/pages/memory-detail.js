@@ -269,27 +269,16 @@ class MemoryDetailPage extends HTMLElement {
     try {
       console.log('Loading memory data via direct API calls...');
       
-      // 직접 메모리 ID로 조회
-      const memoryUrl = new URL(`/api/memories/${this.memoryId}`, window.location.origin);
-      const memoryResponse = await fetch(memoryUrl);
-      
-      if (!memoryResponse.ok) {
-        throw new Error(`Memory not found: ${memoryResponse.status}`);
-      }
-      
-      const memory = await memoryResponse.json();
-      
-      // 컨텍스트 데이터 로드
-      const contextUrl = new URL(`/api/memories/${this.memoryId}/context`, window.location.origin);
-      contextUrl.searchParams.append('depth', '2');
-      
-      const contextResponse = await fetch(contextUrl);
+      const api = window.app?.apiClient;
+      if (!api) throw new Error('APIClient not available');
+
+      const memory = await api.getMemory(this.memoryId);
+
       let contextData = [];
-      
-      if (contextResponse.ok) {
-        const contextResult = await contextResponse.json();
+      try {
+        const contextResult = await api.getContext(this.memoryId, 2);
         contextData = contextResult.related_memories || [];
-      } else {
+      } catch {
         console.warn('Context loading failed, continuing without context');
       }
       
@@ -723,9 +712,51 @@ class MemoryDetailPage extends HTMLElement {
         return placeholder;
       });
       
+      // 마크다운 테이블 처리 (HTML 이스케이프 전)
+      const tableBlocks = [];
+      formatted = formatted.replace(
+        /(?:^|\n)((?:\|[^\n]+\|\n?)+)/g,
+        (match, tableText) => {
+          const rows = tableText.trim().split('\n').filter(r => r.trim());
+          if (rows.length < 2) return match;
+          // 구분선 행 확인 (|---|---|)
+          const sepIdx = rows.findIndex(r => {
+            const cells = r.split('|').slice(1, -1);
+            return cells.length > 0 && cells.every(c => /^[\s:-]+$/.test(c));
+          });
+          if (sepIdx < 0) return match;
+
+          const parseRow = (row) => row.split('|').slice(1, -1).map(c => c.trim());
+          const headerCells = parseRow(rows[sepIdx - 1] || rows[0]);
+          const bodyRows = rows.slice(sepIdx + 1);
+
+          let html = '<table class="md-table"><thead><tr>';
+          headerCells.forEach(c => {
+            const escaped = this.escapeHtml(c).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            html += `<th>${escaped}</th>`;
+          });
+          html += '</tr></thead><tbody>';
+          bodyRows.forEach(row => {
+            html += '<tr>';
+            parseRow(row).forEach(c => {
+              const escaped = this.escapeHtml(c)
+                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+              html += `<td>${escaped}</td>`;
+            });
+            html += '</tr>';
+          });
+          html += '</tbody></table>';
+
+          const placeholder = `__TABLE_BLOCK_${tableBlocks.length}__`;
+          tableBlocks.push(html);
+          return `\n${placeholder}\n`;
+        }
+      );
+
       // 인라인 코드 처리 전에 나머지 HTML 이스케이프
       formatted = this.escapeHtml(formatted);
-      
+
       // 간단한 마크다운 변환
       formatted = formatted
         .replace(/\n/g, '<br>')
@@ -742,6 +773,11 @@ class MemoryDetailPage extends HTMLElement {
       // 코드 블록 플레이스홀더를 실제 코드로 교체
       codeBlocks.forEach((block, index) => {
         formatted = formatted.replace(`__CODE_BLOCK_${index}__`, block);
+      });
+
+      // 테이블 플레이스홀더를 실제 테이블로 교체
+      tableBlocks.forEach((block, index) => {
+        formatted = formatted.replace(`__TABLE_BLOCK_${index}__`, block);
       });
       
       // Prism.js로 문법 강조 적용 (다음 틱에서 실행)
@@ -894,6 +930,12 @@ class MemoryDetailPage extends HTMLElement {
                 <span class="meta-value">${this.memory.source}</span>
               </div>
             ` : ''}
+            ${this.memory.client ? `
+              <div class="meta-item">
+                <span class="meta-label">Client:</span>
+                <span class="client-badge client-${this.memory.client}">${this.memory.client}</span>
+              </div>
+            ` : ''}
           </div>
           
           <div class="memory-body">
@@ -1026,7 +1068,7 @@ style.textContent = `
     margin-bottom: 2rem;
   }
   
-  .header-actions {
+  .memory-detail-page .header-actions {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -1158,7 +1200,21 @@ style.textContent = `
     font-size: 0.875rem;
     font-weight: 500;
   }
-  
+
+  .client-badge {
+    background: var(--bg-tertiary, #374151);
+    color: var(--text-primary);
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--border-radius-sm);
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+  }
+  .client-claude_code { background: #d97706; color: #fff; }
+  .client-cursor { background: #7c3aed; color: #fff; }
+  .client-kiro { background: #059669; color: #fff; }
+  .client-web { background: #2563eb; color: #fff; }
+
   .memory-body {
     padding: 2rem;
   }
@@ -1170,23 +1226,55 @@ style.textContent = `
     margin-bottom: 2rem;
     text-transform: none !important;
   }
-  
+
+  .memory-text strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  .memory-text em {
+    color: var(--text-primary);
+  }
+
   .memory-text code {
     background: var(--bg-secondary);
+    color: var(--text-primary);
     padding: 0.125rem 0.25rem;
     border-radius: var(--border-radius-sm);
     font-family: var(--font-mono);
     font-size: 0.875rem;
     text-transform: none !important;
   }
-  
+
   .memory-text a {
     color: var(--primary-color);
     text-decoration: none;
   }
-  
+
   .memory-text a:hover {
     text-decoration: underline;
+  }
+
+  .memory-text .md-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+  }
+  .memory-text .md-table th,
+  .memory-text .md-table td {
+    border: 1px solid var(--border-color, #e0e0e0);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    color: var(--text-primary);
+  }
+  .memory-text .md-table th {
+    background: var(--bg-secondary, #f5f5f5);
+    font-weight: 600;
+  }
+  .memory-text .md-table tr:hover {
+    background: var(--bg-hover, rgba(0,0,0,0.02));
   }
   
   .memory-tags {
@@ -1660,7 +1748,7 @@ style.textContent = `
       height: auto;
     }
     
-    .header-actions {
+    .memory-detail-page .header-actions {
       flex-direction: column;
       gap: 1rem;
       align-items: stretch;

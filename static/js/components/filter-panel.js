@@ -54,8 +54,8 @@ class FilterPanel extends HTMLElement {
         // In a real implementation, fetch available tags from API
         this.availableTags = ['architecture', 'database', 'frontend', 'backend', 'testing', 'deployment'];
       }
-    } catch (error) {
-      console.warn('Failed to load tags:', error);
+    } catch {
+      // Tag loading failed silently
     }
   }
   

@@ -4,7 +4,63 @@ Query Expander - 한국어/영어 검색어 확장
 """
 
 import re
-from typing import List, Dict, Set
+from typing import Dict, List, Optional, Tuple
+
+KOREAN_TIME_EXPRESSIONS: Dict[str, str] = {
+    "오늘": "today",
+    "어제": "yesterday",
+    "이번주": "this_week",
+    "이번 주": "this_week",
+    "지난주": "last_week",
+    "지난 주": "last_week",
+    "이번달": "this_month",
+    "이번 달": "this_month",
+    "지난달": "last_month",
+    "지난 달": "last_month",
+    "이번분기": "this_quarter",
+    "이번 분기": "this_quarter",
+}
+
+ENGLISH_TIME_EXPRESSIONS: Dict[str, str] = {
+    "today": "today",
+    "yesterday": "yesterday",
+    "this week": "this_week",
+    "last week": "last_week",
+    "this month": "this_month",
+    "last month": "last_month",
+    "this quarter": "this_quarter",
+}
+
+
+def extract_time_expression(query: str) -> Tuple[Optional[str], str]:
+    """쿼리에서 시간 표현을 추출하고 제거된 쿼리를 반환.
+
+    Args:
+        query: 원본 쿼리 문자열
+
+    Returns:
+        (time_range, cleaned_query) 튜플.
+        time_range가 None이면 시간 표현이 감지되지 않은 것.
+    """
+    lower = query.strip()
+
+    # 한국어 시간 표현 (길이 순 내림차 — 긴 패턴 우선)
+    for expr in sorted(KOREAN_TIME_EXPRESSIONS, key=len, reverse=True):
+        if expr in lower:
+            time_range = KOREAN_TIME_EXPRESSIONS[expr]
+            cleaned = lower.replace(expr, "").strip()
+            # 남은 쿼리가 비어있으면 원본 유지
+            return (time_range, cleaned if cleaned else query)
+
+    # 영어 시간 표현
+    for expr in sorted(ENGLISH_TIME_EXPRESSIONS, key=len, reverse=True):
+        if expr in lower.lower():
+            time_range = ENGLISH_TIME_EXPRESSIONS[expr]
+            # 대소문자 무시하여 제거
+            cleaned = re.sub(re.escape(expr), "", lower, flags=re.IGNORECASE).strip()
+            return (time_range, cleaned if cleaned else query)
+
+    return (None, query)
 
 
 class QueryExpander:
@@ -22,7 +78,7 @@ class QueryExpander:
             "캐싱": "caching",
             "메모리": "memory",
             "배치": "batch",
-            "임베딩": "embedding",
+            "임베딩": "embedding embed",
             "벡터": "vector",
             "의도": "intent",
             "점수": "score",
@@ -36,7 +92,7 @@ class QueryExpander:
             "저장": "save storage",
             "로드": "load",
             "분석": "analyze analysis",
-            "테스트": "test",
+            "테스트": "test testing",
             "결과": "result",
             "문제": "problem issue",
             "해결": "solve solution",
@@ -74,7 +130,7 @@ class QueryExpander:
             "경고": "warning",
             "로그": "log logging",
             "디버그": "debug debugging",
-            "추적": "trace tracking",
+            "추적": "trace tracking tracing",
             "모니터링": "monitor monitoring",
             "메트릭": "metric metrics",
             "통계": "statistics stats",
@@ -127,7 +183,6 @@ class QueryExpander:
             "딕셔너리": "dictionary dict",
             "세트": "set",
             "트리": "tree",
-            "그래프": "graph",
             "노드": "node",
             "엣지": "edge",
             "경로": "path route",
@@ -182,14 +237,12 @@ class QueryExpander:
             "로우": "row",
             "컬럼": "column",
             "테이블": "table",
-            "인덱스": "index",
             "뷰": "view",
             "트리거": "trigger",
             "프로시저": "procedure",
             "펑션": "function",
             "트랜잭션": "transaction",
             "커밋": "commit",
-            "롤백": "rollback",
             "락": "lock",
             "데드락": "deadlock",
             "동시성": "concurrency concurrent",
@@ -202,21 +255,16 @@ class QueryExpander:
             "인증": "authentication auth",
             "권한": "authorization permission",
             "액세스": "access",
-            "토큰": "token",
-            "세션": "session",
             "쿠키": "cookie",
             "헤더": "header",
             "바디": "body",
             "페이로드": "payload",
-            "요청": "request",
-            "응답": "response",
             "상태코드": "status code",
             "리다이렉트": "redirect",
             "프록시": "proxy",
             "게이트웨이": "gateway",
             "로드밸런서": "load balancer",
             "클러스터": "cluster",
-            "노드": "node",
             "파드": "pod",
             "컨테이너": "container",
             "도커": "docker",
@@ -235,7 +283,6 @@ class QueryExpander:
             "신뢰성": "reliability reliable",
             "내구성": "durability durable",
             "복구": "recovery recover",
-            "백업": "backup",
             "스냅샷": "snapshot",
             "체크포인트": "checkpoint",
             "복제": "replication replicate",
@@ -248,11 +295,9 @@ class QueryExpander:
             "복호화": "decryption decrypt",
             "해시": "hash",
             "솔트": "salt",
-            "키": "key",
             "인증서": "certificate cert",
             "서명": "signature sign",
             "검증": "validation verify",
-            "테스트": "test testing",
             "단위테스트": "unit test",
             "통합테스트": "integration test",
             "엔드투엔드": "end to end e2e",
@@ -264,18 +309,11 @@ class QueryExpander:
             "프로파일링": "profiling profile",
             "디버깅": "debugging debug",
             "로깅": "logging log",
-            "추적": "tracing trace",
-            "모니터링": "monitoring monitor",
             "알람": "alarm alert",
             "노티피케이션": "notification notify",
-            "대시보드": "dashboard",
             "리포트": "report",
-            "분석": "analysis analyze",
-            "통계": "statistics stats",
-            "메트릭": "metrics metric",
             "지표": "indicator kpi",
             "트렌드": "trend",
-            "패턴": "pattern",
             "이상": "anomaly abnormal",
             "정상": "normal",
             "임계값": "threshold",
@@ -289,12 +327,11 @@ class QueryExpander:
             "높이": "height",
             "깊이": "depth",
             "차원": "dimension",
-            "벡터": "vector",
             "행렬": "matrix",
             "텐서": "tensor",
             "스칼라": "scalar",
             "그래디언트": "gradient",
-            "역전파": "backpropagation",
+            "역전파": "backpropagation backprop",
             "순전파": "forward propagation",
             "신경망": "neural network",
             "딥러닝": "deep learning",
@@ -309,13 +346,12 @@ class QueryExpander:
             "차원축소": "dimensionality reduction",
             "특징추출": "feature extraction",
             "전처리": "preprocessing preprocess",
-            "정규화": "normalization normalize",
+            "정규화": "normalization normalize regularization regularize",
             "표준화": "standardization standardize",
             "인코딩": "encoding encode",
             "디코딩": "decoding decode",
             "토큰화": "tokenization tokenize",
             "벡터화": "vectorization vectorize",
-            "임베딩": "embedding embed",
             "어텐션": "attention",
             "트랜스포머": "transformer",
             "컨볼루션": "convolution convolutional cnn",
@@ -337,20 +373,16 @@ class QueryExpander:
             "교차검증": "cross validation",
             "과적합": "overfitting overfit",
             "과소적합": "underfitting underfit",
-            "정규화": "regularization regularize",
-            "드롭아웃": "dropout",
             "조기종료": "early stopping",
             "학습률": "learning rate",
             "배치크기": "batch size",
             "에폭": "epoch",
             "반복": "iteration iterate",
             "스텝": "step",
-            "그래디언트": "gradient",
             "옵티마이저": "optimizer",
             "모멘텀": "momentum",
             "아담": "adam",
             "경사하강법": "gradient descent sgd",
-            "역전파": "backpropagation backprop",
             "미분": "differentiation derivative",
             "적분": "integration integral",
             "행렬곱": "matrix multiplication matmul",
@@ -390,7 +422,7 @@ class QueryExpander:
             "체비셰프거리": "chebyshev distance",
             "마할라노비스거리": "mahalanobis distance",
             "브레그만발산": "bregman divergence",
-            "총변동거리": "total variation distance"
+            "총변동거리": "total variation distance",
         }
 
         # 영어 → 한국어 역방향 사전 생성
@@ -452,18 +484,18 @@ class QueryExpander:
 
     def is_korean(self, text: str) -> bool:
         """텍스트가 한국어인지 확인"""
-        korean_pattern = re.compile('[가-힣]+')
+        korean_pattern = re.compile("[가-힣]+")
         return bool(korean_pattern.search(text))
 
     def is_english(self, text: str) -> bool:
         """텍스트가 영어인지 확인"""
-        english_pattern = re.compile('[a-zA-Z]+')
+        english_pattern = re.compile("[a-zA-Z]+")
         return bool(english_pattern.search(text))
 
     def get_language(self, text: str) -> str:
         """텍스트의 주 언어 판별"""
-        korean_count = len(re.findall('[가-힣]', text))
-        english_count = len(re.findall('[a-zA-Z]', text))
+        korean_count = len(re.findall("[가-힣]", text))
+        english_count = len(re.findall("[a-zA-Z]", text))
 
         if korean_count > english_count:
             return "korean"

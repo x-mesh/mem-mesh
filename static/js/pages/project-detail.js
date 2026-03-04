@@ -114,17 +114,7 @@ class ProjectDetailPage extends HTMLElement {
       // Load all memories to get project info and filter by project
       let searchResult;
       
-      if (window.app && window.app.apiClient) {
-        searchResult = await window.app.apiClient.searchMemories('', { 
-          limit: 1000 // Get all memories
-        });
-      } else {
-        const response = await fetch('/api/memories/search?query=&limit=1000');
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        searchResult = await response.json();
-      }
+      searchResult = await window.app.apiClient.searchMemories('', { limit: 1000 });
       
       if (searchResult && searchResult.results) {
         this.processProjectData(searchResult.results);

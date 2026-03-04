@@ -4,12 +4,12 @@
 """
 
 import asyncio
-import json
+
+from app.core.config import Settings
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
-from app.core.services.search import SearchService
 from app.core.services.enhanced_search import EnhancedSearchService
-from app.core.config import Settings
+from app.core.services.search import SearchService
 
 
 async def test_token_search():
@@ -22,30 +22,29 @@ async def test_token_search():
     embedding_service = EmbeddingService(preload=False)
     basic_search = SearchService(db, embedding_service)
     enhanced_search = EnhancedSearchService(
-        db, embedding_service,
+        db,
+        embedding_service,
         enable_quality_scoring=True,
         enable_feedback=False,
-        enable_dynamic_embedding=False
+        enable_dynamic_embedding=False,
     )
 
-    print("="*60)
+    print("=" * 60)
     print("토큰 검색 테스트 - 문제 진단")
-    print("="*60)
+    print("=" * 60)
 
     # 여러 검색어 테스트
     test_queries = ["토큰", "token", "토큰 최적화", "token optimization"]
 
     for query in test_queries:
         print(f"\n🔍 검색어: '{query}'")
-        print("-"*40)
+        print("-" * 40)
 
         # 1. Basic Search - 하이브리드 모드
         print("\n1️⃣ Basic Search (hybrid mode):")
         try:
             response = await basic_search.search(
-                query=query,
-                limit=5,
-                search_mode='hybrid'
+                query=query, limit=5, search_mode="hybrid"
             )
 
             print(f"   결과 수: {len(response.results)}")
@@ -59,9 +58,7 @@ async def test_token_search():
         print("\n2️⃣ Basic Search (text mode):")
         try:
             response = await basic_search.search(
-                query=query,
-                limit=5,
-                search_mode='text'
+                query=query, limit=5, search_mode="text"
             )
 
             print(f"   결과 수: {len(response.results)}")
@@ -75,57 +72,59 @@ async def test_token_search():
         print("\n3️⃣ Enhanced Search (smart mode):")
         try:
             response = await enhanced_search.search(
-                query=query,
-                limit=5,
-                search_mode='smart',
-                performance_mode='balanced'
+                query=query, limit=5, search_mode="smart", performance_mode="balanced"
             )
 
             print(f"   결과 수: {len(response.results)}")
             for i, r in enumerate(response.results[:3], 1):
                 print(f"   {i}. [{r.category}] {r.content[:80]}...")
-                if hasattr(r, 'quality_score'):
-                    print(f"      품질점수: {r.quality_score:.3f}, 프로젝트: {r.project_id}")
+                if hasattr(r, "quality_score"):
+                    print(
+                        f"      품질점수: {r.quality_score:.3f}, 프로젝트: {r.project_id}"
+                    )
                 else:
-                    print(f"      점수: {r.similarity_score:.3f}, 프로젝트: {r.project_id}")
+                    print(
+                        f"      점수: {r.similarity_score:.3f}, 프로젝트: {r.project_id}"
+                    )
 
-            if hasattr(response, 'metadata'):
-                print(f"   의도 분석: {response.metadata.get('intent', {}).get('type', 'unknown')}")
+            if hasattr(response, "metadata"):
+                print(
+                    f"   의도 분석: {response.metadata.get('intent', {}).get('type', 'unknown')}"
+                )
         except Exception as e:
             print(f"   오류: {e}")
 
     # 프로젝트별 필터링 테스트
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("프로젝트 필터링 테스트")
-    print("="*60)
+    print("=" * 60)
 
-    projects = ['mem-mesh-optimization', 'mem-mesh-search-quality', 'mem-mesh-thread-summary-kr']
+    projects = [
+        "mem-mesh-optimization",
+        "mem-mesh-search-quality",
+        "mem-mesh-thread-summary-kr",
+    ]
 
     for project_id in projects:
         print(f"\n📁 프로젝트: {project_id}")
         response = await basic_search.search(
-            query="토큰",
-            project_id=project_id,
-            limit=3,
-            search_mode='hybrid'
+            query="토큰", project_id=project_id, limit=3, search_mode="hybrid"
         )
         print(f"   결과 수: {len(response.results)}")
         if response.results:
             print(f"   첫 결과: {response.results[0].content[:100]}...")
 
     # 직접 SQL로 확인
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("직접 SQL 쿼리 테스트")
-    print("="*60)
+    print("=" * 60)
 
-    cursor = await db.execute(
-        """
+    cursor = await db.execute("""
         SELECT content, project_id, category
         FROM memories
         WHERE content LIKE '%토큰%' OR content LIKE '%token%'
         LIMIT 10
-        """
-    )
+        """)
     rows = cursor.fetchall()
 
     print(f"\nSQL LIKE 검색 결과: {len(rows)}개")
@@ -134,15 +133,15 @@ async def test_token_search():
         print(f"   {row[0][:100]}...")
 
     # 임베딩 테스트
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("임베딩 생성 테스트")
-    print("="*60)
+    print("=" * 60)
 
     test_texts = [
         "토큰 최적화",
         "token optimization",
         "토큰을 줄이는 방법",
-        "reducing tokens"
+        "reducing tokens",
     ]
 
     for text in test_texts:

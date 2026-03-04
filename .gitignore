@@ -6,13 +6,15 @@
 *.egg-info
 __pycache__/
 .hypothesis/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 .coverage.*
-.cache
-imports/**
-.vscode
+.cache/
+imports/
+.vscode/
 .idea
-.vscode
 # Directories to ignore
 data/
 data_bak/
@@ -21,3 +23,15 @@ logs/
 **/data_bak/
 **/logs/
 **/data_bak_0122/
+.venv/
+**/results/
+
+# Worktrees
+.cursor/worktrees/
+.claude/worktrees/
+
+# Benchmark
+benchmarks/longmemeval/dbs/
+benchmarks/longmemeval/results_v1_backup/
+
+**/.omc/**

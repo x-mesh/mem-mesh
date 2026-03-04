@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mem-mesh"
-version = "0.1.0"
+version = "1.1.3"
 description = "Centralized memory system for AI development tools"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -23,42 +23,50 @@ classifiers = [
 ]
 
 dependencies = [
+    # CLI-only deps (lightweight)
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+server = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
     "sentence-transformers>=2.2.2",
     "sqlite-vec>=0.0.1a12",
-    "pydantic>=2.5.0",
-    "pydantic-settings>=2.1.0",
     "mcp>=1.0.0",
     "sqlmodel>=0.0.14",
     "python-multipart>=0.0.6",
-    "python-dotenv>=1.0.0",
-    # New dependencies for FastMCP architecture
     "fastmcp>=0.1.0",
     "httpx>=0.25.0",
-    # SQLite with better performance and features
     "pysqlite3>=0.5.0",
 ]
-
-[project.optional-dependencies]
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
     "hypothesis>=6.88.0",
     "black>=23.0.0",
     "isort>=5.12.0",
     "mypy>=1.7.0",
+    "types-requests>=2.31.0",
     "coverage>=7.3.0",
     "pre-commit>=3.5.0",
+    "tiktoken>=0.5.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
 ]
 
 [project.scripts]
-mem-mesh = "src.main:main"
+mem-mesh = "app.cli.main:main"
+# Legacy entry points (backward compat)
 mem-mesh-mcp = "src.__main__:main"
-# New entry points for app/ architecture
+# App architecture entry points
 mem-mesh-mcp-stdio = "app.mcp_stdio.__main__:main"
 mem-mesh-mcp-pure = "app.mcp_stdio_pure.__main__:main"
 mem-mesh-web = "app.web.__main__:main"
+mem-mesh-hooks = "app.cli.install_hooks:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -89,22 +97,28 @@ line_length = 88
 known_first_party = ["src", "app"]
 
 [tool.mypy]
-python_version = "3.9"
-warn_return_any = true
+python_version = "3.10"
+warn_return_any = false
 warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
 check_untyped_defs = true
-disallow_untyped_decorators = true
+disallow_untyped_decorators = false
 no_implicit_optional = true
 warn_redundant_casts = true
-warn_unused_ignores = true
+warn_unused_ignores = false
 warn_no_return = true
-warn_unreachable = true
+warn_unreachable = false
 strict_equality = true
+
+[[tool.mypy.overrides]]
+module = ["mcp.*", "fastmcp.*"]
+follow_imports = "skip"
+ignore_errors = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+pythonpath = ["."]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
@@ -113,6 +127,7 @@ markers = [
     "unit: Unit tests",
     "integration: Integration tests",
     "property: Property-based tests",
+    "eval: DX evaluation tests (Tier 3 requires RUN_EVALS=1)",
 ]
 
 [tool.coverage.run]

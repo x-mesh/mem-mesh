@@ -4,14 +4,14 @@
 """
 
 from datetime import datetime, timedelta
-from typing import Optional, Literal
+from typing import Literal, Optional
 
-from fastapi import APIRouter, Query, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.core.services.monitoring import MonitoringService
-from app.core.services.alert import AlertService
 from app.core.database.base import Database
+from app.core.services.alert import AlertService
+from app.core.services.monitoring import MonitoringService
 from app.web.common.dependencies import get_database
 
 router = APIRouter(prefix="/api/monitoring", tags=["monitoring"])
@@ -180,19 +180,18 @@ def get_alert_service(db: Database = Depends(get_database)) -> AlertService:
 async def get_search_metrics(
     start_date: datetime = Query(
         default_factory=lambda: datetime.utcnow() - timedelta(days=1),
-        description="시작 날짜 (ISO 8601 형식)"
+        description="시작 날짜 (ISO 8601 형식)",
     ),
     end_date: datetime = Query(
-        default_factory=datetime.utcnow,
-        description="종료 날짜 (ISO 8601 형식)"
+        default_factory=datetime.utcnow, description="종료 날짜 (ISO 8601 형식)"
     ),
     project_id: Optional[str] = Query(None, description="프로젝트 ID"),
     aggregation: Literal["hourly", "daily"] = Query("hourly", description="집계 단위"),
-    service: MonitoringService = Depends(get_monitoring_service)
+    service: MonitoringService = Depends(get_monitoring_service),
 ):
     """
     검색 메트릭 조회
-    
+
     시간대별 검색 품질 메트릭을 집계하여 반환합니다.
     """
     try:
@@ -200,7 +199,7 @@ async def get_search_metrics(
             start_date=start_date,
             end_date=end_date,
             project_id=project_id,
-            aggregation=aggregation
+            aggregation=aggregation,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -213,19 +212,15 @@ async def get_query_analysis(
         "frequency", description="정렬 기준"
     ),
     days: int = Query(7, ge=1, le=90, description="분석 기간 (일)"),
-    service: MonitoringService = Depends(get_monitoring_service)
+    service: MonitoringService = Depends(get_monitoring_service),
 ):
     """
     쿼리 분석
-    
+
     검색 쿼리를 분석하여 빈도, 유사도, 응답 시간 등의 통계를 반환합니다.
     """
     try:
-        return await service.get_query_analysis(
-            limit=limit,
-            sort_by=sort_by,
-            days=days
-        )
+        return await service.get_query_analysis(limit=limit, sort_by=sort_by, days=days)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -234,23 +229,21 @@ async def get_query_analysis(
 async def get_embedding_metrics(
     start_date: datetime = Query(
         default_factory=lambda: datetime.utcnow() - timedelta(days=1),
-        description="시작 날짜 (ISO 8601 형식)"
+        description="시작 날짜 (ISO 8601 형식)",
     ),
     end_date: datetime = Query(
-        default_factory=datetime.utcnow,
-        description="종료 날짜 (ISO 8601 형식)"
+        default_factory=datetime.utcnow, description="종료 날짜 (ISO 8601 형식)"
     ),
-    service: MonitoringService = Depends(get_monitoring_service)
+    service: MonitoringService = Depends(get_monitoring_service),
 ):
     """
     임베딩 메트릭 조회
-    
+
     임베딩 생성 성능 메트릭을 집계하여 반환합니다.
     """
     try:
         return await service.get_embedding_metrics(
-            start_date=start_date,
-            end_date=end_date
+            start_date=start_date, end_date=end_date
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -260,29 +253,26 @@ async def get_embedding_metrics(
 async def get_recent_searches(
     limit: int = Query(50, ge=1, le=200, description="최대 결과 수"),
     project_id: Optional[str] = Query(None, description="프로젝트 ID"),
-    service: MonitoringService = Depends(get_monitoring_service)
+    service: MonitoringService = Depends(get_monitoring_service),
 ):
     """
     최근 검색 목록 조회
-    
+
     최근 수행된 검색 목록을 반환합니다.
     """
     try:
-        return await service.get_recent_searches(
-            limit=limit,
-            project_id=project_id
-        )
+        return await service.get_recent_searches(limit=limit, project_id=project_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/dashboard/summary", response_model=DashboardSummaryResponse)
 async def get_dashboard_summary(
-    service: MonitoringService = Depends(get_monitoring_service)
+    service: MonitoringService = Depends(get_monitoring_service),
 ):
     """
     대시보드 요약 정보
-    
+
     모니터링 대시보드에 표시할 요약 정보를 반환합니다.
     """
     try:
@@ -293,12 +283,10 @@ async def get_dashboard_summary(
 
 # Alert Endpoints
 @router.get("/alerts", response_model=list[AlertResponse])
-async def get_active_alerts(
-    service: AlertService = Depends(get_alert_service)
-):
+async def get_active_alerts(service: AlertService = Depends(get_alert_service)):
     """
     활성 알림 목록 조회
-    
+
     해결되지 않은 활성 알림 목록을 반환합니다.
     """
     try:
@@ -311,29 +299,26 @@ async def get_active_alerts(
 async def get_alert_history(
     limit: int = Query(50, ge=1, le=200, description="최대 결과 수"),
     include_resolved: bool = Query(True, description="해결된 알림 포함 여부"),
-    service: AlertService = Depends(get_alert_service)
+    service: AlertService = Depends(get_alert_service),
 ):
     """
     알림 히스토리 조회
-    
+
     알림 히스토리를 반환합니다.
     """
     try:
         return await service.get_alert_history(
-            limit=limit,
-            include_resolved=include_resolved
+            limit=limit, include_resolved=include_resolved
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/alerts/summary", response_model=AlertSummaryResponse)
-async def get_alert_summary(
-    service: AlertService = Depends(get_alert_service)
-):
+async def get_alert_summary(service: AlertService = Depends(get_alert_service)):
     """
     알림 요약 정보
-    
+
     활성 알림 수, 심각도별 분포 등 요약 정보를 반환합니다.
     """
     try:
@@ -346,17 +331,16 @@ async def get_alert_summary(
 async def resolve_alert(
     alert_id: str,
     request: ResolveAlertRequest = ResolveAlertRequest(),
-    service: AlertService = Depends(get_alert_service)
+    service: AlertService = Depends(get_alert_service),
 ):
     """
     알림 해결 처리
-    
+
     지정된 알림을 해결 상태로 변경합니다.
     """
     try:
         success = await service.resolve_alert(
-            alert_id=alert_id,
-            resolved_by=request.resolved_by
+            alert_id=alert_id, resolved_by=request.resolved_by
         )
         if not success:
             raise HTTPException(status_code=404, detail="Alert not found")
@@ -368,12 +352,10 @@ async def resolve_alert(
 
 
 @router.post("/alerts/check")
-async def trigger_threshold_check(
-    service: AlertService = Depends(get_alert_service)
-):
+async def trigger_threshold_check(service: AlertService = Depends(get_alert_service)):
     """
     임계값 체크 수동 실행
-    
+
     임계값 체크를 수동으로 실행하고 생성된 알림을 반환합니다.
     """
     try:
@@ -386,19 +368,19 @@ async def trigger_threshold_check(
                     "id": a.id,
                     "alert_type": a.alert_type,
                     "severity": a.severity,
-                    "message": a.message
+                    "message": a.message,
                 }
                 for a in alerts
-            ]
+            ],
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
 # Search Quality Metrics Endpoints
 class SearchQualityStatsResponse(BaseModel):
     """검색 품질 통계 응답"""
+
     period: dict
     summary: dict
     by_source: list[dict]
@@ -408,6 +390,7 @@ class SearchQualityStatsResponse(BaseModel):
 
 class ProjectSearchStatsResponse(BaseModel):
     """프로젝트별 검색 통계 응답"""
+
     project_id: str
     search_count: int
     avg_results: float
@@ -418,6 +401,7 @@ class ProjectSearchStatsResponse(BaseModel):
 
 class CachePerformanceStatsResponse(BaseModel):
     """캐시 성능 통계 응답"""
+
     period: dict
     embedding_cache: dict
 
@@ -425,6 +409,7 @@ class CachePerformanceStatsResponse(BaseModel):
 def get_metrics_collector(db: Database = Depends(get_database)):
     """MetricsCollector 의존성"""
     from app.core.services.metrics_collector import MetricsCollector
+
     return MetricsCollector(database=db)
 
 
@@ -432,11 +417,11 @@ def get_metrics_collector(db: Database = Depends(get_database)):
 async def get_search_quality_stats(
     hours: int = Query(24, ge=1, le=168, description="조회 기간 (시간, 최대 7일)"),
     project_id: Optional[str] = Query(None, description="프로젝트 ID 필터"),
-    collector = Depends(get_metrics_collector)
+    collector=Depends(get_metrics_collector),
 ):
     """
     검색 품질 통계 조회
-    
+
     실시간 검색 품질 메트릭을 조회합니다:
     - 전체 검색 통계 (검색 수, 평균 결과 수, 평균 점수)
     - Zero-result 쿼리 비율
@@ -447,8 +432,7 @@ async def get_search_quality_stats(
     """
     try:
         stats = await collector.get_search_quality_stats(
-            hours=hours,
-            project_id=project_id
+            hours=hours, project_id=project_id
         )
         return stats
     except Exception as e:
@@ -458,11 +442,11 @@ async def get_search_quality_stats(
 @router.get("/search/project-stats", response_model=list[ProjectSearchStatsResponse])
 async def get_project_search_stats(
     hours: int = Query(24, ge=1, le=168, description="조회 기간 (시간, 최대 7일)"),
-    collector = Depends(get_metrics_collector)
+    collector=Depends(get_metrics_collector),
 ):
     """
     프로젝트별 검색 통계 조회
-    
+
     프로젝트별로 검색 패턴과 품질을 분석합니다:
     - 검색 빈도
     - 평균 결과 수
@@ -480,11 +464,11 @@ async def get_project_search_stats(
 @router.get("/cache/performance-stats", response_model=CachePerformanceStatsResponse)
 async def get_cache_performance_stats(
     hours: int = Query(24, ge=1, le=168, description="조회 기간 (시간, 최대 7일)"),
-    collector = Depends(get_metrics_collector)
+    collector=Depends(get_metrics_collector),
 ):
     """
     캐시 성능 통계 조회
-    
+
     임베딩 캐시 성능 메트릭을 조회합니다:
     - 총 작업 수
     - 캐시 히트/미스 수

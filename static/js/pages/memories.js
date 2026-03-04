@@ -1,47 +1,234 @@
 /**
- * Unified Memories Page Web Component
- * Displays memories with different view modes based on URL parameters
+ * Memories Page — Linear-style compact list redesign
+ * Replaces legacy card-based UI with 1-line rows, filter chips,
+ * Cmd+K command palette, and load-more pagination.
  */
 
 import { wsClient } from '../services/websocket-client.js';
-import '../components/connection-status.js';
+import '../components/searchable-combobox.js';
+
+/* ── helpers (same as dashboard.js) ─────────────────────────── */
+
+const CAT_ICONS = {
+  task: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>',
+  bug: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+  decision: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+  code_snippet: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+  incident: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  idea: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z"/></svg>',
+  'git-history': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="1.05" y1="12" x2="7" y2="12"/><line x1="17.01" y1="12" x2="22.96" y2="12"/></svg>'
+};
+const DEFAULT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+
+function esc(text) {
+  if (text == null) return '';
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function relTime(dateStr) {
+  if (!dateStr) return '';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return '방금';
+  if (m < 60) return `${m}분 전`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}시간 전`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}일 전`;
+  if (d < 30) return `${Math.floor(d / 7)}주 전`;
+  return `${Math.floor(d / 30)}개월 전`;
+}
+
+function truncate(text, max = 120) {
+  if (!text) return '';
+  const clean = text.replace(/#{1,6}\s+/g, '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/\n/g, ' ').trim();
+  return clean.length > max ? clean.substring(0, max) + '...' : clean;
+}
+
+function highlight(text, query) {
+  if (!query || !text) return esc(text);
+  const escaped = esc(text);
+  const terms = query.trim().split(/\s+/).filter(t => t.length >= 2);
+  if (!terms.length) return escaped;
+  const pattern = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  return escaped.replace(new RegExp(`(${pattern})`, 'gi'), '<mark>$1</mark>');
+}
+
+/* ── Component ──────────────────────────────────────────────── */
 
 class MemoriesPage extends HTMLElement {
   constructor() {
     super();
     this.memories = [];
     this.isLoading = false;
-    this.currentView = 'recent';
-    this.viewParams = {};
-    this.currentPage = 1;
-    this.pageSize = 25;
+    this.page = 0;
+    this.pageSize = 50;
     this.totalMemories = 0;
+    this.hasMore = true;
     this.sortBy = 'created_at';
     this.sortDirection = 'desc';
     this.searchQuery = '';
-    this.searchMode = 'hybrid'; // hybrid, vector, text
+    this.searchMode = 'hybrid';
+    this.recencyWeight = 0;
+    this.timeRange = null; // today, this_week, this_month
+    this._prevSortBy = 'created_at'; // remember sort before search auto-switch
+    this.viewParams = {};
+    this._searchTimer = null;
+    this._paletteEl = null;
+    this._paletteSearchTimer = null;
+    this._paletteIdx = -1;
+    this._isInitialized = false;
+    // P1: batch selection
+    this._selected = new Set();
+    // P1: stats
+    this._stats = null;
+    // P1: active pins
+    this._activePins = [];
+    // P2: favorites (localStorage)
+    this._favorites = new Set(JSON.parse(localStorage.getItem('mem-favorites') || '[]'));
+    this._showFavoritesOnly = false;
+    // P2: peek panel
+    this._peekId = null;
+    this._peekData = null;
+    // P2: sources list (from stats)
+    this._sources = [];
   }
-  
+
   connectedCallback() {
-    console.log('MemoriesPage connected');
-    
-    // Parse URL parameters
+    if (this._isInitialized) return;
+    this._isInitialized = true;
+
     this.parseURLParameters();
-    
     this.render();
     this.setupEventListeners();
     this.setupWebSocketListeners();
-    
-    // Connect WebSocket
     this.connectWebSocket();
-    
-    // Set initial filter values from URL parameters
+    this.loadMemories();
+    this.loadProjectsForFilter();
+    this.loadStats();
+    this.loadActivePins();
+  }
+
+  disconnectedCallback() {
+    if (this._boundHandlers) {
+      wsClient.off('memory_created', this._boundHandlers.memoryCreated);
+      wsClient.off('memory_updated', this._boundHandlers.memoryUpdated);
+      wsClient.off('memory_deleted', this._boundHandlers.memoryDeleted);
+      wsClient.off('reconnected', this._boundHandlers.reconnected);
+    }
+    if (this._boundKeydown) {
+      document.removeEventListener('keydown', this._boundKeydown);
+      this._boundKeydown = null;
+    }
+    this.destroyPalette();
+  }
+
+  /* ── URL state ──────────────────────────────────────────── */
+
+  parseURLParameters() {
+    const p = new URLSearchParams(window.location.search);
+    this.viewParams = {
+      category: p.get('category') || null,
+      project_id: p.get('project_id') || null,
+      tag: p.get('tag') || null,
+      source: p.get('source') || null
+    };
+    this.searchQuery = p.get('query') || '';
+    this.sortBy = p.get('sort_by') || 'created_at';
+    this.timeRange = p.get('time_range') || null;
+    this.searchMode = p.get('search_mode') || 'hybrid';
+  }
+
+  updateURL() {
+    const p = new URLSearchParams();
+    if (this.viewParams.category) p.set('category', this.viewParams.category);
+    if (this.viewParams.project_id) p.set('project_id', this.viewParams.project_id);
+    if (this.viewParams.tag) p.set('tag', this.viewParams.tag);
+    if (this.viewParams.source) p.set('source', this.viewParams.source);
+    if (this.searchQuery) p.set('query', this.searchQuery);
+    if (this.sortBy !== 'created_at') p.set('sort_by', this.sortBy);
+    if (this.timeRange) p.set('time_range', this.timeRange);
+    if (this.searchMode !== 'hybrid') p.set('search_mode', this.searchMode);
+    const qs = p.toString();
+    window.history.replaceState({}, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+  }
+
+  /* ── Render skeleton ────────────────────────────────────── */
+
+  render() {
+    this.className = 'mem page-container';
+    this.innerHTML = `
+      <div class="mem-toolbar">
+        <h1 class="mem-title">Memories</h1>
+        <div class="mem-search-wrap">
+          <svg class="mem-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input class="mem-search-input" type="text" placeholder="Search memories... (${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl+'}K)" value="${esc(this.searchQuery)}" />
+        </div>
+        <select class="mem-mode-select" title="Search mode">
+          <option value="hybrid">Hybrid</option>
+          <option value="exact">Exact</option>
+          <option value="semantic">Semantic</option>
+          <option value="fuzzy">Fuzzy</option>
+        </select>
+        <searchable-combobox class="mem-cat-combo" placeholder="All Categories">
+          <option value="">All Categories</option>
+          <option value="task" data-icon="📋">Task</option>
+          <option value="bug" data-icon="🐛">Bug</option>
+          <option value="idea" data-icon="💡">Idea</option>
+          <option value="decision" data-icon="💎">Decision</option>
+          <option value="incident" data-icon="⚠️">Incident</option>
+          <option value="code_snippet" data-icon="💻">Code Snippet</option>
+          <option value="git-history" data-icon="📚">Git History</option>
+        </searchable-combobox>
+        <searchable-combobox class="mem-proj-combo" placeholder="All Projects">
+          <option value="">All Projects</option>
+        </searchable-combobox>
+        <select class="mem-sort-select">
+          <option value="created_at">Newest</option>
+          <option value="updated_at">Updated</option>
+          <option value="category">Category</option>
+          <option value="recency">Recency</option>
+        </select>
+        <div class="mem-time-range">
+          <button class="mem-time-btn${this.timeRange === null ? ' active' : ''}" data-range="">All</button>
+          <button class="mem-time-btn${this.timeRange === 'today' ? ' active' : ''}" data-range="today">Today</button>
+          <button class="mem-time-btn${this.timeRange === 'this_week' ? ' active' : ''}" data-range="this_week">Week</button>
+          <button class="mem-time-btn${this.timeRange === 'this_month' ? ' active' : ''}" data-range="this_month">Month</button>
+        </div>
+        <select class="mem-source-select">
+          <option value="">All Sources</option>
+        </select>
+        <button class="mem-fav-toggle${this._showFavoritesOnly ? ' active' : ''}" title="Favorites only">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="${this._showFavoritesOnly ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        </button>
+        <button class="mem-export-btn" title="Export memories">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+      </div>
+      <div class="mem-stats-bar"></div>
+      <div class="mem-batch-bar" style="display:none"></div>
+      <div class="mem-chips"></div>
+      <div class="mem-suggestions"></div>
+      <div class="mem-content-area">
+        <div class="mem-list"></div>
+        <div class="mem-peek-panel" style="display:none"></div>
+      </div>
+      <div class="mem-footer"></div>
+    `;
+
+    // restore select/combobox values from URL
+    const sortSel = this.querySelector('.mem-sort-select');
+    if (sortSel) sortSel.value = this.sortBy;
+    const modeSel = this.querySelector('.mem-mode-select');
+    if (modeSel) modeSel.value = this.searchMode;
+    const srcSel = this.querySelector('.mem-source-select');
+    if (srcSel && this.viewParams.source) srcSel.value = this.viewParams.source;
+
+    // Initialize combobox options explicitly (child <option> may not be parsed yet)
     setTimeout(() => {
-      // Initialize category combobox with options
-      const categoryCombobox = this.querySelector('.category-combobox');
-      if (categoryCombobox) {
-        // Set options explicitly
-        categoryCombobox.setOptions([
+      const catCombo = this.querySelector('.mem-cat-combo');
+      if (catCombo) {
+        catCombo.setOptions([
           { value: '', text: 'All Categories' },
           { value: 'task', text: 'Task', icon: '📋' },
           { value: 'bug', text: 'Bug', icon: '🐛' },
@@ -51,1764 +238,2629 @@ class MemoriesPage extends HTMLElement {
           { value: 'code_snippet', text: 'Code Snippet', icon: '💻' },
           { value: 'git-history', text: 'Git History', icon: '📚' }
         ]);
-        
-        // Set initial value if provided
-        if (this.viewParams.category) {
-          categoryCombobox.setValue(this.viewParams.category);
+        if (this.viewParams.category) catCombo.setValue(this.viewParams.category);
+      }
+      const projCombo = this.querySelector('.mem-proj-combo');
+      if (projCombo && this.viewParams.project_id) {
+        projCombo.setValue(this.viewParams.project_id);
+      }
+    }, 0);
+
+    this.renderChips();
+  }
+
+  /* ── Build single row (dashboard pattern) ───────────────── */
+
+  buildRow(mem) {
+    const icon = CAT_ICONS[mem.category] || DEFAULT_ICON;
+    const content = truncate(mem.content);
+    const time = relTime(mem.created_at);
+    const source = mem.source && mem.source !== 'unknown' ? mem.source : '';
+    const tags = (mem.tags || []).slice(0, 3);
+    const score = mem.similarity_score ? `<span class="mem-score">${(mem.similarity_score * 100).toFixed(0)}%</span>` : '';
+    const contentHtml = this.searchQuery ? highlight(content, this.searchQuery) : esc(content);
+    const isSelected = this._selected.has(mem.id);
+    const isFav = this._favorites.has(mem.id);
+    const srcBadge = source ? `<span class="mem-source-badge mem-clickable-filter" data-filter-type="source" data-filter-value="${esc(source)}">${esc(source)}</span>` : '';
+    const client = mem.client || '';
+    const clientBadge = client ? `<span class="mem-client-badge client-${client}">${esc(client)}</span>` : '';
+
+    return `
+      <div class="recent-item mem-row${isSelected ? ' mem-selected' : ''}" data-memory-id="${esc(mem.id)}" role="button" tabindex="0">
+        <label class="mem-checkbox-wrap" onclick="event.stopPropagation()">
+          <input type="checkbox" class="mem-checkbox" data-id="${esc(mem.id)}" ${isSelected ? 'checked' : ''} />
+        </label>
+        <button class="mem-star-btn${isFav ? ' active' : ''}" data-id="${esc(mem.id)}" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="${isFav ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        </button>
+        <span class="recent-item-icon">${icon}</span>
+        <span class="recent-item-badge mem-clickable-filter" data-filter-type="category" data-filter-value="${esc(mem.category)}">${esc(mem.category)}</span>
+        ${mem.project_id ? `<span class="recent-item-project mem-clickable-filter" data-filter-type="project_id" data-filter-value="${esc(mem.project_id)}">${esc(mem.project_id)}</span>` : ''}
+        ${clientBadge}
+        <span class="recent-item-content">${contentHtml}</span>
+        ${tags.length ? `<span class="mem-tags">${tags.map(t => `<span class="mem-tag mem-clickable-filter" data-filter-type="tag" data-filter-value="${esc(t)}">#${esc(t)}</span>`).join('')}</span>` : ''}
+        ${srcBadge}
+        ${score}
+        <span class="recent-item-time">${time}</span>
+        <span class="mem-row-actions">
+          <button class="mem-action-btn mem-edit-btn" data-id="${esc(mem.id)}" title="Edit">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="mem-action-btn mem-delete-btn" data-id="${esc(mem.id)}" title="Delete">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+          </button>
+        </span>
+      </div>`;
+  }
+
+  /* ── Render memory list ─────────────────────────────────── */
+
+  renderMemoryList() {
+    const container = this.querySelector('.mem-list');
+    if (!container) return;
+
+    if (this.isLoading && this.page === 0) {
+      container.innerHTML = Array.from({ length: 10 }, () =>
+        '<div class="recent-item ml-skeleton"><div class="sk-line" style="width:' + (40 + Math.random() * 50) + '%"></div></div>'
+      ).join('');
+      return;
+    }
+
+    const displayMems = this._showFavoritesOnly
+      ? this.memories.filter(m => this._favorites.has(m.id))
+      : this.memories;
+
+    if (displayMems.length === 0) {
+      const hasFilters = this.searchQuery || Object.values(this.viewParams).some(v => v);
+      container.innerHTML = `
+        <div class="mem-empty">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <p>${hasFilters ? `No results for "${esc(this.searchQuery || '')}"` : 'No memories yet'}</p>
+          ${hasFilters ? '<button class="mem-clear-all-btn">Clear all filters</button>' : ''}
+        </div>`;
+      return;
+    }
+
+    if (this.page === 0 || this._showFavoritesOnly) {
+      container.innerHTML = displayMems.map(m => this.buildRow(m)).join('');
+    } else {
+      // append new rows for load-more
+      const frag = document.createRange().createContextualFragment(
+        this.memories.slice((this.page) * this.pageSize).map(m => this.buildRow(m)).join('')
+      );
+      container.appendChild(frag);
+    }
+  }
+
+  /* ── Footer (count + load more) ─────────────────────────── */
+
+  renderFooter() {
+    const footer = this.querySelector('.mem-footer');
+    if (!footer) return;
+
+    const count = this.memories.length;
+    const total = this.totalMemories;
+
+    if (count === 0 && !this.isLoading) {
+      footer.innerHTML = '';
+      return;
+    }
+
+    footer.innerHTML = `
+      <span class="mem-count">${count} / ${total} memories</span>
+      ${this.hasMore ? '<button class="mem-load-more-btn">Load more</button>' : ''}
+      <button class="mem-shortcuts-hint" title="Keyboard shortcuts (?)"
+        ><kbd>?</kbd> Shortcuts</button>
+    `;
+  }
+
+  /* ── Search suggestions ────────────────────────────────── */
+
+  renderSuggestions() {
+    const container = this.querySelector('.mem-suggestions');
+    if (!container) return;
+
+    const suggestions = this._suggestions || [];
+    if (!suggestions.length || !this.searchQuery || this.memories.length > 5) {
+      container.innerHTML = '';
+      return;
+    }
+
+    container.innerHTML = `
+      <span class="mem-suggest-label">Did you mean:</span>
+      ${suggestions.map(s => `<button class="mem-suggest-item" data-query="${esc(s)}">${esc(s)}</button>`).join('')}
+    `;
+  }
+
+  /* ── Filter chips ───────────────────────────────────────── */
+
+  renderChips() {
+    const container = this.querySelector('.mem-chips');
+    if (!container) return;
+
+    const chips = [];
+    if (this.viewParams.category) chips.push({ key: 'category', label: this.viewParams.category });
+    if (this.viewParams.project_id) chips.push({ key: 'project_id', label: `project:${this.viewParams.project_id}` });
+    if (this.viewParams.tag) chips.push({ key: 'tag', label: `#${this.viewParams.tag}` });
+    if (this.viewParams.source) chips.push({ key: 'source', label: `source:${this.viewParams.source}` });
+    if (this.timeRange) chips.push({ key: 'timeRange', label: this.timeRange === 'today' ? 'Today' : this.timeRange === 'this_week' ? 'This week' : 'This month' });
+    if (this.searchQuery) chips.push({ key: 'query', label: `"${this.searchQuery}"` });
+
+    if (chips.length === 0) {
+      container.innerHTML = '';
+      return;
+    }
+
+    container.innerHTML = chips.map(c =>
+      `<span class="mem-chip" data-filter="${c.key}">${esc(c.label)} <button class="mem-chip-remove" data-filter="${c.key}">&times;</button></span>`
+    ).join('') + '<button class="mem-clear-all-btn">Clear all</button>';
+  }
+
+  removeFilter(key) {
+    if (key === 'query') {
+      this.searchQuery = '';
+      const input = this.querySelector('.mem-search-input');
+      if (input) input.value = '';
+      // Restore sort when search cleared
+      this.sortBy = this._prevSortBy || 'created_at';
+      const sortSel = this.querySelector('.mem-sort-select');
+      if (sortSel) sortSel.value = this.sortBy;
+    } else if (key === 'timeRange') {
+      this.timeRange = null;
+      this.querySelectorAll('.mem-time-btn').forEach(b => b.classList.toggle('active', b.dataset.range === ''));
+    } else {
+      this.viewParams[key] = null;
+      if (key === 'category') {
+        const combo = this.querySelector('.mem-cat-combo');
+        if (combo) combo.setValue('', 'All Categories');
+      }
+      if (key === 'project_id') {
+        const combo = this.querySelector('.mem-proj-combo');
+        if (combo) combo.setValue('', 'All Projects');
+      }
+    }
+    this.resetAndLoad();
+  }
+
+  clearAllFilters() {
+    this.searchQuery = '';
+    this.viewParams = { category: null, project_id: null, tag: null, source: null };
+    this.timeRange = null;
+    this.sortBy = this._prevSortBy || 'created_at';
+    const input = this.querySelector('.mem-search-input');
+    if (input) input.value = '';
+    const catCombo = this.querySelector('.mem-cat-combo');
+    if (catCombo) catCombo.setValue('', 'All Categories');
+    const projCombo = this.querySelector('.mem-proj-combo');
+    if (projCombo) projCombo.setValue('', 'All Projects');
+    const sortSel = this.querySelector('.mem-sort-select');
+    if (sortSel) sortSel.value = this.sortBy;
+    this.querySelectorAll('.mem-time-btn').forEach(b => b.classList.toggle('active', b.dataset.range === ''));
+    this.resetAndLoad();
+  }
+
+  /* ── Data loading ───────────────────────────────────────── */
+
+  resetAndLoad() {
+    this.page = 0;
+    this.memories = [];
+    this.hasMore = true;
+    this.updateURL();
+    this.renderChips();
+    this.loadMemories();
+  }
+
+  async loadMemories() {
+    try {
+      this.isLoading = true;
+      if (this.page === 0) this.renderMemoryList(); // show skeleton
+
+      const sortBy = this.sortBy === 'recency' ? 'created_at' : this.sortBy;
+      const params = {
+        limit: this.pageSize,
+        offset: this.page * this.pageSize,
+        sort_by: sortBy,
+        sort_direction: this.sortDirection,
+        search_mode: this.searchMode
+      };
+      if (this.sortBy === 'recency') {
+        params.recency_weight = 0.7;
+      } else if (this.recencyWeight > 0) {
+        params.recency_weight = this.recencyWeight;
+      }
+      if (this.timeRange) {
+        params.time_range = this.timeRange;
+        params.temporal_mode = 'filter';
+      }
+      if (this.viewParams.category) params.category = this.viewParams.category;
+      if (this.viewParams.project_id) params.project_id = this.viewParams.project_id;
+      if (this.viewParams.source) params.source = this.viewParams.source;
+      if (this.viewParams.tag) params.tag = this.viewParams.tag;
+
+      const query = this.searchQuery || '';
+      const api = window.app?.apiClient;
+      if (!api) return;
+
+      const result = await api.searchMemories(query, params);
+      if (result && result.results) {
+        if (this.page === 0) {
+          this.memories = result.results;
+        } else {
+          this.memories = this.memories.concat(result.results);
+        }
+        this.totalMemories = result.total || result.results.length;
+        this.hasMore = this.memories.length < this.totalMemories;
+        this._suggestions = result.suggestions || [];
+      } else {
+        if (this.page === 0) this.memories = [];
+        this.totalMemories = 0;
+        this.hasMore = false;
+        this._suggestions = [];
+      }
+
+      this.isLoading = false;
+      this.renderMemoryList();
+      this.renderFooter();
+      this.renderSuggestions();
+    } catch (error) {
+      console.error('Failed to load memories:', error);
+      this.showToast('Failed to load memories', 'error');
+      this.isLoading = false;
+    }
+  }
+
+  async loadProjectsForFilter() {
+    try {
+      const api = window.app?.apiClient;
+      if (!api) return;
+
+      let projectsData;
+      try { projectsData = await api.get('/projects'); } catch { /* ignore */ }
+
+      if (!projectsData) {
+        try {
+          const sr = await api.searchMemories('', { limit: 100 });
+          if (sr?.results) {
+            const ids = new Set(sr.results.map(m => m.project_id).filter(Boolean));
+            projectsData = { projects: Array.from(ids).map(id => ({ id, name: id })) };
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (projectsData?.projects) {
+        const projCombo = this.querySelector('.mem-proj-combo');
+        if (projCombo) {
+          const opts = [{ value: '', text: 'All Projects' }];
+          projectsData.projects.forEach(p => {
+            opts.push({ value: p.id, text: p.name || p.id });
+          });
+          projCombo.setOptions(opts);
+          if (this.viewParams.project_id) projCombo.setValue(this.viewParams.project_id);
         }
       }
-      
-      const projectCombobox = this.querySelector('.project-combobox');
-      if (projectCombobox && this.viewParams.project_id) {
-        projectCombobox.setValue(this.viewParams.project_id);
+    } catch { /* ignore */ }
+  }
+
+  /* ── Event delegation ───────────────────────────────────── */
+
+  setupEventListeners() {
+    // Click delegation
+    this.addEventListener('click', (e) => {
+      const target = e.target;
+
+      // Star/favorite toggle
+      const starBtn = target.closest('.mem-star-btn');
+      if (starBtn) {
+        e.stopPropagation();
+        this.toggleFavorite(starBtn.dataset.id);
+        return;
       }
-    }, 100);
-    
-    // Load memories after a short delay
-    setTimeout(() => {
-      this.loadProjectsForFilter();
-      this.loadMemories();
-    }, 100);
-  }
-  
-  disconnectedCallback() {
-    console.log('MemoriesPage disconnected');
-    
-    // WebSocket 데이터 이벤트 리스너 제거
-    if (this._boundHandlers) {
-      wsClient.off('memory_created', this._boundHandlers.memoryCreated);
-      wsClient.off('memory_updated', this._boundHandlers.memoryUpdated);
-      wsClient.off('memory_deleted', this._boundHandlers.memoryDeleted);
+
+      // Favorites filter toggle
+      if (target.closest('.mem-fav-toggle')) {
+        this.toggleFavoritesFilter();
+        return;
+      }
+
+      // Export button (left click = JSON, will show dropdown)
+      const exportBtn = target.closest('.mem-export-btn');
+      if (exportBtn) {
+        this._showExportMenu(exportBtn);
+        return;
+      }
+      // Export menu item
+      const exportItem = target.closest('.mem-export-item');
+      if (exportItem) {
+        this.exportMemories(exportItem.dataset.format);
+        this._closeExportMenu();
+        return;
+      }
+
+      // Peek panel actions
+      if (target.closest('.mem-peek-close')) {
+        this.closePeek();
+        return;
+      }
+      if (target.closest('.mem-peek-edit')) {
+        const id = target.closest('.mem-peek-edit').dataset.id;
+        if (id) { this.closePeek(); this.openEditModal(id); }
+        return;
+      }
+      if (target.closest('.mem-peek-fav')) {
+        const id = target.closest('.mem-peek-fav').dataset.id;
+        if (id) { this.toggleFavorite(id); this.renderPeekPanel(); }
+        return;
+      }
+      if (target.closest('.mem-peek-open-btn')) {
+        const id = target.closest('.mem-peek-open-btn').dataset.id;
+        if (id && window.app?.router) { this.closePeek(); window.app.router.navigate(`/memory/${id}`); }
+        return;
+      }
+
+      // Inline click filter (badge, tag, project, source)
+      const filterEl = target.closest('.mem-clickable-filter');
+      if (filterEl) {
+        e.stopPropagation();
+        const type = filterEl.dataset.filterType;
+        const value = filterEl.dataset.filterValue;
+        if (type && value) {
+          this.viewParams[type] = value;
+          if (type === 'category') {
+            const catCombo = this.querySelector('.mem-cat-combo');
+            if (catCombo) catCombo.setValue(value);
+          }
+          if (type === 'project_id') {
+            const projCombo = this.querySelector('.mem-proj-combo');
+            if (projCombo) projCombo.setValue(value);
+          }
+          this.resetAndLoad();
+        }
+        return;
+      }
+
+      // Row click → if peek is open, switch peek; otherwise navigate
+      const row = target.closest('.mem-row');
+      if (row && !target.closest('.mem-action-btn') && !target.closest('.mem-checkbox-wrap')) {
+        const id = row.dataset.memoryId;
+        if (!id) return;
+        if (this._peekId) {
+          this.openPeek(id);
+        } else if (window.app?.router) {
+          window.app.router.navigate(`/memory/${id}`);
+        }
+        return;
+      }
+
+      // Edit button → open inline modal
+      const editBtn = target.closest('.mem-edit-btn');
+      if (editBtn) {
+        e.stopPropagation();
+        const id = editBtn.dataset.id;
+        if (id) this.openEditModal(id);
+        return;
+      }
+
+      // Suggestion click
+      const suggestBtn = target.closest('.mem-suggest-item');
+      if (suggestBtn) {
+        const q = suggestBtn.dataset.query;
+        if (q) {
+          this.searchQuery = q;
+          const input = this.querySelector('.mem-search-input');
+          if (input) input.value = q;
+          this.resetAndLoad();
+        }
+        return;
+      }
+
+      // Delete button
+      const delBtn = target.closest('.mem-delete-btn');
+      if (delBtn) {
+        e.stopPropagation();
+        const id = delBtn.dataset.id;
+        if (id && confirm('Delete this memory?')) this.deleteMemory(id);
+        return;
+      }
+
+      // Load more
+      if (target.closest('.mem-load-more-btn')) {
+        this.page++;
+        this.loadMemories();
+        return;
+      }
+      // Shortcuts help
+      if (target.closest('.mem-shortcuts-hint')) {
+        this.toggleShortcutsHelp();
+        return;
+      }
+
+      // Chip remove
+      const chipRemove = target.closest('.mem-chip-remove');
+      if (chipRemove) {
+        this.removeFilter(chipRemove.dataset.filter);
+        return;
+      }
+
+      // Clear all (chip bar or empty state)
+      if (target.closest('.mem-clear-all-btn')) {
+        this.clearAllFilters();
+        return;
+      }
+
+      // Batch: delete
+      if (target.closest('.mem-batch-delete-btn')) {
+        this.batchDelete();
+        return;
+      }
+      // Batch: deselect
+      if (target.closest('.mem-batch-clear-btn')) {
+        this.toggleSelectAll(false);
+        return;
+      }
+      // Pins badge click → filter by first pin's project
+      if (target.closest('.mem-stat-pins')) {
+        const pin = this._activePins[0];
+        if (pin?.project_id) {
+          this.viewParams.project_id = pin.project_id;
+          const projCombo = this.querySelector('.mem-proj-combo');
+          if (projCombo) projCombo.setValue(pin.project_id);
+          this.resetAndLoad();
+        }
+        return;
+      }
+
+      // Time range button
+      const timeBtn = target.closest('.mem-time-btn');
+      if (timeBtn) {
+        const range = timeBtn.dataset.range || null;
+        this.timeRange = range;
+        this.querySelectorAll('.mem-time-btn').forEach(b => b.classList.toggle('active', b.dataset.range === (range || '')));
+        this.resetAndLoad();
+        return;
+      }
+    });
+
+    // Change delegation
+    this.addEventListener('change', (e) => {
+      const target = e.target;
+      // Checkbox for batch selection
+      if (target.matches('.mem-checkbox')) {
+        this.toggleSelect(target.dataset.id, target.checked);
+        return;
+      }
+      // Batch category change
+      if (target.matches('.mem-batch-cat')) {
+        this.batchChangeCategory(target.value);
+        return;
+      }
+      // Searchable combobox change events (CustomEvent with detail)
+      if (target.matches('.mem-cat-combo')) {
+        this.viewParams.category = e.detail?.value || null;
+        this.resetAndLoad();
+        return;
+      }
+      if (target.matches('.mem-proj-combo')) {
+        this.viewParams.project_id = e.detail?.value || null;
+        this.resetAndLoad();
+        return;
+      }
+      if (target.matches('.mem-sort-select')) {
+        this.sortBy = target.value;
+        this._prevSortBy = target.value;
+        this.resetAndLoad();
+      }
+      if (target.matches('.mem-mode-select')) {
+        this.searchMode = target.value;
+        this.resetAndLoad();
+      }
+      if (target.matches('.mem-source-select')) {
+        this.viewParams.source = target.value || null;
+        this.resetAndLoad();
+      }
+    });
+
+    // Search input with debounce
+    const searchInput = this.querySelector('.mem-search-input');
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        clearTimeout(this._searchTimer);
+        this._searchTimer = setTimeout(() => {
+          const val = searchInput.value.trim();
+          const wasEmpty = !this.searchQuery;
+          const nowEmpty = !val;
+          this.searchQuery = val;
+
+          // Auto-switch sort to recency when searching, restore when cleared
+          if (wasEmpty && !nowEmpty) {
+            this._prevSortBy = this.sortBy;
+            this.sortBy = 'recency';
+            const sortSel = this.querySelector('.mem-sort-select');
+            if (sortSel) sortSel.value = 'recency';
+          } else if (!wasEmpty && nowEmpty) {
+            this.sortBy = this._prevSortBy || 'created_at';
+            const sortSel = this.querySelector('.mem-sort-select');
+            if (sortSel) sortSel.value = this.sortBy;
+          }
+
+          this.resetAndLoad();
+        }, 300);
+      });
+      searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          clearTimeout(this._searchTimer);
+          this.searchQuery = searchInput.value.trim();
+          this.resetAndLoad();
+        }
+      });
     }
-    
-    // 프로젝트 구독 해제
-    if (this.viewParams.project_id) {
-      wsClient.unsubscribeFromProject(this.viewParams.project_id);
-    }
-  }
-  
-  /**
-   * Parse URL parameters to determine view mode
-   */
-  parseURLParameters() {
-    const urlParams = new URLSearchParams(window.location.search);
-    
-    // Get view mode (default: recent)
-    this.currentView = urlParams.get('view') || 'recent';
-    
-    // Parse view-specific parameters
-    this.viewParams = {
-      project_id: urlParams.get('project_id'),
-      category: urlParams.get('category'),
-      query: urlParams.get('query'),
-      tag: urlParams.get('tag'),
-      limit: parseInt(urlParams.get('limit')) || this.pageSize,
-      source: urlParams.get('source')
+
+    // Keyboard: j/k navigation, Space peek, Cmd+K palette — bound on document
+    this._boundKeydown = (e) => {
+      // Only handle when this page is connected and visible
+      if (!this.isConnected) return;
+
+      // Cmd+K palette (always active)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        this.openPalette();
+        return;
+      }
+
+      // Shortcuts overlay: ? toggles, Escape closes
+      const shortcutsEl = document.querySelector('.mem-shortcuts-overlay');
+      if (shortcutsEl) {
+        if (e.key === 'Escape' || e.key === '?') shortcutsEl.remove();
+        return; // block all other keys while help is open
+      }
+
+      // Skip when focus is in an input/select/textarea (except Escape)
+      if (e.target.matches('input, select, textarea, .combobox-input') && e.key !== 'Escape') return;
+
+      // Skip when a modal overlay is open (edit modal, palette, export menu)
+      if (document.querySelector('.cmd-palette-overlay, .mem-edit-overlay')) return;
+
+      const rows = Array.from(this.querySelectorAll('.mem-row'));
+      if (!rows.length && e.key !== 'Escape') return;
+      const curIdx = rows.findIndex(r => r.classList.contains('keyboard-selected'));
+
+      if (e.key === 'j' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        const next = curIdx < rows.length - 1 ? curIdx + 1 : 0;
+        rows.forEach(r => r.classList.remove('keyboard-selected'));
+        rows[next].classList.add('keyboard-selected');
+        rows[next].scrollIntoView({ block: 'nearest' });
+      }
+      if (e.key === 'k' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const prev = curIdx > 0 ? curIdx - 1 : rows.length - 1;
+        rows.forEach(r => r.classList.remove('keyboard-selected'));
+        rows[prev].classList.add('keyboard-selected');
+        rows[prev].scrollIntoView({ block: 'nearest' });
+      }
+      if (e.key === 'Enter') {
+        const sel = this.querySelector('.mem-row.keyboard-selected');
+        if (sel) sel.click();
+      }
+      // x = toggle selection on keyboard-selected row
+      if (e.key === 'x') {
+        const sel = this.querySelector('.mem-row.keyboard-selected');
+        if (sel) {
+          const id = sel.dataset.memoryId;
+          const isSelected = this._selected.has(id);
+          this.toggleSelect(id, !isSelected);
+          const cb = sel.querySelector('.mem-checkbox');
+          if (cb) cb.checked = !isSelected;
+        }
+      }
+      // Space = toggle peek on keyboard-selected OR hovered row
+      if (e.key === ' ') {
+        e.preventDefault();
+        const sel = this.querySelector('.mem-row.keyboard-selected')
+          || this.querySelector('.mem-row:hover');
+        if (sel) {
+          const id = sel.dataset.memoryId;
+          if (id) {
+            if (this._peekId === id) this.closePeek();
+            else this.openPeek(id);
+          }
+        }
+      }
+      // Escape = close peek, or deselect all
+      if (e.key === 'Escape') {
+        if (this._peekId) {
+          this.closePeek();
+        } else if (this._selected.size > 0) {
+          this.toggleSelectAll(false);
+        }
+      }
+      // e = export JSON, E (shift) = export CSV
+      if (e.key === 'e' && !e.metaKey && !e.ctrlKey) {
+        this.exportMemories(e.shiftKey ? 'csv' : 'json');
+      }
+      // ? = toggle keyboard shortcuts help
+      if (e.key === '?') {
+        this.toggleShortcutsHelp();
+      }
     };
-    
-    // Set search query if provided
-    this.searchQuery = this.viewParams.query || '';
-    
-    console.log('View mode:', this.currentView, 'Params:', this.viewParams);
+    document.addEventListener('keydown', this._boundKeydown);
   }
-  
-  /**
-   * Setup WebSocket listeners - 데이터 이벤트만 처리
-   * 연결 상태는 connection-status 컴포넌트가 처리
-   */
+
+  /* ── WebSocket ──────────────────────────────────────────── */
+
   setupWebSocketListeners() {
-    console.log('MemoriesPage: Setting up WebSocket listeners');
-    
-    // 바인딩된 핸들러를 저장 (제거할 때 사용)
     this._boundHandlers = {
       memoryCreated: this.handleMemoryCreated.bind(this),
       memoryUpdated: this.handleMemoryUpdated.bind(this),
-      memoryDeleted: this.handleMemoryDeleted.bind(this)
+      memoryDeleted: this.handleMemoryDeleted.bind(this),
+      reconnected: () => this.loadMemories(),
     };
-    
-    // 메모리 생성 이벤트
     wsClient.on('memory_created', this._boundHandlers.memoryCreated);
-    
-    // 메모리 업데이트 이벤트
     wsClient.on('memory_updated', this._boundHandlers.memoryUpdated);
-    
-    // 메모리 삭제 이벤트
     wsClient.on('memory_deleted', this._boundHandlers.memoryDeleted);
+    wsClient.on('reconnected', this._boundHandlers.reconnected);
   }
 
-  /**
-   * Connect WebSocket
-   */
-  async connectWebSocket() {
-    try {
-      await wsClient.connect();
-      console.log('Memories page WebSocket connected');
-      
-      // 현재 프로젝트가 있으면 구독
-      if (this.viewParams.project_id) {
-        wsClient.subscribeToProject(this.viewParams.project_id);
-      }
-    } catch (error) {
-      console.error('Failed to connect WebSocket in memories page:', error);
-    }
+  connectWebSocket() {
+    // P5: connect()는 main.js에서 전역으로 호출됨
+    if (this.viewParams.project_id) wsClient.subscribeToProject(this.viewParams.project_id);
   }
 
-  /**
-   * Handle memory created event
-   */
   handleMemoryCreated(data) {
-    console.log('MemoriesPage: handleMemoryCreated called with data:', data);
     const { memory } = data;
-    
-    // 디버깅: 메모리 데이터 상세 로깅
-    console.log('MemoriesPage: Memory object details:', {
-      id: memory?.id,
-      content: memory?.content,
-      content_length: memory?.content?.length,
-      project_id: memory?.project_id,
-      category: memory?.category,
-      tags: memory?.tags,
-      source: memory?.source,
-      created_at: memory?.created_at,
-      updated_at: memory?.updated_at
-    });
-    
-    // 중복 체크: 이미 존재하는 메모리인지 확인
-    const existingIndex = this.memories.findIndex(m => m.id === memory.id);
-    if (existingIndex !== -1) {
-      console.log('MemoriesPage: Memory already exists, ignoring duplicate');
-      return;
+    if (!memory || this.memories.some(m => m.id === memory.id)) return;
+    if (!this.shouldIncludeMemory(memory)) return;
+
+    this.memories.unshift(memory);
+    this.totalMemories++;
+
+    // prepend row into DOM
+    const container = this.querySelector('.mem-list');
+    if (container) {
+      const frag = document.createRange().createContextualFragment(this.buildRow(memory));
+      const newEl = frag.firstElementChild;
+      newEl.style.background = 'rgba(34,197,94,0.08)';
+      container.prepend(frag);
+      setTimeout(() => { if (newEl) newEl.style.background = ''; }, 3000);
     }
-    
-    // 현재 필터 조건에 맞는지 확인
-    if (this.shouldIncludeMemory(memory)) {
-      console.log('MemoriesPage: Memory matches filters, adding to list');
-      // 메모리 목록 맨 앞에 추가
-      this.memories.unshift(memory);
-      
-      // 페이지 크기 제한 적용
-      if (this.memories.length > this.pageSize) {
-        this.memories = this.memories.slice(0, this.pageSize);
-      }
-      
-      // 전체 카운트 증가
-      this.totalMemories++;
-      
-      // UI 전체 업데이트 (메모리 목록 + 요약 + 페이지네이션)
-      console.log('MemoriesPage: Updating UI with new memory');
-      this.renderMemories();
-      this.renderPagination();
-      this.updateSummary();
-      
-      // 토스트 알림
-      this.showToast(`새 메모리가 생성되었습니다: ${memory.category}`, 'success');
-    } else {
-      console.log('MemoriesPage: Memory does not match current filters, ignoring');
-    }
+    this.renderFooter();
+    this.showToast('New memory created', 'success');
   }
 
-  /**
-   * Handle memory updated event
-   */
   handleMemoryUpdated(data) {
     const { memory_id, memory } = data;
-    
-    // 기존 메모리 찾기
-    const index = this.memories.findIndex(m => m.id === memory_id);
-    
-    if (index !== -1) {
-      // 업데이트된 메모리가 현재 필터 조건에 맞는지 확인
+    const idx = this.memories.findIndex(m => m.id === memory_id);
+    if (idx !== -1) {
       if (this.shouldIncludeMemory(memory)) {
-        this.memories[index] = memory;
-        this.updateMemoriesGrid();
+        this.memories[idx] = memory;
       } else {
-        // 필터 조건에 맞지 않으면 제거
-        this.memories.splice(index, 1);
-        this.updateMemoriesGrid();
+        this.memories.splice(idx, 1);
       }
-      
-      this.showToast('Memory updated', 'info');
     } else if (this.shouldIncludeMemory(memory)) {
-      // 새로 필터 조건에 맞게 된 경우 추가
       this.memories.unshift(memory);
-      if (this.memories.length > this.pageSize) {
-        this.memories = this.memories.slice(0, this.pageSize);
-      }
-      this.updateMemoriesGrid();
-      this.showToast('New memory added', 'info');
+      this.totalMemories++;
     }
+    this.renderMemoryList();
+    this.renderFooter();
   }
 
-  /**
-   * Handle memory deleted event
-   */
   handleMemoryDeleted(data) {
     const { memory_id } = data;
-    
-    // 메모리 목록에서 제거
-    const index = this.memories.findIndex(m => m.id === memory_id);
-    if (index !== -1) {
-      this.memories.splice(index, 1);
-      this.updateMemoriesGrid();
-      this.showToast('Memory deleted', 'warning');
+    const idx = this.memories.findIndex(m => m.id === memory_id);
+    if (idx !== -1) {
+      this.memories.splice(idx, 1);
+      this.totalMemories--;
+      const row = this.querySelector(`.mem-row[data-memory-id="${memory_id}"]`);
+      if (row) {
+        row.style.opacity = '0';
+        row.style.transform = 'translateX(20px)';
+        setTimeout(() => row.remove(), 200);
+      }
+      this.renderFooter();
     }
   }
 
-  /**
-   * Check if memory should be included based on current filters
-   */
   shouldIncludeMemory(memory) {
-    // 프로젝트 필터
-    if (this.viewParams.project_id && memory.project_id !== this.viewParams.project_id) {
-      return false;
+    if (this.viewParams.project_id && memory.project_id !== this.viewParams.project_id) return false;
+    if (this.viewParams.category && memory.category !== this.viewParams.category) return false;
+    if (this.viewParams.source && memory.source !== this.viewParams.source) return false;
+    if (this.viewParams.tag && !(memory.tags || []).includes(this.viewParams.tag)) return false;
+    if (this.searchQuery) {
+      const q = this.searchQuery.toLowerCase();
+      const c = (memory.content || '').toLowerCase();
+      const p = (memory.project_id || '').toLowerCase();
+      const t = (memory.tags || []).join(' ').toLowerCase();
+      if (!c.includes(q) && !p.includes(q) && !t.includes(q)) return false;
     }
-    
-    // 카테고리 필터
-    if (this.viewParams.category && memory.category !== this.viewParams.category) {
-      return false;
-    }
-    
-    // 소스 필터
-    if (this.viewParams.source && memory.source !== this.viewParams.source) {
-      return false;
-    }
-    
-    // 태그 필터
-    if (this.viewParams.tag) {
-      const memoryTags = memory.tags || [];
-      if (!memoryTags.includes(this.viewParams.tag)) {
-        return false;
-      }
-    }
-    
-    // 검색 쿼리 필터 (간단한 텍스트 매칭)
-    if (this.searchQuery && this.searchQuery.trim()) {
-      const query = this.searchQuery.toLowerCase();
-      const content = (memory.content || '').toLowerCase();
-      const project = (memory.project_id || '').toLowerCase();
-      const tags = (memory.tags || []).join(' ').toLowerCase();
-      
-      if (!content.includes(query) && !project.includes(query) && !tags.includes(query)) {
-        return false;
-      }
-    }
-    
     return true;
   }
 
-  /**
-   * Connect WebSocket
-   */
-  async connectWebSocket() {
-    try {
-      console.log('MemoriesPage: Attempting to connect WebSocket...');
-      await wsClient.connect();
-      console.log('MemoriesPage: WebSocket connected successfully');
-      
-      // 프로젝트별 구독 설정
-      if (this.viewParams.project_id) {
-        console.log(`MemoriesPage: Subscribing to project ${this.viewParams.project_id}`);
-        wsClient.subscribeToProject(this.viewParams.project_id);
-      }
-    } catch (error) {
-      console.error('MemoriesPage: Failed to connect WebSocket:', error);
-    }
-  }
+  /* ── Delete ─────────────────────────────────────────────── */
 
-  /**
-   * Show toast notification
-   */
-  showToast(message, type = 'info') {
-    // 간단한 토스트 구현
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-    
-    // 스타일 적용
-    Object.assign(toast.style, {
-      position: 'fixed',
-      top: '20px',
-      right: '20px',
-      padding: '12px 20px',
-      borderRadius: '6px',
-      color: 'white',
-      fontSize: '14px',
-      fontWeight: '500',
-      zIndex: '10000',
-      opacity: '0',
-      transform: 'translateY(-20px)',
-      transition: 'all 0.3s ease'
-    });
-    
-    // 타입별 배경색
-    const colors = {
-      success: '#10b981',
-      info: '#3b82f6',
-      warning: '#f59e0b',
-      error: '#ef4444'
-    };
-    toast.style.backgroundColor = colors[type] || colors.info;
-    
-    document.body.appendChild(toast);
-    
-    // 애니메이션
-    requestAnimationFrame(() => {
-      toast.style.opacity = '1';
-      toast.style.transform = 'translateY(0)';
-    });
-    
-    // 3초 후 제거
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateY(-20px)';
-      setTimeout(() => {
-        if (toast.parentNode) {
-          toast.parentNode.removeChild(toast);
-        }
-      }, 300);
-    }, 3000);
-  }
-
-  /**
-   * Update memories grid with animation
-   */
-  updateMemoriesGrid() {
-    const container = this.querySelector('.memories-list');
-    if (!container) return;
-
-    // 기존 그리드 업데이트
-    this.renderMemories();
-    
-    // 새로 추가된 메모리 카드들에 애니메이션 적용
-    const memoryCards = container.querySelectorAll('memory-card');
-    memoryCards.forEach((card, index) => {
-      // 새로 추가된 카드 (첫 번째)에 하이라이트 효과
-      if (index === 0) {
-        card.style.background = 'linear-gradient(135deg, #f0fdf4, #dcfce7)';
-        card.style.border = '2px solid #22c55e';
-        card.style.transform = 'scale(1.02)';
-        
-        // 3초 후 하이라이트 제거
-        setTimeout(() => {
-          card.style.background = '';
-          card.style.border = '';
-          card.style.transform = '';
-          card.style.transition = 'all 0.3s ease';
-        }, 3000);
-      }
-    });
-    
-    // 메모리 카드 이벤트 리스너 재설정
-    this.setupMemoryCardListeners();
-  }
-
-
-
-  /**
-   * Setup memory card event listeners
-   */
-  setupMemoryCardListeners() {
-    // 메모리 카드 클릭 이벤트
-    const memoryCards = this.querySelectorAll('memory-card');
-    memoryCards.forEach(card => {
-      // 메모리 선택 이벤트 리스너
-      card.addEventListener('memory-select', this.handleMemorySelect.bind(this));
-      
-      // 즐겨찾기 토글 이벤트 리스너
-      card.addEventListener('memory-favorite', this.handleMemoryFavorite.bind(this));
-    });
-    
-    // 기타 메모리 관련 버튼들
-    const editButtons = this.querySelectorAll('.edit-memory-btn');
-    editButtons.forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        const memoryId = btn.getAttribute('data-memory-id');
-        if (memoryId && window.app && window.app.router) {
-          window.app.router.navigate(`/memory/${memoryId}/edit`);
-        }
-      });
-    });
-    
-    const deleteButtons = this.querySelectorAll('.delete-memory-btn');
-    deleteButtons.forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        const memoryId = btn.getAttribute('data-memory-id');
-        if (memoryId && confirm('Are you sure you want to delete this memory?')) {
-          this.deleteMemory(memoryId);
-        }
-      });
-    });
-  }
-
-  /**
-   * Create memories grid HTML
-   */
-  createMemoriesGrid() {
-    if (!this.memories || this.memories.length === 0) {
-      return `
-        <div class="no-memories">
-          <div class="no-memories-icon">📝</div>
-          <h3>No memories found</h3>
-          <p>No memories match your current filters.</p>
-          <button class="clear-filters-btn">Clear Filters</button>
-        </div>
-      `;
-    }
-    
-    return this.memories.map(memory => `
-      <memory-card
-        memory-id="${memory.id}"
-        content="${this.escapeAttribute(memory.content)}"
-        project="${memory.project_id || ''}"
-        category="${memory.category}"
-        created-at="${memory.created_at}"
-        updated-at="${memory.updated_at || ''}"
-        similarity-score="${memory.similarity_score || ''}"
-        tags="${this.escapeAttribute(JSON.stringify(memory.tags || []))}"
-        source="${memory.source || 'unknown'}"
-        search-query="${this.escapeAttribute(this.searchQuery)}"
-      ></memory-card>
-    `).join('');
-  }
-
-  /**
-   * Delete a memory
-   */
   async deleteMemory(memoryId) {
     try {
-      if (!window.app || !window.app.apiClient) {
-        throw new Error('API client not available');
-      }
-      
-      await window.app.apiClient.deleteMemory(memoryId);
-      
-      // 로컬 메모리 목록에서 제거
+      const api = window.app?.apiClient;
+      if (!api) throw new Error('API not available');
+      await api.deleteMemory(memoryId);
       this.memories = this.memories.filter(m => m.id !== memoryId);
-      
-      // UI 업데이트
-      this.updateMemoriesGrid();
-      this.updateSummary();
-      
-      // 성공 토스트
+      this.totalMemories--;
+      const row = this.querySelector(`.mem-row[data-memory-id="${memoryId}"]`);
+      if (row) row.remove();
+      this.renderFooter();
       this.showToast('Memory deleted', 'success');
-      
     } catch (error) {
       console.error('Failed to delete memory:', error);
       this.showToast('Failed to delete memory', 'error');
     }
   }
 
-  /**
-   * Show toast notification
-   */
+  /* ── Inline Edit Modal ───────────────────────────────────── */
+
+  async openEditModal(memoryId) {
+    this.closeEditModal();
+    const api = window.app?.apiClient;
+    if (!api) return;
+
+    let mem = this.memories.find(m => m.id === memoryId);
+    if (!mem) {
+      try { mem = await api.getMemory(memoryId); } catch { return; }
+    }
+    if (!mem) return;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'mem-edit-overlay';
+    overlay.innerHTML = `
+      <div class="mem-edit-modal">
+        <div class="mem-edit-header">
+          <h3>Edit Memory</h3>
+          <button class="mem-edit-close">&times;</button>
+        </div>
+        <div class="mem-edit-body">
+          <label class="mem-edit-label">Category</label>
+          <select class="mem-edit-category">
+            ${['task','bug','idea','decision','incident','code_snippet','git-history'].map(c =>
+              `<option value="${c}"${c === mem.category ? ' selected' : ''}>${c}</option>`
+            ).join('')}
+          </select>
+          <label class="mem-edit-label">Tags <span class="mem-edit-hint">(comma-separated)</span></label>
+          <input class="mem-edit-tags" type="text" value="${esc((mem.tags || []).join(', '))}" placeholder="tag1, tag2" />
+          <label class="mem-edit-label">Content</label>
+          <textarea class="mem-edit-content" rows="10">${esc(mem.content || '')}</textarea>
+        </div>
+        <div class="mem-edit-footer">
+          <span class="mem-edit-id">${memoryId.substring(0, 8)}...</span>
+          <div class="mem-edit-actions">
+            <button class="mem-edit-cancel">Cancel</button>
+            <button class="mem-edit-save">Save</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    this._editOverlay = overlay;
+    this._editMemoryId = memoryId;
+
+    // Focus content
+    const textarea = overlay.querySelector('.mem-edit-content');
+    if (textarea) { textarea.focus(); textarea.setSelectionRange(0, 0); }
+
+    // Event listeners
+    overlay.querySelector('.mem-edit-close').addEventListener('click', () => this.closeEditModal());
+    overlay.querySelector('.mem-edit-cancel').addEventListener('click', () => this.closeEditModal());
+    overlay.querySelector('.mem-edit-save').addEventListener('click', () => this.saveEdit());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) this.closeEditModal(); });
+    overlay.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.closeEditModal();
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') this.saveEdit();
+    });
+  }
+
+  closeEditModal() {
+    if (this._editOverlay) {
+      this._editOverlay.remove();
+      this._editOverlay = null;
+      this._editMemoryId = null;
+    }
+  }
+
+  async saveEdit() {
+    if (!this._editOverlay || !this._editMemoryId) return;
+    const overlay = this._editOverlay;
+    const memoryId = this._editMemoryId;
+
+    const content = overlay.querySelector('.mem-edit-content')?.value?.trim();
+    const category = overlay.querySelector('.mem-edit-category')?.value;
+    const tagsStr = overlay.querySelector('.mem-edit-tags')?.value || '';
+    const tags = tagsStr.split(',').map(t => t.trim()).filter(Boolean);
+
+    if (!content || content.length < 10) {
+      this.showToast('Content must be at least 10 characters', 'warning');
+      return;
+    }
+
+    const saveBtn = overlay.querySelector('.mem-edit-save');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
+
+    try {
+      const api = window.app?.apiClient;
+      if (!api) throw new Error('API not available');
+      await api.updateMemory(memoryId, { content, category, tags });
+
+      // Update local state
+      const idx = this.memories.findIndex(m => m.id === memoryId);
+      if (idx !== -1) {
+        this.memories[idx] = { ...this.memories[idx], content, category, tags };
+      }
+
+      this.closeEditModal();
+      this.renderMemoryList();
+      this.showToast('Memory updated', 'success');
+    } catch (error) {
+      console.error('Failed to update memory:', error);
+      this.showToast('Failed to update: ' + (error.message || 'Unknown error'), 'error');
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+    }
+  }
+
+  /* ── Cmd+K Command Palette ──────────────────────────────── */
+
+  openPalette() {
+    if (this._paletteEl) { this.closePalette(); return; }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'cmd-palette-overlay';
+    overlay.innerHTML = `
+      <div class="cmd-palette">
+        <div class="cmd-palette-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input class="cmd-palette-input" type="text" placeholder="Search memories..." autofocus />
+        </div>
+        <div class="cmd-palette-body">
+          <div class="cmd-palette-section">RECENT</div>
+          <div class="cmd-palette-results"></div>
+        </div>
+        <div class="cmd-palette-footer">
+          <span>↑↓ Navigate</span><span>↵ Open</span><span>Esc Close</span>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    this._paletteEl = overlay;
+    this._paletteIdx = -1;
+
+    const input = overlay.querySelector('.cmd-palette-input');
+    const results = overlay.querySelector('.cmd-palette-results');
+
+    // Show recent from localStorage
+    this._showRecentPalette(results);
+
+    // Search on input
+    input.addEventListener('input', () => {
+      clearTimeout(this._paletteSearchTimer);
+      this._paletteSearchTimer = setTimeout(() => this._paletteSearch(input.value, results), 300);
+    });
+
+    // Keyboard
+    overlay.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { this.closePalette(); return; }
+      const items = results.querySelectorAll('.cmd-palette-item');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        this._paletteIdx = Math.min(this._paletteIdx + 1, items.length - 1);
+        this._highlightPaletteItem(items);
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        this._paletteIdx = Math.max(this._paletteIdx - 1, 0);
+        this._highlightPaletteItem(items);
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (this._paletteIdx >= 0 && items[this._paletteIdx]) {
+          const id = items[this._paletteIdx].dataset.memoryId;
+          if (id) {
+            this._savePaletteRecent(id, input.value);
+            this.closePalette();
+            if (window.app?.router) window.app.router.navigate(`/memory/${id}`);
+          }
+        }
+      }
+    });
+
+    // Click overlay to close
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) this.closePalette();
+    });
+
+    // Click item
+    results.addEventListener('click', (e) => {
+      const item = e.target.closest('.cmd-palette-item');
+      if (item) {
+        const id = item.dataset.memoryId;
+        if (id) {
+          this._savePaletteRecent(id, input.value);
+          this.closePalette();
+          if (window.app?.router) window.app.router.navigate(`/memory/${id}`);
+        }
+      }
+    });
+
+    input.focus();
+  }
+
+  closePalette() {
+    if (this._paletteEl) {
+      this._paletteEl.remove();
+      this._paletteEl = null;
+      this._paletteIdx = -1;
+    }
+  }
+
+  destroyPalette() {
+    this.closePalette();
+  }
+
+  /* ── Keyboard Shortcuts Help ──────────────────────────── */
+
+  toggleShortcutsHelp() {
+    const existing = document.querySelector('.mem-shortcuts-overlay');
+    if (existing) { existing.remove(); return; }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'mem-shortcuts-overlay';
+    overlay.innerHTML = `
+      <div class="mem-shortcuts-panel">
+        <div class="mem-shortcuts-header">
+          <span>Keyboard Shortcuts</span>
+          <button class="mem-shortcuts-close">&times;</button>
+        </div>
+        <div class="mem-shortcuts-body">
+          <div class="mem-shortcuts-group">
+            <div class="mem-shortcuts-group-title">Navigation</div>
+            <div class="mem-shortcut-row"><kbd>j</kbd> / <kbd>&darr;</kbd><span>Next row</span></div>
+            <div class="mem-shortcut-row"><kbd>k</kbd> / <kbd>&uarr;</kbd><span>Previous row</span></div>
+            <div class="mem-shortcut-row"><kbd>Enter</kbd><span>Open memory</span></div>
+          </div>
+          <div class="mem-shortcuts-group">
+            <div class="mem-shortcuts-group-title">Preview & Selection</div>
+            <div class="mem-shortcut-row"><kbd>Space</kbd><span>Toggle peek preview</span></div>
+            <div class="mem-shortcut-row"><kbd>x</kbd><span>Toggle checkbox</span></div>
+            <div class="mem-shortcut-row"><kbd>Esc</kbd><span>Close peek / Deselect all</span></div>
+          </div>
+          <div class="mem-shortcuts-group">
+            <div class="mem-shortcuts-group-title">Actions</div>
+            <div class="mem-shortcut-row"><kbd>${navigator.platform.includes('Mac') ? '&#8984;' : 'Ctrl+'}K</kbd><span>Command palette</span></div>
+            <div class="mem-shortcut-row"><kbd>e</kbd><span>Export JSON</span></div>
+            <div class="mem-shortcut-row"><kbd>E</kbd><span>Export CSV</span></div>
+            <div class="mem-shortcut-row"><kbd>?</kbd><span>This help</span></div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay || e.target.closest('.mem-shortcuts-close')) {
+        overlay.remove();
+      }
+    });
+    overlay.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' || e.key === '?') { overlay.remove(); }
+    });
+
+    document.body.appendChild(overlay);
+  }
+
+  _showRecentPalette(container) {
+    const recent = JSON.parse(localStorage.getItem('mem-palette-recent') || '[]');
+    if (recent.length === 0) {
+      // Show some recent memories from current data
+      const items = this.memories.slice(0, 5);
+      container.innerHTML = items.map(m => this._buildPaletteItem(m)).join('') || '<div class="cmd-palette-empty">Type to search...</div>';
+    } else {
+      container.innerHTML = '<div class="cmd-palette-section">RECENT SEARCHES</div>' +
+        recent.map(r => `<div class="cmd-palette-item cmd-palette-recent-item" data-query="${esc(r)}">${esc(r)}</div>`).join('');
+    }
+  }
+
+  async _paletteSearch(query, container) {
+    if (!query.trim()) {
+      this._showRecentPalette(container);
+      this._paletteIdx = -1;
+      return;
+    }
+    try {
+      const api = window.app?.apiClient;
+      if (!api) return;
+      const result = await api.searchMemories(query, { limit: 8, search_mode: 'hybrid' });
+      if (result?.results?.length) {
+        // group by category
+        const grouped = {};
+        result.results.forEach(m => {
+          const cat = m.category || 'other';
+          if (!grouped[cat]) grouped[cat] = [];
+          grouped[cat].push(m);
+        });
+        let html = '';
+        for (const [cat, mems] of Object.entries(grouped)) {
+          html += `<div class="cmd-palette-section">${cat.toUpperCase()}</div>`;
+          html += mems.map(m => this._buildPaletteItem(m)).join('');
+        }
+        container.innerHTML = html;
+      } else {
+        container.innerHTML = '<div class="cmd-palette-empty">No results found</div>';
+      }
+      this._paletteIdx = -1;
+    } catch {
+      container.innerHTML = '<div class="cmd-palette-empty">Search failed</div>';
+    }
+  }
+
+  _buildPaletteItem(mem) {
+    const icon = CAT_ICONS[mem.category] || DEFAULT_ICON;
+    const content = truncate(mem.content, 60);
+    const time = relTime(mem.created_at);
+    return `
+      <div class="cmd-palette-item" data-memory-id="${esc(mem.id)}">
+        <span class="cmd-palette-item-icon">${icon}</span>
+        <span class="cmd-palette-item-badge">${esc(mem.category)}</span>
+        <span class="cmd-palette-item-content">${esc(content)}</span>
+        <span class="cmd-palette-item-time">${time}</span>
+      </div>`;
+  }
+
+  _highlightPaletteItem(items) {
+    items.forEach((el, i) => el.classList.toggle('active', i === this._paletteIdx));
+    if (items[this._paletteIdx]) items[this._paletteIdx].scrollIntoView({ block: 'nearest' });
+  }
+
+  _savePaletteRecent(id, query) {
+    if (!query?.trim()) return;
+    let recent = JSON.parse(localStorage.getItem('mem-palette-recent') || '[]');
+    recent = recent.filter(r => r !== query.trim());
+    recent.unshift(query.trim());
+    recent = recent.slice(0, 5);
+    localStorage.setItem('mem-palette-recent', JSON.stringify(recent));
+  }
+
+  /* ── Stats bar ─────────────────────────────────────────── */
+
+  async loadStats() {
+    try {
+      const api = window.app?.apiClient;
+      if (!api) return;
+      const [stats, daily] = await Promise.all([
+        api.getStats(),
+        api.get('/memories/daily-counts', { days: 7 })
+      ]);
+      this._stats = { ...stats, daily: daily?.daily_counts || [] };
+      // Populate source filter select
+      const sources = stats.sources_breakdown || {};
+      this._sources = Object.keys(sources);
+      const srcSel = this.querySelector('.mem-source-select');
+      if (srcSel && this._sources.length) {
+        this._sources.forEach(s => {
+          if (!srcSel.querySelector(`option[value="${s}"]`)) {
+            const opt = document.createElement('option');
+            opt.value = s;
+            opt.textContent = `${s} (${sources[s]})`;
+            srcSel.appendChild(opt);
+          }
+        });
+        if (this.viewParams.source) srcSel.value = this.viewParams.source;
+      }
+      this.renderStatsBar();
+    } catch { /* ignore — stats are optional */ }
+  }
+
+  renderStatsBar() {
+    const bar = this.querySelector('.mem-stats-bar');
+    if (!bar || !this._stats) return;
+
+    const s = this._stats;
+    const total = s.total_memories || 0;
+    const cats = s.categories_breakdown || {};
+    const daily = s.daily || [];
+
+    // Mini sparkline (7 days)
+    const maxCount = Math.max(...daily.map(d => d.count), 1);
+    const sparkBars = daily.map(d => {
+      const h = Math.max(2, Math.round((d.count / maxCount) * 20));
+      return `<span class="mem-spark-bar" style="height:${h}px" title="${d.date}: ${d.count}"></span>`;
+    }).join('');
+
+    // Category pills (top 4)
+    const topCats = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    const catPills = topCats.map(([c, n]) =>
+      `<span class="mem-stat-cat mem-clickable-filter" data-filter-type="category" data-filter-value="${esc(c)}">${esc(c)} <strong>${n}</strong></span>`
+    ).join('');
+
+    // Week total
+    const weekTotal = daily.reduce((sum, d) => sum + d.count, 0);
+
+    // Active pins
+    const pinsHtml = this._activePins.length
+      ? `<span class="mem-stat-pins" title="Active pins">${this._activePins.length} pins</span>`
+      : '';
+
+    bar.innerHTML = `
+      <span class="mem-stat-total">${total} memories</span>
+      <span class="mem-stat-sep">·</span>
+      <span class="mem-stat-week">+${weekTotal} this week</span>
+      <span class="mem-sparkline">${sparkBars}</span>
+      ${catPills}
+      ${pinsHtml}
+    `;
+  }
+
+  /* ── Active Pins ──────────────────────────────────────── */
+
+  async loadActivePins() {
+    try {
+      const api = window.app?.apiClient;
+      if (!api) return;
+      const result = await api.get('/work/pins', { status: 'open', limit: 10 });
+      this._activePins = result?.pins || [];
+      this.renderStatsBar();
+    } catch { /* ignore */ }
+  }
+
+  /* ── Batch operations ─────────────────────────────────── */
+
+  toggleSelect(memoryId, checked) {
+    if (checked) {
+      this._selected.add(memoryId);
+    } else {
+      this._selected.delete(memoryId);
+    }
+    const row = this.querySelector(`.mem-row[data-memory-id="${memoryId}"]`);
+    if (row) row.classList.toggle('mem-selected', checked);
+    this.renderBatchBar();
+  }
+
+  toggleSelectAll(checked) {
+    this._selected.clear();
+    if (checked) {
+      this.memories.forEach(m => this._selected.add(m.id));
+    }
+    this.querySelectorAll('.mem-checkbox').forEach(cb => { cb.checked = checked; });
+    this.querySelectorAll('.mem-row').forEach(r => r.classList.toggle('mem-selected', checked));
+    this.renderBatchBar();
+  }
+
+  renderBatchBar() {
+    const bar = this.querySelector('.mem-batch-bar');
+    if (!bar) return;
+    const count = this._selected.size;
+    if (count === 0) {
+      bar.style.display = 'none';
+      return;
+    }
+    bar.style.display = 'flex';
+    bar.innerHTML = `
+      <span class="mem-batch-count">${count} selected</span>
+      <select class="mem-batch-cat" title="Change category">
+        <option value="">Category...</option>
+        <option value="task">Task</option>
+        <option value="bug">Bug</option>
+        <option value="idea">Idea</option>
+        <option value="decision">Decision</option>
+        <option value="incident">Incident</option>
+        <option value="code_snippet">Code Snippet</option>
+      </select>
+      <button class="mem-batch-delete-btn">Delete</button>
+      <button class="mem-batch-clear-btn">Deselect</button>
+    `;
+  }
+
+  async batchDelete() {
+    const ids = [...this._selected];
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} memories?`)) return;
+
+    const api = window.app?.apiClient;
+    if (!api) return;
+
+    let deleted = 0;
+    for (const id of ids) {
+      try {
+        await api.deleteMemory(id);
+        this.memories = this.memories.filter(m => m.id !== id);
+        this.totalMemories--;
+        const row = this.querySelector(`.mem-row[data-memory-id="${id}"]`);
+        if (row) row.remove();
+        deleted++;
+      } catch { /* continue */ }
+    }
+    this._selected.clear();
+    this.renderBatchBar();
+    this.renderFooter();
+    this.showToast(`${deleted} memories deleted`, 'success');
+  }
+
+  async batchChangeCategory(category) {
+    if (!category) return;
+    const ids = [...this._selected];
+    if (!ids.length) return;
+
+    const api = window.app?.apiClient;
+    if (!api) return;
+
+    let updated = 0;
+    for (const id of ids) {
+      try {
+        await api.updateMemory(id, { category });
+        const idx = this.memories.findIndex(m => m.id === id);
+        if (idx !== -1) this.memories[idx].category = category;
+        updated++;
+      } catch { /* continue */ }
+    }
+    this._selected.clear();
+    this.renderBatchBar();
+    this.renderMemoryList();
+    this.showToast(`${updated} memories updated to ${category}`, 'success');
+  }
+
+  /* ── P2: Favorites ─────────────────────────────────────── */
+
+  toggleFavorite(memoryId) {
+    if (this._favorites.has(memoryId)) {
+      this._favorites.delete(memoryId);
+    } else {
+      this._favorites.add(memoryId);
+    }
+    localStorage.setItem('mem-favorites', JSON.stringify([...this._favorites]));
+
+    // Update star icon in DOM
+    const starBtn = this.querySelector(`.mem-star-btn[data-id="${memoryId}"]`);
+    if (starBtn) {
+      const isFav = this._favorites.has(memoryId);
+      starBtn.classList.toggle('active', isFav);
+      starBtn.title = isFav ? 'Remove from favorites' : 'Add to favorites';
+      const svg = starBtn.querySelector('svg');
+      if (svg) svg.setAttribute('fill', isFav ? 'currentColor' : 'none');
+    }
+
+    // Re-filter if showing favorites only
+    if (this._showFavoritesOnly) this.renderMemoryList();
+  }
+
+  toggleFavoritesFilter() {
+    this._showFavoritesOnly = !this._showFavoritesOnly;
+    const btn = this.querySelector('.mem-fav-toggle');
+    if (btn) {
+      btn.classList.toggle('active', this._showFavoritesOnly);
+      const svg = btn.querySelector('svg');
+      if (svg) svg.setAttribute('fill', this._showFavoritesOnly ? 'currentColor' : 'none');
+    }
+    this.renderMemoryList();
+    this.renderFooter();
+  }
+
+  /* ── P2: Peek Preview Panel ──────────────────────────── */
+
+  async openPeek(memoryId) {
+    if (this._peekId === memoryId) { this.closePeek(); return; }
+    this._peekId = memoryId;
+
+    const panel = this.querySelector('.mem-peek-panel');
+    if (!panel) return;
+
+    panel.style.display = 'block';
+    panel.innerHTML = '<div class="mem-peek-loading">Loading...</div>';
+    this.querySelector('.mem-content-area')?.classList.add('peek-open');
+
+    try {
+      const api = window.app?.apiClient;
+      if (!api) return;
+      const mem = await api.getMemory(memoryId);
+      if (!mem || this._peekId !== memoryId) return;
+      this._peekData = mem;
+      this.renderPeekPanel();
+    } catch {
+      panel.innerHTML = '<div class="mem-peek-loading">Failed to load</div>';
+    }
+  }
+
+  closePeek() {
+    this._peekId = null;
+    this._peekData = null;
+    const panel = this.querySelector('.mem-peek-panel');
+    if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
+    this.querySelector('.mem-content-area')?.classList.remove('peek-open');
+  }
+
+  renderPeekPanel() {
+    const panel = this.querySelector('.mem-peek-panel');
+    if (!panel || !this._peekData) return;
+
+    const m = this._peekData;
+    // Normalize tags (API may return JSON string)
+    if (typeof m.tags === 'string') {
+      try { m.tags = JSON.parse(m.tags); } catch { m.tags = []; }
+    }
+    const icon = CAT_ICONS[m.category] || DEFAULT_ICON;
+    const isFav = this._favorites.has(m.id);
+
+    panel.innerHTML = `
+      <div class="mem-peek-header">
+        <span class="mem-peek-cat">${icon} ${esc(m.category)}</span>
+        <div class="mem-peek-actions">
+          <button class="mem-action-btn mem-peek-fav" data-id="${esc(m.id)}" title="Favorite">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="${isFav ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          </button>
+          <button class="mem-action-btn mem-peek-edit" data-id="${esc(m.id)}" title="Edit">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="mem-action-btn mem-peek-close" title="Close">&times;</button>
+        </div>
+      </div>
+      <div class="mem-peek-meta">
+        ${m.project_id ? `<span class="mem-peek-project">${esc(m.project_id)}</span>` : ''}
+        ${m.source ? `<span class="mem-peek-source">${esc(m.source)}</span>` : ''}
+        ${m.client ? `<span class="mem-client-badge client-${m.client}">${esc(m.client)}</span>` : ''}
+        <span class="mem-peek-time">${relTime(m.created_at)}</span>
+        ${m.updated_at && m.updated_at !== m.created_at ? `<span class="mem-peek-updated">updated ${relTime(m.updated_at)}</span>` : ''}
+      </div>
+      ${(m.tags || []).length ? `<div class="mem-peek-tags">${m.tags.map(t => `<span class="mem-tag">#${esc(t)}</span>`).join('')}</div>` : ''}
+      <div class="mem-peek-body">${this._renderMarkdown(m.content || '')}</div>
+      <div class="mem-peek-footer">
+        <span class="mem-peek-id">${m.id.substring(0, 8)}...</span>
+        <button class="mem-peek-open-btn" data-id="${esc(m.id)}">Open full →</button>
+      </div>
+    `;
+  }
+
+  _renderMarkdown(text) {
+    // Simple markdown → HTML: headers, bold, code blocks, lists
+    return esc(text)
+      .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+      .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/^- (.+)$/gm, '<li>$1</li>')
+      .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
+      .replace(/\n\n/g, '<br><br>')
+      .replace(/\n/g, '<br>');
+  }
+
+  /* ── P2: Export Menu ──────────────────────────────────── */
+
+  _showExportMenu(anchorEl) {
+    this._closeExportMenu();
+    const menu = document.createElement('div');
+    menu.className = 'mem-export-menu';
+    const count = this._selected.size > 0 ? `${this._selected.size} selected` : `${this.memories.length} memories`;
+    menu.innerHTML = `
+      <div class="mem-export-menu-label">Export ${count}</div>
+      <button class="mem-export-item" data-format="json">JSON</button>
+      <button class="mem-export-item" data-format="csv">CSV</button>
+    `;
+    const rect = anchorEl.getBoundingClientRect();
+    Object.assign(menu.style, {
+      position: 'fixed',
+      top: `${rect.bottom + 4}px`,
+      right: `${window.innerWidth - rect.right}px`,
+      zIndex: '9999'
+    });
+    document.body.appendChild(menu);
+    this._exportMenu = menu;
+    // Close on outside click
+    this._exportMenuClose = (e) => {
+      if (!menu.contains(e.target) && !anchorEl.contains(e.target)) this._closeExportMenu();
+    };
+    setTimeout(() => document.addEventListener('click', this._exportMenuClose), 0);
+  }
+
+  _closeExportMenu() {
+    if (this._exportMenu) {
+      this._exportMenu.remove();
+      this._exportMenu = null;
+    }
+    if (this._exportMenuClose) {
+      document.removeEventListener('click', this._exportMenuClose);
+      this._exportMenuClose = null;
+    }
+  }
+
+  /* ── P2: Export ───────────────────────────────────────── */
+
+  exportMemories(format) {
+    const data = this._selected.size > 0
+      ? this.memories.filter(m => this._selected.has(m.id))
+      : this.memories;
+
+    if (!data.length) {
+      this.showToast('No memories to export', 'warning');
+      return;
+    }
+
+    let content, filename, mime;
+
+    if (format === 'json') {
+      const exported = data.map(m => ({
+        id: m.id,
+        content: m.content,
+        category: m.category,
+        tags: m.tags,
+        project_id: m.project_id,
+        source: m.source,
+        created_at: m.created_at,
+        updated_at: m.updated_at
+      }));
+      content = JSON.stringify(exported, null, 2);
+      filename = `memories-${new Date().toISOString().slice(0, 10)}.json`;
+      mime = 'application/json';
+    } else {
+      // CSV
+      const headers = ['id', 'category', 'project_id', 'source', 'tags', 'content', 'created_at'];
+      const csvEsc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
+      const rows = data.map(m =>
+        [m.id, m.category, m.project_id || '', m.source || '', (m.tags || []).join(';'), m.content || '', m.created_at || ''].map(csvEsc).join(',')
+      );
+      content = headers.join(',') + '\n' + rows.join('\n');
+      filename = `memories-${new Date().toISOString().slice(0, 10)}.csv`;
+      mime = 'text/csv';
+    }
+
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    this.showToast(`Exported ${data.length} memories as ${format.toUpperCase()}`, 'success');
+  }
+
+  /* ── Toast ──────────────────────────────────────────────── */
+
   showToast(message, type = 'info') {
-    // 간단한 토스트 구현
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
     toast.textContent = message;
-    
-    // 스타일 적용
     Object.assign(toast.style, {
-      position: 'fixed',
-      top: '20px',
-      right: '20px',
-      padding: '12px 20px',
-      borderRadius: '6px',
-      color: 'white',
-      fontSize: '14px',
-      fontWeight: '500',
-      zIndex: '10000',
-      opacity: '0',
-      transform: 'translateY(-20px)',
-      transition: 'all 0.3s ease'
+      position: 'fixed', top: '20px', right: '20px',
+      padding: '10px 18px', borderRadius: '6px', color: 'white',
+      fontSize: '13px', fontWeight: '500', zIndex: '10001',
+      opacity: '0', transform: 'translateY(-16px)', transition: 'all 0.25s ease'
     });
-    
-    // 타입별 배경색
-    const colors = {
-      success: '#10b981',
-      info: '#3b82f6',
-      warning: '#f59e0b',
-      error: '#ef4444'
-    };
+    const colors = { success: '#10b981', info: '#3b82f6', warning: '#f59e0b', error: '#ef4444' };
     toast.style.backgroundColor = colors[type] || colors.info;
-    
     document.body.appendChild(toast);
-    
-    // 애니메이션
-    requestAnimationFrame(() => {
-      toast.style.opacity = '1';
-      toast.style.transform = 'translateY(0)';
-    });
-    
-    // 3초 후 제거
+    requestAnimationFrame(() => { toast.style.opacity = '1'; toast.style.transform = 'translateY(0)'; });
     setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateY(-20px)';
-      setTimeout(() => {
-        if (toast.parentNode) {
-          toast.parentNode.removeChild(toast);
-        }
-      }, 300);
+      toast.style.opacity = '0'; toast.style.transform = 'translateY(-16px)';
+      setTimeout(() => toast.remove(), 250);
     }, 3000);
-  }
-
-  /**
-   * Setup event listeners
-   */
-  setupEventListeners() {
-    // Search input - 엔터키로만 검색
-    const searchInput = this.querySelector('.search-input');
-    if (searchInput) {
-      searchInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-          this.handleSearch(e);
-        }
-      });
-      searchInput.value = this.searchQuery;
-    }
-    
-    // Search button
-    const searchBtn = this.querySelector('.search-btn');
-    if (searchBtn) {
-      searchBtn.addEventListener('click', () => {
-        const input = this.querySelector('.search-input');
-        if (input) {
-          this.handleSearch({ target: input });
-        }
-      });
-    }
-    
-    // Sort controls
-    const sortSelect = this.querySelector('.sort-select');
-    if (sortSelect) {
-      sortSelect.addEventListener('change', this.handleSortChange.bind(this));
-    }
-    
-    const sortToggle = this.querySelector('.sort-toggle');
-    if (sortToggle) {
-      sortToggle.addEventListener('click', this.toggleSortDirection.bind(this));
-    }
-    
-    // View mode tabs
-    const viewTabs = this.querySelectorAll('.view-tab');
-    viewTabs.forEach(tab => {
-      tab.addEventListener('click', this.handleViewChange.bind(this));
-    });
-    
-    // Search mode select
-    const searchModeSelect = this.querySelector('.search-mode-select');
-    if (searchModeSelect) {
-      searchModeSelect.addEventListener('change', this.handleSearchModeChange.bind(this));
-    }
-    
-    // Filter controls
-    const categoryCombobox = this.querySelector('.category-combobox');
-    if (categoryCombobox) {
-      categoryCombobox.addEventListener('change', (event) => {
-        this.viewParams.category = event.detail.value || null;
-        this.currentPage = 1;
-        this.updateURL();
-        this.loadMemories();
-      });
-    }
-    
-    const projectCombobox = this.querySelector('.project-combobox');
-    if (projectCombobox) {
-      projectCombobox.addEventListener('change', (event) => {
-        this.viewParams.project_id = event.detail.value || null;
-        this.currentPage = 1;
-        this.updateURL();
-        this.loadMemories();
-      });
-    }
-    
-    // Refresh button
-    const refreshBtn = this.querySelector('.refresh-btn');
-    if (refreshBtn) {
-      refreshBtn.addEventListener('click', this.loadMemories.bind(this));
-    }
-    
-    // Memory card events
-    this.addEventListener('memory-select', this.handleMemorySelect.bind(this));
-    this.addEventListener('memory-favorite-toggle', this.handleMemoryFavorite.bind(this));
-    
-    // Pagination
-    this.addEventListener('click', this.handlePaginationClick.bind(this));
-  }
-  
-  /**
-   * Update search mode visibility
-   */
-  updateSearchModeVisibility() {
-    const searchModeSelect = this.querySelector('.search-mode-select');
-    if (searchModeSelect) {
-      if (this.shouldShowSearchMode()) {
-        searchModeSelect.style.display = '';
-      } else {
-        searchModeSelect.style.display = 'none';
-      }
-    }
-  }
-  
-  /**
-   * Handle search input
-   */
-  handleSearch(event) {
-    this.searchQuery = event.target.value;
-    this.currentPage = 1;
-    this.updateSearchModeVisibility();
-    // debounceSearch 제거 - 즉시 검색 실행
-    this.loadMemories();
-  }
-  
-  /**
-   * Debounced search - DEPRECATED (실시간 검색 방지)
-   */
-  debounceSearch() {
-    // 더 이상 사용하지 않음 - 검색 버튼/엔터키로만 검색
-    clearTimeout(this.searchTimeout);
-    this.searchTimeout = setTimeout(() => {
-      this.loadMemories();
-    }, 300);
-  }
-  
-  /**
-   * Handle sort change
-   */
-  handleSortChange(event) {
-    this.sortBy = event.target.value;
-    this.loadMemories();
-  }
-  
-  /**
-   * Toggle sort direction
-   */
-  toggleSortDirection() {
-    this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc';
-    this.loadMemories();
-    
-    const toggle = this.querySelector('.sort-toggle');
-    if (toggle) {
-      toggle.textContent = this.sortDirection === 'asc' ? '↑' : '↓';
-    }
-  }
-  
-  /**
-   * Handle view mode change
-   */
-  handleViewChange(event) {
-    const newView = event.target.getAttribute('data-view');
-    if (newView && newView !== this.currentView) {
-      this.currentView = newView;
-      this.currentPage = 1;
-      this.updateURL();
-      this.updateViewTabs();
-      this.updateSearchModeVisibility();
-      this.loadMemories();
-    }
-  }
-  
-  /**
-   * Handle search mode change
-   */
-  handleSearchModeChange(event) {
-    this.searchMode = event.target.value;
-    if (this.searchQuery) {
-      this.currentPage = 1;
-      this.loadMemories();
-    }
-  }
-  
-  /**
-   * Handle category filter
-   */
-  handleCategoryFilter(event) {
-    this.viewParams.category = event.target.value || null;
-    this.currentPage = 1;
-    this.updateURL();
-    this.loadMemories();
-  }
-  
-  /**
-   * Handle project filter
-   */
-  handleProjectFilter(event) {
-    this.viewParams.project_id = event.target.value || null;
-    this.currentPage = 1;
-    this.updateURL();
-    this.loadMemories();
-  }
-  
-  /**
-   * Handle memory selection
-   */
-  handleMemorySelect(event) {
-    const { memoryId } = event.detail;
-    console.log('Memory selected:', memoryId);
-  }
-  
-  /**
-   * Handle memory favorite toggle
-   */
-  handleMemoryFavorite(event) {
-    const { memoryId } = event.detail;
-    console.log('Memory favorite toggled:', memoryId);
-    // TODO: Implement favorite functionality
-  }
-  
-  /**
-   * Handle pagination clicks
-   */
-  handlePaginationClick(event) {
-    const pageBtn = event.target.closest('.page-btn');
-    if (pageBtn) {
-      const page = parseInt(pageBtn.getAttribute('data-page'));
-      if (page && page !== this.currentPage) {
-        this.currentPage = page;
-        this.loadMemories();
-      }
-    }
-    
-    const prevBtn = event.target.closest('.prev-btn');
-    if (prevBtn && this.currentPage > 1) {
-      this.currentPage--;
-      this.loadMemories();
-    }
-    
-    const nextBtn = event.target.closest('.next-btn');
-    if (nextBtn && this.currentPage < this.getTotalPages()) {
-      this.currentPage++;
-      this.loadMemories();
-    }
-  }
-  
-  /**
-   * Update URL with current parameters
-   */
-  updateURL() {
-    const params = new URLSearchParams();
-    
-    params.set('view', this.currentView);
-    
-    if (this.viewParams.project_id) {
-      params.set('project_id', this.viewParams.project_id);
-    }
-    
-    if (this.viewParams.category) {
-      params.set('category', this.viewParams.category);
-    }
-    
-    if (this.searchQuery) {
-      params.set('query', this.searchQuery);
-    }
-    
-    if (this.viewParams.tag) {
-      params.set('tag', this.viewParams.tag);
-    }
-    
-    if (this.viewParams.source) {
-      params.set('source', this.viewParams.source);
-    }
-    
-    const newURL = `${window.location.pathname}?${params.toString()}`;
-    window.history.replaceState({}, '', newURL);
-  }
-  
-  /**
-   * Update view tabs active state
-   */
-  updateViewTabs() {
-    const tabs = this.querySelectorAll('.view-tab');
-    tabs.forEach(tab => {
-      tab.classList.toggle('active', tab.getAttribute('data-view') === this.currentView);
-    });
-  }
-  
-  /**
-   * Load available projects for filter dropdown
-   */
-  async loadProjectsForFilter() {
-    try {
-      let projectsData;
-      
-      // Try to use the new projects API endpoint first
-      try {
-        const response = await fetch('/api/projects');
-        if (response.ok) {
-          projectsData = await response.json();
-        }
-      } catch (error) {
-        console.log('Projects API not available, falling back to search API');
-      }
-      
-      // Fallback to search API if projects API is not available
-      if (!projectsData) {
-        let searchResult;
-        
-        if (window.app && window.app.apiClient) {
-          // Use a smaller limit for project discovery
-          searchResult = await window.app.apiClient.searchMemories('', { limit: 100 });
-        } else {
-          const response = await fetch('/api/memories/search?query=&limit=100');
-          if (response.ok) {
-            searchResult = await response.json();
-          }
-        }
-        
-        if (searchResult && searchResult.results) {
-          const projects = new Set();
-          searchResult.results.forEach(memory => {
-            const projectId = memory.project_id || 'default';
-            projects.add(projectId);
-          });
-          
-          projectsData = {
-            projects: Array.from(projects).map(id => ({ id, name: id === 'default' ? 'Default Project' : id }))
-          };
-        }
-      }
-      
-      if (projectsData && projectsData.projects) {
-        const projectCombobox = this.querySelector('.project-combobox');
-        if (projectCombobox) {
-          const options = [
-            { value: '', text: 'All Projects' },
-            ...projectsData.projects.map(project => ({
-              value: project.id,
-              text: project.name || (project.id === 'default' ? 'Default Project' : project.id)
-            }))
-          ];
-          
-          projectCombobox.setOptions(options);
-          
-          // Set current value if specified
-          if (this.viewParams.project_id) {
-            projectCombobox.setValue(this.viewParams.project_id);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load projects for filter:', error);
-    }
-  }
-  async loadMemories() {
-    try {
-      this.setLoading(true);
-      
-      // Build search parameters with proper pagination
-      let searchParams = {
-        limit: this.pageSize,
-        offset: (this.currentPage - 1) * this.pageSize,
-        sort_by: this.sortBy,
-        sort_direction: this.sortDirection
-      };
-      
-      // Add filters to search params
-      if (this.viewParams.category) {
-        searchParams.category = this.viewParams.category;
-      }
-      
-      if (this.viewParams.project_id) {
-        searchParams.project_id = this.viewParams.project_id;
-      }
-      
-      if (this.viewParams.source) {
-        searchParams.source = this.viewParams.source;
-      }
-      
-      if (this.viewParams.tag) {
-        searchParams.tag = this.viewParams.tag;
-      }
-      
-      // Build search query based on view mode
-      let query = this.searchQuery || '';
-      
-      if (window.app && window.app.apiClient) {
-        const searchResult = await window.app.apiClient.searchMemories(query, searchParams);
-        
-        if (searchResult && searchResult.results) {
-          this.memories = searchResult.results;
-          this.totalMemories = searchResult.total || searchResult.results.length;
-          this.renderMemories();
-          this.renderPagination();
-          this.updateSummary();
-        } else {
-          this.memories = [];
-          this.totalMemories = 0;
-          this.renderMemories();
-          this.renderPagination();
-          this.updateSummary();
-        }
-      } else {
-        // Fallback to direct API call
-        const urlParams = new URLSearchParams({
-          query: query,
-          limit: searchParams.limit.toString(),
-          offset: searchParams.offset.toString(),
-          sort_by: searchParams.sort_by,
-          sort_direction: searchParams.sort_direction
-        });
-        
-        // Add filter parameters
-        Object.entries(searchParams).forEach(([key, value]) => {
-          if (!['limit', 'offset', 'sort_by', 'sort_direction'].includes(key) && value) {
-            urlParams.set(key, value);
-          }
-        });
-        
-        const response = await fetch(`/api/memories/search?${urlParams.toString()}`);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const searchResult = await response.json();
-        if (searchResult && searchResult.results) {
-          this.memories = searchResult.results;
-          this.totalMemories = searchResult.total || searchResult.results.length;
-          this.renderMemories();
-          this.renderPagination();
-          this.updateSummary();
-        }
-      }
-      
-    } catch (error) {
-      console.error('Failed to load memories:', error);
-      this.showError('Failed to load memories: ' + error.message);
-    } finally {
-      this.setLoading(false);
-    }
-  }
-  
-
-  
-  /**
-   * Sort memories (now handled server-side, but keeping for potential client-side sorting)
-   */
-  sortMemories(memories) {
-    // Note: Sorting is now primarily handled server-side
-    // This method is kept for potential client-side sorting needs
-    memories.sort((a, b) => {
-      let aVal, bVal;
-      
-      switch (this.sortBy) {
-        case 'created_at':
-          aVal = new Date(a.created_at);
-          bVal = new Date(b.created_at);
-          break;
-        case 'updated_at':
-          aVal = new Date(a.updated_at || a.created_at);
-          bVal = new Date(b.updated_at || b.created_at);
-          break;
-        case 'category':
-          aVal = a.category;
-          bVal = b.category;
-          break;
-        case 'project':
-          aVal = a.project_id || 'default';
-          bVal = b.project_id || 'default';
-          break;
-        case 'size':
-          aVal = a.content?.length || 0;
-          bVal = b.content?.length || 0;
-          break;
-        default:
-          aVal = new Date(a.created_at);
-          bVal = new Date(b.created_at);
-      }
-      
-      if (aVal < bVal) return this.sortDirection === 'asc' ? -1 : 1;
-      if (aVal > bVal) return this.sortDirection === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }
-  
-  /**
-   * Get page title based on current view
-   */
-  getPageTitle() {
-    switch (this.currentView) {
-      case 'project':
-        return this.viewParams.project_id ? 
-          `Project: ${this.viewParams.project_id}` : 'Project Memories';
-      case 'category':
-        return this.viewParams.category ? 
-          `Category: ${this.viewParams.category}` : 'Category Memories';
-      case 'tag':
-        return this.viewParams.tag ? 
-          `Tag: #${this.viewParams.tag}` : 'Tagged Memories';
-      case 'search':
-        return this.searchQuery ? 
-          `Search: "${this.searchQuery}"` : 'Search Memories';
-      case 'source':
-        return this.viewParams.source ? 
-          `Source: ${this.viewParams.source}` : 'Source Memories';
-      case 'recent':
-      default:
-        return 'Recent Memories';
-    }
-  }
-  
-  /**
-   * Get view description based on current view
-   */
-  getViewDescription() {
-    switch (this.currentView) {
-      case 'project':
-        return this.viewParams.project_id ? 
-          `All memories from the ${this.viewParams.project_id} project` : 
-          'Browse memories by project';
-      case 'category':
-        return this.viewParams.category ? 
-          `All ${this.viewParams.category} memories` : 
-          'Browse memories by category';
-      case 'tag':
-        return this.viewParams.tag ? 
-          `All memories tagged with #${this.viewParams.tag}` : 
-          'Browse memories by tags';
-      case 'search':
-        return this.searchQuery ? 
-          `Search results for "${this.searchQuery}" using ${this.searchMode} mode` : 
-          'Search through all memories';
-      case 'source':
-        return this.viewParams.source ? 
-          `All memories from ${this.viewParams.source}` : 
-          'Browse memories by source';
-      case 'recent':
-      default:
-        return 'Most recently created memories';
-    }
-  }
-  
-  /**
-   * Check if search mode should be visible
-   */
-  shouldShowSearchMode() {
-    return this.currentView === 'search' || this.searchQuery || this.currentView === 'recent';
-  }
-  
-  /**
-   * Get total pages
-   */
-  getTotalPages() {
-    return Math.ceil(this.totalMemories / this.pageSize);
-  }
-  
-  /**
-   * Set loading state
-   */
-  setLoading(loading) {
-    this.isLoading = loading;
-    
-    const loadingEl = this.querySelector('.loading-state');
-    const contentEl = this.querySelector('.memories-content');
-    
-    if (loading) {
-      if (loadingEl) loadingEl.style.display = 'flex';
-      if (contentEl) contentEl.style.display = 'none';
-    } else {
-      if (loadingEl) loadingEl.style.display = 'none';
-      if (contentEl) contentEl.style.display = 'block';
-    }
-  }
-  
-  /**
-   * Show error message
-   */
-  showError(message) {
-    const errorEl = this.querySelector('.error-message');
-    if (errorEl) {
-      errorEl.textContent = message;
-      errorEl.style.display = 'block';
-      setTimeout(() => {
-        errorEl.style.display = 'none';
-      }, 5000);
-    }
-  }
-  
-  /**
-   * Render memories list
-   */
-  renderMemories() {
-    const container = this.querySelector('.memories-list');
-    if (!container) return;
-    
-    if (this.memories.length === 0) {
-      container.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-icon">📝</div>
-          <h3>No memories found</h3>
-          <p>Try adjusting your search or filters</p>
-          ${this.searchQuery || Object.values(this.viewParams).some(v => v) ? `
-            <button class="clear-filters-btn">Clear all filters</button>
-          ` : ''}
-        </div>
-      `;
-      
-      const clearBtn = container.querySelector('.clear-filters-btn');
-      if (clearBtn) {
-        clearBtn.addEventListener('click', this.clearAllFilters.bind(this));
-      }
-      return;
-    }
-    
-    container.innerHTML = this.memories.map(memory => `
-      <memory-card
-        memory-id="${memory.id}"
-        content="${this.escapeAttribute(memory.content)}"
-        project="${memory.project_id || ''}"
-        category="${memory.category}"
-        created-at="${memory.created_at}"
-        updated-at="${memory.updated_at || ''}"
-        similarity-score="${memory.similarity_score || ''}"
-        tags="${this.escapeAttribute(JSON.stringify(memory.tags || []))}"
-        source="${memory.source || 'unknown'}"
-        search-query="${this.escapeAttribute(this.searchQuery)}"
-      ></memory-card>
-    `).join('');
-  }
-  
-  /**
-   * Clear all filters
-   */
-  clearAllFilters() {
-    this.searchQuery = '';
-    this.viewParams = {};
-    this.currentView = 'recent';
-    this.currentPage = 1;
-    
-    const searchInput = this.querySelector('.search-input');
-    if (searchInput) searchInput.value = '';
-    
-    const categoryCombobox = this.querySelector('.category-combobox');
-    if (categoryCombobox) categoryCombobox.setValue('');
-    
-    const projectCombobox = this.querySelector('.project-combobox');
-    if (projectCombobox) projectCombobox.setValue('');
-    
-    this.updateURL();
-    this.updateViewTabs();
-    this.loadMemories();
-  }
-  
-  /**
-   * Escape attribute values
-   */
-  escapeAttribute(value) {
-    if (typeof value !== 'string') return '';
-    return value
-      .replace(/&/g, '&amp;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-  }
-  
-  /**
-   * Render pagination
-   */
-  renderPagination() {
-    const container = this.querySelector('.pagination');
-    if (!container) return;
-    
-    const totalPages = this.getTotalPages();
-    
-    if (totalPages <= 1) {
-      container.innerHTML = '';
-      return;
-    }
-    
-    let paginationHTML = `
-      <button class="prev-btn ${this.currentPage === 1 ? 'disabled' : ''}" 
-              ${this.currentPage === 1 ? 'disabled' : ''}>
-        ← Previous
-      </button>
-    `;
-    
-    // Show page numbers (with ellipsis for large ranges)
-    const maxVisible = 5;
-    let startPage = Math.max(1, this.currentPage - Math.floor(maxVisible / 2));
-    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-    
-    if (endPage - startPage < maxVisible - 1) {
-      startPage = Math.max(1, endPage - maxVisible + 1);
-    }
-    
-    if (startPage > 1) {
-      paginationHTML += `<button class="page-btn" data-page="1">1</button>`;
-      if (startPage > 2) {
-        paginationHTML += `<span class="ellipsis">...</span>`;
-      }
-    }
-    
-    for (let i = startPage; i <= endPage; i++) {
-      paginationHTML += `
-        <button class="page-btn ${i === this.currentPage ? 'active' : ''}" 
-                data-page="${i}">${i}</button>
-      `;
-    }
-    
-    if (endPage < totalPages) {
-      if (endPage < totalPages - 1) {
-        paginationHTML += `<span class="ellipsis">...</span>`;
-      }
-      paginationHTML += `<button class="page-btn" data-page="${totalPages}">${totalPages}</button>`;
-    }
-    
-    paginationHTML += `
-      <button class="next-btn ${this.currentPage === totalPages ? 'disabled' : ''}"
-              ${this.currentPage === totalPages ? 'disabled' : ''}>
-        Next →
-      </button>
-    `;
-    
-    container.innerHTML = paginationHTML;
-  }
-  
-  /**
-   * Update summary information
-   */
-  updateSummary() {
-    const summaryEl = this.querySelector('.memories-summary');
-    if (!summaryEl) return;
-    
-    const startIndex = (this.currentPage - 1) * this.pageSize + 1;
-    const endIndex = Math.min(this.currentPage * this.pageSize, this.totalMemories);
-    
-    summaryEl.innerHTML = `
-      <span class="summary-text">
-        Showing ${startIndex}-${endIndex} of ${this.totalMemories} memories
-      </span>
-      <span class="view-mode">View: ${this.currentView}</span>
-    `;
-  }
-  
-  /**
-   * Render the component
-   */
-  render() {
-    this.className = 'memories-page page-container';
-    
-    this.innerHTML = `
-      <div class="page-header">
-        <div class="page-header-main">
-          <h1 class="page-title">${this.getPageTitle()}</h1>
-          <p class="page-subtitle">${this.getViewDescription()}</p>
-        </div>
-        <div class="page-header-actions">
-          <connection-status></connection-status>
-          <button class="refresh-btn secondary-button">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="23,4 23,10 17,10"/>
-              <polyline points="1,20 1,14 7,14"/>
-              <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/>
-            </svg>
-            Refresh
-          </button>
-        </div>
-      </div>
-      
-      <div class="error-message" style="display: none;"></div>
-      
-      <div class="view-tabs">
-        <button class="view-tab ${this.currentView === 'recent' ? 'active' : ''}" data-view="recent">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/>
-          </svg>
-          Recent
-        </button>
-        <button class="view-tab ${this.currentView === 'project' ? 'active' : ''}" data-view="project">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-          </svg>
-          By Project
-        </button>
-        <button class="view-tab ${this.currentView === 'category' ? 'active' : ''}" data-view="category">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/>
-          </svg>
-          By Category
-        </button>
-        <button class="view-tab ${this.currentView === 'search' ? 'active' : ''}" data-view="search">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-          </svg>
-          Search
-        </button>
-      </div>
-      
-      <div class="controls-section">
-        <div class="search-controls">
-          <div class="search-input-group">
-            <input 
-              type="text" 
-              class="search-input" 
-              placeholder="Search memories..."
-              value="${this.searchQuery}"
-            />
-            <button class="search-btn" title="Search (or press Enter)">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M7 12C9.76142 12 12 9.76142 12 7C12 4.23858 9.76142 2 7 2C4.23858 2 2 4.23858 2 7C2 9.76142 4.23858 12 7 12Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M14 14L10.5 10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              Search
-            </button>
-            <select class="search-mode-select" ${!this.shouldShowSearchMode() ? 'style="display: none;"' : ''}>
-              <option value="hybrid" ${this.searchMode === 'hybrid' ? 'selected' : ''}>Hybrid</option>
-              <option value="vector" ${this.searchMode === 'vector' ? 'selected' : ''}>Vector</option>
-              <option value="text" ${this.searchMode === 'text' ? 'selected' : ''}>Text</option>
-            </select>
-          </div>
-        </div>
-        
-        <div class="filter-controls">
-          <searchable-combobox class="category-combobox" placeholder="All Categories">
-            <option value="">All Categories</option>
-            <option value="task" data-icon="📋">Task</option>
-            <option value="bug" data-icon="🐛">Bug</option>
-            <option value="idea" data-icon="💡">Idea</option>
-            <option value="decision" data-icon="💎">Decision</option>
-            <option value="incident" data-icon="⚠️">Incident</option>
-            <option value="code_snippet" data-icon="💻">Code Snippet</option>
-            <option value="git-history" data-icon="📚">Git History</option>
-          </searchable-combobox>
-          
-          <searchable-combobox class="project-combobox" placeholder="All Projects">
-            <option value="">All Projects</option>
-          </searchable-combobox>
-        </div>
-        
-        <div class="sort-controls">
-          <select class="sort-select">
-            <option value="created_at">Created Date</option>
-            <option value="updated_at">Updated Date</option>
-            <option value="category">Category</option>
-            <option value="project">Project</option>
-            <option value="size">Size</option>
-          </select>
-          <button class="sort-toggle" title="Toggle sort direction">↓</button>
-        </div>
-      </div>
-      
-      <div class="loading-state" style="display: none;">
-        <div class="loading-spinner"></div>
-        <p>Loading memories...</p>
-      </div>
-      
-      <div class="memories-content">
-        <div class="memories-summary"></div>
-        <div class="memories-list"></div>
-        <div class="pagination"></div>
-      </div>
-    `;
-    
-    // Update view tabs and summary
-    this.updateViewTabs();
-    this.updateSummary();
-    
-    // Update search mode visibility after render
-    setTimeout(() => {
-      this.updateSearchModeVisibility();
-    }, 0);
   }
 }
 
-// Define the custom element
 customElements.define('memories-page', MemoriesPage);
-
 export { MemoriesPage };
 
-// Add component styles
+/* ── Styles (injected once) ──────────────────────────────────── */
 const style = document.createElement('style');
 style.textContent = `
-  .memories-page {
+  /* ── Layout ─────────────────────────────── */
+  .mem {
+    display: block;
+    max-width: var(--container-xl, 1280px);
+    width: 100%;
+    margin: 0 auto;
+    padding: var(--space-6, 1.5rem) var(--space-4, 1rem);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    box-sizing: border-box;
+    overflow-x: hidden;
   }
-  
-  .secondary-button {
-    background: var(--bg-secondary);
+
+  /* ── Toolbar ────────────────────────────── */
+  .mem-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .mem-title {
+    font-size: 1.125rem;
+    font-weight: 600;
     color: var(--text-primary);
-    border: 1px solid var(--border-color);
-    padding: 0.5rem 1rem;
-    border-radius: var(--border-radius);
-    cursor: pointer;
-    font-size: 0.875rem;
-    transition: var(--transition);
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  
-  .secondary-button:hover {
-    background: var(--bg-tertiary);
-  }
-  
-  .secondary-button svg {
-    width: 16px;
-    height: 16px;
-    stroke: currentColor;
-  }
-  
-  .error-message {
-    background: var(--error-bg);
-    color: var(--error-text);
-    border: 1px solid var(--error-color);
-    border-radius: var(--border-radius);
-    padding: 1rem;
-    margin-bottom: 1rem;
-  }
-  
-  .view-tabs {
-    display: flex;
-    gap: 0.25rem;
-    margin-bottom: 1.5rem;
-    border-bottom: 1px solid var(--border-color);
-  }
-  
-  .view-tab {
-    background: none;
-    border: none;
-    padding: 0.75rem 1rem;
-    cursor: pointer;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    border-bottom: 2px solid transparent;
-    transition: var(--transition);
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  
-  .view-tab svg {
-    width: 16px;
-    height: 16px;
-    stroke: currentColor;
-  }
-  
-  .view-tab:hover {
-    color: var(--text-primary);
-    background: var(--bg-secondary);
-  }
-  
-  .view-tab.active {
-    color: var(--primary-color);
-    border-bottom-color: var(--primary-color);
-    background: var(--primary-color-alpha);
-  }
-  
-  .controls-section {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
-    gap: 1.5rem;
-    margin-bottom: 1.5rem;
-    align-items: center;
-  }
-  
-  .search-controls {
-    display: flex;
-    gap: 0.5rem;
-  }
-  
-  .search-input-group {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-  }
-  
-  .search-input {
-    flex: 1;
-    min-width: 200px;
-    padding: 0.75rem;
-    border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font-size: 1rem;
-  }
-  
-  .search-input:focus {
-    outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px var(--primary-color-alpha);
-  }
-  
-  .search-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.75rem 1.25rem;
-    min-width: 100px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font-size: 0.875rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-  }
-  
-  .search-btn:hover {
-    background: var(--bg-secondary);
-    border-color: var(--border-hover);
-  }
-  
-  .search-btn:active {
-    transform: translateY(0);
-  }
-  
-  .search-btn svg {
-    width: 16px;
-    height: 16px;
+    margin: 0;
     flex-shrink: 0;
   }
-  
-  .search-mode-select {
-    padding: 0.75rem;
+  .mem-search-wrap {
+    flex: 1;
+    min-width: 180px;
+    position: relative;
+  }
+  .mem-search-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+  .mem-search-input {
+    width: 100%;
+    padding: 0.4375rem 0.625rem 0.4375rem 2rem;
     border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-sm, 6px);
     background: var(--bg-primary);
     color: var(--text-primary);
-    font-size: 0.875rem;
-    min-width: 100px;
+    font-size: 0.8125rem;
+    outline: none;
+    transition: border-color 0.15s;
+    box-sizing: border-box;
   }
-  
-  .filter-controls {
-    display: flex;
-    gap: 0.75rem;
-    align-items: center;
+  .mem-search-input:focus {
+    border-color: var(--primary-color, #6366f1);
+    box-shadow: 0 0 0 2px rgba(99,102,241,0.12);
   }
-  
-  .category-combobox,
-  .project-combobox {
-    min-width: 150px;
-  }
-  
-  .sort-controls {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-  }
-  
-  .sort-select {
-    padding: 0.5rem;
+  .mem-sort-select {
+    padding: 0.4375rem 0.5rem;
     border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-sm, 6px);
     background: var(--bg-primary);
     color: var(--text-primary);
-    font-size: 0.875rem;
-  }
-  
-  .sort-toggle {
-    background: none;
-    border: 1px solid var(--border-color);
-    color: var(--text-secondary);
-    padding: 0.5rem;
-    border-radius: var(--border-radius);
+    font-size: 0.75rem;
     cursor: pointer;
-    font-size: 1rem;
-    width: 2rem;
-    height: 2rem;
+    outline: none;
+  }
+
+  /* ── Searchable Combobox in toolbar ──── */
+  .mem-cat-combo,
+  .mem-proj-combo {
+    flex-shrink: 0;
+    width: 150px;
+  }
+  .mem-cat-combo .combobox-input,
+  .mem-proj-combo .combobox-input {
+    padding: 0.4375rem 1.75rem 0.4375rem 0.5rem;
+    font-size: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+  }
+  .mem-cat-combo .combobox-input:focus,
+  .mem-proj-combo .combobox-input:focus {
+    border-color: var(--primary-color, #6366f1);
+    box-shadow: 0 0 0 2px rgba(99,102,241,0.12);
+  }
+  .mem-cat-combo .combobox-dropdown,
+  .mem-proj-combo .combobox-dropdown {
+    border-radius: var(--border-radius-sm, 6px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    max-height: 240px;
+  }
+  .mem-cat-combo .combobox-option,
+  .mem-proj-combo .combobox-option {
+    padding: 0.375rem 0.5rem;
+    font-size: 0.75rem;
+    gap: 0.375rem;
+  }
+
+  /* ── Search Mode Select ───────────────────── */
+  .mem-mode-select {
+    padding: 0.4375rem 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: 0.6875rem;
+    cursor: pointer;
+    outline: none;
+    flex-shrink: 0;
+  }
+
+  /* ── Search Suggestions ──────────────────── */
+  .mem-suggestions {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0;
+    flex-wrap: wrap;
+  }
+  .mem-suggestions:empty { display: none; }
+  .mem-suggest-label {
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .mem-suggest-item {
+    padding: 2px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 9999px;
+    background: var(--bg-primary);
+    color: var(--primary-color, #6366f1);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .mem-suggest-item:hover {
+    background: rgba(99,102,241,0.08);
+    border-color: var(--primary-color, #6366f1);
+  }
+
+  /* ── Time Range Buttons ──────────────────── */
+  .mem-time-range {
+    display: flex;
+    gap: 1px;
+    background: var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .mem-time-btn {
+    padding: 0.375rem 0.625rem;
+    border: none;
+    background: var(--bg-primary);
+    color: var(--text-muted);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .mem-time-btn:hover { color: var(--text-primary); background: var(--bg-secondary); }
+  .mem-time-btn.active { color: var(--text-primary); background: var(--bg-secondary); font-weight: 600; }
+
+  /* Clickable filter elements */
+  .mem-clickable-filter { cursor: pointer; transition: all 0.15s; }
+  .mem-clickable-filter:hover { opacity: 0.8; text-decoration: underline; }
+
+  /* ── Filter Chips ───────────────────────── */
+  .mem-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-bottom: 0.5rem;
+    align-items: center;
+  }
+  .mem-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    font-size: 0.6875rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+  .mem-chip-remove {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.875rem;
+    line-height: 1;
+    padding: 0 2px;
+  }
+  .mem-chip-remove:hover {
+    color: var(--error-color, #ef4444);
+  }
+  .mem-clear-all-btn {
+    background: none;
+    border: none;
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px 6px;
+    text-decoration: underline;
+  }
+  .mem-clear-all-btn:hover {
+    color: var(--text-primary);
+  }
+
+  /* ── Compact list (reuse dashboard's .recent-item) ──────── */
+  .mem-list {
+    background: var(--card-bg, var(--bg-primary));
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius, 8px);
+    overflow: hidden;
+    min-height: 200px;
+    min-width: 0;
+  }
+
+  .mem-list .recent-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: background 0.15s;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    position: relative;
+  }
+  .mem-list .recent-item:last-child { border-bottom: none; }
+  .mem-list .recent-item:hover { background: var(--bg-secondary); }
+  .mem-list .recent-item.keyboard-selected { background: var(--bg-secondary); outline: 2px solid var(--primary-color, #6366f1); outline-offset: -2px; }
+
+  .mem-list .recent-item-icon { flex-shrink: 0; display: flex; align-items: center; color: var(--text-muted); }
+  .mem-list .recent-item-icon svg { display: block; }
+  .mem-list .recent-item-badge { flex-shrink: 0; font-size: 0.6875rem; padding: 1px 6px; border-radius: var(--border-radius-sm, 4px); background: var(--bg-secondary); color: var(--text-secondary); font-weight: 500; }
+  .mem-list .recent-item-project { flex-shrink: 0; font-size: 0.6875rem; padding: 1px 6px; border-radius: var(--border-radius-sm, 4px); background: var(--bg-tertiary, var(--bg-secondary)); color: var(--text-primary); font-weight: 500; border: 1px solid var(--border-color); }
+  .mem-list .recent-item-content { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+  .mem-list .recent-item-time { flex-shrink: 0; font-size: 0.6875rem; color: var(--text-muted); white-space: nowrap; }
+
+  /* Tags inline */
+  .mem-tags { display: flex; gap: 0.25rem; flex-shrink: 0; }
+  .mem-tag { font-size: 0.625rem; padding: 0 4px; border-radius: 3px; background: var(--bg-tertiary, var(--bg-secondary)); color: var(--text-muted); white-space: nowrap; }
+
+  /* Score badge */
+  .mem-score { flex-shrink: 0; font-size: 0.625rem; padding: 1px 5px; border-radius: 3px; background: rgba(99,102,241,0.1); color: var(--primary-color, #6366f1); font-weight: 600; }
+
+  /* Hover actions */
+  .mem-row-actions {
+    display: none;
+    gap: 0.25rem;
+    flex-shrink: 0;
+  }
+  .mem-row:hover .mem-row-actions { display: flex; }
+  .mem-row:hover .recent-item-time { display: none; }
+  .mem-action-btn {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    width: 24px;
+    height: 24px;
     display: flex;
     align-items: center;
     justify-content: center;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all 0.15s;
+    padding: 0;
   }
-  
-  .sort-toggle:hover {
-    background: var(--bg-secondary);
+  .mem-action-btn:hover {
+    background: var(--bg-tertiary, var(--bg-secondary));
     color: var(--text-primary);
+    border-color: var(--border-hover, var(--border-color));
   }
-  
-  .loading-state {
+  .mem-delete-btn:hover { color: var(--error-color, #ef4444); }
+
+  /* ── Skeleton loading ───────────────────── */
+  .ml-skeleton {
+    padding: 0.625rem 0.75rem !important;
+    cursor: default !important;
+  }
+  .sk-line {
+    height: 12px;
+    border-radius: 3px;
+    background: var(--bg-secondary);
+    animation: sk-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes sk-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+
+  /* ── Empty state ────────────────────────── */
+  .mem-empty {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 4rem;
+    padding: 3rem 1rem;
     color: var(--text-muted);
+    gap: 0.75rem;
   }
-  
-  .loading-spinner {
-    width: 32px;
-    height: 32px;
-    border: 3px solid var(--border-color);
-    border-top: 3px solid var(--primary-color);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin-bottom: 1rem;
+  .mem-empty p { margin: 0; font-size: 0.875rem; }
+  .mem-empty .mem-clear-all-btn {
+    padding: 0.375rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    text-decoration: none;
+    font-size: 0.8125rem;
   }
-  
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-  
-  .memories-content {
-    min-height: 400px;
-  }
-  
-  .memories-summary {
+
+  /* ── Footer ─────────────────────────────── */
+  .mem-footer {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 1rem;
-    padding: 0.75rem;
-    background: var(--bg-secondary);
-    border-radius: var(--border-radius);
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-  }
-  
-  .view-mode {
-    font-weight: 500;
-    color: var(--primary-color);
-  }
-  
-  .memories-list {
-    margin-bottom: 2rem;
-  }
-  
-  .empty-state {
-    text-align: center;
-    padding: 4rem 2rem;
+    justify-content: space-between;
+    padding: 0.75rem 0;
+    font-size: 0.75rem;
     color: var(--text-muted);
   }
-  
-  .empty-icon {
-    font-size: 3rem;
-    margin-bottom: 1rem;
-  }
-  
-  .empty-state h3 {
-    margin: 0 0 0.5rem 0;
+  .mem-count { font-weight: 500; }
+  .mem-load-more-btn {
+    padding: 0.375rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    background: var(--bg-primary);
     color: var(--text-primary);
-    font-size: 1.25rem;
-  }
-  
-  .empty-state p {
-    margin: 0 0 1.5rem 0;
-    font-size: 1rem;
-  }
-  
-  .clear-filters-btn {
-    background: var(--primary-color);
-    color: white;
-    border: none;
-    padding: 0.75rem 1.5rem;
-    border-radius: var(--border-radius);
-    cursor: pointer;
-    font-size: 0.875rem;
+    font-size: 0.75rem;
     font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
   }
-  
-  .clear-filters-btn:hover {
-    background: var(--primary-hover);
+  .mem-load-more-btn:hover {
+    background: var(--bg-secondary);
+    border-color: var(--border-hover, var(--border-color));
   }
-  
-  .pagination {
+
+  /* ── Shortcuts hint ──────────────────────── */
+  .mem-shortcuts-hint {
+    margin-left: auto;
     display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    font-size: 0.6875rem;
+    cursor: pointer;
+    border-radius: var(--border-radius-sm, 4px);
+    transition: color 0.15s, background 0.15s;
+  }
+  .mem-shortcuts-hint:hover {
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+  }
+  .mem-shortcuts-hint kbd {
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: var(--bg-primary);
+    font-family: inherit;
+    font-size: 0.625rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    box-shadow: 0 1px 0 var(--border-color);
+  }
+
+  /* ── Shortcuts help overlay ──────────────── */
+  .mem-shortcuts-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: sh-fade 0.15s ease;
+  }
+  @keyframes sh-fade { from { opacity: 0; } to { opacity: 1; } }
+
+  .mem-shortcuts-panel {
+    width: 400px;
+    max-width: 92vw;
+    background: var(--card-bg, var(--bg-primary));
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+    animation: sh-slide 0.15s ease;
+    overflow: hidden;
+  }
+  @keyframes sh-slide { from { transform: translateY(-8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  .mem-shortcuts-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .mem-shortcuts-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.25rem;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    line-height: 1;
+    border-radius: 4px;
+  }
+  .mem-shortcuts-close:hover { color: var(--text-primary); background: var(--bg-secondary); }
+
+  .mem-shortcuts-body {
+    padding: 0.5rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .mem-shortcuts-group {
+    padding: 0.25rem 1rem 0.5rem;
+  }
+  .mem-shortcuts-group-title {
+    font-size: 0.625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    padding-bottom: 0.375rem;
+  }
+  .mem-shortcut-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.3125rem 0;
+    font-size: 0.8125rem;
+    color: var(--text-primary);
+  }
+  .mem-shortcut-row kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    font-family: inherit;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    box-shadow: 0 1px 0 var(--border-color);
+  }
+  .mem-shortcut-row span {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+  }
+
+  /* ── Cmd+K Command Palette ──────────────── */
+  .cmd-palette-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 15vh;
+    animation: cp-fade-in 0.12s ease;
+  }
+  @keyframes cp-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+  .cmd-palette {
+    width: 560px;
+    max-width: 92vw;
+    max-height: 420px;
+    background: var(--card-bg, var(--bg-primary));
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: cp-slide-in 0.15s ease;
+  }
+  @keyframes cp-slide-in { from { transform: translateY(-8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  .cmd-palette-header {
+    display: flex;
     align-items: center;
     gap: 0.5rem;
-    margin-top: 2rem;
-  }
-  
-  .page-btn,
-  .prev-btn,
-  .next-btn {
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    color: var(--text-primary);
-    padding: 0.5rem 0.75rem;
-    border-radius: var(--border-radius);
-    cursor: pointer;
-    font-size: 0.875rem;
-    transition: var(--transition);
-  }
-  
-  .page-btn:hover,
-  .prev-btn:hover:not(.disabled),
-  .next-btn:hover:not(.disabled) {
-    background: var(--bg-secondary);
-    border-color: var(--primary-color);
-  }
-  
-  .page-btn.active {
-    background: var(--primary-color);
-    color: white;
-    border-color: var(--primary-color);
-  }
-  
-  .prev-btn.disabled,
-  .next-btn.disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  
-  .ellipsis {
-    padding: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color);
     color: var(--text-muted);
-    font-size: 0.875rem;
   }
-  
-  /* Responsive design */
-  @media (max-width: 768px) {
-    .memories-page {
-      padding: var(--space-4) 0;
-    }
-    
-    .view-tabs {
-      overflow-x: auto;
-      scrollbar-width: none;
-      -ms-overflow-style: none;
-    }
-    
-    .view-tabs::-webkit-scrollbar {
-      display: none;
-    }
-    
-    .controls-section {
-      grid-template-columns: 1fr;
-      gap: 1rem;
-    }
-    
-    .search-input-group {
+  .cmd-palette-input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 0.9375rem;
+    outline: none;
+  }
+  .cmd-palette-input::placeholder { color: var(--text-muted); }
+
+  .cmd-palette-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.375rem 0;
+  }
+  .cmd-palette-section {
+    padding: 0.375rem 1rem;
+    font-size: 0.625rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .cmd-palette-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4375rem 1rem;
+    cursor: pointer;
+    transition: background 0.1s;
+    font-size: 0.8125rem;
+  }
+  .cmd-palette-item:hover,
+  .cmd-palette-item.active {
+    background: var(--bg-secondary);
+  }
+  .cmd-palette-item-icon { flex-shrink: 0; display: flex; align-items: center; color: var(--text-muted); }
+  .cmd-palette-item-badge { flex-shrink: 0; font-size: 0.625rem; padding: 1px 5px; border-radius: 3px; background: var(--bg-secondary); color: var(--text-secondary); font-weight: 500; }
+  .cmd-palette-item-content { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+  .cmd-palette-item-time { flex-shrink: 0; font-size: 0.625rem; color: var(--text-muted); }
+  .cmd-palette-empty { padding: 2rem 1rem; text-align: center; color: var(--text-muted); font-size: 0.8125rem; }
+
+  .cmd-palette-footer {
+    display: flex;
+    gap: 1.25rem;
+    padding: 0.5rem 1rem;
+    border-top: 1px solid var(--border-color);
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+  }
+
+  /* ── Inline Edit Modal ────────────────────── */
+  .mem-edit-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 12vh;
+    animation: cp-fade-in 0.12s ease;
+  }
+  .mem-edit-modal {
+    width: 580px;
+    max-width: 92vw;
+    max-height: 75vh;
+    background: var(--card-bg, var(--bg-primary));
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: cp-slide-in 0.15s ease;
+  }
+  .mem-edit-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .mem-edit-header h3 {
+    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .mem-edit-close {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    line-height: 1;
+    padding: 0 4px;
+  }
+  .mem-edit-close:hover { color: var(--text-primary); }
+  .mem-edit-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .mem-edit-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .mem-edit-hint {
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--text-muted);
+  }
+  .mem-edit-category,
+  .mem-edit-tags {
+    padding: 0.4375rem 0.625rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+    outline: none;
+  }
+  .mem-edit-category:focus,
+  .mem-edit-tags:focus {
+    border-color: var(--primary-color, #6366f1);
+    box-shadow: 0 0 0 2px rgba(99,102,241,0.12);
+  }
+  .mem-edit-content {
+    padding: 0.625rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    line-height: 1.5;
+    resize: vertical;
+    min-height: 160px;
+    outline: none;
+  }
+  .mem-edit-content:focus {
+    border-color: var(--primary-color, #6366f1);
+    box-shadow: 0 0 0 2px rgba(99,102,241,0.12);
+  }
+  .mem-edit-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 1rem;
+    border-top: 1px solid var(--border-color);
+  }
+  .mem-edit-id {
+    font-size: 0.625rem;
+    color: var(--text-muted);
+    font-family: monospace;
+  }
+  .mem-edit-actions { display: flex; gap: 0.5rem; }
+  .mem-edit-cancel {
+    padding: 0.375rem 0.875rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .mem-edit-cancel:hover { background: var(--bg-secondary); }
+  .mem-edit-save {
+    padding: 0.375rem 0.875rem;
+    border: none;
+    border-radius: var(--border-radius-sm, 6px);
+    background: var(--primary-color, #6366f1);
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .mem-edit-save:hover { opacity: 0.9; }
+  .mem-edit-save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ── Search Highlighting ───────────────── */
+  mark {
+    background: rgba(250, 204, 21, 0.25);
+    color: inherit;
+    padding: 0 1px;
+    border-radius: 2px;
+  }
+  [data-theme="dark"] mark,
+  .dark mark {
+    background: rgba(250, 204, 21, 0.15);
+  }
+
+  /* ── Stats Bar ────────────────────────── */
+  .mem-stats-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0;
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+    min-height: 1.5rem;
+  }
+  .mem-stats-bar:empty { display: none; }
+  .mem-stat-total { font-weight: 600; color: var(--text-secondary); }
+  .mem-stat-sep { opacity: 0.4; }
+  .mem-stat-week { color: var(--success-color, #10b981); }
+  .mem-sparkline {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 20px;
+    margin: 0 0.25rem;
+  }
+  .mem-spark-bar {
+    width: 4px;
+    background: var(--primary-color, #6366f1);
+    border-radius: 1px;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+  }
+  .mem-spark-bar:hover { opacity: 1; }
+  .mem-stat-cat {
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--bg-secondary);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .mem-stat-cat:hover { background: var(--border-color); }
+  .mem-stat-cat strong { font-weight: 600; color: var(--text-primary); margin-left: 2px; }
+  .mem-stat-pins {
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--primary-color, #6366f1);
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .mem-stat-pins:hover { background: rgba(99, 102, 241, 0.2); }
+
+  /* ── Batch Toolbar ────────────────────── */
+  .mem-batch-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    background: var(--primary-color, #6366f1);
+    color: white;
+    border-radius: var(--border-radius-sm, 6px);
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+  }
+  .mem-batch-count { flex: 1; }
+  .mem-batch-cat {
+    padding: 0.25rem 0.5rem;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 4px;
+    background: rgba(255,255,255,0.1);
+    color: white;
+    font-size: 0.6875rem;
+    cursor: pointer;
+  }
+  .mem-batch-cat option { color: var(--text-primary); background: var(--bg-primary); }
+  .mem-batch-delete-btn {
+    padding: 0.25rem 0.625rem;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 4px;
+    background: rgba(239,68,68,0.8);
+    color: white;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .mem-batch-delete-btn:hover { background: #ef4444; }
+  .mem-batch-clear-btn {
+    padding: 0.25rem 0.625rem;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 4px;
+    background: transparent;
+    color: white;
+    font-size: 0.6875rem;
+    cursor: pointer;
+  }
+  .mem-batch-clear-btn:hover { background: rgba(255,255,255,0.15); }
+
+  /* ── Checkbox in rows ─────────────────── */
+  .mem-checkbox-wrap {
+    display: flex;
+    align-items: center;
+    width: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: width 0.15s, opacity 0.15s, margin 0.15s;
+    margin-right: 0;
+    flex-shrink: 0;
+  }
+  .mem-row:hover .mem-checkbox-wrap,
+  .mem-row.mem-selected .mem-checkbox-wrap,
+  .mem-row.keyboard-selected .mem-checkbox-wrap {
+    width: 18px;
+    opacity: 1;
+    margin-right: 4px;
+  }
+  .mem-checkbox {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    accent-color: var(--primary-color, #6366f1);
+  }
+  .mem-row.mem-selected {
+    background: rgba(99, 102, 241, 0.06);
+  }
+
+  /* ── P2: Favorites star ─────────────────── */
+  .mem-star-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    opacity: 0;
+    width: 0;
+    overflow: hidden;
+    transition: opacity 0.15s, width 0.15s, color 0.15s;
+  }
+  .mem-row:hover .mem-star-btn,
+  .mem-row.keyboard-selected .mem-star-btn,
+  .mem-star-btn.active {
+    opacity: 1;
+    width: 18px;
+  }
+  .mem-star-btn.active { color: #f59e0b; }
+  .mem-star-btn:hover { color: #f59e0b; }
+
+  /* ── P2: Favorites toggle btn ─────────── */
+  .mem-fav-toggle {
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.375rem;
+    display: flex;
+    align-items: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .mem-fav-toggle:hover { color: #f59e0b; border-color: #f59e0b; }
+  .mem-fav-toggle.active { color: #f59e0b; border-color: #f59e0b; background: rgba(245, 158, 11, 0.08); }
+
+  /* ── P2: Export btn ───────────────────── */
+  .mem-export-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.375rem;
+    display: flex;
+    align-items: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .mem-export-btn:hover { color: var(--text-primary); border-color: var(--border-hover, var(--border-color)); }
+
+  /* ── P2: Export Menu ──────────────────── */
+  .mem-export-menu {
+    background: var(--card-bg, var(--bg-primary));
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    padding: 0.375rem;
+    min-width: 140px;
+    animation: cp-slide-in 0.1s ease;
+  }
+  .mem-export-menu-label {
+    padding: 0.25rem 0.625rem;
+    font-size: 0.625rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .mem-export-item {
+    display: block;
+    width: 100%;
+    padding: 0.375rem 0.625rem;
+    border: none;
+    background: none;
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+    text-align: left;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .mem-export-item:hover { background: var(--bg-secondary); }
+
+  /* ── P2: Source badge ─────────────────── */
+  .mem-source-badge {
+    flex-shrink: 0;
+    font-size: 0.5625rem;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: var(--bg-tertiary, var(--bg-secondary));
+    color: var(--text-muted);
+    white-space: nowrap;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  /* ── Client badge ─────────────────────── */
+  .mem-client-badge {
+    flex-shrink: 0;
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 500;
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    background: var(--bg-tertiary, #374151);
+    color: var(--text-primary);
+    white-space: nowrap;
+  }
+  .mem-client-badge.client-claude_code { background: #d97706; color: #fff; }
+  .mem-client-badge.client-cursor { background: #7c3aed; color: #fff; }
+  .mem-client-badge.client-kiro { background: #059669; color: #fff; }
+  .mem-client-badge.client-web { background: #2563eb; color: #fff; }
+
+  /* ── P2: Source select ────────────────── */
+  .mem-source-select {
+    padding: 0.4375rem 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.75rem;
+    cursor: pointer;
+    outline: none;
+  }
+
+  /* ── P2: Content area (list + peek) ─── */
+  .mem-content-area {
+    display: flex;
+    gap: 0;
+    transition: gap 0.2s;
+  }
+  .mem-content-area .mem-list {
+    flex: 1;
+    min-width: 0;
+    transition: flex 0.2s;
+  }
+  .mem-content-area.peek-open {
+    gap: 0.75rem;
+  }
+  .mem-content-area.peek-open .mem-list {
+    flex: 1;
+  }
+
+  /* ── P2: Peek Panel ───────────────────── */
+  .mem-peek-panel {
+    width: 380px;
+    max-height: calc(100vh - 220px);
+    overflow-y: auto;
+    background: var(--card-bg, var(--bg-primary));
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius, 8px);
+    animation: peek-in 0.15s ease;
+    flex-shrink: 0;
+  }
+  @keyframes peek-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
+
+  .mem-peek-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .mem-peek-cat {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: capitalize;
+  }
+  .mem-peek-actions { display: flex; gap: 0.25rem; }
+  .mem-peek-close {
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .mem-peek-close:hover { color: var(--text-primary); }
+
+  .mem-peek-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border-color);
+  }
+  .mem-peek-project {
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--bg-secondary);
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+  .mem-peek-source {
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--bg-tertiary, var(--bg-secondary));
+    text-transform: uppercase;
+    font-weight: 500;
+    font-size: 0.5625rem;
+    letter-spacing: 0.02em;
+  }
+  .mem-peek-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    padding: 0.375rem 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .mem-peek-body {
+    padding: 0.75rem;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--text-primary);
+    word-break: break-word;
+  }
+  .mem-peek-body h3 { font-size: 0.875rem; font-weight: 600; margin: 0.75rem 0 0.375rem; color: var(--text-primary); }
+  .mem-peek-body h4 { font-size: 0.8125rem; font-weight: 600; margin: 0.5rem 0 0.25rem; color: var(--text-secondary); }
+  .mem-peek-body code { padding: 1px 4px; border-radius: 3px; background: var(--bg-secondary); font-size: 0.75rem; font-family: 'SF Mono', 'Fira Code', monospace; }
+  .mem-peek-body strong { font-weight: 600; }
+  .mem-peek-body ul { margin: 0.25rem 0; padding-left: 1.25rem; }
+  .mem-peek-body li { margin-bottom: 0.125rem; }
+
+  .mem-peek-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-top: 1px solid var(--border-color);
+    font-size: 0.625rem;
+    color: var(--text-muted);
+  }
+  .mem-peek-id { font-family: monospace; }
+  .mem-peek-open-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.25rem 0.625rem;
+    font-size: 0.6875rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .mem-peek-open-btn:hover { color: var(--text-primary); background: var(--bg-secondary); }
+  .mem-peek-loading { padding: 2rem 1rem; text-align: center; color: var(--text-muted); font-size: 0.8125rem; }
+
+  /* ── Responsive ─────────────────────────── */
+  @media (max-width: 640px) {
+    .mem-toolbar {
       flex-direction: column;
-    }
-    
-    .filter-controls {
-      flex-direction: row;
-      gap: 1rem;
-    }
-    
-    .filter-group {
-      flex: 1;
-    }
-    
-    .sort-group {
-      justify-content: space-between;
-    }
-    
-    .memories-summary {
-      flex-direction: column;
-      align-items: flex-start;
+      align-items: stretch;
       gap: 0.5rem;
     }
-    
-    .pagination {
-      flex-wrap: wrap;
-      gap: 0.25rem;
-    }
-    
-    .page-btn,
-    .prev-btn,
-    .next-btn {
-      padding: 0.375rem 0.5rem;
-      font-size: 0.75rem;
-    }
+    .mem-toolbar .mem-title { font-size: 1rem; }
+    .mem-search-wrap { min-width: 100%; }
+    .mem-cat-combo, .mem-proj-combo { width: auto; flex: 1; min-width: 0; }
+    .mem-sort-select, .mem-mode-select { flex: 1; min-width: 0; }
+    .mem-time-range { width: 100%; }
+    .mem-toolbar { flex-direction: row; flex-wrap: wrap; }
+    .mem-tags { display: none; }
+    .mem-list .recent-item-badge { display: none; }
+    .mem-list .recent-item-project { display: none; }
+    .mem-score { display: none; }
+    .mem-source-badge { display: none; }
+    .mem-peek-panel { display: none !important; }
+    .mem-content-area.peek-open { gap: 0; }
+    .cmd-palette { max-height: 70vh; }
   }
 `;
-
 document.head.appendChild(style);

@@ -1,39 +1,44 @@
 """
-Dashboard REST API 라우터.
+Dashboard REST API router.
 
-메모리 관리, 검색, 통계, 임베딩 관리 등의 API 엔드포인트를 제공합니다.
+Provides API endpoints for memory management, search, statistics, embedding management, etc.
 """
 
 import json
 import logging
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, Depends
+from typing import Union
 
-from app.core.services.memory import MemoryService, MemoryNotFoundError
-from app.core.services.search import SearchService
-from app.core.services.context import ContextService, ContextNotFoundError
-from app.core.services.stats import StatsService
-from app.core.services.embedding_manager import EmbeddingManagerService
-from app.core.services.project import ProjectService
-from app.core.services.session import SessionService, NoActiveSessionError
-from app.core.services.pin import PinService, PinNotFoundError, InvalidStatusTransitionError
-from app.core.schemas.requests import AddParams, SearchParams, UpdateParams, RuleUpdateParams
+from fastapi import APIRouter, Depends, HTTPException
+
 from app.core.schemas.pins import PinCreate, PinUpdate
 from app.core.schemas.projects import ProjectUpdate
-from app.core.schemas.responses import (
-    AddResponse, SearchResponse, ContextResponse, 
-    UpdateResponse, DeleteResponse, StatsResponse
+from app.core.schemas.requests import RuleUpdateParams
+from app.core.services.embedding_manager import EmbeddingManagerService
+from app.core.services.pin import (
+    InvalidStatusTransitionError,
+    PinNotFoundError,
+    PinService,
 )
+from app.core.services.project import ProjectService
+from app.core.services.session import NoActiveSessionError, SessionService
+from app.core.services.stats import StatsService
+
 from ..common.dependencies import (
-    get_memory_service, get_search_service, get_context_service,
-    get_stats_service, get_embedding_manager,
-    get_project_service, get_session_service, get_pin_service
+    get_embedding_manager,
+    get_embedding_service,
+    get_pin_service,
+    get_project_service,
+    get_session_service,
+    get_stats_service,
 )
+from .route_modules import router as modular_router
 
 logger = logging.getLogger(__name__)
 
-# API 라우터 생성
 router = APIRouter(prefix="/api", tags=["Dashboard API"])
+
+router.include_router(modular_router)
 
 
 def _rules_root() -> Path:
@@ -72,24 +77,97 @@ def _resolve_rule_path(rule_entry: dict) -> Path:
 
 @router.get("/")
 async def api_root():
-    """API 루트 엔드포인트"""
+    """API root endpoint"""
+    from app.core.version import __VERSION__, MCP_PROTOCOL_VERSION
+
     return {
         "name": "mem-mesh",
         "description": "Central memory server with vector search",
-        "version": "1.0.0",
-        "status": "running"
+        "version": __VERSION__,
+        "mcp_protocol": MCP_PROTOCOL_VERSION,
+        "status": "running",
     }
 
 
 @router.get("/health")
 async def health_check():
-    """헬스 체크 엔드포인트"""
-    return {"status": "healthy", "timestamp": "2026-01-11T12:30:00Z"}
+    """Health check endpoint (always 200, even during model loading)"""
+    from datetime import datetime, timezone
+
+    from ..lifespan import get_services
+
+    services = get_services()
+    es = services.get("embedding_service")
+    db = services.get("db")
+    embedding_ready = es.is_ready if es else False
+    embedding_status = es.status if es else "not_initialized"
+
+    result = {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "embedding_ready": embedding_ready,
+        "embedding_status": embedding_status,
+    }
+
+    # 모델 일관성 체크 (DB vs settings)
+    if db and es:
+        try:
+            model_check = await db.check_embedding_model_consistency(
+                current_model=es.model_name,
+                current_dim=es.dimension,
+            )
+            if model_check["needs_migration"]:
+                result["needs_migration"] = True
+                result["migration_info"] = {
+                    "stored_model": model_check["stored_model"],
+                    "stored_dim": model_check["stored_dim"],
+                    "current_model": model_check["current_model"],
+                    "current_dim": model_check["current_dim"],
+                    "message": model_check["message"],
+                }
+        except Exception:
+            pass
+
+    return result
+
+
+@router.get("/system/info")
+async def system_info():
+    """Detailed system information for settings page"""
+    import os
+    import platform
+    import sqlite3
+    import sys
+    from datetime import datetime, timezone
+
+    from app.core.version import __VERSION__, MCP_PROTOCOL_VERSION
+
+    # DB file size
+    db_path = os.environ.get("MEM_MESH_DB_PATH", "data/mem_mesh.db")
+    db_size = 0
+    try:
+        if os.path.exists(db_path):
+            db_size = os.path.getsize(db_path)
+    except OSError:
+        pass
+
+    return {
+        "version": __VERSION__,
+        "mcp_protocol": MCP_PROTOCOL_VERSION,
+        "python_version": sys.version.split()[0],
+        "sqlite_version": sqlite3.sqlite_version,
+        "platform": platform.system(),
+        "platform_version": platform.release(),
+        "db_path": db_path,
+        "db_size_bytes": db_size,
+        "pid": os.getpid(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @router.get("/rules")
 async def list_rules():
-    """Rules 목록 조회"""
+    """List all rules"""
     try:
         index_data = _load_rules_index()
         rules = index_data.get("rules", [])
@@ -100,10 +178,10 @@ async def list_rules():
                     "id": rule.get("id"),
                     "title": rule.get("title"),
                     "kind": rule.get("kind"),
-                    "tags": rule.get("tags", [])
+                    "tags": rule.get("tags", []),
                 }
                 for rule in rules
-            ]
+            ],
         }
     except Exception as e:
         logger.error(f"List rules error: {e}")
@@ -112,7 +190,7 @@ async def list_rules():
 
 @router.get("/rules/{rule_id}")
 async def get_rule(rule_id: str):
-    """Rules 단건 조회"""
+    """Get a single rule"""
     try:
         entry = _get_rule_entry(rule_id)
         rule_path = _resolve_rule_path(entry)
@@ -131,7 +209,7 @@ async def get_rule(rule_id: str):
 
 @router.put("/rules/{rule_id}")
 async def update_rule(rule_id: str, params: RuleUpdateParams):
-    """Rules 수정"""
+    """Update a rule"""
     try:
         entry = _get_rule_entry(rule_id)
         rule_path = _resolve_rule_path(entry)
@@ -148,286 +226,108 @@ async def update_rule(rule_id: str, params: RuleUpdateParams):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/memories", response_model=AddResponse)
-async def add_memory(
-    params: AddParams,
-    service: MemoryService = Depends(get_memory_service)
-) -> AddResponse:
-    """메모리 추가"""
-    try:
-        result = await service.create(
-            content=params.content,
-            project_id=params.project_id,
-            category=params.category,
-            source=params.source or "api",
-            tags=params.tags
-        )
-        
-        # WebSocket 실시간 알림 전송 - 완전한 메모리 데이터 조회 후 전송
-        try:
-            from ..websocket.realtime import notifier
-            # 생성된 메모리의 완전한 데이터 조회
-            memory = await service.get(result.id)
-            if memory:
-                memory_data = {
-                    "id": memory.id,
-                    "content": memory.content,
-                    "project_id": memory.project_id,
-                    "category": memory.category,
-                    "tags": json.loads(memory.tags) if memory.tags else [],
-                    "source": memory.source,
-                    "created_at": memory.created_at,
-                    "updated_at": memory.updated_at
-                }
-                await notifier.notify_memory_created(memory_data)
-        except Exception as e:
-            logger.warning(f"Failed to send WebSocket notification: {e}")
-        
-        return result
-    except Exception as e:
-        logger.error(f"Add memory error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/memories/search", response_model=SearchResponse)
-async def search_memories(
-    query: str,
-    project_id: str = None,
-    category: str = None,
-    source: str = None,
-    tag: str = None,
-    limit: int = 25,
-    offset: int = 0,
-    sort_by: str = "created_at",
-    sort_direction: str = "desc",
-    recency_weight: float = 0.0,
-    search_mode: str = "hybrid",
-    service: SearchService = Depends(get_search_service)
-) -> SearchResponse:
-    """
-    메모리 검색
-    
-    search_mode 옵션:
-    - hybrid: 벡터 + 텍스트 결합 검색 (기본값)
-    - exact: 정확한 텍스트 매칭만
-    - semantic: 의미 기반 벡터 검색만
-    - fuzzy: 오타 허용 퍼지 검색
-    
-    정렬 옵션:
-    - sort_by: created_at, updated_at, category, project, size
-    - sort_direction: asc, desc
-    """
-    try:
-        return await service.search(
-            query=query,
-            project_id=project_id,
-            category=category,
-            source=source,
-            tag=tag,
-            limit=limit,
-            offset=offset,
-            sort_by=sort_by,
-            sort_direction=sort_direction,
-            recency_weight=recency_weight,
-            search_mode=search_mode
-        )
-    except Exception as e:
-        logger.error(f"Search memories error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/memories/stats", response_model=StatsResponse)
-async def get_memory_stats(
-    project_id: str = None,
-    start_date: str = None,
-    end_date: str = None,
-    service: StatsService = Depends(get_stats_service)
-) -> StatsResponse:
-    """메모리 통계 조회"""
-    try:
-        stats = await service.get_overall_stats(
-            project_id=project_id,
-            start_date=start_date,
-            end_date=end_date
-        )
-        return StatsResponse(**stats)
-    except Exception as e:
-        logger.error(f"Get stats error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/projects")
-async def get_projects(
-    service: StatsService = Depends(get_stats_service)
-):
-    """
-    프로젝트 목록 및 상세 통계 조회
-    
-    서버에서 SQL GROUP BY로 집계하여 반환하므로 효율적입니다.
-    모든 메모리를 다운로드하지 않고 집계된 결과만 반환합니다.
-    
-    Returns:
-        - projects: 프로젝트 상세 정보 리스트
-        - total_projects: 총 프로젝트 수
-        - total_memories: 총 메모리 수
-    """
-    try:
-        projects = await service.get_projects_detail()
-        
-        total_memories = sum(p['memory_count'] for p in projects)
-        
-        return {
-            'projects': projects,
-            'total_projects': len(projects),
-            'total_memories': total_memories,
-            'avg_per_project': total_memories // len(projects) if len(projects) > 0 else 0
-        }
-    except Exception as e:
-        logger.error(f"Get projects error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/memories/{memory_id}")
-async def get_memory(
-    memory_id: str,
-    service: MemoryService = Depends(get_memory_service)
-):
-    """개별 메모리 조회"""
-    try:
-        memory = await service.get(memory_id)
-        if memory is None:
-            raise HTTPException(status_code=404, detail="Memory not found")
-        
-        return {
-            "id": memory.id,
-            "content": memory.content,
-            "project_id": memory.project_id,
-            "category": memory.category,
-            "tags": memory.tags,
-            "source": memory.source,
-            "created_at": memory.created_at,
-            "updated_at": memory.updated_at
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Get memory error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/memories/{memory_id}/context", response_model=ContextResponse)
-async def get_memory_context(
-    memory_id: str,
-    depth: int = 2,
-    project_id: str = None,
-    service: ContextService = Depends(get_context_service)
-) -> ContextResponse:
-    """메모리 맥락 조회"""
-    try:
-        return await service.get_context(
-            memory_id=memory_id,
-            depth=depth,
-            project_id=project_id
-        )
-    except ContextNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error(f"Get context error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.put("/memories/{memory_id}", response_model=UpdateResponse)
-async def update_memory(
-    memory_id: str,
-    params: UpdateParams,
-    service: MemoryService = Depends(get_memory_service)
-) -> UpdateResponse:
-    """메모리 업데이트"""
-    try:
-        result = await service.update(
-            memory_id=memory_id,
-            content=params.content,
-            category=params.category,
-            tags=params.tags
-        )
-        
-        # WebSocket 실시간 알림 전송 - 완전한 메모리 데이터 조회 후 전송
-        try:
-            from ..websocket.realtime import notifier
-            # 업데이트된 메모리의 완전한 데이터 조회
-            memory = await service.get(memory_id)
-            if memory:
-                memory_data = {
-                    "id": memory.id,
-                    "content": memory.content,
-                    "project_id": memory.project_id,
-                    "category": memory.category,
-                    "tags": json.loads(memory.tags) if memory.tags else [],
-                    "source": memory.source,
-                    "created_at": memory.created_at,
-                    "updated_at": memory.updated_at
-                }
-                await notifier.notify_memory_updated(memory_id, memory_data)
-        except Exception as e:
-            logger.warning(f"Failed to send WebSocket notification: {e}")
-        
-        return result
-    except MemoryNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error(f"Update memory error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/memories/{memory_id}", response_model=DeleteResponse)
-async def delete_memory(
-    memory_id: str,
-    service: MemoryService = Depends(get_memory_service)
-) -> DeleteResponse:
-    """메모리 삭제"""
-    try:
-        # 삭제 전에 메모리 정보 조회 (프로젝트 ID 확인용)
-        try:
-            memory_info = await service.get_by_id(memory_id)
-            project_id = memory_info.project_id if memory_info else None
-        except:
-            project_id = None
-        
-        result = await service.delete(memory_id)
-        
-        # WebSocket 실시간 알림 전송
-        try:
-            from ..websocket.realtime import notifier
-            await notifier.notify_memory_deleted(memory_id, project_id)
-        except Exception as e:
-            logger.warning(f"Failed to send WebSocket notification: {e}")
-        
-        return result
-    except MemoryNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error(f"Delete memory error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 # ===== Embedding Management API =====
+
+
+@router.get("/embeddings/models")
+async def list_available_models():
+    """List available embedding models for onboarding selection."""
+    from app.core.embeddings.service import AVAILABLE_MODELS, is_model_cached
+
+    models = []
+    for m in AVAILABLE_MODELS:
+        models.append({**m, "cached": is_model_cached(m["name"])})
+    return {"models": models}
+
+
+@router.get("/embeddings/loading-status")
+async def get_embedding_loading_status(
+    embedding_service=Depends(get_embedding_service),
+):
+    """Get current model loading/download status for onboarding progress."""
+    return embedding_service.get_status_info()
+
+
+@router.post("/embeddings/select")
+async def select_embedding_model(
+    body: dict,
+    embedding_service=Depends(get_embedding_service),
+):
+    """Select and start downloading an embedding model.
+
+    Body: {"model": "intfloat/multilingual-e5-large"}
+    """
+    model_name = body.get("model")
+    if not model_name:
+        raise HTTPException(status_code=400, detail="model field is required")
+
+    from app.core.embeddings.service import AVAILABLE_MODELS, MODEL_ALIASES
+
+    # 유효한 모델인지 확인
+    resolved = MODEL_ALIASES.get(model_name, model_name)
+    valid_names = [m["name"] for m in AVAILABLE_MODELS]
+    if resolved not in valid_names:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid model. Choose from: {valid_names}",
+        )
+
+    # 이미 로딩 중이면 현재 상태 반환
+    if embedding_service.status in ("downloading", "loading"):
+        return embedding_service.get_status_info()
+
+    # 모델 변경 + DB에 선택 저장 + 백그라운드 다운로드 시작
+    embedding_service.switch_model(resolved)
+
+    # DB에 선택한 모델 저장 (재시작 시 자동 로드용)
+    from ..lifespan import get_services
+    services = get_services()
+    db = services.get("db")
+    if db:
+        try:
+            from app.core.embeddings.service import MODEL_DIMENSIONS
+            dim = MODEL_DIMENSIONS.get(resolved, 384)
+            await db._migrator.set_embedding_metadata("embedding_model", resolved)
+            await db._migrator.set_embedding_metadata("embedding_dimension", str(dim))
+        except Exception as e:
+            logger.warning(f"Failed to persist model selection: {e}")
+
+    def _on_progress(progress: float, status: str) -> None:
+        try:
+            from ..websocket.realtime import notifier
+            import asyncio
+
+            loop = asyncio.get_running_loop()
+            loop.call_soon_threadsafe(
+                asyncio.ensure_future,
+                notifier.broadcast(
+                    "model_download",
+                    {"progress": progress, "status": status, "model": resolved},
+                ),
+            )
+        except Exception:
+            pass
+
+    embedding_service.load_model_background(on_progress=_on_progress)
+    return embedding_service.get_status_info()
+
 
 @router.get("/embeddings/status")
 async def get_embedding_status(
-    manager: EmbeddingManagerService = Depends(get_embedding_manager)
+    manager: EmbeddingManagerService = Depends(get_embedding_manager),
 ):
     """
-    임베딩 모델 상태 조회
-    
+    Get embedding model status.
+
     Returns:
-        - stored_model: DB에 저장된 모델명
-        - stored_dimension: DB에 저장된 차원
-        - current_model: 현재 설정된 모델명
-        - current_dimension: 현재 설정된 차원
-        - total_memories: 총 메모리 수
-        - vector_count: 벡터 테이블 레코드 수
-        - needs_migration: 마이그레이션 필요 여부
-        - migration_in_progress: 마이그레이션 진행 중 여부
+        - stored_model: Model name stored in DB
+        - stored_dimension: Dimension stored in DB
+        - current_model: Currently configured model name
+        - current_dimension: Currently configured dimension
+        - total_memories: Total number of memories
+        - vector_count: Number of records in vector table
+        - needs_migration: Whether migration is needed
+        - migration_in_progress: Whether migration is in progress
     """
     try:
         status = await manager.get_status()
@@ -441,17 +341,17 @@ async def get_embedding_status(
 async def start_embedding_migration(
     force: bool = False,
     batch_size: int = 100,
-    manager: EmbeddingManagerService = Depends(get_embedding_manager)
+    manager: EmbeddingManagerService = Depends(get_embedding_manager),
 ):
     """
-    임베딩 마이그레이션 시작
-    
+    Start embedding migration.
+
     Args:
-        force: 모델이 같아도 강제 재임베딩
-        batch_size: 배치 크기 (기본: 100)
-    
+        force: Force re-embedding even if model is the same
+        batch_size: Batch size (default: 100)
+
     Returns:
-        마이그레이션 결과 또는 진행 상황
+        Migration result or progress
     """
     try:
         result = await manager.start_migration(force=force, batch_size=batch_size)
@@ -463,9 +363,9 @@ async def start_embedding_migration(
 
 @router.get("/embeddings/migration/progress")
 async def get_migration_progress(
-    manager: EmbeddingManagerService = Depends(get_embedding_manager)
+    manager: EmbeddingManagerService = Depends(get_embedding_manager),
 ):
-    """마이그레이션 진행 상황 조회"""
+    """Get migration progress"""
     try:
         progress = manager.get_migration_progress()
         return progress
@@ -476,19 +376,13 @@ async def get_migration_progress(
 
 # ===== Work Tracking API (Pins, Sessions, Projects) =====
 
+
 @router.get("/work/projects")
-async def list_work_projects(
-    service: ProjectService = Depends(get_project_service)
-):
-    """
-    Work Tracking 프로젝트 목록 조회 (통계 포함)
-    """
+async def list_work_projects(service: ProjectService = Depends(get_project_service)):
+    """List work tracking projects with statistics"""
     try:
         projects = await service.list_projects_with_stats()
-        return {
-            "projects": [p.dict() for p in projects],
-            "total": len(projects)
-        }
+        return {"projects": [p.dict() for p in projects], "total": len(projects)}
     except Exception as e:
         logger.error(f"List work projects error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -496,10 +390,9 @@ async def list_work_projects(
 
 @router.get("/work/projects/{project_id}")
 async def get_work_project(
-    project_id: str,
-    service: ProjectService = Depends(get_project_service)
+    project_id: str, service: ProjectService = Depends(get_project_service)
 ):
-    """개별 프로젝트 조회"""
+    """Get a single project"""
     try:
         project = await service.get_project(project_id)
         if project is None:
@@ -514,10 +407,9 @@ async def get_work_project(
 
 @router.post("/work/projects/{project_id}")
 async def create_or_get_work_project(
-    project_id: str,
-    service: ProjectService = Depends(get_project_service)
+    project_id: str, service: ProjectService = Depends(get_project_service)
 ):
-    """프로젝트 생성 또는 조회"""
+    """Create or get a project"""
     try:
         project = await service.get_or_create_project(project_id)
         return project.dict()
@@ -530,9 +422,9 @@ async def create_or_get_work_project(
 async def update_work_project(
     project_id: str,
     update: ProjectUpdate,
-    service: ProjectService = Depends(get_project_service)
+    service: ProjectService = Depends(get_project_service),
 ):
-    """프로젝트 업데이트"""
+    """Update a project"""
     try:
         project = await service.update_project(project_id, update)
         if project is None:
@@ -547,20 +439,21 @@ async def update_work_project(
 
 @router.get("/work/projects/{project_id}/stats")
 async def get_work_project_stats(
-    project_id: str,
-    stats_service: StatsService = Depends(get_stats_service)
+    project_id: str, stats_service: StatsService = Depends(get_stats_service)
 ):
-    """프로젝트 통계 조회 (Pin/Session 통계)"""
+    """Get project statistics (Pin/Session stats)"""
     try:
         pin_stats = await stats_service.get_pin_stats(project_id=project_id)
         session_stats = await stats_service.get_session_stats(project_id=project_id)
-        daily_completions = await stats_service.get_daily_pin_completions(project_id=project_id)
-        
+        daily_completions = await stats_service.get_daily_pin_completions(
+            project_id=project_id
+        )
+
         return {
             "project_id": project_id,
             "pins": pin_stats,
             "sessions": session_stats,
-            "daily_completions": daily_completions
+            "daily_completions": daily_completions,
         }
     except Exception as e:
         logger.error(f"Get work project stats error: {e}")
@@ -569,30 +462,48 @@ async def get_work_project_stats(
 
 # ===== Session API =====
 
+
 @router.get("/work/sessions/resume/{project_id}")
 async def resume_session(
     project_id: str,
-    expand: bool = False,
+    expand: Union[bool, str] = False,
     limit: int = 10,
     user_id: str = None,
-    session_service: SessionService = Depends(get_session_service)
+    ide_session_id: str = None,
+    client_type: str = None,
+    session_service: SessionService = Depends(get_session_service),
 ):
     """
-    마지막 세션 컨텍스트 로드
-    
+    Load last session context.
+
     Args:
-        project_id: 프로젝트 ID
-        expand: True면 전체 pin 내용 반환, False면 요약만
-        limit: 반환할 pin 개수 (기본 10개)
-        user_id: 사용자 ID (선택)
+        project_id: Project ID
+        expand: If True, return full pin content; if False, return summary only
+        limit: Number of pins to return (default 10)
+        user_id: User ID (optional)
+        ide_session_id: IDE native session ID (optional, for session correlation)
+        client_type: IDE/tool type (optional, e.g. "claude-ai", "Cursor")
     """
     try:
+        # 1. 먼저 resume로 기존 맥락 로드 (cross-session 포함)
         context = await session_service.resume_last_session(
-            project_id=project_id,
-            user_id=user_id,
-            expand=expand,
-            limit=limit
+            project_id=project_id, user_id=user_id, expand=expand, limit=limit
         )
+
+        # 2. IDE session_id가 있으면 활성 세션에 연결 (resume 이후)
+        if ide_session_id:
+            await session_service.get_or_create_active_session(
+                project_id=project_id,
+                user_id=user_id,
+                ide_session_id=ide_session_id,
+                client_type=client_type,
+            )
+
+        if context is None:
+            return {
+                "status": "no_session",
+                "message": f"No session found for project: {project_id}",
+            }
         return context.dict()
     except NoActiveSessionError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -605,14 +516,37 @@ async def resume_session(
 async def end_session(
     session_id: str,
     summary: str = None,
-    session_service: SessionService = Depends(get_session_service)
+    session_service: SessionService = Depends(get_session_service),
 ):
-    """세션 종료"""
+    """End a session"""
     try:
         session = await session_service.end_session(session_id, summary)
         return session.dict()
     except Exception as e:
         logger.error(f"End session error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/work/sessions/end-by-project/{project_id}")
+async def end_session_by_project(
+    project_id: str,
+    summary: str = None,
+    session_service: SessionService = Depends(get_session_service),
+):
+    """End the most recent active session for a project.
+
+    Used by PreCompact/SessionEnd hooks which only know project_id.
+    """
+    try:
+        session = await session_service.end_session_by_project(project_id, summary)
+        if not session:
+            return {
+                "status": "no_active_session",
+                "message": f"No active session found for project: {project_id}",
+            }
+        return session.dict()
+    except Exception as e:
+        logger.error(f"End session by project error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -622,20 +556,14 @@ async def list_sessions(
     user_id: str = None,
     status: str = None,
     limit: int = 20,
-    session_service: SessionService = Depends(get_session_service)
+    session_service: SessionService = Depends(get_session_service),
 ):
-    """세션 목록 조회"""
+    """List sessions"""
     try:
         sessions = await session_service.list_sessions(
-            project_id=project_id,
-            user_id=user_id,
-            status=status,
-            limit=limit
+            project_id=project_id, user_id=user_id, status=status, limit=limit
         )
-        return {
-            "sessions": [s.dict() for s in sessions],
-            "total": len(sessions)
-        }
+        return {"sessions": [s.dict() for s in sessions], "total": len(sessions)}
     except Exception as e:
         logger.error(f"List sessions error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -643,26 +571,25 @@ async def list_sessions(
 
 # ===== Pin API =====
 
+
 @router.post("/work/pins")
 async def create_pin(
-    pin: PinCreate,
-    pin_service: PinService = Depends(get_pin_service)
+    pin: PinCreate, pin_service: PinService = Depends(get_pin_service)
 ):
     """
-    새 Pin 생성
-    
-    세션이 없으면 자동으로 생성됩니다.
+    Create a new Pin.
+
+    Session is automatically created if it doesn't exist.
     """
     try:
-        # Pin 생성 (세션은 PinService 내부에서 자동 처리)
         created_pin = await pin_service.create_pin(
             project_id=pin.project_id,
             content=pin.content,
             importance=pin.importance,
             tags=pin.tags,
-            user_id=pin.user_id
+            user_id=pin.user_id,
         )
-        
+
         return created_pin.dict()
     except Exception as e:
         logger.error(f"Create pin error: {e}")
@@ -677,9 +604,9 @@ async def list_pins(
     status: str = None,
     limit: int = 10,
     order_by_importance: bool = True,
-    pin_service: PinService = Depends(get_pin_service)
+    pin_service: PinService = Depends(get_pin_service),
 ):
-    """Pin 목록 조회"""
+    """List pins"""
     try:
         pins = await pin_service.get_pins(
             project_id=project_id,
@@ -687,23 +614,17 @@ async def list_pins(
             user_id=user_id,
             status=status,
             limit=limit,
-            order_by_importance=order_by_importance
+            order_by_importance=order_by_importance,
         )
-        return {
-            "pins": [p.dict() for p in pins],
-            "total": len(pins)
-        }
+        return {"pins": [p.dict() for p in pins], "total": len(pins)}
     except Exception as e:
         logger.error(f"List pins error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/work/pins/{pin_id}")
-async def get_pin(
-    pin_id: str,
-    pin_service: PinService = Depends(get_pin_service)
-):
-    """개별 Pin 조회"""
+async def get_pin(pin_id: str, pin_service: PinService = Depends(get_pin_service)):
+    """Get a single pin"""
     try:
         pin = await pin_service.get_pin(pin_id)
         if pin is None:
@@ -718,11 +639,9 @@ async def get_pin(
 
 @router.put("/work/pins/{pin_id}")
 async def update_pin(
-    pin_id: str,
-    update: PinUpdate,
-    pin_service: PinService = Depends(get_pin_service)
+    pin_id: str, update: PinUpdate, pin_service: PinService = Depends(get_pin_service)
 ):
-    """Pin 업데이트"""
+    """Update a pin"""
     try:
         pin = await pin_service.update_pin(pin_id, update)
         return pin.dict()
@@ -737,11 +656,9 @@ async def update_pin(
 
 @router.patch("/work/pins/{pin_id}")
 async def patch_pin(
-    pin_id: str,
-    update: PinUpdate,
-    pin_service: PinService = Depends(get_pin_service)
+    pin_id: str, update: PinUpdate, pin_service: PinService = Depends(get_pin_service)
 ):
-    """Pin 부분 업데이트 (드래그 앤 드롭용)"""
+    """Partial update a pin (for drag and drop)"""
     try:
         pin = await pin_service.update_pin(pin_id, update)
         return pin.dict()
@@ -755,24 +672,22 @@ async def patch_pin(
 
 
 @router.put("/work/pins/{pin_id}/complete")
-async def complete_pin(
-    pin_id: str,
-    pin_service: PinService = Depends(get_pin_service)
-):
+async def complete_pin(pin_id: str, pin_service: PinService = Depends(get_pin_service)):
     """
-    Pin 완료 처리
-    
-    importance >= 4인 경우 Memory 승격 제안을 포함합니다.
+    Complete a pin.
+
+    If importance >= 4, includes a suggestion to promote to Memory.
     """
     try:
         pin = await pin_service.complete_pin(pin_id)
         result = pin.dict()
-        
-        # 중요도 4 이상이면 승격 제안
+
         if pin.importance >= 4:
             result["suggest_promotion"] = True
-            result["promotion_message"] = f"이 Pin의 중요도가 {pin.importance}입니다. Memory로 승격하시겠습니까?"
-        
+            result["promotion_message"] = (
+                f"This Pin has importance {pin.importance}. Would you like to promote it to Memory?"
+            )
+
         return result
     except PinNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -784,14 +699,11 @@ async def complete_pin(
 
 
 @router.post("/work/pins/{pin_id}/promote")
-async def promote_pin(
-    pin_id: str,
-    pin_service: PinService = Depends(get_pin_service)
-):
+async def promote_pin(pin_id: str, pin_service: PinService = Depends(get_pin_service)):
     """
-    Pin을 Memory로 승격
-    
-    content, tags를 복사하고 embedding을 생성합니다.
+    Promote a Pin to Memory.
+
+    Copies content and tags, and generates embedding.
     """
     try:
         result = await pin_service.promote_to_memory(pin_id)
@@ -804,11 +716,8 @@ async def promote_pin(
 
 
 @router.delete("/work/pins/{pin_id}")
-async def delete_pin(
-    pin_id: str,
-    pin_service: PinService = Depends(get_pin_service)
-):
-    """Pin 삭제"""
+async def delete_pin(pin_id: str, pin_service: PinService = Depends(get_pin_service)):
+    """Delete a pin"""
     try:
         success = await pin_service.delete_pin(pin_id)
         return {"success": success, "deleted_id": pin_id}

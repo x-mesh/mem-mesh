@@ -385,6 +385,7 @@ class ChromaCharts {
     const colors = this.getColors();
     const {
       title = 'Line Chart',
+      labels = [],
       showPoints = true,
       showGrid = true,
       animate = true,
@@ -392,13 +393,20 @@ class ChromaCharts {
       width = 500
     } = options;
 
+    if (!data || data.length === 0) {
+      container.innerHTML = '<div class="no-data">No data available</div>';
+      return;
+    }
+
     const maxValue = Math.max(...data);
     const minValue = Math.min(...data);
     const range = maxValue - minValue || 1;
 
-    // Create SVG path
+    const pointCount = data.length;
     const points = data.map((value, index) => {
-      const x = (index / (data.length - 1)) * (width - 60) + 30;
+      const x = pointCount === 1
+        ? (width - 60) / 2 + 30
+        : (index / (pointCount - 1)) * (width - 60) + 30;
       const y = height - 40 - ((value - minValue) / range) * (height - 80);
       return { x, y, value };
     });
@@ -474,7 +482,7 @@ class ChromaCharts {
       </div>
     `;
 
-    this.setupLineChartInteractions(container, points, containerId);
+    this.setupLineChartInteractions(container, points, containerId, labels);
   }
 
   /**
@@ -522,7 +530,7 @@ class ChromaCharts {
   /**
    * Setup line chart interactions
    */
-  setupLineChartInteractions(container, points, containerId) {
+  setupLineChartInteractions(container, points, containerId, labels = []) {
     const tooltip = container.querySelector(`#line-tooltip-${containerId}`);
     const pointElements = container.querySelectorAll('.line-point');
 
@@ -533,12 +541,24 @@ class ChromaCharts {
         // Highlight point
         e.target.style.r = '6';
         e.target.style.filter = 'brightness(1.2)';
+
+        // Format label: use date label if available
+        let labelText = `Point ${index + 1}`;
+        if (labels[index]) {
+          const d = new Date(labels[index] + 'T00:00:00');
+          if (!isNaN(d.getTime())) {
+            const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+            labelText = `${d.getMonth() + 1}/${d.getDate()} (${dayNames[d.getDay()]})`;
+          } else {
+            labelText = labels[index];
+          }
+        }
         
         // Show tooltip
         tooltip.innerHTML = `
           <div class="tooltip-content">
             <div class="tooltip-value">${value}</div>
-            <div class="tooltip-index">Point ${index + 1}</div>
+            <div class="tooltip-index">${labelText}</div>
           </div>
         `;
         tooltip.style.opacity = '1';

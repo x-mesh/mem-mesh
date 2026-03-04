@@ -1,1856 +1,1201 @@
 /**
- * Dashboard Page Component - Chroma Style
- * Interactive dashboard with live data, hover effects, and micro-interactions
- * Requirements: 4.4, 4.5
+ * Dashboard Page — Linear-style Memory-First
+ * 1-line compact memory list as primary content
  */
 
 import { wsClient } from '../services/websocket-client.js';
-import '../components/connection-status.js';
+
+const CAT_ICONS = {
+  task: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>',
+  bug: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+  decision: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+  code_snippet: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+  incident: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  idea: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z"/></svg>',
+  'git-history': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="1.05" y1="12" x2="7" y2="12"/><line x1="17.01" y1="12" x2="22.96" y2="12"/></svg>',
+};
+const DEFAULT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+
+const CLIENT_COLORS = {
+  claude_code: '#d97706',
+  cursor: '#7c3aed',
+  kiro: '#059669',
+  web: '#2563eb',
+  unknown: '#6b7280',
+};
+
+const VIZ_MODES = ['pulse', 'orbit', 'ticker', 'heatmap', 'stats', 'timeline', 'flow', 'calendar', 'leaderboard'];
+const VIZ_LABELS = { pulse: 'Pulse', orbit: 'Orbit', ticker: 'Ticker', heatmap: 'Heatmap', stats: 'Stats', timeline: 'Timeline', flow: 'Flow', calendar: 'Calendar', leaderboard: 'Board' };
 
 class DashboardPage extends HTMLElement {
   constructor() {
     super();
     this.stats = null;
-    this.recentMemories = [];
+    this.memories = [];
+    this.sessions = [];
     this.isLoading = true;
     this.isInitialized = false;
     this.refreshInterval = null;
-    this.animationObserver = null;
+    this.filterCategory = 'all';
+    this.filterDays = 30;
+    this.page = 0;
+    this.pageSize = 30;
+    this.hasMore = true;
+    // Peek state
+    this._peekId = null;
+    this._peekData = null;
+    // Pins
+    this.activePins = [];
+    // Client viz state
+    this._vizMode = localStorage.getItem('mem-mesh-client-viz') || 'orbit';
+    this._vizEvents = []; // recent events for pulse/ticker
+    this._orbitAnim = null; // orbit animation frame id
   }
-  
+
   connectedCallback() {
-    if (this.isInitialized) {
-      console.log('Dashboard already initialized, skipping...');
-      return;
-    }
-    
+    if (this.isInitialized) return;
     this.isInitialized = true;
-    this.setupEventListeners();
-    this.setupIntersectionObserver();
     this.render();
-    
-    // 앱이 완전히 초기화될 때까지 기다린 후 데이터 로드
+    this.setupEventListeners();
     this.waitForAppAndLoadData();
-    
-    // WebSocket 연결 (이벤트 리스너 설정 포함)
     this.connectWebSocket();
-    
-    // 자동 새로고침 설정 (5분마다)
-    this.setupAutoRefresh();
+    this.refreshInterval = setInterval(() => { if (!this.isLoading) this.loadData(); }, 5 * 60 * 1000);
   }
-  
+
   disconnectedCallback() {
-    this.removeEventListeners();
-    this.clearAutoRefresh();
-    this.disconnectWebSocket();
-    
-    // WebSocket 데이터 이벤트 리스너 제거
-    if (this._boundHandlers) {
-      wsClient.off('memory_created', this._boundHandlers.memoryCreated);
-      wsClient.off('memory_updated', this._boundHandlers.memoryUpdated);
-      wsClient.off('memory_deleted', this._boundHandlers.memoryDeleted);
-      wsClient.off('stats_updated', this._boundHandlers.statsUpdated);
+    if (this._orbitAnim) { cancelAnimationFrame(this._orbitAnim); this._orbitAnim = null; }
+    if (this.refreshInterval) clearInterval(this.refreshInterval);
+    if (this._bh) {
+      wsClient.off('memory_created', this._bh.c);
+      wsClient.off('memory_updated', this._bh.u);
+      wsClient.off('memory_deleted', this._bh.d);
+      wsClient.off('reconnected', this._bh.r);
     }
-    
-    if (this.animationObserver) {
-      this.animationObserver.disconnect();
+    if (this._boundKeydown) {
+      document.removeEventListener('keydown', this._boundKeydown);
+      this._boundKeydown = null;
     }
   }
-  
-  /**
-   * Setup WebSocket listeners - 데이터 이벤트만 처리
-   * 연결 상태는 connection-status 컴포넌트가 처리
-   */
-  setupWebSocketListeners() {
-    // 바인딩된 핸들러를 저장 (제거할 때 사용)
-    this._boundHandlers = {
-      memoryCreated: this.handleMemoryCreated.bind(this),
-      memoryUpdated: this.handleMemoryUpdated.bind(this),
-      memoryDeleted: this.handleMemoryDeleted.bind(this),
-      statsUpdated: this.handleStatsUpdated.bind(this)
+
+  // ── WebSocket ──
+
+  connectWebSocket() {
+    this._bh = {
+      c: this.onMemoryCreated.bind(this),
+      u: this.onMemoryUpdated.bind(this),
+      d: this.onMemoryDeleted.bind(this),
+      r: () => { this.page = 0; this.memories = []; this.loadData(); },
     };
-    
-    // 메모리 생성 이벤트
-    wsClient.on('memory_created', this._boundHandlers.memoryCreated);
-    
-    // 메모리 업데이트 이벤트
-    wsClient.on('memory_updated', this._boundHandlers.memoryUpdated);
-    
-    // 메모리 삭제 이벤트
-    wsClient.on('memory_deleted', this._boundHandlers.memoryDeleted);
-    
-    // 통계 업데이트 이벤트
-    wsClient.on('stats_updated', this._boundHandlers.statsUpdated);
+    wsClient.on('memory_created', this._bh.c);
+    wsClient.on('memory_updated', this._bh.u);
+    wsClient.on('memory_deleted', this._bh.d);
+    wsClient.on('reconnected', this._bh.r);
+    // P5: connect()는 main.js에서 전역으로 호출됨
   }
 
-  /**
-   * Connect WebSocket - 데이터 이벤트 리스너만 설정
-   * 연결 상태 표시는 connection-status 컴포넌트가 처리
-   */
-  async connectWebSocket() {
-    // 데이터 이벤트 리스너 설정
-    this.setupWebSocketListeners();
-    
-    // 연결은 connection-status 컴포넌트가 처리하므로
-    // 이미 연결되어 있지 않으면 연결 시도
-    const status = wsClient.getConnectionStatus();
-    if (!status.isConnected) {
-      try {
-        await wsClient.connect();
-        console.log('Dashboard WebSocket connected');
-      } catch (error) {
-        console.error('Failed to connect WebSocket:', error);
-      }
-    }
+  onMemoryCreated({ memory }) {
+    if (!memory) return;
+    if (this.memories.some(m => m.id === memory.id)) return;
+    this.memories.unshift(memory);
+    this.renderMemoryList();
+    this.refreshStats();
+    // Push viz event
+    this._pushVizEvent(memory);
   }
 
-  /**
-   * Disconnect WebSocket
-   */
-  disconnectWebSocket() {
-    wsClient.disconnect();
+  onMemoryUpdated({ memory_id, memory }) {
+    const idx = this.memories.findIndex(m => m.id === memory_id);
+    if (idx !== -1) { this.memories[idx] = memory; this.renderMemoryList(); }
   }
 
-  /**
-   * Handle memory created event
-   */
-  handleMemoryCreated(data) {
-    const { memory } = data;
-    
-    // 중복 체크: 이미 존재하는 메모리인지 확인
-    const existingIndex = this.recentMemories.findIndex(m => m.id === memory.id);
-    if (existingIndex !== -1) {
-      console.log('Dashboard: Memory already exists, ignoring duplicate');
-      return;
-    }
-    
-    // 최근 메모리 목록에 추가 (맨 앞에)
-    this.recentMemories.unshift(memory);
-    
-    // 최대 개수 제한 (10개)
-    if (this.recentMemories.length > 10) {
-      this.recentMemories = this.recentMemories.slice(0, 10);
-    }
-    
-    // UI 업데이트 - 애니메이션과 함께
-    this.updateRecentMemoriesWithAnimation('created', memory);
-    
-    // 통계 새로고침 (비동기)
-    this.refreshStatsAsync();
-    
-    // 토스트 알림
-    this.showToast(`새 메모리가 생성되었습니다: ${memory.category}`, 'success');
+  onMemoryDeleted({ memory_id }) {
+    this.memories = this.memories.filter(m => m.id !== memory_id);
+    this.renderMemoryList();
+    this.refreshStats();
   }
 
-  /**
-   * Handle memory updated event
-   */
-  handleMemoryUpdated(data) {
-    const { memory_id, memory } = data;
-    
-    // 최근 메모리 목록에서 해당 메모리 업데이트
-    const index = this.recentMemories.findIndex(m => m.id === memory_id);
-    if (index !== -1) {
-      this.recentMemories[index] = memory;
-      this.updateRecentMemoriesWithAnimation('updated', memory, index);
-    }
-    
-    // 토스트 알림
-    this.showToast(`메모리가 업데이트되었습니다`, 'info');
-  }
+  // ── Events ──
 
-  /**
-   * Handle memory deleted event
-   */
-  handleMemoryDeleted(data) {
-    const { memory_id } = data;
-    
-    // 최근 메모리 목록에서 제거
-    const index = this.recentMemories.findIndex(m => m.id === memory_id);
-    if (index !== -1) {
-      const deletedMemory = this.recentMemories[index];
-      this.recentMemories = this.recentMemories.filter(m => m.id !== memory_id);
-      
-      // UI 업데이트 - 애니메이션과 함께
-      this.updateRecentMemoriesWithAnimation('deleted', deletedMemory, index);
-    }
-    
-    // 통계 새로고침 (비동기)
-    this.refreshStatsAsync();
-    
-    // 토스트 알림
-    this.showToast(`메모리가 삭제되었습니다`, 'warning');
-  }
-
-  /**
-   * Handle stats updated event
-   */
-  handleStatsUpdated(data) {
-    const { stats } = data;
-    this.stats = stats;
-    this.updateStatsSection();
-  }
-
-  /**
-   * Show toast notification
-   */
-  showToast(message, type = 'info') {
-    // 간단한 토스트 구현
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-    
-    // 스타일 적용
-    Object.assign(toast.style, {
-      position: 'fixed',
-      top: '20px',
-      right: '20px',
-      padding: '12px 20px',
-      borderRadius: '6px',
-      color: 'white',
-      fontSize: '14px',
-      fontWeight: '500',
-      zIndex: '10000',
-      opacity: '0',
-      transform: 'translateY(-20px)',
-      transition: 'all 0.3s ease'
-    });
-    
-    // 타입별 배경색
-    const colors = {
-      success: '#10b981',
-      info: '#3b82f6',
-      warning: '#f59e0b',
-      error: '#ef4444'
-    };
-    toast.style.backgroundColor = colors[type] || colors.info;
-    
-    document.body.appendChild(toast);
-    
-    // 애니메이션
-    requestAnimationFrame(() => {
-      toast.style.opacity = '1';
-      toast.style.transform = 'translateY(0)';
-    });
-    
-    // 3초 후 제거
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateY(-20px)';
-      setTimeout(() => {
-        if (toast.parentNode) {
-          toast.parentNode.removeChild(toast);
-        }
-      }, 300);
-    }, 3000);
-  }
-
-  /**
-   * Update recent memories section only
-   */
-  updateRecentMemoriesSection() {
-    const activityContent = this.querySelector('.activity-content');
-    if (activityContent) {
-      activityContent.innerHTML = this.createRecentMemories();
-    }
-  }
-
-  /**
-   * Update recent memories with animation
-   */
-  updateRecentMemoriesWithAnimation(action, memory, index = 0) {
-    const activityContent = this.querySelector('.activity-content');
-    if (!activityContent) return;
-
-    switch (action) {
-      case 'created':
-        this.animateMemoryCreated(activityContent, memory);
-        break;
-      case 'updated':
-        this.animateMemoryUpdated(activityContent, memory, index);
-        break;
-      case 'deleted':
-        this.animateMemoryDeleted(activityContent, memory, index);
-        break;
-      default:
-        this.updateRecentMemoriesSection();
-    }
-  }
-
-  /**
-   * Animate new memory creation
-   */
-  animateMemoryCreated(container, memory) {
-    // 새 메모리 카드 생성
-    const newMemoryHTML = `
-      <memory-card
-        memory-id="${memory.id}"
-        content="${this.escapeHtml(memory.content)}"
-        project="${memory.project_id || ''}"
-        category="${memory.category}"
-        created-at="${memory.created_at}"
-        updated-at="${memory.updated_at}"
-        tags="${this.escapeHtml(JSON.stringify(memory.tags || []))}"
-        source="${memory.source || 'unknown'}"
-        style="opacity: 0; transform: translateY(-20px); transition: all 0.3s ease;"
-      ></memory-card>
-    `;
-
-    // 기존 목록 업데이트
-    const memoryList = container.querySelector('.recent-memories-list');
-    if (memoryList) {
-      // 새 메모리를 맨 앞에 추가
-      memoryList.insertAdjacentHTML('afterbegin', newMemoryHTML);
-      
-      // 새로 추가된 카드 애니메이션
-      const newCard = memoryList.firstElementChild;
-      if (newCard) {
-        // 하이라이트 효과
-        newCard.style.background = 'linear-gradient(135deg, #f0fdf4, #dcfce7)';
-        newCard.style.border = '2px solid #22c55e';
-        
-        // 페이드인 애니메이션
-        requestAnimationFrame(() => {
-          newCard.style.opacity = '1';
-          newCard.style.transform = 'translateY(0)';
-        });
-
-        // 하이라이트 제거 (3초 후)
-        setTimeout(() => {
-          newCard.style.background = '';
-          newCard.style.border = '';
-          newCard.style.transition = 'all 0.3s ease';
-        }, 3000);
-      }
-
-      // 10개 초과 시 마지막 항목 제거
-      const cards = memoryList.querySelectorAll('memory-card');
-      if (cards.length > 10) {
-        const lastCard = cards[cards.length - 1];
-        lastCard.style.opacity = '0';
-        lastCard.style.transform = 'translateX(20px)';
-        setTimeout(() => {
-          if (lastCard.parentNode) {
-            lastCard.parentNode.removeChild(lastCard);
-          }
-        }, 300);
-      }
-    } else {
-      // 목록이 없으면 전체 재생성
-      this.updateRecentMemoriesSection();
-    }
-  }
-
-  /**
-   * Animate memory update
-   */
-  animateMemoryUpdated(container, memory, index) {
-    const memoryList = container.querySelector('.recent-memories-list');
-    if (!memoryList) {
-      this.updateRecentMemoriesSection();
-      return;
-    }
-
-    const cards = memoryList.querySelectorAll('memory-card');
-    const targetCard = cards[index];
-    
-    if (targetCard) {
-      // 업데이트 하이라이트 효과
-      targetCard.style.background = 'linear-gradient(135deg, #eff6ff, #dbeafe)';
-      targetCard.style.border = '2px solid #3b82f6';
-      targetCard.style.transform = 'scale(1.02)';
-      
-      // 속성 업데이트
-      targetCard.setAttribute('content', this.escapeHtml(memory.content));
-      targetCard.setAttribute('updated-at', memory.updated_at);
-      targetCard.setAttribute('tags', this.escapeHtml(JSON.stringify(memory.tags || [])));
-
-      // 하이라이트 제거 (2초 후)
-      setTimeout(() => {
-        targetCard.style.background = '';
-        targetCard.style.border = '';
-        targetCard.style.transform = '';
-        targetCard.style.transition = 'all 0.3s ease';
-      }, 2000);
-    } else {
-      // 카드를 찾을 수 없으면 전체 재생성
-      this.updateRecentMemoriesSection();
-    }
-  }
-
-  /**
-   * Animate memory deletion
-   */
-  animateMemoryDeleted(container, memory, index) {
-    const memoryList = container.querySelector('.recent-memories-list');
-    if (!memoryList) {
-      this.updateRecentMemoriesSection();
-      return;
-    }
-
-    const cards = memoryList.querySelectorAll('memory-card');
-    const targetCard = cards[index];
-    
-    if (targetCard) {
-      // 삭제 애니메이션
-      targetCard.style.background = 'linear-gradient(135deg, #fef2f2, #fee2e2)';
-      targetCard.style.border = '2px solid #ef4444';
-      targetCard.style.transform = 'scale(0.95)';
-      targetCard.style.opacity = '0.7';
-      
-      // 슬라이드 아웃 후 제거
-      setTimeout(() => {
-        targetCard.style.transform = 'translateX(-100%)';
-        targetCard.style.opacity = '0';
-        
-        setTimeout(() => {
-          if (targetCard.parentNode) {
-            targetCard.parentNode.removeChild(targetCard);
-          }
-        }, 300);
-      }, 500);
-    } else {
-      // 카드를 찾을 수 없으면 전체 재생성
-      this.updateRecentMemoriesSection();
-    }
-  }
-
-  /**
-   * Update stats section only
-   */
-  updateStatsSection() {
-    const statsSection = this.querySelector('.stats-section');
-    if (statsSection) {
-      const statsGrid = statsSection.querySelector('.chroma-stats-grid');
-      if (statsGrid) {
-        // innerHTML 사용하여 grid 내부만 업데이트
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = this.createStatsCards();
-        const newGrid = tempDiv.querySelector('.chroma-stats-grid');
-        if (newGrid) {
-          statsGrid.innerHTML = newGrid.innerHTML;
-          console.log('Stats section updated successfully');
-        }
-      } else {
-        console.warn('Stats grid not found, section may have been removed');
-      }
-    }
-  }
-
-  /**
-   * Refresh stats asynchronously
-   */
-  async refreshStatsAsync() {
-    try {
-      if (window.app && window.app.apiClient) {
-        const stats = await window.app.apiClient.getStats();
-        this.stats = stats;
-        this.updateStatsSection();
-      }
-    } catch (error) {
-      console.error('Failed to refresh stats:', error);
-    }
-  }
-  setupIntersectionObserver() {
-    this.animationObserver = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add('animate-in');
-        }
-      });
-    }, {
-      threshold: 0.1,
-      rootMargin: '50px'
-    });
-  }
-
-  /**
-   * Setup auto refresh
-   */
-  setupAutoRefresh() {
-    // 5분마다 자동 새로고침
-    this.refreshInterval = setInterval(() => {
-      if (!this.isLoading) {
-        this.loadData();
-      }
-    }, 5 * 60 * 1000);
-  }
-
-  /**
-   * Clear auto refresh
-   */
-  clearAutoRefresh() {
-    if (this.refreshInterval) {
-      clearInterval(this.refreshInterval);
-      this.refreshInterval = null;
-    }
-  }
-
-  /**
-   * Wait for app initialization and then load data
-   */
-  async waitForAppAndLoadData() {
-    // 앱이 초기화될 때까지 최대 5초 대기
-    let attempts = 0;
-    const maxAttempts = 50; // 100ms * 50 = 5초
-    
-    const checkApp = () => {
-      console.log(`Checking app for dashboard (attempt ${attempts + 1}/${maxAttempts})...`);
-      
-      if (window.app && window.app.apiClient) {
-        console.log('App is ready, loading dashboard data...');
-        this.loadData();
-        return true;
-      }
-      
-      attempts++;
-      if (attempts >= maxAttempts) {
-        console.error('App initialization timeout, trying direct API calls...');
-        this.loadDataDirect();
-        return false;
-      }
-      
-      setTimeout(checkApp, 100);
-      return false;
-    };
-    
-    checkApp();
-  }
-  
-  /**
-   * Setup event listeners
-   */
   setupEventListeners() {
-    this.addEventListener('click', this.handleClick.bind(this));
-    this.addEventListener('mouseenter', this.handleMouseEnter.bind(this), true);
-    this.addEventListener('mouseleave', this.handleMouseLeave.bind(this), true);
-    
-    // Listen for memory selection events
-    this.addEventListener('memory-select', this.handleMemorySelect.bind(this));
-    
-    // Listen for refresh events
-    window.addEventListener('data-refresh', this.loadData.bind(this));
-    
-    // Listen for visibility change to pause/resume auto refresh
-    document.addEventListener('visibilitychange', this.handleVisibilityChange.bind(this));
-  }
-  
-  /**
-   * Remove event listeners
-   */
-  removeEventListeners() {
-    window.removeEventListener('data-refresh', this.loadData);
-    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
-  }
-
-  /**
-   * Handle mouse enter for micro-interactions
-   */
-  handleMouseEnter(event) {
-    const target = event.target;
-    
-    if (target.classList.contains('stat-card')) {
-      this.animateStatCard(target, 'enter');
-    } else if (target.classList.contains('memory-card')) {
-      this.animateMemoryCard(target, 'enter');
-    } else if (target.classList.contains('chart-section')) {
-      this.animateChart(target, 'enter');
-    }
-  }
-
-  /**
-   * Handle mouse leave for micro-interactions
-   */
-  handleMouseLeave(event) {
-    const target = event.target;
-    
-    if (target.classList.contains('stat-card')) {
-      this.animateStatCard(target, 'leave');
-    } else if (target.classList.contains('memory-card')) {
-      this.animateMemoryCard(target, 'leave');
-    } else if (target.classList.contains('chart-section')) {
-      this.animateChart(target, 'leave');
-    }
-  }
-
-  /**
-   * Handle visibility change
-   */
-  handleVisibilityChange() {
-    if (document.hidden) {
-      this.clearAutoRefresh();
-    } else {
-      this.setupAutoRefresh();
-      // 페이지가 다시 보일 때 데이터 새로고침
-      if (!this.isLoading) {
-        this.loadData();
+    this.addEventListener('click', (e) => {
+      // Peek panel actions
+      if (e.target.closest('.dash-peek-close')) { this.closePeek(); return; }
+      if (e.target.closest('.dash-peek-open')) {
+        const id = e.target.closest('.dash-peek-open').dataset.id;
+        if (id && window.app?.router) { this.closePeek(); window.app.router.navigate(`/memory/${id}`); }
+        return;
       }
-    }
-  }
 
-  /**
-   * Animate stat card
-   */
-  animateStatCard(card, type) {
-    const icon = card.querySelector('.stat-icon');
-    const number = card.querySelector('.stat-number');
-    
-    if (type === 'enter') {
-      card.style.transform = 'translateY(-4px)';
-      card.style.boxShadow = '0 8px 25px rgba(0, 0, 0, 0.15)';
-      if (icon) icon.style.transform = 'scale(1.1)';
-      if (number) number.style.color = 'var(--primary-500)';
-    } else {
-      card.style.transform = '';
-      card.style.boxShadow = '';
-      if (icon) icon.style.transform = '';
-      if (number) number.style.color = '';
-    }
-  }
-
-  /**
-   * Animate memory card
-   */
-  animateMemoryCard(card, type) {
-    if (type === 'enter') {
-      card.style.transform = 'translateX(4px)';
-      card.style.borderColor = 'var(--primary-400)';
-    } else {
-      card.style.transform = '';
-      card.style.borderColor = '';
-    }
-  }
-
-  /**
-   * Animate chart
-   */
-  animateChart(chart, type) {
-    const bars = chart.querySelectorAll('.chart-bar-fill');
-    
-    if (type === 'enter') {
-      bars.forEach((bar, index) => {
-        setTimeout(() => {
-          bar.style.transform = 'scaleY(1.05)';
-        }, index * 50);
-      });
-    } else {
-      bars.forEach(bar => {
-        bar.style.transform = '';
-      });
-    }
-  }
-  
-  /**
-   * Handle click events
-   */
-  handleClick(event) {
-    const target = event.target;
-    
-    if (target.classList.contains('refresh-btn')) {
-      this.loadData();
-    } else if (target.classList.contains('view-all-btn')) {
-      const section = target.getAttribute('data-section');
-      this.navigateToSection(section);
-    } else if (target.classList.contains('stat-card')) {
-      const type = target.getAttribute('data-type');
-      this.navigateToFilteredView(type);
-    }
-  }
-  
-  /**
-   * Handle memory selection
-   */
-  handleMemorySelect(event) {
-    const { memoryId } = event.detail;
-    if (window.app && window.app.router) {
-      window.app.router.navigate(`/memory/${memoryId}`);
-    }
-  }
-  
-  /**
-   * Navigate to section
-   */
-  navigateToSection(section) {
-    if (window.app && window.app.router) {
-      switch (section) {
-        case 'memories':
-          window.app.router.navigate('/memories?view=recent');
-          break;
-        case 'projects':
-          window.app.router.navigate('/projects');
-          break;
-        case 'analytics':
-          window.app.router.navigate('/analytics');
-          break;
+      const row = e.target.closest('.recent-item');
+      if (row) {
+        const id = row.dataset.id;
+        if (!id) return;
+        // If peek is open, switch peek target; otherwise navigate
+        if (this._peekId) {
+          this.openPeek(id);
+        } else if (window.app?.router) {
+          window.app.router.navigate(`/memory/${id}`);
+        }
+        return;
       }
-    }
-  }
-  
-  /**
-   * Navigate to filtered view
-   */
-  navigateToFilteredView(type) {
-    if (window.app && window.app.router) {
-      const filters = {};
-      
-      switch (type) {
-        case 'category':
-          // Navigate to memories with category filter
-          window.app.router.navigate('/memories?view=category');
-          break;
-        case 'project':
-          window.app.router.navigate('/memories?view=project');
-          break;
-        default:
-          window.app.router.navigate('/memories?view=recent');
+      if (e.target.closest('.load-more-btn')) { this.loadMore(); return; }
+      if (e.target.closest('.viz-mode-btn')) {
+        const mode = e.target.closest('.viz-mode-btn').dataset.mode;
+        if (mode && VIZ_MODES.includes(mode)) {
+          this._vizMode = mode;
+          localStorage.setItem('mem-mesh-client-viz', mode);
+          this.renderClientViz();
+        }
+        return;
       }
-    }
+      if (e.target.closest('.session-end-btn')) { this.endSession(); return; }
+      if (e.target.closest('.session-link')) {
+        if (window.app?.router) window.app.router.navigate('/work');
+        return;
+      }
+    });
+    this.addEventListener('change', (e) => {
+      if (e.target.matches('.filter-cat')) {
+        this.filterCategory = e.target.value;
+        this.page = 0; this.memories = []; this.loadData();
+      }
+      if (e.target.matches('.filter-days')) {
+        this.filterDays = parseInt(e.target.value, 10);
+        this.page = 0; this.memories = []; this.loadData();
+      }
+    });
+
+    // Keyboard: Space = peek on hovered row, Escape = close peek
+    this._boundKeydown = (e) => {
+      if (!this.isConnected) return;
+      if (e.target.matches('input, select, textarea') && e.key !== 'Escape') return;
+
+      if (e.key === ' ') {
+        e.preventDefault();
+        const row = this.querySelector('.recent-item:hover');
+        if (row) {
+          const id = row.dataset.id;
+          if (id) {
+            if (this._peekId === id) this.closePeek();
+            else this.openPeek(id);
+          }
+        }
+      }
+      if (e.key === 'Escape' && this._peekId) {
+        this.closePeek();
+      }
+    };
+    document.addEventListener('keydown', this._boundKeydown);
   }
-  
-  /**
-   * Load dashboard data
-   */
+
+  // ── Data ──
+
+  async waitForAppAndLoadData() {
+    let n = 0;
+    const check = () => {
+      if (window.app?.apiClient) { this.loadData(); return; }
+      if (++n >= 50) { this.loadData(); return; }
+      setTimeout(check, 100);
+    };
+    check();
+  }
+
   async loadData() {
     this.isLoading = true;
-    this.updateLoadingState();
-    
     try {
-      // 앱과 API 클라이언트 가용성 재확인
-      if (!window.app) {
-        throw new Error('App not available');
-      }
-      
-      if (!window.app.apiClient) {
-        throw new Error('API client not available');
-      }
-      
-      console.log('Loading dashboard data...');
-      
-      // Load stats, recent memories, and pin stats in parallel
-      const [stats, recentResponse, pinStatsResponse] = await Promise.all([
-        window.app.apiClient.getStats(),
-        window.app.apiClient.searchMemories(' ', { limit: 10 }),  // 공백 문자 사용
-        fetch('/api/work/projects/default/stats').then(r => r.ok ? r.json() : null).catch(() => null)
+      const api = window.app?.apiClient;
+      if (!api) return;
+
+      const searchParams = { limit: this.pageSize, recency_weight: 1.0 };
+      if (this.filterCategory !== 'all') searchParams.category = this.filterCategory;
+
+      // Server-side date filtering
+      const from = new Date(Date.now() - this.filterDays * 86400000);
+      searchParams.date_from = from.toISOString().split('T')[0];
+      searchParams.temporal_mode = 'filter';
+
+      const [statsR, memR, sessR, pinsR] = await Promise.allSettled([
+        api.getStats(),
+        api.searchMemories(' ', searchParams),
+        api.get('/work/sessions?limit=3'),
+        api.get('/work/pins', { limit: 50 }),
       ]);
-      
-      console.log('Stats received:', stats);
-      console.log('Recent memories received:', recentResponse);
-      console.log('Pin stats received:', pinStatsResponse);
-      
-      this.stats = stats;
-      this.recentMemories = recentResponse.results || [];
-      
-      // Pin stats에서 avg_lead_time 추가
-      if (pinStatsResponse && pinStatsResponse.pins) {
-        this.stats.average_lead_time = pinStatsResponse.pins.avg_lead_time_hours 
-          ? pinStatsResponse.pins.avg_lead_time_hours / 24  // hours to days
-          : 0;
-        this.stats.pin_stats = pinStatsResponse.pins;
-      }
-      
-      console.log('Dashboard data loaded successfully');
-      
-    } catch (error) {
-      console.error('Failed to load dashboard data:', error);
-      if (window.app && window.app.errorHandler) {
-        window.app.errorHandler.showError('Failed to load dashboard data');
-      }
-    } finally {
-      this.isLoading = false;
-      this.render();
-    }
+
+      this.stats = statsR.status === 'fulfilled' ? statsR.value : null;
+      const results = memR.status === 'fulfilled' ? (memR.value.results || []) : [];
+      if (this.page === 0) this.memories = results;
+      else this.memories = [...this.memories, ...results];
+      this.hasMore = results.length >= this.pageSize;
+      this.sessions = sessR.status === 'fulfilled' ? (sessR.value.sessions || []) : [];
+      this.activePins = pinsR.status === 'fulfilled'
+        ? (pinsR.value.pins || []).filter(p => p.status !== 'completed')
+        : [];
+    } catch (_) {}
+    this.isLoading = false;
+    this.renderContent();
   }
 
-  /**
-   * Load dashboard data using direct API calls (fallback)
-   */
-  async loadDataDirect() {
-    console.log('loadDataDirect called for dashboard');
-    
-    this.isLoading = true;
-    this.updateLoadingState();
-    
+  async loadMore() {
+    this.page++;
+    await this.loadData();
+  }
+
+  async refreshStats() {
     try {
-      console.log('Loading dashboard data via direct API calls...');
-      
-      // Load stats, recent memories, and pin stats using direct fetch
-      const [statsResponse, searchResponse, pinStatsResponse] = await Promise.all([
-        fetch('/api/memories/stats'),
-        fetch('/api/memories/search?query= &limit=10'),
-        fetch('/api/work/projects/default/stats').catch(() => null)
-      ]);
-      
-      if (!statsResponse.ok) {
-        throw new Error(`Stats API failed: ${statsResponse.status}`);
-      }
-      
-      if (!searchResponse.ok) {
-        throw new Error(`Search API failed: ${searchResponse.status}`);
-      }
-      
-      const [stats, searchResult] = await Promise.all([
-        statsResponse.json(),
-        searchResponse.json()
-      ]);
-      
-      // Pin stats 처리 (실패해도 무시)
-      let pinStats = null;
-      if (pinStatsResponse && pinStatsResponse.ok) {
-        pinStats = await pinStatsResponse.json();
-      }
-      
-      console.log('Direct API - Stats received:', stats);
-      console.log('Direct API - Recent memories received:', searchResult);
-      console.log('Direct API - Pin stats received:', pinStats);
-      
-      this.stats = stats;
-      this.recentMemories = searchResult.results || [];
-      
-      // Pin stats에서 avg_lead_time 추가
-      if (pinStats && pinStats.pins) {
-        this.stats.average_lead_time = pinStats.pins.avg_lead_time_hours 
-          ? pinStats.pins.avg_lead_time_hours / 24  // hours to days
-          : 0;
-        this.stats.pin_stats = pinStats.pins;
-      }
-      
-      console.log('Direct API - Dashboard data loaded successfully');
-      
-    } catch (error) {
-      console.error('Direct API - Failed to load dashboard data:', error);
-      this.showError('Failed to load dashboard data. Please refresh the page.');
-    } finally {
-      this.isLoading = false;
-      this.render();
-    }
+      const api = window.app?.apiClient;
+      if (!api) return;
+      this.stats = await api.getStats();
+      this.renderFooter();
+    } catch (_) {}
   }
 
-  /**
-   * Show error message
-   */
-  showError(message) {
-    this.innerHTML = `
-      <div class="dashboard-error">
-        <div class="error-content">
-          <h1>⚠️ Error</h1>
-          <p>${message}</p>
-          <div class="error-actions">
-            <button class="retry-btn">Retry</button>
-            <button class="refresh-btn">Refresh Page</button>
-          </div>
-        </div>
-      </div>
-    `;
-    
-    // 이벤트 리스너 추가
-    const retryBtn = this.querySelector('.retry-btn');
-    const refreshBtn = this.querySelector('.refresh-btn');
-    
-    if (retryBtn) {
-      retryBtn.addEventListener('click', () => {
-        if (window.app && window.app.apiClient) {
-          this.loadData();
-        } else {
-          this.loadDataDirect();
-        }
-      });
-    }
-    
-    if (refreshBtn) {
-      refreshBtn.addEventListener('click', () => {
-        window.location.reload();
-      });
-    }
-  }
-  
-  /**
-   * Update loading state
-   */
-  updateLoadingState() {
-    const loadingElements = this.querySelectorAll('.loading-placeholder');
-    loadingElements.forEach(el => {
-      el.style.display = this.isLoading ? 'block' : 'none';
-    });
-    
-    const contentElements = this.querySelectorAll('.dashboard-content');
-    contentElements.forEach(el => {
-      el.style.display = this.isLoading ? 'none' : 'block';
-    });
-  }
-  
-  /**
-   * Create statistics cards - Chroma Style
-   */
-  createStatsCards() {
-    if (!this.stats) {
-      return '<div class="loading-placeholder chroma-loading">Loading statistics...</div>';
-    }
-    
-    const totalMemories = this.stats.total_memories || 0;
-    const totalProjects = this.stats.unique_projects || 0;
-    const totalCategories = Object.keys(this.stats.categories_breakdown || {}).length;
-    const avgLeadTime = this.stats.average_lead_time || 0;
-    
-    // Calculate trends (mock data for now)
-    const memoryTrend = this.calculateTrend(totalMemories, 'memories');
-    const projectTrend = this.calculateTrend(totalProjects, 'projects');
-    
-    return `
-      <div class="chroma-stats-grid">
-        <div class="chroma-stat-card animate-on-scroll" data-type="total">
-          <div class="stat-header">
-            <div class="stat-icon-wrapper">
-              <div class="stat-icon">
-                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2"/>
-                </svg>
-              </div>
-            </div>
-            <div class="stat-trend ${memoryTrend.type}">
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M7 14L12 9L17 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              <span>${memoryTrend.value}</span>
-            </div>
-          </div>
-          <div class="stat-content">
-            <div class="stat-number" data-count="${totalMemories}">${totalMemories.toLocaleString()}</div>
-            <div class="stat-label">Total Memories</div>
-            <div class="stat-description">All stored memories</div>
-          </div>
-        </div>
-        
-        <div class="chroma-stat-card animate-on-scroll" data-type="project">
-          <div class="stat-header">
-            <div class="stat-icon-wrapper">
-              <div class="stat-icon">
-                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M22 19C22 19.5304 21.7893 20.0391 21.4142 20.4142C21.0391 20.7893 20.5304 21 20 21H4C3.46957 21 2.96086 20.7893 2.58579 20.4142C2.21071 20.0391 2 19.5304 2 19V5C2 4.46957 2.21071 3.96086 2.58579 3.58579C2.96086 3.21071 3.46957 3 4 3H9L11 6H20C20.5304 6 21.0391 6.21071 21.4142 6.58579C21.7893 6.96086 22 7.46957 22 8V19Z" stroke="currentColor" stroke-width="2"/>
-                </svg>
-              </div>
-            </div>
-            <div class="stat-trend ${projectTrend.type}">
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M7 14L12 9L17 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              <span>${projectTrend.value}</span>
-            </div>
-          </div>
-          <div class="stat-content">
-            <div class="stat-number" data-count="${totalProjects}">${totalProjects}</div>
-            <div class="stat-label">Active Projects</div>
-            <div class="stat-description">Organized collections</div>
-          </div>
-        </div>
-        
-        <div class="chroma-stat-card animate-on-scroll" data-type="category">
-          <div class="stat-header">
-            <div class="stat-icon-wrapper">
-              <div class="stat-icon">
-                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M20.59 13.41L13.42 20.58C13.2343 20.766 13.0137 20.9135 12.7709 21.0141C12.5281 21.1148 12.2678 21.1666 12.005 21.1666C11.7422 21.1666 11.4819 21.1148 11.2391 21.0141C10.9963 20.9135 10.7757 20.766 10.59 20.58L2 12V2H12L20.59 10.59C20.9625 10.9647 21.1716 11.4716 21.1716 12C21.1716 12.5284 20.9625 13.0353 20.59 13.41V13.41Z" stroke="currentColor" stroke-width="2"/>
-                  <circle cx="7" cy="7" r="1" fill="currentColor"/>
-                </svg>
-              </div>
-            </div>
-            <div class="stat-badge">
-              <span>Well organized</span>
-            </div>
-          </div>
-          <div class="stat-content">
-            <div class="stat-number" data-count="${totalCategories}">${totalCategories}</div>
-            <div class="stat-label">Categories</div>
-            <div class="stat-description">Content types</div>
-          </div>
-        </div>
-        
-        <div class="chroma-stat-card animate-on-scroll" data-type="leadtime">
-          <div class="stat-header">
-            <div class="stat-icon-wrapper">
-              <div class="stat-icon">
-                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
-                  <path d="M12 6V12L16 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </div>
-            </div>
-            <div class="stat-badge success">
-              <span>Improved</span>
-            </div>
-          </div>
-          <div class="stat-content">
-            <div class="stat-number" data-count="${avgLeadTime.toFixed(1)}">${avgLeadTime.toFixed(1)}d</div>
-            <div class="stat-label">Avg Lead Time</div>
-            <div class="stat-description">Task completion</div>
-          </div>
-        </div>
-      </div>
-    `;
+  async endSession() {
+    const active = this.sessions.find(s => s.status === 'active');
+    if (!active) return;
+    try {
+      const api = window.app?.apiClient;
+      if (!api) return;
+      await api.post(`/work/sessions/${active.session_id || active.id}/end`, {});
+      this.loadData();
+    } catch (_) {}
   }
 
-  /**
-   * Calculate trend for stats
-   */
-  calculateTrend(value, type) {
-    // Mock trend calculation - in real app this would compare with previous period
-    const trends = {
-      memories: { type: 'positive', value: '+12%' },
-      projects: { type: 'positive', value: '+3' },
-      categories: { type: 'neutral', value: 'Stable' },
-      leadtime: { type: 'positive', value: '-0.3d' }
-    };
-    
-    return trends[type] || { type: 'neutral', value: 'N/A' };
-  }
-  
-  /**
-   * Create category distribution chart
-   */
-  createCategoryChart() {
-    if (!this.stats || !this.stats.categories_breakdown) {
-      return '<div class="loading-placeholder">Loading chart...</div>';
-    }
-    
-    const categories = this.stats.categories_breakdown;
-    const total = Object.values(categories).reduce((sum, count) => sum + count, 0);
-    
-    if (total === 0) {
-      return '<div class="no-data">No data available</div>';
-    }
-    
-    // 일관된 회색 톤 색상 팔레트
-    const categoryColors = {
-      task: '#525252',
-      bug: '#737373',
-      idea: '#a3a3a3',
-      decision: '#404040',
-      incident: '#262626',
-      code_snippet: '#171717'
-    };
-    
-    // SVG 아이콘으로 변경
-    const categoryIcons = {
-      task: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-               <path d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2"/>
-             </svg>`,
-      bug: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M8 2V5M16 2V5M8 19L16 5M16 19L8 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>`,
-      idea: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-               <path d="M9 21H15M12 3C8.68629 3 6 5.68629 6 9C6 11.973 7.818 14.441 10.5 15.5V17C10.5 17.8284 11.1716 18.5 12 18.5C12.8284 18.5 13.5 17.8284 13.5 17V15.5C16.182 14.441 18 11.973 18 9C18 5.68629 15.3137 3 12 3Z" stroke="currentColor" stroke-width="2"/>
-             </svg>`,
-      decision: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 3L2 12L12 21L22 12L12 3Z" stroke="currentColor" stroke-width="2"/>
-                </svg>`,
-      incident: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 9V13M12 17H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2"/>
-                </svg>`,
-      code_snippet: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M16 18L22 12L16 6M8 6L2 12L8 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>`
-    };
-    
-    let chartHTML = '<div class="category-chart">';
-    let currentAngle = 0;
-    
-    // Create pie chart using CSS conic-gradient
-    const gradientStops = [];
-    Object.entries(categories).forEach(([category, count]) => {
-      const percentage = (count / total) * 100;
-      const color = categoryColors[category] || '#64748b';
-      
-      gradientStops.push(`${color} ${currentAngle}% ${currentAngle + percentage}%`);
-      currentAngle += percentage;
-    });
-    
-    chartHTML += `
-      <div class="pie-chart" style="background: conic-gradient(${gradientStops.join(', ')})"></div>
-      <div class="chart-legend">
-    `;
-    
-    Object.entries(categories).forEach(([category, count]) => {
-      const percentage = ((count / total) * 100).toFixed(1);
-      const color = categoryColors[category] || '#64748b';
-      const icon = categoryIcons[category] || categoryIcons.task;
-      
-      chartHTML += `
-        <div class="legend-item">
-          <div class="legend-color" style="background: ${color}"></div>
-          <span class="legend-icon">${icon}</span>
-          <span class="legend-text">${category}</span>
-          <span class="legend-count">${count} (${percentage}%)</span>
-        </div>
-      `;
-    });
-    
-    chartHTML += '</div></div>';
-    return chartHTML;
-  }
-  
-  /**
-   * Create recent memories list
-   */
-  createRecentMemories() {
-    if (this.isLoading) {
-      return '<div class="loading-placeholder">Loading recent memories...</div>';
-    }
-    
-    if (!this.recentMemories.length) {
-      return `
-        <div class="no-data">
-          <p>No memories found</p>
-          <button class="create-memory-btn">Create your first memory</button>
-        </div>
-      `;
-    }
-    
-    // Recent Activity 표시 개수 (기본 10개)
-    const displayCount = this.getAttribute('recent-count') || 10;
-    
-    return `
-      <div class="recent-memories-list">
-        ${this.recentMemories.slice(0, displayCount).map(memory => `
-          <memory-card
-            memory-id="${memory.id}"
-            content="${this.escapeHtml(memory.content)}"
-            project="${memory.project_id || ''}"
-            category="${memory.category}"
-            created-at="${memory.created_at}"
-            updated-at="${memory.updated_at}"
-            tags="${this.escapeHtml(JSON.stringify(memory.tags || []))}"
-            source="${memory.source || 'unknown'}"
-          ></memory-card>
-        `).join('')}
-      </div>
-    `;
-  }
-  
-  /**
-   * Create project overview
-   */
-  createProjectOverview() {
-    if (!this.stats || !this.stats.projects_breakdown) {
-      return '<div class="loading-placeholder">Loading projects...</div>';
-    }
-    
-    const projects = this.stats.projects_breakdown;
-    const projectEntries = Object.entries(projects)
-      .sort(([,a], [,b]) => b - a)
-      .slice(0, 5);
-    
-    if (projectEntries.length === 0) {
-      return '<div class="no-data">No projects found</div>';
-    }
-    
-    return `
-      <div class="project-list">
-        ${projectEntries.map(([project, count]) => `
-          <div class="project-item">
-            <div class="project-info">
-              <div class="project-name">${project}</div>
-              <div class="project-count">${count} memories</div>
-            </div>
-            <div class="project-bar">
-              <div class="project-bar-fill" style="width: ${(count / Math.max(...Object.values(projects))) * 100}%"></div>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    `;
-  }
-  
-  /**
-   * Escape HTML for safe attribute usage
-   * Handles: < > & " ' to prevent XSS and attribute breaking
-   */
-  escapeHtml(text) {
-    if (text == null) return '';
-    const str = String(text);
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-  
-  /**
-   * Render the component - Chroma Style
-   */
+  // ── Render ──
+
   render() {
-    this.className = 'dashboard-page chroma-dashboard page-container';
-    
+    this.className = 'dash';
     this.innerHTML = `
-      <div class="page-header">
-        <div class="page-header-main">
-          <h1 class="page-title">Dashboard</h1>
-          <p class="page-subtitle">Get insights into your memory collection and activity</p>
+      <div class="dash-session" id="dash-session"></div>
+      <div class="dash-pins" id="dash-pins"></div>
+      <div class="dash-insights" id="dash-insights"></div>
+      <div class="client-viz-section" id="client-viz">
+        <div class="client-viz-header">
+          <span class="client-viz-title">Client Activity</span>
+          <div class="client-viz-switcher" id="viz-switcher"></div>
         </div>
-        <div class="page-header-actions">
-          <connection-status></connection-status>
-          <button class="chroma-refresh-btn" title="Refresh data">
-            <svg class="refresh-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M1 4V10H7M23 20V14H17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M20.49 9C19.9828 7.56678 19.1209 6.28392 17.9845 5.27493C16.8482 4.26595 15.4745 3.56905 13.9917 3.24575C12.5089 2.92246 10.9652 2.98546 9.51691 3.42597C8.06861 3.86648 6.76302 4.66921 5.64 5.76L1 10M23 14L18.36 18.24C17.237 19.3308 15.9314 20.1335 14.4831 20.574C13.0348 21.0145 11.4911 21.0775 10.0083 20.7542C8.52547 20.431 7.1518 19.7341 6.01547 18.7251C4.87913 17.7161 4.01717 16.4332 3.51 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span class="btn-text">Refresh</span>
-          </button>
-          <button class="chroma-settings-btn" title="Dashboard settings">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
-              <path d="M19.4 15C19.2669 15.3016 19.2272 15.6362 19.286 15.9606C19.3448 16.285 19.4995 16.5843 19.73 16.82L19.79 16.88C19.976 17.0657 20.1235 17.2863 20.2241 17.5291C20.3248 17.7719 20.3766 18.0322 20.3766 18.295C20.3766 18.5578 20.3248 18.8181 20.2241 19.0609C20.1235 19.3037 19.976 19.5243 19.79 19.71C19.6043 19.896 19.3837 20.0435 19.1409 20.1441C18.8981 20.2448 18.6378 20.2966 18.375 20.2966C18.1122 20.2966 17.8519 20.2448 17.6091 20.1441C17.3663 20.0435 17.1457 19.896 16.96 19.71L16.9 19.65C16.6643 19.4195 16.365 19.2648 16.0406 19.206C15.7162 19.1472 15.3816 19.1869 15.08 19.32C14.7842 19.4468 14.532 19.6572 14.3543 19.9255C14.1766 20.1938 14.0813 20.5082 14.08 20.83V21C14.08 21.5304 13.8693 22.0391 13.4942 22.4142C13.1191 22.7893 12.6104 23 12.08 23C11.5496 23 11.0409 22.7893 10.6658 22.4142C10.2907 22.0391 10.08 21.5304 10.08 21V20.91C10.0723 20.579 9.96512 20.2573 9.77251 19.9887C9.5799 19.7201 9.31074 19.5176 9 19.41C8.69838 19.2769 8.36381 19.2372 8.03941 19.296C7.71502 19.3548 7.41568 19.5095 7.18 19.74L7.12 19.8C6.93425 19.986 6.71368 20.1335 6.47088 20.2341C6.22808 20.3348 5.96783 20.3866 5.705 20.3866C5.44217 20.3866 5.18192 20.3348 4.93912 20.2341C4.69632 20.1335 4.47575 19.986 4.29 19.8C4.10405 19.6143 3.95653 19.3937 3.85588 19.1509C3.75523 18.9081 3.70343 18.6478 3.70343 18.385C3.70343 18.1222 3.75523 17.8619 3.85588 17.6191C3.95653 17.3763 4.10405 17.1557 4.29 16.97L4.35 16.91C4.58054 16.6743 4.73519 16.375 4.794 16.0506C4.85282 15.7262 4.81312 15.3916 4.68 15.09C4.55324 14.7942 4.34276 14.542 4.07447 14.3643C3.80618 14.1866 3.49179 14.0913 3.17 14.09H3C2.46957 14.09 1.96086 13.8793 1.58579 13.5042C1.21071 13.1291 1 12.6204 1 12.09C1 11.5596 1.21071 11.0509 1.58579 10.6758C1.96086 10.3007 2.46957 10.09 3 10.09H3.09C3.42099 10.0823 3.742 9.97512 4.01062 9.78251C4.27925 9.5899 4.48167 9.32074 4.59 9.01C4.72312 8.70838 4.76282 8.37381 4.704 8.04941C4.64519 7.72502 4.49054 7.42568 4.26 7.19L4.2 7.13C4.01405 6.94425 3.86653 6.72368 3.76588 6.48088C3.66523 6.23808 3.61343 5.97783 3.61343 5.715C3.61343 5.45217 3.66523 5.19192 3.76588 4.94912C3.86653 4.70632 4.01405 4.48575 4.2 4.3C4.38575 4.11405 4.60632 3.96653 4.84912 3.86588C5.09192 3.76523 5.35217 3.71343 5.615 3.71343C5.87783 3.71343 6.13808 3.76523 6.38088 3.86588C6.62368 3.96653 6.84425 4.11405 7.03 4.3L7.09 4.36C7.32568 4.59054 7.62502 4.74519 7.94941 4.804C8.27381 4.86282 8.60838 4.82312 8.91 4.69H9C9.29577 4.56324 9.54802 4.35276 9.72569 4.08447C9.90337 3.81618 9.99872 3.50179 10 3.18V3C10 2.46957 10.2107 1.96086 10.5858 1.58579C10.9609 1.21071 11.4696 1 12 1C12.5304 1 13.0391 1.21071 13.4142 1.58579C13.7893 1.96086 14 2.46957 14 3V3.09C14.0013 3.41179 14.0966 3.72618 14.2743 3.99447C14.452 4.26276 14.7042 4.47324 15 4.6C15.3016 4.73312 15.6362 4.77282 15.9606 4.714C16.285 4.65519 16.5843 4.50054 16.82 4.27L16.88 4.21C17.0657 4.02405 17.2863 3.87653 17.5291 3.77588C17.7719 3.67523 18.0322 3.62343 18.295 3.62343C18.5578 3.62343 18.8181 3.67523 19.0609 3.77588C19.3037 3.87653 19.5243 4.02405 19.71 4.21C19.896 4.39575 20.0435 4.61632 20.1441 4.85912C20.2448 5.10192 20.2966 5.36217 20.2966 5.625C20.2966 5.88783 20.2448 6.14808 20.1441 6.39088C20.0435 6.63368 19.896 6.85425 19.71 7.04L19.65 7.1C19.4195 7.33568 19.2648 7.63502 19.206 7.95941C19.1472 8.28381 19.1869 8.61838 19.32 8.92V9C19.4468 9.29577 19.6572 9.54802 19.9255 9.72569C20.1938 9.90337 20.5082 9.99872 20.83 10H21C21.5304 10 22.0391 10.2107 22.4142 10.5858C22.7893 10.9609 23 11.4696 23 12C23 12.5304 22.7893 13.0391 22.4142 13.4142C22.0391 13.7893 21.5304 14 21 14H20.91C20.5882 14.0013 20.2738 14.0966 20.0055 14.2743C19.7372 14.452 19.5268 14.7042 19.4 15Z" stroke="currentColor" stroke-width="2"/>
-            </svg>
-          </button>
+        <div class="client-viz-body" id="client-viz-body"></div>
+      </div>
+      <div class="dash-projects" id="dash-projects"></div>
+      <div class="dash-toolbar">
+        <span class="dash-title">Recent Memories</span>
+        <div class="dash-filters">
+          <select class="filter-cat">
+            <option value="all">All</option>
+            <option value="decision">decision</option>
+            <option value="bug">bug</option>
+            <option value="code_snippet">code</option>
+            <option value="idea">idea</option>
+            <option value="incident">incident</option>
+          </select>
+          <select class="filter-days">
+            <option value="7">7d</option>
+            <option value="30" selected>30d</option>
+            <option value="90">90d</option>
+            <option value="365">1y</option>
+          </select>
         </div>
       </div>
-      
-      <div class="chroma-dashboard-content">
-        <!-- Statistics Section -->
-        <section class="chroma-dashboard-section stats-section">
-          <div class="section-header">
-            <h2 class="section-title">Overview</h2>
-            <p class="section-subtitle">Key metrics and performance indicators</p>
-          </div>
-          ${this.createStatsCards()}
-        </section>
-        
-        <!-- Charts and Analytics Section -->
-        <section class="chroma-dashboard-section charts-section">
-          <div class="section-header">
-            <h2 class="section-title">Analytics</h2>
-            <p class="section-subtitle">Data insights and trends</p>
-          </div>
-          <div class="charts-grid">
-            <div class="chart-card animate-on-scroll">
-              <div class="chart-header">
-                <h3>Category Distribution</h3>
-                <button class="chart-expand-btn" title="Expand chart">
-                  <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M15 3H21V9M9 21H3V15M21 3L14 10M3 21L10 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </button>
-              </div>
-              <div class="chart-content">
-                ${this.createCategoryChart()}
-              </div>
-            </div>
-            
-            <div class="chart-card animate-on-scroll">
-              <div class="chart-header">
-                <h3>Top Projects</h3>
-                <button class="view-all-btn" data-section="projects">View All</button>
-              </div>
-              <div class="chart-content">
-                ${this.createProjectOverview()}
-              </div>
-            </div>
-            
-            <div class="chart-card animate-on-scroll">
-              <div class="chart-header">
-                <h3>Weekly Activity</h3>
-                <button class="chart-expand-btn" title="Expand chart">
-                  <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M15 3H21V9M9 21H3V15M21 3L14 10M3 21L10 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </button>
-              </div>
-              <div class="chart-content">
-                ${this.createWeeklyActivityChart()}
-              </div>
-            </div>
-          </div>
-        </section>
-        
-        <!-- Recent Activity Section -->
-        <section class="chroma-dashboard-section activity-section">
-          <div class="section-header">
-            <h2 class="section-title">Recent Activity</h2>
-            <p class="section-subtitle">Latest memories and updates</p>
-            <button class="view-all-btn" data-section="memories">View All</button>
-          </div>
-          <div class="activity-content animate-on-scroll">
-            ${this.createRecentMemories()}
-          </div>
-        </section>
+      <div class="dash-content-area" id="dash-content-area">
+        <div class="dash-list" id="dash-list"></div>
+        <div class="dash-peek-panel" id="dash-peek" style="display:none"></div>
+      </div>
+      <div class="dash-footer" id="dash-footer"></div>
+    `;
+  }
+
+  renderContent() {
+    this.renderSession();
+    this.renderPins();
+    this.renderInsights();
+    this.renderClientViz();
+    this.renderProjects();
+    this.renderMemoryList();
+    this.renderFooter();
+  }
+
+  renderSession() {
+    const el = this.querySelector('#dash-session');
+    if (!el) return;
+    const active = this.sessions.find(s => s.status === 'active');
+    if (!active) { el.innerHTML = ''; el.classList.remove('has-session'); return; }
+    el.classList.add('has-session');
+    const pins = active.open_pins ?? 0;
+    const t = active.started_at ? this.relTime(active.started_at) : '';
+    const proj = active.project_id || '—';
+    el.innerHTML = `
+      <span class="session-dot"></span>
+      <span class="session-project">${this.esc(proj)}</span>
+      <span class="session-meta">${pins} pins open</span>
+      <span class="session-meta">${t}</span>
+      <button class="session-link">View</button>
+      <button class="session-end-btn">End</button>
+    `;
+  }
+
+  renderPins() {
+    const el = this.querySelector('#dash-pins');
+    if (!el) return;
+
+    const allPins = this.activePins || [];
+    if (allPins.length === 0) { el.innerHTML = ''; return; }
+
+    // Sort: importance DESC, then newest first. Show top 5.
+    const sorted = [...allPins].sort((a, b) => (b.importance || 3) - (a.importance || 3) || new Date(b.created_at) - new Date(a.created_at));
+    const pins = sorted.slice(0, 5);
+    const hasMore = allPins.length > 5;
+
+    const statusColors = { open: 'var(--text-muted)', in_progress: '#d97706' };
+
+    const pinRows = pins.map(pin => {
+      const proj = pin.project_id || '—';
+      const importance = pin.importance || 3;
+      const statusColor = statusColors[pin.status] || 'var(--text-muted)';
+      const preview = (pin.content || '').length > 40 ? pin.content.substring(0, 40) + '…' : pin.content;
+
+      return `<div class="pin-row">
+        <span class="pin-status-dot" style="background:${statusColor}"></span>
+        <span class="pin-imp pin-imp-${importance}">P${importance}</span>
+        <span class="pin-project">${this.esc(proj)}</span>
+        <span class="pin-content">${this.esc(preview)}</span>
+      </div>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div class="pins-section">
+        <div class="pins-header">
+          <span class="pins-title">Active Pins</span>
+          <span class="pins-count">${allPins.length}</span>
+          ${hasMore ? '<a class="pins-more" href="#/work">View all</a>' : ''}
+        </div>
+        <div class="pins-list">${pinRows}</div>
       </div>
     `;
-    
-    // Setup intersection observer for animations
-    this.setupScrollAnimations();
-    
-    // Setup create memory button if it exists
-    const createBtn = this.querySelector('.create-memory-btn');
-    if (createBtn) {
-      createBtn.addEventListener('click', () => {
-        if (window.app && window.app.router) {
-          window.app.router.navigate('/create');
-        }
-      });
-    }
   }
 
-  /**
-   * Setup scroll animations
-   */
-  setupScrollAnimations() {
-    const animateElements = this.querySelectorAll('.animate-on-scroll');
-    
-    if (this.animationObserver) {
-      animateElements.forEach(el => {
-        this.animationObserver.observe(el);
-      });
-    }
-    
-    // Animate stat numbers
-    this.animateStatNumbers();
-    
-    // Initialize charts after a short delay
-    setTimeout(() => {
-      this.initializeCharts();
-    }, 300);
-  }
+  renderInsights() {
+    const el = this.querySelector('#dash-insights');
+    if (!el || !this.stats) return;
 
-  /**
-   * Animate stat numbers with counting effect
-   */
-  animateStatNumbers() {
-    const statNumbers = this.querySelectorAll('.stat-number[data-count]');
-    
-    statNumbers.forEach(numberEl => {
-      const targetValue = parseFloat(numberEl.getAttribute('data-count'));
-      const duration = 1500;
-      const startTime = performance.now();
-      
-      const animate = (currentTime) => {
-        const elapsed = currentTime - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        
-        // Easing function
-        const easeOutQuart = 1 - Math.pow(1 - progress, 4);
-        const currentValue = targetValue * easeOutQuart;
-        
-        if (targetValue % 1 === 0) {
-          numberEl.textContent = Math.floor(currentValue).toLocaleString();
-        } else {
-          numberEl.textContent = currentValue.toFixed(1);
-        }
-        
-        if (progress < 1) {
-          requestAnimationFrame(animate);
-        }
-      };
-      
-      // Start animation after a small delay
-      setTimeout(() => {
-        requestAnimationFrame(animate);
-      }, 300);
+    const cats = this.stats.categories_breakdown || {};
+    const total = Object.values(cats).reduce((a, b) => a + b, 0);
+    if (total === 0) { el.innerHTML = ''; return; }
+
+    // Category distribution — top categories as inline bars
+    const sorted = Object.entries(cats).sort(([,a],[,b]) => b - a);
+    const topCats = sorted.slice(0, 4);
+    const catBars = topCats.map(([cat, count]) => {
+      const pct = Math.round((count / total) * 100);
+      const w = Math.max(pct, 4);
+      return `<span class="insight-bar-item">
+        <span class="insight-bar-track"><span class="insight-bar-fill cat-bg-${cat}" style="width:${w}%"></span></span>
+        <span class="insight-bar-label">${cat.replace('_',' ')} ${pct}%</span>
+      </span>`;
+    }).join('');
+    const moreCount = sorted.length - 4;
+    const moreLabel = moreCount > 0 ? `<span class="insight-more">+${moreCount} more</span>` : '';
+
+    // Weekly activity — count memories from last 7 days as mini bars
+    const filtered = this.memories.filter(m => {
+      const age = Date.now() - new Date(m.created_at).getTime();
+      return age < 7 * 86400000;
     });
-  }
+    const dayBuckets = new Array(7).fill(0);
+    filtered.forEach(m => {
+      const daysAgo = Math.floor((Date.now() - new Date(m.created_at).getTime()) / 86400000);
+      if (daysAgo >= 0 && daysAgo < 7) dayBuckets[6 - daysAgo]++;
+    });
+    const maxDay = Math.max(...dayBuckets, 1);
+    const dayLabels = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    const today = new Date().getDay(); // 0=Sun
+    const sparkBars = dayBuckets.map((c, i) => {
+      const h = Math.max(Math.round((c / maxDay) * 24), 2);
+      const dayIdx = (today - 6 + i + 7) % 7;
+      return `<span class="spark-col" title="${dayLabels[dayIdx]}: ${c}"><span class="spark-bar" style="height:${h}px"></span></span>`;
+    }).join('');
+    const weekTotal = dayBuckets.reduce((a, b) => a + b, 0);
 
-  /**
-   * Create category distribution chart - Enhanced with Chroma Charts
-   */
-  createCategoryChart() {
-    if (!this.stats || !this.stats.categories_breakdown) {
-      return '<div class="loading-placeholder chroma-loading">Loading chart...</div>';
-    }
-    
-    const categories = this.stats.categories_breakdown;
-    const total = Object.values(categories).reduce((sum, count) => sum + count, 0);
-    
-    if (total === 0) {
-      return '<div class="no-data">No data available</div>';
-    }
-    
-    // Generate unique ID for this chart
-    const chartId = `category-chart-${Date.now()}`;
-    
-    return `
-      <div class="enhanced-category-chart">
-        <div id="${chartId}" class="chart-placeholder" style="min-height: 300px;"></div>
+    const totalMemories = this.stats.total_memories ?? total;
+
+    el.innerHTML = `
+      <div class="insight-card insight-total">
+        <span class="insight-count-lg">${totalMemories.toLocaleString()}</span>
+        <span class="insight-title">memories</span>
+      </div>
+      <div class="insight-card">
+        <span class="insight-title">Categories</span>
+        <div class="insight-bars">${catBars}${moreLabel}</div>
+      </div>
+      <div class="insight-card">
+        <span class="insight-title">This week</span>
+        <div class="insight-spark">${sparkBars}</div>
+        <span class="insight-count">${weekTotal}</span>
       </div>
     `;
   }
 
-  /**
-   * Create project overview with enhanced bar chart
-   */
-  createProjectOverview() {
-    if (!this.stats || !this.stats.projects_breakdown) {
-      return '<div class="loading-placeholder chroma-loading">Loading projects...</div>';
-    }
-    
-    const projects = this.stats.projects_breakdown;
-    const projectEntries = Object.entries(projects)
-      .sort(([,a], [,b]) => b - a)
-      .slice(0, 5);
-    
-    if (projectEntries.length === 0) {
-      return '<div class="no-data">No projects found</div>';
-    }
-    
-    // Generate unique ID for this chart
-    const chartId = `projects-chart-${Date.now()}`;
-    
-    return `
-      <div class="enhanced-projects-chart">
-        <div id="${chartId}" class="chart-placeholder" style="min-height: 250px;"></div>
+  renderProjects() {
+    const el = this.querySelector('#dash-projects');
+    if (!el || !this.stats) return;
+
+    const breakdown = this.stats.projects_breakdown || {};
+    const entries = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
+    if (entries.length === 0) { el.innerHTML = ''; return; }
+
+    const total = entries.reduce((s, [, c]) => s + c, 0) || 1;
+    const topN = entries.slice(0, 6);
+    const rest = entries.length - topN.length;
+
+    const bars = topN.map(([name, count]) => {
+      const pct = Math.round((count / total) * 100);
+      const w = Math.max(pct, 3);
+      return `<div class="proj-row" data-route="/project/${encodeURIComponent(name)}">
+        <span class="proj-name" title="${this.esc(name)}">${this.esc(name)}</span>
+        <div class="proj-bar-track"><div class="proj-bar-fill" style="width:${w}%"></div></div>
+        <span class="proj-count">${count}</span>
+      </div>`;
+    }).join('');
+
+    const restLabel = rest > 0 ? `<span class="proj-rest">+${rest} more projects</span>` : '';
+
+    el.innerHTML = `
+      <div class="proj-section">
+        <div class="proj-header">
+          <span class="proj-title">Projects</span>
+          <span class="proj-total">${entries.length} projects · ${total.toLocaleString()} memories</span>
+        </div>
+        <div class="proj-list">${bars}</div>
+        ${restLabel}
       </div>
     `;
   }
 
-  /**
-   * Create weekly activity chart
-   */
-  createWeeklyActivityChart() {
-    // Mock weekly activity data - in real app this would come from API
-    const weeklyData = [12, 19, 15, 27, 22, 18, 24];
-    
-    // Generate unique ID for this chart
-    const chartId = `weekly-activity-${Date.now()}`;
-    
-    return `
-      <div class="enhanced-weekly-chart">
-        <div id="${chartId}" class="chart-placeholder" style="min-height: 200px;"></div>
-      </div>
-    `;
-  }
+  renderMemoryList() {
+    const el = this.querySelector('#dash-list');
+    if (!el) return;
 
-  /**
-   * Initialize charts after render
-   */
-  initializeCharts() {
-    if (!window.ChromaCharts) {
-      console.warn('ChromaCharts not loaded');
+    if (this.isLoading && this.memories.length === 0) {
+      el.innerHTML = Array.from({ length: 8 }, () =>
+        '<div class="recent-item ml-skeleton"><span class="sk-line"></span></div>'
+      ).join('');
       return;
     }
-    
-    const charts = new ChromaCharts();
-    
-    // Initialize category donut chart
-    const categoryChartEl = this.querySelector('[id^="category-chart-"]');
-    if (categoryChartEl && this.stats && this.stats.categories_breakdown) {
-      charts.createCategoryDonutChart(
-        this.stats.categories_breakdown,
-        categoryChartEl.id
-      );
+
+    if (this.memories.length === 0) {
+      el.innerHTML = '<div class="ml-empty">No memories found</div>';
+      return;
     }
-    
-    // Initialize projects bar chart
-    const projectsChartEl = this.querySelector('[id^="projects-chart-"]');
-    if (projectsChartEl && this.stats && this.stats.projects_breakdown) {
-      const projectsData = Object.fromEntries(
-        Object.entries(this.stats.projects_breakdown)
-          .sort(([,a], [,b]) => b - a)
-          .slice(0, 5)
-      );
-      
-      charts.createBarChart(
-        projectsData,
-        projectsChartEl.id,
-        {
-          title: 'Top Projects by Memory Count',
-          showValues: true,
-          animate: true,
-          height: 250
-        }
-      );
+
+    const rows = this.memories.map(m => this.buildRow(m)).join('');
+    const more = this.hasMore ? '<button class="load-more-btn">Load more</button>' : '';
+    el.innerHTML = rows + more;
+  }
+
+  buildRow(m) {
+    const icon = CAT_ICONS[m.category] || DEFAULT_ICON;
+    const preview = (m.content || '').replace(/#{1,6}\s+/g, '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/\n/g, ' ').trim();
+    const truncated = preview.length > 120 ? preview.substring(0, 120) + '...' : preview;
+    const time = this.relTime(m.created_at);
+    const source = m.source && m.source !== 'unknown' ? m.source : '';
+    const client = m.client || '';
+    return `<div class="recent-item" data-id="${m.id}" role="button" tabindex="0">
+      <span class="recent-item-icon cat-${m.category}">${icon}</span>
+      <span class="recent-item-badge">${m.category}</span>
+      ${m.project_id ? `<span class="recent-item-project">${this.esc(m.project_id)}</span>` : ''}
+      ${client ? `<span class="recent-item-client client-${client}">${client}</span>` : ''}
+      <span class="recent-item-content">${this.esc(truncated)}</span>
+      <span class="recent-item-time">${time}${source ? ' \u00b7 ' + source : ''}</span>
+    </div>`;
+  }
+
+  renderFooter() {
+    const el = this.querySelector('#dash-footer');
+    if (!el) return;
+    const s = this.stats;
+    const total = s?.total_memories?.toLocaleString() || '—';
+    const projects = s?.unique_projects || '—';
+    el.innerHTML = `
+      <span>${total} memories</span>
+      <span class="footer-sep">&middot;</span>
+      <span>${projects} projects</span>
+    `;
+  }
+
+  // ── Client Visualization ──
+
+  _pushVizEvent(memory) {
+    this._vizEvents.unshift({
+      client: memory.client || 'unknown',
+      category: memory.category || 'task',
+      content: (memory.content || '').substring(0, 60),
+      time: Date.now(),
+    });
+    if (this._vizEvents.length > 40) this._vizEvents.length = 40;
+    // Live-update current viz
+    if (this._vizMode === 'pulse') this._appendPulseDot(this._vizEvents[0]);
+    if (this._vizMode === 'ticker') this._appendTickerItem(this._vizEvents[0]);
+  }
+
+  renderClientViz() {
+    const section = this.querySelector('#client-viz');
+    if (!section) return;
+
+    const clients = this.stats?.clients_breakdown || {};
+    const hasClients = Object.keys(clients).length > 0;
+    if (!hasClients && this.memories.length === 0) {
+      section.style.display = 'none';
+      return;
     }
-    
-    // Initialize weekly activity line chart
-    const weeklyChartEl = this.querySelector('[id^="weekly-activity-"]');
-    if (weeklyChartEl) {
-      const weeklyData = [12, 19, 15, 27, 22, 18, 24];
-      
-      charts.createLineChart(
-        weeklyData,
-        weeklyChartEl.id,
-        {
-          title: 'Daily Memory Creation',
-          showPoints: true,
-          showGrid: true,
-          animate: true,
-          height: 200,
-          width: 400
-        }
-      );
+    section.style.display = '';
+
+    // Render switcher
+    const switcher = this.querySelector('#viz-switcher');
+    if (switcher) {
+      switcher.innerHTML = VIZ_MODES.map(m =>
+        `<button class="viz-mode-btn${this._vizMode === m ? ' active' : ''}" data-mode="${m}">${VIZ_LABELS[m]}</button>`
+      ).join('');
     }
+
+    // Seed viz events from memories if empty
+    if (this._vizEvents.length === 0 && this.memories.length > 0) {
+      this._vizEvents = this.memories.slice(0, 30).map(m => ({
+        client: m.client || 'unknown',
+        category: m.category || 'task',
+        content: (m.content || '').substring(0, 60),
+        time: new Date(m.created_at).getTime(),
+      }));
+    }
+
+    // Stop orbit if switching away
+    if (this._vizMode !== 'orbit' && this._orbitAnim) {
+      cancelAnimationFrame(this._orbitAnim);
+      this._orbitAnim = null;
+    }
+
+    const body = this.querySelector('#client-viz-body');
+    if (!body) return;
+
+    if (this._vizMode === 'pulse') this._renderPulseStrip(body);
+    else if (this._vizMode === 'orbit') this._renderOrbitRing(body);
+    else if (this._vizMode === 'ticker') this._renderStreamTicker(body);
+    else if (this._vizMode === 'heatmap') this._renderHeatmap(body);
+    else if (this._vizMode === 'stats') this._renderStatsCards(body);
+    else if (this._vizMode === 'timeline') this._renderTimeline(body);
+    else if (this._vizMode === 'flow') this._renderFlow(body);
+    else if (this._vizMode === 'calendar') this._renderCalendar(body);
+    else if (this._vizMode === 'leaderboard') this._renderLeaderboard(body);
+  }
+
+  // ── 1. Pulse Strip ──
+
+  _renderPulseStrip(container) {
+    const clients = this.stats?.clients_breakdown || {};
+    const entries = Object.entries(clients).sort(([,a],[,b]) => b - a);
+
+    // Client legend + dot timeline
+    const legend = entries.map(([name, count]) => {
+      const color = CLIENT_COLORS[name] || CLIENT_COLORS.unknown;
+      return `<span class="pulse-client" style="--c:${color}">
+        <span class="pulse-client-dot"></span>
+        <span class="pulse-client-name">${this.esc(name)}</span>
+        <span class="pulse-client-count">${count}</span>
+      </span>`;
+    }).join('');
+
+    // Build dot timeline from events
+    const dots = this._vizEvents.slice(0, 30).map((ev, i) => {
+      const color = CLIENT_COLORS[ev.client] || CLIENT_COLORS.unknown;
+      const age = (Date.now() - ev.time) / 3600000; // hours
+      const opacity = Math.max(0.25, 1 - age / 168); // fade over 7 days
+      const catIcon = CAT_ICONS[ev.category] ? 'has-icon' : '';
+      return `<span class="pulse-dot ${catIcon}" style="--c:${color};opacity:${opacity.toFixed(2)}" title="${this.esc(ev.client)}: ${this.esc(ev.content)}" data-idx="${i}"></span>`;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="pulse-legend">${legend}</div>
+      <div class="pulse-timeline" id="pulse-timeline">${dots}</div>
+    `;
+  }
+
+  _appendPulseDot(ev) {
+    const timeline = this.querySelector('#pulse-timeline');
+    if (!timeline || this._vizMode !== 'pulse') return;
+    const color = CLIENT_COLORS[ev.client] || CLIENT_COLORS.unknown;
+    const dot = document.createElement('span');
+    dot.className = 'pulse-dot pulse-dot-enter';
+    dot.style.setProperty('--c', color);
+    dot.title = `${ev.client}: ${ev.content}`;
+    timeline.prepend(dot);
+    // Remove excess
+    while (timeline.children.length > 30) timeline.lastElementChild.remove();
+    // Trigger animation
+    requestAnimationFrame(() => dot.classList.remove('pulse-dot-enter'));
+  }
+
+  // ── 2. Orbit Ring ──
+
+  _renderOrbitRing(container) {
+    const clients = this.stats?.clients_breakdown || {};
+    const entries = Object.entries(clients).sort(([,a],[,b]) => b - a);
+    const total = Object.values(clients).reduce((a, b) => a + b, 0) || 1;
+
+    container.innerHTML = `<canvas id="orbit-canvas" width="600" height="180"></canvas>`;
+    const canvas = container.querySelector('#orbit-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    // Build orbit nodes — size circle to fit label text
+    const fontSize = 9;
+    ctx.font = `600 ${fontSize}px system-ui, sans-serif`;
+    const nodes = entries.map(([name, count], i) => {
+      const textW = ctx.measureText(name).width;
+      const minR = (textW / 2) + 6; // text half-width + padding
+      const countR = Math.max(12, (count / total) * 50);
+      return {
+        name,
+        count,
+        color: CLIENT_COLORS[name] || CLIENT_COLORS.unknown,
+        radius: Math.max(minR, countR),
+        angle: (i / entries.length) * Math.PI * 2,
+        speed: 0.003 + (i * 0.002),
+        pulsePhase: Math.random() * Math.PI * 2,
+        fontSize,
+      };
+    });
+
+    // Particles for recent events
+    const particles = [];
+    this._vizEvents.slice(0, 15).forEach((ev, i) => {
+      particles.push({
+        color: CLIENT_COLORS[ev.client] || CLIENT_COLORS.unknown,
+        angle: Math.random() * Math.PI * 2,
+        dist: 30 + Math.random() * 40,
+        speed: 0.01 + Math.random() * 0.015,
+        size: 2 + Math.random() * 2,
+        alpha: 0.3 + Math.random() * 0.5,
+      });
+    });
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvas.offsetWidth * dpr;
+    canvas.height = 180 * dpr;
+    canvas.style.width = canvas.offsetWidth + 'px';
+    canvas.style.height = '180px';
+    ctx.scale(dpr, dpr);
+    const W = canvas.offsetWidth;
+    const H = 180;
+    const cx = W / 2;
+    const cy = H / 2;
+    const orbitRx = Math.min(W * 0.35, 120);
+    const orbitRy = orbitRx * 0.45;
+
+    const draw = (t) => {
+      ctx.clearRect(0, 0, W, H);
+
+      // Draw orbit path
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, orbitRx, orbitRy, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(128,128,128,0.15)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Draw center label
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#888';
+      ctx.font = '600 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('mem-mesh', cx, cy);
+
+      // Draw particles
+      particles.forEach(p => {
+        p.angle += p.speed;
+        const px = cx + Math.cos(p.angle) * (orbitRx * p.dist / 70);
+        const py = cy + Math.sin(p.angle) * (orbitRy * p.dist / 70);
+        ctx.beginPath();
+        ctx.arc(px, py, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.alpha * (0.5 + 0.5 * Math.sin(t * 0.002 + p.angle));
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      });
+
+      // Draw client nodes
+      nodes.forEach(node => {
+        node.angle += node.speed;
+        const nx = cx + Math.cos(node.angle) * orbitRx;
+        const ny = cy + Math.sin(node.angle) * orbitRy;
+        const pulse = 1 + 0.12 * Math.sin(t * 0.003 + node.pulsePhase);
+        const r = node.radius * pulse;
+
+        // Glow
+        ctx.beginPath();
+        ctx.arc(nx, ny, r + 4, 0, Math.PI * 2);
+        ctx.fillStyle = node.color;
+        ctx.globalAlpha = 0.12;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // Circle
+        ctx.beginPath();
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
+        ctx.fillStyle = node.color;
+        ctx.fill();
+
+        // Label
+        ctx.fillStyle = '#fff';
+        ctx.font = `600 ${node.fontSize}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(node.name, nx, ny);
+      });
+
+      this._orbitAnim = requestAnimationFrame(draw);
+    };
+
+    this._orbitAnim = requestAnimationFrame(draw);
+  }
+
+  // ── 3. Stream Ticker ──
+
+  _renderStreamTicker(container) {
+    const items = this._vizEvents.slice(0, 20).map(ev => {
+      const color = CLIENT_COLORS[ev.client] || CLIENT_COLORS.unknown;
+      const catIcon = CAT_ICONS[ev.category] || DEFAULT_ICON;
+      const preview = ev.content.length > 40 ? ev.content.substring(0, 40) + '...' : ev.content;
+      const ago = this.relTime(new Date(ev.time).toISOString());
+      return `<span class="ticker-item">
+        <span class="ticker-client" style="background:${color}">${this.esc(ev.client)}</span>
+        <span class="ticker-cat">${catIcon}</span>
+        <span class="ticker-text">${this.esc(preview)}</span>
+        <span class="ticker-time">${ago}</span>
+      </span>`;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="ticker-track" id="ticker-track">
+        <div class="ticker-scroll">${items}${items}</div>
+      </div>
+    `;
+  }
+
+  _appendTickerItem(ev) {
+    const scroll = this.querySelector('.ticker-scroll');
+    if (!scroll || this._vizMode !== 'ticker') return;
+    const color = CLIENT_COLORS[ev.client] || CLIENT_COLORS.unknown;
+    const catIcon = CAT_ICONS[ev.category] || DEFAULT_ICON;
+    const preview = ev.content.length > 40 ? ev.content.substring(0, 40) + '...' : ev.content;
+    const html = `<span class="ticker-item ticker-item-enter">
+      <span class="ticker-client" style="background:${color}">${this.esc(ev.client)}</span>
+      <span class="ticker-cat">${catIcon}</span>
+      <span class="ticker-text">${this.esc(preview)}</span>
+      <span class="ticker-time">now</span>
+    </span>`;
+    scroll.insertAdjacentHTML('afterbegin', html);
+    requestAnimationFrame(() => {
+      const el = scroll.firstElementChild;
+      if (el) el.classList.remove('ticker-item-enter');
+    });
+  }
+
+  // ── Heatmap ──
+
+  _renderHeatmap(container) {
+    const hours = Array.from({ length: 24 }, (_, i) => i);
+    const clients = Object.keys(this.stats?.clients_breakdown || {});
+    if (!clients.length) {
+      container.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:var(--text-xs);padding:var(--space-4)">No client data</div>';
+      return;
+    }
+
+    // Build hour×client matrix from memories
+    const matrix = {};
+    clients.forEach(c => { matrix[c] = new Array(24).fill(0); });
+    (this.memories || []).forEach(m => {
+      const client = m.client || 'unknown';
+      if (!matrix[client]) matrix[client] = new Array(24).fill(0);
+      const h = new Date(m.created_at).getHours();
+      matrix[client][h]++;
+    });
+
+    // Find max for opacity scaling
+    let max = 0;
+    clients.forEach(c => hours.forEach(h => { if (matrix[c]?.[h] > max) max = matrix[c][h]; }));
+    if (max === 0) max = 1;
+
+    // Hour labels (show every 3h)
+    const hourLabels = hours.map(h =>
+      h % 3 === 0 ? `<span class="heatmap-hour-label">${String(h).padStart(2, '0')}</span>` : '<span class="heatmap-hour-label"></span>'
+    ).join('');
+
+    // Rows
+    const rows = clients.map(client => {
+      const color = CLIENT_COLORS[client] || CLIENT_COLORS.unknown;
+      const cells = hours.map(h => {
+        const count = matrix[client]?.[h] || 0;
+        const opacity = count === 0 ? 0.08 : 0.2 + (count / max) * 0.8;
+        const title = `${client} · ${String(h).padStart(2, '0')}:00 — ${count} memor${count === 1 ? 'y' : 'ies'}`;
+        return `<span class="heatmap-cell" style="background:${color};opacity:${opacity}" title="${title}"></span>`;
+      }).join('');
+      return `<div class="heatmap-row">
+        <span class="heatmap-client" style="color:${color}">${this.esc(client)}</span>
+        <div class="heatmap-cells">${cells}</div>
+      </div>`;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="heatmap-grid">
+        <div class="heatmap-row heatmap-header-row">
+          <span class="heatmap-client"></span>
+          <div class="heatmap-cells heatmap-hours">${hourLabels}</div>
+        </div>
+        ${rows}
+      </div>
+    `;
+  }
+
+  // ── Stats Cards ──
+
+  _renderStatsCards(container) {
+    const breakdown = this.stats?.clients_breakdown || {};
+    const clients = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
+    const total = clients.reduce((s, [, c]) => s + c, 0) || 1;
+
+    if (!clients.length) {
+      container.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:var(--text-xs);padding:var(--space-4)">No client data</div>';
+      return;
+    }
+
+    // Per-client category breakdown from memories
+    const clientCats = {};
+    (this.memories || []).forEach(m => {
+      const c = m.client || 'unknown';
+      if (!clientCats[c]) clientCats[c] = {};
+      const cat = m.category || 'other';
+      clientCats[c][cat] = (clientCats[c][cat] || 0) + 1;
+    });
+
+    // Recent activity (last 24h)
+    const now = Date.now();
+    const recentCounts = {};
+    (this.memories || []).forEach(m => {
+      const c = m.client || 'unknown';
+      if (now - new Date(m.created_at).getTime() < 86400000) {
+        recentCounts[c] = (recentCounts[c] || 0) + 1;
+      }
+    });
+
+    const cards = clients.map(([client, count]) => {
+      const color = CLIENT_COLORS[client] || CLIENT_COLORS.unknown;
+      const pct = ((count / total) * 100).toFixed(0);
+      const recent = recentCounts[client] || 0;
+      const cats = clientCats[client] || {};
+      const topCats = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      const catTags = topCats.map(([cat, n]) =>
+        `<span class="stats-cat-tag">${this.esc(cat)} <em>${n}</em></span>`
+      ).join('');
+
+      return `<div class="stats-card">
+        <div class="stats-card-header">
+          <span class="stats-card-dot" style="background:${color}"></span>
+          <span class="stats-card-name">${this.esc(client)}</span>
+          <span class="stats-card-count">${count}</span>
+        </div>
+        <div class="stats-card-bar-track">
+          <div class="stats-card-bar-fill" style="width:${pct}%;background:${color}"></div>
+        </div>
+        <div class="stats-card-meta">
+          <span class="stats-card-pct">${pct}%</span>
+          <span class="stats-card-recent">${recent > 0 ? `${recent} today` : 'idle'}</span>
+        </div>
+        ${catTags ? `<div class="stats-card-cats">${catTags}</div>` : ''}
+      </div>`;
+    }).join('');
+
+    container.innerHTML = `<div class="stats-grid">${cards}</div>`;
+  }
+
+  // ── Timeline ──
+
+  _renderTimeline(container) {
+    const events = (this._vizEvents || []).slice(0, 20);
+    if (!events.length) {
+      container.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:var(--text-xs);padding:var(--space-4)">No recent events</div>';
+      return;
+    }
+
+    const items = events.map((ev, i) => {
+      const color = CLIENT_COLORS[ev.client] || CLIENT_COLORS.unknown;
+      const catIcon = CAT_ICONS[ev.category] || DEFAULT_ICON;
+      const preview = ev.content.length > 60 ? ev.content.substring(0, 60) + '...' : ev.content;
+      const timeStr = this.relTime(ev.time);
+      return `<div class="tl-item" style="--delay:${i * 40}ms">
+        <div class="tl-line"><span class="tl-dot" style="background:${color}"></span></div>
+        <div class="tl-body">
+          <div class="tl-head">
+            <span class="tl-client" style="background:${color}">${this.esc(ev.client)}</span>
+            <span class="tl-cat">${catIcon}</span>
+            <span class="tl-time">${timeStr}</span>
+          </div>
+          <div class="tl-text">${this.esc(preview)}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    container.innerHTML = `<div class="tl-container">${items}</div>`;
+  }
+
+  // ── Flow (Sankey) ──
+
+  _renderFlow(container) {
+    const breakdown = this.stats?.clients_breakdown || {};
+    const clients = Object.keys(breakdown);
+    if (!clients.length) {
+      container.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:var(--text-xs);padding:var(--space-4)">No client data</div>';
+      return;
+    }
+
+    // Build client→category flow from memories
+    const flows = {};
+    const catTotals = {};
+    (this.memories || []).forEach(m => {
+      const c = m.client || 'unknown';
+      const cat = m.category || 'other';
+      const key = `${c}→${cat}`;
+      flows[key] = (flows[key] || 0) + 1;
+      catTotals[cat] = (catTotals[cat] || 0) + 1;
+    });
+
+    const total = Object.values(flows).reduce((s, v) => s + v, 0) || 1;
+    const categories = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
+
+    // SVG-based sankey
+    const svgW = 400;
+    const svgH = Math.max(120, clients.length * 28, categories.length * 28);
+    const leftX = 90;
+    const rightX = svgW - 90;
+
+    // Position nodes
+    const clientNodes = clients.map((c, i) => ({
+      name: c, y: (i + 0.5) * (svgH / clients.length), count: breakdown[c] || 0,
+      color: CLIENT_COLORS[c] || CLIENT_COLORS.unknown
+    }));
+    const catNodes = categories.map(([cat, count], i) => ({
+      name: cat, y: (i + 0.5) * (svgH / categories.length), count
+    }));
+
+    // Draw paths
+    const paths = Object.entries(flows).map(([key, count]) => {
+      const [cName, catName] = key.split('→');
+      const cNode = clientNodes.find(n => n.name === cName);
+      const catNode = catNodes.find(n => n.name === catName);
+      if (!cNode || !catNode) return '';
+      const thickness = Math.max(1, (count / total) * 40);
+      const color = cNode.color;
+      const midX = (leftX + rightX) / 2;
+      return `<path d="M${leftX + 4},${cNode.y} C${midX},${cNode.y} ${midX},${catNode.y} ${rightX - 4},${catNode.y}"
+        fill="none" stroke="${color}" stroke-width="${thickness}" opacity="0.25"/>`;
+    }).join('');
+
+    // Client labels
+    const cLabels = clientNodes.map(n =>
+      `<text x="${leftX - 6}" y="${n.y + 3}" text-anchor="end" fill="${n.color}" class="flow-label">${this.esc(n.name)}</text>`
+    ).join('');
+
+    // Category labels
+    const catLabels = catNodes.map(n =>
+      `<text x="${rightX + 6}" y="${n.y + 3}" text-anchor="start" fill="var(--text-secondary)" class="flow-label">${this.esc(n.name)} <tspan fill="var(--text-muted)" font-size="9">${n.count}</tspan></text>`
+    ).join('');
+
+    // Client dots
+    const cDots = clientNodes.map(n =>
+      `<circle cx="${leftX}" cy="${n.y}" r="4" fill="${n.color}"/>`
+    ).join('');
+
+    // Category dots
+    const catDots = catNodes.map(n =>
+      `<circle cx="${rightX}" cy="${n.y}" r="4" fill="var(--text-muted)"/>`
+    ).join('');
+
+    container.innerHTML = `
+      <svg class="flow-svg" viewBox="0 0 ${svgW} ${svgH}" preserveAspectRatio="xMidYMid meet">
+        ${paths}${cDots}${catDots}${cLabels}${catLabels}
+      </svg>`;
+  }
+
+  // ── Calendar ──
+
+  _renderCalendar(container) {
+    // Build 30-day calendar from memories
+    const now = new Date();
+    const days = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      days.push({ date: d, key, count: 0 });
+    }
+
+    const dayMap = {};
+    days.forEach(d => { dayMap[d.key] = d; });
+
+    (this.memories || []).forEach(m => {
+      const key = (m.created_at || '').slice(0, 10);
+      if (dayMap[key]) dayMap[key].count++;
+    });
+
+    const max = Math.max(1, ...days.map(d => d.count));
+
+    const cells = days.map(d => {
+      const opacity = d.count === 0 ? 0.08 : 0.2 + (d.count / max) * 0.8;
+      const dayNum = d.date.getDate();
+      const weekday = ['S', 'M', 'T', 'W', 'T', 'F', 'S'][d.date.getDay()];
+      const isToday = d.key === now.toISOString().slice(0, 10);
+      return `<div class="cal-cell${isToday ? ' cal-today' : ''}" title="${d.key}: ${d.count} memories">
+        <span class="cal-day-label">${dayNum === 1 || d === days[0] ? d.date.toLocaleDateString('en', { month: 'short' }) : ''}</span>
+        <span class="cal-block" style="opacity:${opacity}"></span>
+        <span class="cal-weekday">${weekday}</span>
+      </div>`;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="cal-strip">
+        ${cells}
+      </div>
+      <div class="cal-legend">
+        <span class="cal-legend-label">Less</span>
+        ${[0.08, 0.3, 0.55, 0.8, 1].map(o => `<span class="cal-legend-block" style="opacity:${o}"></span>`).join('')}
+        <span class="cal-legend-label">More</span>
+      </div>
+    `;
+  }
+
+  // ── Leaderboard ──
+
+  _renderLeaderboard(container) {
+    const breakdown = this.stats?.clients_breakdown || {};
+    const clients = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
+    const total = clients.reduce((s, [, c]) => s + c, 0) || 1;
+
+    if (!clients.length) {
+      container.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:var(--text-xs);padding:var(--space-4)">No client data</div>';
+      return;
+    }
+
+    const rows = clients.map(([client, count], i) => {
+      const color = CLIENT_COLORS[client] || CLIENT_COLORS.unknown;
+      const pct = ((count / total) * 100).toFixed(1);
+      const rank = i + 1;
+      const medal = rank === 1 ? '●' : rank === 2 ? '◐' : rank === 3 ? '○' : '';
+      return `<div class="lb-row" style="--delay:${i * 60}ms">
+        <span class="lb-rank">${medal || rank}</span>
+        <span class="lb-dot" style="background:${color}"></span>
+        <span class="lb-name">${this.esc(client)}</span>
+        <div class="lb-bar-track">
+          <div class="lb-bar-fill" style="width:${pct}%;background:${color}"></div>
+        </div>
+        <span class="lb-count">${count}</span>
+        <span class="lb-pct">${pct}%</span>
+      </div>`;
+    }).join('');
+
+    container.innerHTML = `<div class="lb-container">${rows}</div>`;
+  }
+
+  // ── Helpers ──
+
+  relTime(d) {
+    if (!d) return '';
+    const ms = Date.now() - new Date(d).getTime();
+    const m = Math.floor(ms / 60000);
+    if (m < 1) return 'now';
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(ms / 3600000);
+    if (h < 24) return `${h}h`;
+    const day = Math.floor(ms / 86400000);
+    if (day < 30) return `${day}d`;
+    return `${Math.floor(day / 30)}mo`;
+  }
+
+  esc(t) {
+    if (t == null) return '';
+    return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ── Peek panel ──
+
+  async openPeek(memoryId) {
+    if (this._peekId === memoryId) { this.closePeek(); return; }
+    this._peekId = memoryId;
+
+    const panel = this.querySelector('#dash-peek');
+    if (!panel) return;
+
+    panel.style.display = 'block';
+    panel.innerHTML = '<div class="dash-peek-loading">Loading...</div>';
+    this.querySelector('#dash-content-area')?.classList.add('peek-open');
+
+    try {
+      const api = window.app?.apiClient;
+      if (!api) return;
+      const mem = await api.getMemory(memoryId);
+      if (!mem || this._peekId !== memoryId) return;
+      this._peekData = mem;
+      this.renderPeekPanel();
+    } catch {
+      panel.innerHTML = '<div class="dash-peek-loading">Failed to load</div>';
+    }
+  }
+
+  closePeek() {
+    this._peekId = null;
+    this._peekData = null;
+    const panel = this.querySelector('#dash-peek');
+    if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
+    this.querySelector('#dash-content-area')?.classList.remove('peek-open');
+  }
+
+  renderPeekPanel() {
+    const panel = this.querySelector('#dash-peek');
+    if (!panel || !this._peekData) return;
+
+    const m = this._peekData;
+    if (typeof m.tags === 'string') {
+      try { m.tags = JSON.parse(m.tags); } catch { m.tags = []; }
+    }
+    const icon = CAT_ICONS[m.category] || DEFAULT_ICON;
+    const time = this.relTime(m.created_at);
+
+    panel.innerHTML = `
+      <div class="dash-peek-header">
+        <span class="dash-peek-cat">${icon} ${this.esc(m.category)}</span>
+        <button class="dash-peek-close" title="Close (Esc)">&times;</button>
+      </div>
+      <div class="dash-peek-meta">
+        ${m.project_id ? `<span class="dash-peek-project">${this.esc(m.project_id)}</span>` : ''}
+        ${m.source && m.source !== 'unknown' ? `<span class="dash-peek-source">${this.esc(m.source)}</span>` : ''}
+        ${m.client ? `<span class="dash-peek-client client-${m.client}">${this.esc(m.client)}</span>` : ''}
+        <span class="dash-peek-time">${time}</span>
+      </div>
+      ${(m.tags || []).length ? `<div class="dash-peek-tags">${m.tags.map(t => `<span class="dash-peek-tag">#${this.esc(t)}</span>`).join('')}</div>` : ''}
+      <div class="dash-peek-body">${this._renderMarkdown(m.content || '')}</div>
+      <div class="dash-peek-footer">
+        <span class="dash-peek-id">${m.id.substring(0, 8)}...</span>
+        <button class="dash-peek-open" data-id="${this.esc(m.id)}">Open full →</button>
+      </div>
+    `;
+  }
+
+  _renderMarkdown(text) {
+    return this.esc(text)
+      .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+      .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/^- (.+)$/gm, '<li>$1</li>')
+      .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
+      .replace(/\n\n/g, '<br><br>')
+      .replace(/\n/g, '<br>');
   }
 }
 
-// Define the custom element
 customElements.define('dashboard-page', DashboardPage);
-
-// Add component styles
-const style = document.createElement('style');
-style.textContent = `
-  .dashboard-page .dashboard-header {
-    margin-bottom: var(--space-8);
-  }
-  
-  .dashboard-page .dashboard-content {
-    /* No additional constraints needed */
-  }
-  
-  .dashboard-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    margin-bottom: 2rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid var(--border-color);
-  }
-  
-  .header-content h1 {
-    margin: 0 0 0.5rem 0;
-    font-size: 2rem;
-    color: var(--text-primary);
-  }
-  
-  .header-subtitle {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: 1rem;
-  }
-  
-  .refresh-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    background: var(--primary-color);
-    color: white;
-    border: none;
-    padding: 0.75rem 1rem;
-    border-radius: var(--border-radius);
-    cursor: pointer;
-    font-size: 0.875rem;
-    font-weight: 500;
-    transition: var(--transition);
-  }
-  
-  .refresh-btn:hover {
-    background: var(--primary-hover);
-  }
-  
-  .refresh-icon {
-    width: 1rem;
-    height: 1rem;
-  }
-  
-  .dashboard-section {
-    margin-bottom: 3rem;
-  }
-  
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-  }
-  
-  .section-header h2 {
-    margin: 0;
-    font-size: 1.5rem;
-    color: var(--text-primary);
-  }
-  
-  .view-all-btn {
-    background: none;
-    border: 1px solid var(--border-color);
-    color: var(--text-secondary);
-    padding: 0.5rem 1rem;
-    border-radius: var(--border-radius);
-    cursor: pointer;
-    font-size: 0.875rem;
-    transition: var(--transition);
-  }
-  
-  .view-all-btn:hover {
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-  }
-  
-  /* Statistics Grid */
-  .stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 1.5rem;
-  }
-  
-  .stat-card {
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
-    padding: 1.5rem;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    cursor: pointer;
-    transition: var(--transition);
-  }
-  
-  .stat-card:hover {
-    box-shadow: var(--shadow-md);
-    transform: translateY(-2px);
-    border-color: var(--border-hover);
-  }
-  
-  .stat-icon {
-    width: 2rem;
-    height: 2rem;
-    color: var(--text-secondary);
-    opacity: 0.8;
-  }
-  
-  .stat-icon svg {
-    width: 100%;
-    height: 100%;
-  }
-  
-  .stat-content {
-    flex: 1;
-  }
-  
-  .stat-number {
-    font-size: 2rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    line-height: 1;
-    margin-bottom: 0.25rem;
-  }
-  
-  .stat-label {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    font-weight: 500;
-  }
-  
-  /* Category Chart */
-  .category-chart {
-    display: flex;
-    align-items: center;
-    gap: 2rem;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
-    padding: 2rem;
-  }
-  
-  .pie-chart {
-    width: 200px;
-    height: 200px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-  
-  .chart-legend {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-  
-  .legend-item {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    font-size: 0.875rem;
-  }
-  
-  .legend-color {
-    width: 1rem;
-    height: 1rem;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-  
-  .legend-icon {
-    width: 1rem;
-    height: 1rem;
-    color: var(--text-secondary);
-  }
-  
-  .legend-icon svg {
-    width: 100%;
-    height: 100%;
-  }
-  
-  .legend-text {
-    flex: 1;
-    color: var(--text-primary);
-  }
-  
-  .legend-count {
-    color: var(--text-secondary);
-    font-weight: 500;
-  }
-  
-  /* Recent Memories */
-  .recent-memories-list {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-  
-  /* Project List */
-  .project-list {
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
-    overflow: hidden;
-  }
-  
-  .project-item {
-    padding: 1rem;
-    border-bottom: 1px solid var(--border-color);
-    transition: var(--transition);
-  }
-  
-  .project-item:last-child {
-    border-bottom: none;
-  }
-  
-  .project-item:hover {
-    background: var(--bg-secondary);
-  }
-  
-  .project-info {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.5rem;
-  }
-  
-  .project-name {
-    font-weight: 500;
-    color: var(--text-primary);
-  }
-  
-  .project-count {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-  }
-  
-  .project-bar {
-    height: 4px;
-    background: var(--bg-secondary);
-    border-radius: 2px;
-    overflow: hidden;
-  }
-  
-  .project-bar-fill {
-    height: 100%;
-    background: var(--primary-color);
-    border-radius: 2px;
-    transition: width 0.3s ease;
-  }
-  
-  /* Loading and No Data States */
-  .loading-placeholder {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 3rem;
-    color: var(--text-muted);
-    font-style: italic;
-  }
-  
-  .no-data {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 3rem;
-    color: var(--text-muted);
-    text-align: center;
-  }
-  
-  .no-data p {
-    margin: 0 0 1rem 0;
-    font-style: italic;
-  }
-  
-  .create-memory-btn {
-    background: var(--primary-color);
-    color: white;
-    border: none;
-    padding: 0.75rem 1.5rem;
-    border-radius: var(--border-radius);
-    cursor: pointer;
-    font-size: 0.875rem;
-    font-weight: 500;
-    transition: var(--transition);
-  }
-  
-  .create-memory-btn:hover {
-    background: var(--primary-hover);
-  }
-  
-  /* Toast Notifications */
-  .toast {
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-    border-radius: 8px;
-    backdrop-filter: blur(10px);
-  }
-  
-  .toast-success {
-    background: linear-gradient(135deg, #10b981, #059669) !important;
-  }
-  
-  .toast-info {
-    background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
-  }
-  
-  .toast-warning {
-    background: linear-gradient(135deg, #f59e0b, #d97706) !important;
-  }
-  
-  .toast-error {
-    background: linear-gradient(135deg, #ef4444, #dc2626) !important;
-  }
-  @media (max-width: 768px) {
-    .dashboard-page {
-      padding: var(--space-4) 0; /* 모바일에서 상하 패딩 줄임 */
-    }
-    
-    .dashboard-header {
-      flex-direction: column;
-      gap: 1rem;
-      align-items: flex-start;
-    }
-    
-    .stats-grid {
-      grid-template-columns: 1fr;
-      gap: 1rem;
-    }
-    
-    .stat-card {
-      padding: 1rem;
-    }
-    
-    .stat-number {
-      font-size: 1.5rem;
-    }
-    
-    .category-chart {
-      flex-direction: column;
-      gap: 1.5rem;
-      padding: 1.5rem;
-    }
-    
-    .pie-chart {
-      width: 150px;
-      height: 150px;
-    }
-    
-    .section-header {
-      flex-direction: column;
-      gap: 0.5rem;
-      align-items: flex-start;
-    }
-  }
-`;
-
-document.head.appendChild(style);
-
 export { DashboardPage };

@@ -1,201 +1,196 @@
-.PHONY: help build build-dev up up-dev down logs bash bash-dev test clean prune health benchmark-up benchmark-down benchmark-migrate-postgres benchmark-migrate-qdrant benchmark-run benchmark-full benchmark-clean
+.PHONY: help install test test-live test-live-api test-live-mcp test-live-realdata test-all clean run-api run-mcp run-dashboard docker-build docker-up docker-down docker-logs format lint version bump
 
 # Default target
-help:
-	@echo "mem-mesh Docker Management"
+.DEFAULT_GOAL := help
+
+# Variables
+PYTHON := python
+PIP := pip
+PYTEST := pytest
+VERSION := $(shell grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+DOCKER_REGISTRY := jinwoo
+DOCKER_IMAGE := $(DOCKER_REGISTRY)/mem-mesh
+DOCKER_TAG_VERSION := $(DOCKER_IMAGE):$(VERSION)
+DOCKER_TAG_LATEST := $(DOCKER_IMAGE):latest
+DOCKER_COMPOSE := docker compose -f docker/docker-compose.yml
+
+help: ## Show this help message
+	@echo "mem-mesh - AI Memory Management System"
 	@echo ""
-	@echo "Available targets:"
-	@echo "  build      - Build production Docker image"
-	@echo "  build-dev  - Build development Docker image"
-	@echo "  up         - Start production container"
-	@echo "  up-dev     - Start development container"
-	@echo "  down       - Stop and remove containers"
-	@echo "  logs       - View container logs"
-	@echo "  bash       - Open bash shell in production container"
-	@echo "  bash-dev   - Open bash shell in development container"
-	@echo "  test       - Run tests in container"
-	@echo "  health     - Check container health"
-	@echo "  clean      - Remove containers and images"
-	@echo "  prune      - Clean up Docker system"
-	@echo ""
-	@echo "Benchmark targets:"
-	@echo "  benchmark-up                - Start PostgreSQL + Qdrant"
-	@echo "  benchmark-down              - Stop benchmark environment"
-	@echo "  benchmark-migrate-postgres  - Migrate data to PostgreSQL"
-	@echo "  benchmark-migrate-qdrant    - Migrate data to Qdrant"
-	@echo "  benchmark-run               - Run benchmark comparison"
-	@echo "  benchmark-full              - Run full benchmark pipeline"
-	@echo "  benchmark-clean             - Clean benchmark data and volumes"
+	@echo "Available commands:"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-# Build targets
-build:
-	@echo "Building production image..."
-	docker-compose build mem-mesh
+install: ## Install dependencies
+	$(PIP) install --upgrade pip setuptools wheel
+	$(PIP) install -r requirements.txt
+	@echo "✓ Dependencies installed"
 
-build-dev:
-	@echo "Building development image..."
-	docker-compose build mem-mesh-dev
+install-dev: ## Install development dependencies
+	$(PIP) install --upgrade pip setuptools wheel
+	$(PIP) install -r requirements.txt
+	$(PIP) install pytest pytest-asyncio pytest-cov hypothesis black ruff
+	@echo "✓ Development dependencies installed"
 
-# Run targets
-up:
-	@echo "Starting production container..."
-	docker-compose up -d mem-mesh
-	@echo "Container started. Access at http://localhost:8000"
+test: ## Run unit tests (no server needed)
+	$(PYTEST) tests/ --ignore=tests/integration -v
 
-up-dev:
-	@echo "Starting development container..."
-	docker-compose up -d mem-mesh-dev
-	@echo "Development container started with hot-reload"
-	@echo "Access at http://localhost:8000"
+test-live: ## Run live integration tests (requires localhost:8000)
+	$(PYTEST) tests/integration/ -v
 
-# Stop targets
-down:
-	@echo "Stopping containers..."
-	docker-compose down
+test-live-api: ## Live tests — REST API only
+	$(PYTEST) tests/integration/test_api_live.py -v
 
-# Logs
-logs:
-	docker-compose logs -f
+test-live-mcp: ## Live tests — MCP SSE only
+	$(PYTEST) tests/integration/test_mcp_sse_live.py -v
 
-logs-prod:
-	docker-compose logs -f mem-mesh
+test-live-realdata: ## Live tests — real data scenarios only
+	$(PYTEST) tests/integration/test_realdata_scenarios.py -v
 
-logs-dev:
-	docker-compose logs -f mem-mesh-dev
+test-all: ## Run all tests (unit + live)
+	$(PYTEST) tests/ -v
 
-# Shell access
-bash:
-	@echo "Opening bash shell in production container..."
-	docker-compose exec mem-mesh bash
+test-cov: ## Run tests with coverage
+	$(PYTEST) tests/ -v --cov=app --cov-report=html --cov-report=term
+	@echo "✓ Coverage report generated in htmlcov/"
 
-bash-dev:
-	@echo "Opening bash shell in development container..."
-	docker-compose exec mem-mesh-dev bash
+test-watch: ## Run tests in watch mode
+	$(PYTEST) tests/ -v --looponfail
+	@echo "✓ Test watch mode"
 
-# Interactive shell (if container is not running)
-shell:
-	@echo "Starting interactive shell in new container..."
-	docker-compose run --rm mem-mesh bash
+run-api: ## Run FastAPI web server (development)
+	$(PYTHON) -m app.web --reload
+	@echo "✓ Web server running at http://localhost:8000"
 
-shell-dev:
-	@echo "Starting interactive shell in new development container..."
-	docker-compose run --rm mem-mesh-dev bash
+run-mcp: ## Run MCP stdio server
+	$(PYTHON) -m app.mcp_stdio
+	@echo "✓ MCP stdio server running"
 
-# Testing
-test:
-	@echo "Running tests in container..."
-	docker-compose run --rm mem-mesh-dev pytest tests/ -v
+run-mcp-pure: ## Run pure MCP stdio server
+	$(PYTHON) -m app.mcp_stdio_pure
+	@echo "✓ Pure MCP stdio server running"
 
-test-unit:
-	@echo "Running unit tests..."
-	docker-compose run --rm mem-mesh-dev pytest tests/ -v -m unit
+run-dashboard: ## Run dashboard (alias for run-api)
+	$(MAKE) run-api
 
-test-integration:
-	@echo "Running integration tests..."
-	docker-compose run --rm mem-mesh-dev pytest tests/ -v -m integration
+format: ## Format code with Black
+	black app/ tests/ scripts/
+	@echo "✓ Code formatted"
 
-# Health check
-health:
-	@echo "Checking container health..."
-	@docker ps --filter name=mem-mesh --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-	@echo ""
-	@curl -s http://localhost:8000/health | python -m json.tool || echo "Service not responding"
+lint: ## Lint code with Ruff
+	ruff check app/ tests/ scripts/
+	@echo "✓ Code linted"
 
-# Python commands in container
-python:
-	docker-compose exec mem-mesh-dev python
+lint-fix: ## Lint and fix code with Ruff
+	ruff check --fix app/ tests/ scripts/
+	@echo "✓ Code linted and fixed"
 
-ipython:
-	docker-compose exec mem-mesh-dev ipython
+clean: ## Clean up generated files
+	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name "htmlcov" -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	find . -type f -name ".coverage" -delete 2>/dev/null || true
+	@echo "✓ Cleaned up generated files"
 
-# Database operations
-db-migrate:
-	@echo "Running database migrations..."
-	docker-compose exec mem-mesh-dev python scripts/migrate_embeddings.py
+docker-build: ## Build Docker image (tagged version + latest)
+	docker build -t $(DOCKER_TAG_VERSION) -t $(DOCKER_TAG_LATEST) .
+	@echo "✓ Built $(DOCKER_TAG_VERSION) and $(DOCKER_TAG_LATEST)"
 
-db-check:
-	@echo "Checking database consistency..."
-	docker-compose exec mem-mesh-dev python scripts/verify_db_consistency.py
+docker-build-compose: ## Build Docker images via compose
+	$(DOCKER_COMPOSE) build
+	@echo "✓ Docker compose images built"
 
-# Cleanup targets
-clean:
-	@echo "Removing containers and images..."
-	docker-compose down --rmi all --volumes --remove-orphans
+docker-build-mcp: ## Build MCP server Docker image
+	$(DOCKER_COMPOSE) build mcp-server
+	@echo "✓ MCP server image built"
 
-clean-data:
-	@echo "WARNING: This will delete all data!"
-	@read -p "Are you sure? [y/N] " -n 1 -r; \
-	echo; \
-	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		rm -rf data/*.db data/*.db-shm data/*.db-wal; \
-		echo "Data cleaned"; \
-	fi
+docker-build-dashboard: ## Build dashboard Docker image
+	$(DOCKER_COMPOSE) build dashboard
+	@echo "✓ Dashboard image built"
 
-prune:
-	@echo "Pruning Docker system..."
-	docker system prune -f
+docker-push: ## Push Docker image to registry
+	docker push $(DOCKER_TAG_VERSION)
+	docker push $(DOCKER_TAG_LATEST)
+	@echo "✓ Pushed $(DOCKER_TAG_VERSION) and $(DOCKER_TAG_LATEST)"
 
-# Development helpers
-format:
-	@echo "Formatting code..."
-	docker-compose run --rm mem-mesh-dev black app/ tests/
+docker-up: ## Start Docker containers (dashboard only)
+	$(DOCKER_COMPOSE) up -d dashboard
+	@echo "✓ Dashboard container started at http://localhost:8000"
 
-lint:
-	@echo "Linting code..."
-	docker-compose run --rm mem-mesh-dev black --check app/ tests/
+docker-up-all: ## Start all Docker containers (including MCP)
+	$(DOCKER_COMPOSE) --profile mcp up -d
+	@echo "✓ All containers started"
 
-# Quick start
-quickstart: build-dev up-dev logs-dev
+docker-down: ## Stop Docker containers
+	$(DOCKER_COMPOSE) down
+	@echo "✓ Docker containers stopped"
 
-# Production deployment
-deploy: build up health
+docker-logs: ## Show Docker logs
+	$(DOCKER_COMPOSE) logs -f
 
-# Restart services
-restart:
-	docker-compose restart
+docker-logs-dashboard: ## Show dashboard logs
+	$(DOCKER_COMPOSE) logs -f dashboard
 
-restart-prod:
-	docker-compose restart mem-mesh
+docker-logs-mcp: ## Show MCP server logs
+	$(DOCKER_COMPOSE) logs -f mcp-server
 
-restart-dev:
-	docker-compose restart mem-mesh-dev
+docker-restart: ## Restart Docker containers
+	$(DOCKER_COMPOSE) restart
+	@echo "✓ Docker containers restarted"
 
-# Benchmark targets
-benchmark-up:
-	@echo "Starting benchmark environment (PostgreSQL + Qdrant)..."
-	docker-compose -f docker-compose.benchmark.yml up -d
-	@echo "Waiting for services to be ready..."
-	@sleep 10
-	@echo "PostgreSQL: localhost:5432 (user: memesh, db: memesh)"
-	@echo "Qdrant: localhost:6333"
+docker-clean: ## Remove Docker containers and volumes
+	$(DOCKER_COMPOSE) down -v
+	@echo "✓ Docker containers and volumes removed"
 
-benchmark-down:
-	@echo "Stopping benchmark environment..."
-	docker-compose -f docker-compose.benchmark.yml down
+migrate: ## Run database migrations
+	$(PYTHON) scripts/migrate_embeddings.py
+	@echo "✓ Database migrations completed"
 
-benchmark-logs:
-	docker-compose -f docker-compose.benchmark.yml logs -f
+migrate-check: ## Check database migrations (dry-run)
+	$(PYTHON) scripts/migrate_embeddings.py --check-only
+	@echo "✓ Migration check completed"
 
-benchmark-migrate-postgres:
-	@echo "Migrating data to PostgreSQL..."
-	@echo "📦 Required: pip install asyncpg"
-	@python -c "import asyncpg" 2>/dev/null || (echo "❌ asyncpg not installed. Run: pip install asyncpg" && exit 1)
-	python scripts/migrate_to_postgres.py --pg-url "postgresql://memesh:memesh_password@localhost:5432/memesh"
+db-backup: ## Backup database
+	@mkdir -p backups
+	@cp data/memories.db backups/memories-$$(date +%Y%m%d-%H%M%S).db
+	@echo "✓ Database backed up to backups/"
 
-benchmark-migrate-qdrant:
-	@echo "Migrating data to Qdrant..."
-	@echo "📦 Required: pip install qdrant-client"
-	@python -c "import qdrant_client" 2>/dev/null || (echo "❌ qdrant-client not installed. Run: pip install qdrant-client" && exit 1)
-	python scripts/migrate_to_qdrant.py --qdrant-url "http://localhost:6333"
+db-restore: ## Restore database from latest backup
+	@cp $$(ls -t backups/*.db | head -1) data/memories.db
+	@echo "✓ Database restored from latest backup"
 
-benchmark-run:
-	@echo "Running vector database benchmark..."
-	python scripts/benchmark_vector_dbs.py --dbs all --output benchmark_results.json
+health-check: ## Check service health
+	@curl -f http://localhost:8000/health || echo "✗ Service is not healthy"
+	@echo "✓ Health check completed"
 
-benchmark-full: benchmark-up benchmark-migrate-postgres benchmark-migrate-qdrant benchmark-run
-	@echo "Full benchmark completed. Check results in benchmark_results.json"
+dev: ## Start development environment
+	$(MAKE) install-dev
+	$(MAKE) run-api
 
-benchmark-clean:
-	@echo "Cleaning benchmark environment..."
-	docker-compose -f docker-compose.benchmark.yml down -v
-	@echo "Benchmark data cleaned"
+prod: ## Start production environment with Docker
+	$(MAKE) docker-build
+	$(MAKE) docker-up
+	@echo "✓ Production environment started"
+	@echo "  Dashboard: http://localhost:8000"
+	@echo "  API Docs: http://localhost:8000/docs"
+
+quickstart: ## Docker quick start (build + up)
+	$(MAKE) prod
+
+stop: ## Stop all services
+	$(MAKE) docker-down
+	@echo "✓ All services stopped"
+
+version: ## Show current version
+	@echo $(VERSION)
+
+bump: ## Bump version (usage: make bump V=1.1.0)
+ifndef V
+	$(error Usage: make bump V=x.y.z)
+endif
+	@sed -i '' 's/^version = ".*"/version = "$(V)"/' pyproject.toml
+	@echo "✓ Bumped version to $(V)"
+	@echo "  pyproject.toml updated (single source of truth)"
+	@echo "  app/core/version.py reads from pyproject.toml at runtime"

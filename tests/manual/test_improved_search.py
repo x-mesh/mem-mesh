@@ -4,11 +4,12 @@
 """
 
 import asyncio
+
+from app.core.config import Settings
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
-from app.core.services.search import SearchService
 from app.core.services.improved_search import ImprovedSearchService
-from app.core.config import Settings
+from app.core.services.search import SearchService
 
 
 async def test_improved_search():
@@ -43,7 +44,7 @@ async def test_improved_search():
         ("임베딩", "mem-mesh-search-quality"),
         ("배치", "mem-mesh-optimization"),
         ("의도 분석", "mem-mesh-search-quality"),
-        ("Query Expander", "mem-mesh-search-issue")
+        ("Query Expander", "mem-mesh-search-issue"),
     ]
 
     # 각 서비스별 결과 저장
@@ -58,9 +59,7 @@ async def test_improved_search():
         # 1. 기본 검색
         print("\n1️⃣ 기본 검색 (SearchService):")
         basic_results = await basic_search.search(
-            query=query,
-            limit=5,
-            search_mode='hybrid'
+            query=query, limit=5, search_mode="hybrid"
         )
 
         basic_correct = 0
@@ -80,9 +79,7 @@ async def test_improved_search():
         # 2. 개선된 검색
         print("\n2️⃣ 개선된 검색 (ImprovedSearchService):")
         improved_results = await improved_search.search(
-            query=query,
-            limit=5,
-            search_mode='smart'
+            query=query, limit=5, search_mode="smart"
         )
 
         improved_correct = 0
@@ -95,23 +92,27 @@ async def test_improved_search():
             if i < 3:  # 상위 3개만 자세히
                 print(f"     점수: {r.similarity_score:.3f}, 프로젝트: {r.project_id}")
 
-        improved_accuracy = (improved_correct / 5) * 100 if improved_results.results else 0
+        improved_accuracy = (
+            (improved_correct / 5) * 100 if improved_results.results else 0
+        )
         improved_scores.append(improved_accuracy)
         print(f"  📊 정확도: {improved_accuracy:.0f}%")
 
         # 메타데이터 출력
-        if hasattr(improved_results, 'metadata') and improved_results.metadata:
+        if hasattr(improved_results, "metadata") and improved_results.metadata:
             meta = improved_results.metadata
-            print(f"  📈 소스: 텍스트={meta.get('text_count', 0)}, "
-                  f"벡터={meta.get('vector_count', 0)}, "
-                  f"둘다={meta.get('both_count', 0)}")
+            print(
+                f"  📈 소스: 텍스트={meta.get('text_count', 0)}, "
+                f"벡터={meta.get('vector_count', 0)}, "
+                f"둘다={meta.get('both_count', 0)}"
+            )
 
         # 3. 개선 비교
         improvement = improved_accuracy - basic_accuracy
         if improvement > 0:
             print(f"\n  ✨ 개선: {improvement:+.0f}%")
         elif improvement == 0:
-            print(f"\n  ➡️ 동일")
+            print("\n  ➡️ 동일")
         else:
             print(f"\n  ⚠️ 악화: {improvement:.0f}%")
 
@@ -128,7 +129,9 @@ async def test_improved_search():
     for i, (query, _) in enumerate(test_queries):
         diff = improved_scores[i] - basic_scores[i]
         diff_str = f"{diff:+.0f}%" if diff != 0 else "0%"
-        print(f"│ {query:19} │  {basic_scores[i]:5.0f}%  │  {improved_scores[i]:5.0f}%  │  {diff_str:8} │")
+        print(
+            f"│ {query:19} │  {basic_scores[i]:5.0f}%  │  {improved_scores[i]:5.0f}%  │  {diff_str:8} │"
+        )
 
     print("├─────────────────────┼──────────┼──────────┼───────────┤")
 
@@ -136,7 +139,9 @@ async def test_improved_search():
     avg_improved = sum(improved_scores) / len(improved_scores)
     avg_diff = avg_improved - avg_basic
 
-    print(f"│ {'평균':19} │  {avg_basic:5.1f}%  │  {avg_improved:5.1f}%  │  {avg_diff:+6.1f}%  │")
+    print(
+        f"│ {'평균':19} │  {avg_basic:5.1f}%  │  {avg_improved:5.1f}%  │  {avg_diff:+6.1f}%  │"
+    )
     print("└─────────────────────┴──────────┴──────────┴───────────┘")
 
     # 최종 평가
@@ -149,15 +154,17 @@ async def test_improved_search():
         print(f"   기본 검색: {avg_basic:.1f}%")
         print(f"   개선 검색: {avg_improved:.1f}%")
     else:
-        print(f"⚠️ 개선이 필요합니다.")
+        print("⚠️ 개선이 필요합니다.")
 
     # 가장 개선된 항목
-    improvements = [(test_queries[i][0], improved_scores[i] - basic_scores[i])
-                   for i in range(len(test_queries))]
+    improvements = [
+        (test_queries[i][0], improved_scores[i] - basic_scores[i])
+        for i in range(len(test_queries))
+    ]
     improvements.sort(key=lambda x: x[1], reverse=True)
 
     if improvements[0][1] > 0:
-        print(f"\n🏆 가장 개선된 검색어:")
+        print("\n🏆 가장 개선된 검색어:")
         for query, improvement in improvements[:3]:
             if improvement > 0:
                 print(f"   '{query}': +{improvement:.0f}%")
