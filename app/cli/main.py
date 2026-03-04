@@ -9,6 +9,7 @@ Usage:
     mem-mesh status           # Full system status
     mem-mesh mcp stdio        # FastMCP stdio server
     mem-mesh mcp pure         # Pure MCP stdio server
+    mem-mesh mcp config       # Configure MCP for dev tools
 """
 
 import argparse
@@ -78,6 +79,9 @@ def main(argv: Optional[List[str]] = None) -> None:
     mcp_sub = mcp_parser.add_subparsers(dest="mcp_command", help="MCP commands")
     mcp_sub.add_parser("stdio", help="Start FastMCP stdio server")
     mcp_sub.add_parser("pure", help="Start Pure MCP stdio server")
+    mcp_config_parser = mcp_sub.add_parser("config", help="Configure MCP for dev tools (Cursor, Kiro, etc.)")
+    mcp_config_parser.add_argument("--url", default=None, help="API server URL")
+    mcp_config_parser.add_argument("-y", "--yes", action="store_true", help="Non-interactive mode")
 
     args = parser.parse_args(argv)
 
@@ -158,6 +162,12 @@ def main(argv: Optional[List[str]] = None) -> None:
                 print("Install with: pip install mem-mesh[server]")
                 sys.exit(1)
             mcp_pure_main()
+        elif args.mcp_command == "config":
+            from app.cli.mcp_config import run_mcp_setup
+            from app.cli.hooks.constants import DEFAULT_URL
+
+            url = args.url or DEFAULT_URL
+            run_mcp_setup(url=url, yes=args.yes)
         else:
             sub.choices["mcp"].print_help()
 

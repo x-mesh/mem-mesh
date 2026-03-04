@@ -110,6 +110,17 @@ class OnboardingPage extends HTMLElement {
           gap: 1rem;
           margin-bottom: 2rem;
         }
+        .model-category-header {
+          grid-column: 1 / -1;
+          font-size: 0.85rem;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          color: var(--text-secondary, #666);
+          border-bottom: 1px solid var(--border-color, #e0e0e0);
+          padding-bottom: 0.4rem;
+          margin-top: 0.5rem;
+        }
         .model-card {
           border: 2px solid var(--border-color, #e0e0e0);
           border-radius: 12px;
@@ -318,25 +329,75 @@ class OnboardingPage extends HTMLElement {
     const container = this.querySelector('#model-cards');
     if (!container) return;
 
-    container.innerHTML = this.models.map(m => `
-      <div class="model-card" data-model="${m.name}">
-        <div class="model-card-header">
-          <span class="model-name">${m.name}</span>
-          <span>
-            ${m.recommended ? '<span class="model-badge badge-recommended">Recommended</span>' : ''}
-            ${m.cached ? '<span class="model-badge badge-cached">Cached</span>' : ''}
-          </span>
+    const categoryLabels = {
+      korean: 'Korean Specialized',
+      multilingual: 'Multilingual',
+      english: 'English Optimized',
+    };
+    const categoryOrder = ['korean', 'multilingual', 'english'];
+
+    // Group models by category
+    const grouped = {};
+    for (const m of this.models) {
+      const cat = m.category || 'other';
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(m);
+    }
+
+    let html = '';
+    for (const cat of categoryOrder) {
+      const models = grouped[cat];
+      if (!models || models.length === 0) continue;
+      html += `<div class="model-category-header">${categoryLabels[cat] || cat}</div>`;
+      html += models.map(m => `
+        <div class="model-card" data-model="${m.name}">
+          <div class="model-card-header">
+            <span class="model-name">${m.name}</span>
+            <span>
+              ${m.recommended ? '<span class="model-badge badge-recommended">Recommended</span>' : ''}
+              ${m.cached ? '<span class="model-badge badge-cached">Cached</span>' : ''}
+            </span>
+          </div>
+          <div class="model-desc">${m.description}</div>
+          <div class="model-meta">
+            <span>dim: ${m.dimension}</span>
+            <span>${m.size}</span>
+            ${m.lang ? `<span>lang: ${m.lang}</span>` : ''}
+            ${m.max_tokens ? `<span>ctx: ${m.max_tokens}</span>` : ''}
+          </div>
+          <button class="select-btn" data-model="${m.name}">
+            ${m.cached ? 'Load Model' : 'Download & Load'}
+          </button>
         </div>
-        <div class="model-desc">${m.description}</div>
-        <div class="model-meta">
-          <span>dim: ${m.dimension}</span>
-          <span>${m.size}</span>
+      `).join('');
+    }
+
+    // Any uncategorized models
+    const shown = new Set(categoryOrder);
+    for (const cat of Object.keys(grouped)) {
+      if (shown.has(cat)) continue;
+      html += grouped[cat].map(m => `
+        <div class="model-card" data-model="${m.name}">
+          <div class="model-card-header">
+            <span class="model-name">${m.name}</span>
+            <span>
+              ${m.recommended ? '<span class="model-badge badge-recommended">Recommended</span>' : ''}
+              ${m.cached ? '<span class="model-badge badge-cached">Cached</span>' : ''}
+            </span>
+          </div>
+          <div class="model-desc">${m.description}</div>
+          <div class="model-meta">
+            <span>dim: ${m.dimension}</span>
+            <span>${m.size}</span>
+          </div>
+          <button class="select-btn" data-model="${m.name}">
+            ${m.cached ? 'Load Model' : 'Download & Load'}
+          </button>
         </div>
-        <button class="select-btn" data-model="${m.name}">
-          ${m.cached ? 'Load Model' : 'Download & Load'}
-        </button>
-      </div>
-    `).join('');
+      `).join('');
+    }
+
+    container.innerHTML = html;
   }
 
   async selectModel(modelName) {

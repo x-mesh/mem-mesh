@@ -71,6 +71,7 @@ logger = logging.getLogger(__name__)
 
 # 모델별 임베딩 차원 매핑
 MODEL_DIMENSIONS = {
+    # English lightweight
     "all-MiniLM-L6-v2": 384,
     "all-MiniLM-L12-v2": 384,
     "all-mpnet-base-v2": 768,
@@ -79,9 +80,22 @@ MODEL_DIMENSIONS = {
     "distiluse-base-multilingual-cased-v2": 512,
     "multi-qa-MiniLM-L6-cos-v1": 384,
     "multi-qa-mpnet-base-cos-v1": 768,
+    # BGE English
+    "BAAI/bge-small-en-v1.5": 384,
+    "BAAI/bge-base-en-v1.5": 768,
+    "BAAI/bge-large-en-v1.5": 1024,
+    # Multilingual E5
     "intfloat/multilingual-e5-small": 384,
     "intfloat/multilingual-e5-base": 768,
     "intfloat/multilingual-e5-large": 1024,
+    # BGE-M3 multilingual
+    "BAAI/bge-m3": 1024,
+    # Korean specialized
+    "nlpai-lab/KURE-v1": 1024,
+    "nlpai-lab/KoE5": 1024,
+    "dragonkue/BGE-m3-ko": 1024,
+    "snunlp/KR-SBERT-V40K-klueNLI-augSTS": 768,
+    "jhgan/ko-sroberta-sts": 768,
 }
 
 # 모델 이름 별칭 (짧은 이름 -> 전체 이름)
@@ -92,6 +106,15 @@ MODEL_ALIASES = {
     "e5-small": "intfloat/multilingual-e5-small",
     "e5-base": "intfloat/multilingual-e5-base",
     "e5-large": "intfloat/multilingual-e5-large",
+    "bge-m3": "BAAI/bge-m3",
+    "kure": "nlpai-lab/KURE-v1",
+    "koe5": "nlpai-lab/KoE5",
+    "bge-m3-ko": "dragonkue/BGE-m3-ko",
+    "kr-sbert": "snunlp/KR-SBERT-V40K-klueNLI-augSTS",
+    "ko-sroberta": "jhgan/ko-sroberta-sts",
+    "bge-small-en": "BAAI/bge-small-en-v1.5",
+    "bge-base-en": "BAAI/bge-base-en-v1.5",
+    "bge-large-en": "BAAI/bge-large-en-v1.5",
 }
 
 
@@ -125,33 +148,138 @@ def is_model_cached(model_name: str) -> bool:
 
 # 선택 가능한 모델 목록 (온보딩 UI용)
 AVAILABLE_MODELS = [
+    # ── Korean Specialized ──
+    {
+        "name": "nlpai-lab/KURE-v1",
+        "dimension": 1024,
+        "size": "~2.2GB",
+        "description": "Korean retrieval SOTA. Fine-tuned BGE-M3 with Korean data. Best for Korean-heavy workflows.",
+        "recommended": True,
+        "category": "korean",
+        "lang": "ko/en",
+        "max_tokens": 8192,
+    },
+    {
+        "name": "nlpai-lab/KoE5",
+        "dimension": 1024,
+        "size": "~1.1GB",
+        "description": "Korean-tuned E5-large. Excellent Korean retrieval with smaller footprint than KURE.",
+        "recommended": False,
+        "category": "korean",
+        "lang": "ko/en",
+        "max_tokens": 512,
+    },
+    {
+        "name": "dragonkue/BGE-m3-ko",
+        "dimension": 1024,
+        "size": "~2.2GB",
+        "description": "BGE-M3 fine-tuned for Korean. Strong Korean + multilingual performance.",
+        "recommended": False,
+        "category": "korean",
+        "lang": "ko/en",
+        "max_tokens": 8192,
+    },
+    {
+        "name": "snunlp/KR-SBERT-V40K-klueNLI-augSTS",
+        "dimension": 768,
+        "size": "~440MB",
+        "description": "Korean SBERT by SNU NLP. Lightweight Korean semantic similarity model.",
+        "recommended": False,
+        "category": "korean",
+        "lang": "ko",
+        "max_tokens": 512,
+    },
+    {
+        "name": "jhgan/ko-sroberta-sts",
+        "dimension": 768,
+        "size": "~440MB",
+        "description": "Korean SRoBERTa for semantic similarity. Good for short Korean texts.",
+        "recommended": False,
+        "category": "korean",
+        "lang": "ko",
+        "max_tokens": 512,
+    },
+    # ── Multilingual ──
+    {
+        "name": "BAAI/bge-m3",
+        "dimension": 1024,
+        "size": "~2.2GB",
+        "description": "Top multilingual model. 100+ languages, 8K tokens. Dense + sparse retrieval.",
+        "recommended": False,
+        "category": "multilingual",
+        "lang": "100+ langs",
+        "max_tokens": 8192,
+    },
     {
         "name": "intfloat/multilingual-e5-large",
         "dimension": 1024,
         "size": "~1.1GB",
-        "description": "Best quality, multilingual support",
-        "recommended": True,
+        "description": "Strong multilingual embeddings. Good balance for mixed-language content.",
+        "recommended": False,
+        "category": "multilingual",
+        "lang": "100+ langs",
+        "max_tokens": 512,
     },
     {
         "name": "intfloat/multilingual-e5-base",
         "dimension": 768,
         "size": "~470MB",
-        "description": "Good balance of quality and speed",
+        "description": "Mid-size multilingual E5. Good quality with moderate resource usage.",
         "recommended": False,
+        "category": "multilingual",
+        "lang": "100+ langs",
+        "max_tokens": 512,
     },
     {
         "name": "intfloat/multilingual-e5-small",
         "dimension": 384,
         "size": "~118MB",
-        "description": "Fastest, low resource usage",
+        "description": "Smallest multilingual E5. Fast inference, low memory footprint.",
         "recommended": False,
+        "category": "multilingual",
+        "lang": "100+ langs",
+        "max_tokens": 512,
+    },
+    # ── English Optimized ──
+    {
+        "name": "BAAI/bge-large-en-v1.5",
+        "dimension": 1024,
+        "size": "~1.3GB",
+        "description": "Top English retrieval model. Excellent for English-only environments.",
+        "recommended": False,
+        "category": "english",
+        "lang": "en",
+        "max_tokens": 512,
+    },
+    {
+        "name": "all-mpnet-base-v2",
+        "dimension": 768,
+        "size": "~420MB",
+        "description": "Best all-round English model. High quality sentence embeddings.",
+        "recommended": False,
+        "category": "english",
+        "lang": "en",
+        "max_tokens": 384,
+    },
+    {
+        "name": "BAAI/bge-small-en-v1.5",
+        "dimension": 384,
+        "size": "~130MB",
+        "description": "Compact English model with strong performance. Great for low-resource setups.",
+        "recommended": False,
+        "category": "english",
+        "lang": "en",
+        "max_tokens": 512,
     },
     {
         "name": "all-MiniLM-L6-v2",
         "dimension": 384,
         "size": "~80MB",
-        "description": "English-optimized, lightweight",
+        "description": "Most popular English model. Ultra-fast, minimal resource usage.",
         "recommended": False,
+        "category": "english",
+        "lang": "en",
+        "max_tokens": 256,
     },
 ]
 
