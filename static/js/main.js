@@ -172,10 +172,13 @@ class App {
       const data = await res.json();
 
       if (data.status === 'not_loaded') {
+        // 모델이 선택되지 않은 경우에만 onboarding으로 이동
         this.router.navigate('/onboarding');
         return;
       } else if (data.status === 'downloading' || data.status === 'loading') {
-        this.router.navigate('/onboarding');
+        // 캐시된 모델 로딩 중 — onboarding 대신 현재 페이지에서 대기 후 재확인
+        console.log(`Embedding model ${data.status}, waiting...`);
+        setTimeout(() => this.checkEmbeddingStatus(), 2000);
         return;
       }
       // 'ready' — check for model migration

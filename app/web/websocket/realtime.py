@@ -118,7 +118,7 @@ class ConnectionManager:
             await websocket.send_text(json.dumps(message))
             return True
         except Exception as e:
-            logger.error(f"Failed to send message to client {client_id}: {e}")
+            logger.debug(f"Failed to send message to client {client_id}, disconnecting: {e}")
             self.disconnect(client_id)
             return False
 
@@ -378,7 +378,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     except WebSocketDisconnect:
         connection_manager.disconnect(client_id)
     except Exception as e:
-        logger.error(f"WebSocket error for client {client_id}: {e}")
+        logger.debug(f"WebSocket error for client {client_id}: {e}")
         connection_manager.disconnect(client_id)
 
 

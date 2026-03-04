@@ -151,6 +151,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # 캐시된 모델이 있으면 백그라운드로 로딩 시작
         if model_cached:
             logger.info("Model cached, loading in background")
+            # Race condition 방지: 프론트엔드가 not_loaded를 보고
+            # onboarding으로 리다이렉트하기 전에 상태를 loading으로 설정
+            embedding_service._status = "loading"
 
             _bg_model_name = embedding_model
 

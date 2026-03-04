@@ -430,35 +430,38 @@ class EmbeddingService:
         Returns:
             시작된 Thread 객체
         """
+        svc = self  # closure reference
+
+        def _notify(progress: float, status: str) -> None:
+            """상태 업데이트 + 콜백 호출 헬퍼"""
+            svc._download_progress = progress
+            svc._status = status
+            if on_progress:
+                on_progress(progress, status)
+
         def _worker() -> None:
             with self._load_lock:
                 if self._status == "ready":
                     return
 
-                self._status = "downloading"
-                self._download_progress = 0.0
                 self._error_message = None
 
                 try:
                     logger.info(f"Background loading model: {self.model_name}")
-
-                    # 캐시 여부에 따라 상태 결정
                     cached = is_model_cached(self.model_name)
-                    if cached:
-                        self._status = "loading"
-                        self._download_progress = 0.5
-                        if on_progress:
-                            on_progress(0.5, "loading")
-                    else:
-                        self._download_progress = 0.1
-                        if on_progress:
-                            on_progress(0.1, "downloading")
 
+                    if cached:
+                        # 캐시됨 — 바로 loading 단계
+                        _notify(0.5, "loading")
+                    else:
+                        # 미캐시 — snapshot_download로 실제 진행률 추적
+                        _notify(0.0, "downloading")
+                        self._download_with_progress(_notify)
+
+                    # 모델 로드 (캐시에서 로드하므로 빠름)
+                    _notify(0.85, "loading")
                     self.model = SentenceTransformer(self.model_name)
-                    self._download_progress = 0.9
-                    self._status = "loading"
-                    if on_progress:
-                        on_progress(0.9, "loading")
+                    _notify(0.92, "loading")
 
                     # 차원 자동 감지
                     actual_dim = self.model.get_sentence_embedding_dimension()
@@ -478,10 +481,7 @@ class EmbeddingService:
                             f"got {len(test_embedding)}"
                         )
 
-                    self._status = "ready"
-                    self._download_progress = 1.0
-                    if on_progress:
-                        on_progress(1.0, "ready")
+                    _notify(1.0, "ready")
                     logger.info(
                         f"Model {self.model_name} loaded in background "
                         f"(dimension: {self.dimension})"
@@ -498,6 +498,70 @@ class EmbeddingService:
         thread = threading.Thread(target=_worker, daemon=True, name="model-loader")
         thread.start()
         return thread
+
+    def _download_with_progress(
+        self,
+        notify: Callable[[float, str], None],
+    ) -> None:
+        """huggingface_hub snapshot_download로 실제 다운로드 진행률 추적.
+
+        다운로드 완료 후 SentenceTransformer()는 캐시에서 즉시 로드됨.
+        진행률은 0.0~0.80 범위로 매핑 (0.80 이후는 모델 로딩 단계).
+        """
+        try:
+            from huggingface_hub import snapshot_download
+            import tqdm as tqdm_mod
+
+            # 파일별 다운로드 바이트 추적
+            _file_totals: dict = {}  # id -> total
+            _file_downloaded: dict = {}  # id -> downloaded
+            _last_reported: list = [0.0]  # 마지막 보고 진행률 (debounce)
+
+            svc = self
+
+            class _ProgressTqdm(tqdm_mod.tqdm):
+                """snapshot_download의 tqdm을 오버라이드하여 진행률 캡처"""
+
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    tid = id(self)
+                    _file_totals[tid] = self.total or 0
+                    _file_downloaded[tid] = 0
+
+                def update(self, n=1):
+                    super().update(n)
+                    tid = id(self)
+                    _file_downloaded[tid] = _file_downloaded.get(tid, 0) + n
+
+                    total = sum(_file_totals.values())
+                    downloaded = sum(_file_downloaded.values())
+                    if total > 0:
+                        # 0.0 ~ 0.80 범위로 매핑
+                        pct = min(downloaded / total, 1.0) * 0.80
+                        # 5% 이상 변동 시에만 보고 (WebSocket 스팸 방지)
+                        if pct - _last_reported[0] >= 0.05 or pct >= 0.79:
+                            _last_reported[0] = pct
+                            notify(round(pct, 2), "downloading")
+
+                def close(self):
+                    super().close()
+
+            snapshot_download(
+                self.model_name,
+                tqdm_class=_ProgressTqdm,
+            )
+            logger.info(f"Model files downloaded: {self.model_name}")
+
+        except ImportError:
+            # huggingface_hub 없으면 SentenceTransformer가 직접 다운로드
+            logger.warning(
+                "huggingface_hub not available, falling back to basic download"
+            )
+            notify(0.1, "downloading")
+        except Exception as e:
+            # 다운로드 실패 시 SentenceTransformer에 위임 (재시도 기회)
+            logger.warning(f"snapshot_download failed, falling back: {e}")
+            notify(0.1, "downloading")
 
     def switch_model(self, new_model_name: str) -> None:
         """모델 변경 (온보딩에서 사용자가 모델을 선택한 경우)"""
