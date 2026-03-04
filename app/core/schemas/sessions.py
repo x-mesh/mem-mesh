@@ -29,6 +29,12 @@ class SessionResponse(BaseModel):
     id: str
     project_id: str
     user_id: str
+    ide_session_id: Optional[str] = Field(
+        default=None, description="IDE 네이티브 세션 ID (Claude Code session_id 등)"
+    )
+    client_type: Optional[str] = Field(
+        default=None, description="IDE/도구 유형 (claude-ai, Cursor, Windsurf 등)"
+    )
     started_at: str
     ended_at: Optional[str] = None
     status: str

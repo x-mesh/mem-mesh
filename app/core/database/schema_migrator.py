@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Current schema version - increment when adding new migrations
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 
 
 class SchemaMigrator:
@@ -38,6 +38,7 @@ class SchemaMigrator:
             3: self._migration_v3_relation_tables,
             4: self._migration_v4_pin_columns_integrity,
             5: self._migration_v5_client_column,
+            6: self._migration_v6_session_ide_columns,
         }
 
     async def migrate(self) -> None:
@@ -234,3 +235,23 @@ class SchemaMigrator:
         if await self._table_exists("memories"):
             await self._add_column_if_missing("memories", "client", "TEXT", "NULL")
             logger.info("Added client column to memories table via migration v5")
+
+    async def _migration_v6_session_ide_columns(
+        self, migrator: "SchemaMigrator"
+    ) -> None:
+        """Add IDE session tracking columns to sessions table.
+
+        - ide_session_id: Maps to the IDE's native session ID (e.g. Claude Code session_id)
+        - client_type: Identifies the IDE/tool (e.g. 'claude-ai', 'Cursor', 'Windsurf')
+        """
+        if await self._table_exists("sessions"):
+            await self._add_column_if_missing(
+                "sessions", "ide_session_id", "TEXT", "NULL"
+            )
+            await self._add_column_if_missing(
+                "sessions", "client_type", "TEXT", "NULL"
+            )
+            logger.info(
+                "Added ide_session_id, client_type columns to sessions table "
+                "via migration v6"
+            )

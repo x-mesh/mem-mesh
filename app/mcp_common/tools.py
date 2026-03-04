@@ -490,6 +490,8 @@ class MCPToolHandlers:
         project_id: str,
         importance: Optional[int] = None,
         tags: Optional[List[str]] = None,
+        ide_session_id: Optional[str] = None,
+        client_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Add a new pin (short-term task) to the current session
 
@@ -498,6 +500,8 @@ class MCPToolHandlers:
             project_id: Project identifier
             importance: Importance score (1-5, auto-determined if not provided)
             tags: Pin tags
+            ide_session_id: IDE native session ID. Optional.
+            client_type: IDE/tool type. Optional.
 
         Returns:
             dict: Created pin information
@@ -536,6 +540,8 @@ class MCPToolHandlers:
                 importance=effective_importance,
                 tags=tags,
                 auto_importance=auto_importance,
+                ide_session_id=ide_session_id,
+                client_type=client_type,
             )
 
             response = result.model_dump()
@@ -640,7 +646,12 @@ class MCPToolHandlers:
             raise
 
     async def session_resume(
-        self, project_id: str, expand: Any = False, limit: int = 10
+        self,
+        project_id: str,
+        expand: Any = False,
+        limit: int = 10,
+        ide_session_id: Optional[str] = None,
+        client_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Resume the last session for a project
 
@@ -648,6 +659,8 @@ class MCPToolHandlers:
             project_id: Project identifier
             expand: false=compact, true=full, "smart"=4-tier matrix (status×importance, recommended)
             limit: Maximum number of pins to return (default 10)
+            ide_session_id: IDE native session ID (e.g. Claude Code session_id). Optional.
+            client_type: IDE/tool type (e.g. "claude-ai", "Cursor"). Optional.
 
         Returns:
             dict: Session context with pins and token tracking information
@@ -679,11 +692,26 @@ class MCPToolHandlers:
             )
 
             if session_context is None:
+                # 세션이 없으면 자동 생성 (ide_session_id가 있으면 함께 저장)
+                if ide_session_id:
+                    await session_service.get_or_create_active_session(
+                        project_id=project_id,
+                        ide_session_id=ide_session_id,
+                        client_type=client_type,
+                    )
                 return {
                     "status": "no_session",
                     "message": f"프로젝트 '{project_id}'에 활성 세션이 없습니다. pin_add로 새 작업을 시작하세요.",
                     "token_info": token_info,
                 }
+
+            # ide_session_id가 제공되었으면 기존 세션에 연결
+            if ide_session_id and session_context.status != "cross-session":
+                await session_service.get_or_create_active_session(
+                    project_id=project_id,
+                    ide_session_id=ide_session_id,
+                    client_type=client_type,
+                )
 
             # 세션 컨텍스트와 토큰 정보를 함께 반환
             response = session_context.model_dump()

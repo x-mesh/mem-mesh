@@ -20,6 +20,10 @@ INPUT=$(cat)
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 
+# ── Extract IDE session_id from hook stdin ──
+IDE_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
+
 # ── Detect context continuation ──
 # Claude Code fires SessionStart both on fresh start AND after context compaction.
 # After compaction, the transcript_path still exists with prior entries,
@@ -51,8 +55,11 @@ except Exception:
 fi
 
 # Fetch session resume data (same API as Cursor — consistent cross-IDE)
+# Pass IDE session_id as query param for session correlation
+RESUME_PARAMS="expand=smart"
+[ -n "$IDE_SESSION_ID" ] && RESUME_PARAMS="${RESUME_PARAMS}&ide_session_id=${IDE_SESSION_ID}&client_type=claude-ai"
 RESUME_DATA=$(curl -s --max-time 5 \
-  "${API_URL}/api/work/sessions/resume/${PROJECT_DIR}?expand=smart" \
+  "${API_URL}/api/work/sessions/resume/${PROJECT_DIR}?${RESUME_PARAMS}" \
   2>/dev/null) || RESUME_DATA='{"error": "mem-mesh API not available"}'
 
 # Extract compact summary from session_resume response

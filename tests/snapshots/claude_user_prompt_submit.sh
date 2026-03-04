@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 9
+# mem-mesh-hooks prompt-version: 10
 # UserPromptSubmit hook: keyword-filtered context search + save reminder
 # stdin: {prompt, session_id, transcript_path, cwd, ...}
 # Output: {additionalContext: "..."} or exit 0 (no injection)
