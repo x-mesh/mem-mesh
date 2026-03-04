@@ -485,7 +485,12 @@ async def resume_session(
         client_type: IDE/tool type (optional, e.g. "claude-ai", "Cursor")
     """
     try:
-        # IDE session_id가 제공되면 세션에 연결
+        # 1. 먼저 resume로 기존 맥락 로드 (cross-session 포함)
+        context = await session_service.resume_last_session(
+            project_id=project_id, user_id=user_id, expand=expand, limit=limit
+        )
+
+        # 2. IDE session_id가 있으면 활성 세션에 연결 (resume 이후)
         if ide_session_id:
             await session_service.get_or_create_active_session(
                 project_id=project_id,
@@ -494,9 +499,6 @@ async def resume_session(
                 client_type=client_type,
             )
 
-        context = await session_service.resume_last_session(
-            project_id=project_id, user_id=user_id, expand=expand, limit=limit
-        )
         if context is None:
             return {
                 "status": "no_session",

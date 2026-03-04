@@ -692,21 +692,14 @@ class MCPToolHandlers:
             )
 
             if session_context is None:
-                # 세션이 없으면 자동 생성 (ide_session_id가 있으면 함께 저장)
-                if ide_session_id:
-                    await session_service.get_or_create_active_session(
-                        project_id=project_id,
-                        ide_session_id=ide_session_id,
-                        client_type=client_type,
-                    )
                 return {
                     "status": "no_session",
                     "message": f"프로젝트 '{project_id}'에 활성 세션이 없습니다. pin_add로 새 작업을 시작하세요.",
                     "token_info": token_info,
                 }
 
-            # ide_session_id가 제공되었으면 기존 세션에 연결
-            if ide_session_id and session_context.status != "cross-session":
+            # ide_session_id가 제공되었으면 활성 세션에 연결 (resume 이후)
+            if ide_session_id:
                 await session_service.get_or_create_active_session(
                     project_id=project_id,
                     ide_session_id=ide_session_id,

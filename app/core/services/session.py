@@ -149,8 +149,11 @@ class SessionService:
         """
         마지막 세션 컨텍스트 로드.
 
-        활성/일시정지 세션이 있으면 해당 세션의 핀을 반환.
-        없으면 cross-session fallback으로 최근 7일 내 프로젝트 핀을 반환.
+        흐름:
+        1. 활성/일시정지 세션이 있고 핀이 있으면 → 해당 세션 핀 반환
+        2. 활성 세션은 있지만 핀이 없으면 → cross-session 핀을 병합하여 반환
+        3. 활성 세션이 없으면 → cross-session fallback (최근 7일)
+        4. 아무것도 없으면 → None
 
         Args:
             project_id: 프로젝트 ID
@@ -164,7 +167,7 @@ class SessionService:
         effective_user_id = user_id or get_current_user()
 
         # 가장 최근 세션 조회 (활성 또는 일시정지)
-        row = await self.db.fetchone(
+        active_row = await self.db.fetchone(
             """
             SELECT * FROM sessions
             WHERE project_id = ? AND user_id = ? AND status IN ('active', 'paused')
@@ -174,34 +177,90 @@ class SessionService:
             (project_id, effective_user_id),
         )
 
-        if row:
-            return await self._resume_from_session(row, expand, limit)
+        if active_row:
+            session = self._row_to_response(active_row)
 
-        # Cross-session fallback: 최근 7일 내 프로젝트 핀으로 맥락 복원
+            # paused → active 전환
+            if session.status == "paused":
+                now = datetime.now(timezone.utc).isoformat()
+                await self.db.execute(
+                    "UPDATE sessions SET status = 'active', updated_at = ? WHERE id = ?",
+                    (now, session.id),
+                )
+                self.db.connection.commit()
+                session.status = "active"
+
+            # 현재 세션의 핀 조회
+            current_pins = await self._get_session_pins(session.id, limit)
+
+            if current_pins["total"] > 0:
+                # Case 1: 활성 세션 + 핀 있음 → 해당 세션 핀 반환
+                return self._build_session_context(
+                    session, current_pins, expand
+                )
+
+            # Case 2: 활성 세션 + 핀 없음 → cross-session 핀 병합
+            cross_pins = await self._get_cross_session_pins(
+                project_id, effective_user_id, session.id, limit
+            )
+
+            if cross_pins:
+                pins = self._expand_pin_rows(cross_pins, expand)
+                open_count = sum(
+                    1 for r in cross_pins
+                    if r["status"] in ("open", "in_progress")
+                )
+                completed_count = sum(
+                    1 for r in cross_pins if r["status"] == "completed"
+                )
+
+                # 요약 생성
+                open_contents = [
+                    r["content"][:50] for r in cross_pins
+                    if r["status"] in ("open", "in_progress")
+                ][:3]
+                summary = (
+                    f"[이전 세션] 미완료: {', '.join(open_contents)}"
+                    if open_contents
+                    else "[이전 세션] 최근 작업 맥락 복원"
+                )
+
+                return SessionContext(
+                    session_id=session.id,
+                    project_id=session.project_id,
+                    user_id=session.user_id,
+                    status=session.status,
+                    started_at=session.started_at,
+                    summary=summary,
+                    pins_count=len(cross_pins),
+                    open_pins=open_count,
+                    completed_pins=completed_count,
+                    pins=pins,
+                )
+
+            # 활성 세션은 있지만 핀이 전혀 없음
+            return SessionContext(
+                session_id=session.id,
+                project_id=session.project_id,
+                user_id=session.user_id,
+                status=session.status,
+                started_at=session.started_at,
+                summary=None,
+                pins_count=0,
+                open_pins=0,
+                completed_pins=0,
+                pins=[],
+            )
+
+        # Case 3: 활성 세션 없음 → cross-session fallback
         return await self._resume_cross_session(
             project_id, effective_user_id, expand, limit
         )
 
-    async def _resume_from_session(
-        self,
-        session_row,
-        expand: Union[bool, str],
-        limit: int,
-    ) -> SessionContext:
-        """활성/일시정지 세션에서 컨텍스트 복원."""
-        session = self._row_to_response(session_row)
-
-        # 세션이 paused 상태면 active로 변경
-        if session.status == "paused":
-            now = datetime.now(timezone.utc).isoformat()
-            await self.db.execute(
-                "UPDATE sessions SET status = 'active', updated_at = ? WHERE id = ?",
-                (now, session.id),
-            )
-            self.db.connection.commit()
-            session.status = "active"
-
-        # Pin 통계 조회 (open과 in_progress 모두 "열린" 핀으로 카운트)
+    async def _get_session_pins(
+        self, session_id: str, limit: int
+    ) -> Dict[str, Any]:
+        """세션의 핀 통계 및 목록 조회."""
         stats_row = await self.db.fetchone(
             """
             SELECT
@@ -211,14 +270,9 @@ class SessionService:
             FROM pins
             WHERE session_id = ?
             """,
-            (session.id,),
+            (session_id,),
         )
 
-        pins_count = stats_row["total"] or 0
-        open_pins = stats_row["open_count"] or 0
-        completed_pins = stats_row["completed_count"] or 0
-
-        # Pin 목록 조회 (importance 순)
         pin_rows = await self.db.fetchall(
             """
             SELECT * FROM pins
@@ -226,25 +280,74 @@ class SessionService:
             ORDER BY importance DESC, created_at DESC
             LIMIT ?
             """,
-            (session.id, limit),
+            (session_id, limit),
         )
 
-        pins = self._expand_pin_rows(pin_rows, expand)
+        return {
+            "total": stats_row["total"] or 0,
+            "open_count": stats_row["open_count"] or 0,
+            "completed_count": stats_row["completed_count"] or 0,
+            "rows": pin_rows,
+        }
 
-        # 세션 요약이 없으면 최근 열린 핀들로 자동 생성
-        summary = session.summary
-        if not summary and open_pins > 0:
-            open_pin_rows = await self.db.fetchall(
+    async def _get_cross_session_pins(
+        self,
+        project_id: str,
+        user_id: str,
+        exclude_session_id: Optional[str] = None,
+        limit: int = 10,
+    ) -> list:
+        """최근 7일 내 다른 세션의 핀 조회 (미완료 우선)."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+
+        if exclude_session_id:
+            return await self.db.fetchall(
                 """
-                SELECT content FROM pins
-                WHERE session_id = ? AND status IN ('open', 'in_progress')
-                ORDER BY importance DESC, created_at DESC
-                LIMIT 3
+                SELECT p.* FROM pins p
+                JOIN sessions s ON p.session_id = s.id
+                WHERE p.project_id = ? AND s.user_id = ?
+                    AND p.created_at >= ? AND p.session_id != ?
+                ORDER BY
+                    CASE WHEN p.status IN ('open', 'in_progress') THEN 0 ELSE 1 END,
+                    p.importance DESC,
+                    p.created_at DESC
+                LIMIT ?
                 """,
-                (session.id,),
+                (project_id, user_id, cutoff, exclude_session_id, limit),
             )
-            if open_pin_rows:
-                open_tasks = [r["content"][:50] for r in open_pin_rows]
+
+        return await self.db.fetchall(
+            """
+            SELECT p.* FROM pins p
+            JOIN sessions s ON p.session_id = s.id
+            WHERE p.project_id = ? AND s.user_id = ? AND p.created_at >= ?
+            ORDER BY
+                CASE WHEN p.status IN ('open', 'in_progress') THEN 0 ELSE 1 END,
+                p.importance DESC,
+                p.created_at DESC
+            LIMIT ?
+            """,
+            (project_id, user_id, cutoff, limit),
+        )
+
+    def _build_session_context(
+        self,
+        session: SessionResponse,
+        pins_data: Dict[str, Any],
+        expand: Union[bool, str],
+    ) -> SessionContext:
+        """세션과 핀 데이터로 SessionContext 빌드."""
+        pins = self._expand_pin_rows(pins_data["rows"], expand)
+
+        # 요약 자동 생성
+        summary = session.summary
+        if not summary and pins_data["open_count"] > 0:
+            open_rows = [
+                r for r in pins_data["rows"]
+                if r["status"] in ("open", "in_progress")
+            ][:3]
+            if open_rows:
+                open_tasks = [r["content"][:50] for r in open_rows]
                 summary = f"진행 중: {', '.join(open_tasks)}"
 
         return SessionContext(
@@ -254,9 +357,9 @@ class SessionService:
             status=session.status,
             started_at=session.started_at,
             summary=summary,
-            pins_count=pins_count,
-            open_pins=open_pins,
-            completed_pins=completed_pins,
+            pins_count=pins_data["total"],
+            open_pins=pins_data["open_count"],
+            completed_pins=pins_data["completed_count"],
             pins=pins,
         )
 
@@ -272,21 +375,8 @@ class SessionService:
         활성 세션이 없을 때 호출된다. 최근 종료된 세션들의 핀 중
         미완료(open/in_progress) 또는 중요도 높은 핀을 반환한다.
         """
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-
-        # 최근 7일 내 프로젝트 핀 조회 (미완료 우선, importance 순)
-        pin_rows = await self.db.fetchall(
-            """
-            SELECT p.* FROM pins p
-            JOIN sessions s ON p.session_id = s.id
-            WHERE p.project_id = ? AND s.user_id = ? AND p.created_at >= ?
-            ORDER BY
-                CASE WHEN p.status IN ('open', 'in_progress') THEN 0 ELSE 1 END,
-                p.importance DESC,
-                p.created_at DESC
-            LIMIT ?
-            """,
-            (project_id, user_id, cutoff, limit),
+        pin_rows = await self._get_cross_session_pins(
+            project_id, user_id, limit=limit
         )
 
         if not pin_rows:
