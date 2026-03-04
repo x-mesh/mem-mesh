@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     image: mem-mesh:dev
-    container_name: mem-mesh-dev₩
+    container_name: mem-mesh-dev
     ports:
       - "8000:8000"
     volumes:
