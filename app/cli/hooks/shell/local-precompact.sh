@@ -2,7 +2,7 @@
 __VERSION_MARKER__
 # Claude Code PreCompact hook: save reminder + auto-end session (local mode)
 # Ensures unsaved decisions are flagged before context compaction
-# Returns {additionalContext: "..."} to remind AI to save
+# Returns {hookSpecificOutput: {hookEventName: "PreCompact", additionalContext: "..."}} to remind AI to save
 
 set -euo pipefail
 command -v python3 >/dev/null 2>&1 || exit 0
@@ -102,7 +102,7 @@ except Exception:
     pass
 " 2>/dev/null || true
 
-# ── Return save reminder as additionalContext ──
+# ── Return save reminder as hookSpecificOutput ──
 if [ -n "$SAVE_HINT" ]; then
   CONTEXT="## [IMPORTANT] Context Compaction — Save Checkpoint
 
@@ -173,4 +173,9 @@ ${part}"
   fi
 done
 
-jq -n --arg ctx "$COMBINED" '{additionalContext: $ctx}'
+jq -n --arg ctx "$COMBINED" '{
+  hookSpecificOutput: {
+    hookEventName: "PreCompact",
+    additionalContext: $ctx
+  }
+}'

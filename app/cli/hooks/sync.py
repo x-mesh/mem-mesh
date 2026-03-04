@@ -128,7 +128,7 @@ $RULES_TEXT"
 python3 -c "
 import json, sys
 ctx = sys.stdin.read()
-print(json.dumps({{'additional_context': ctx}}))
+print(json.dumps({{'hookSpecificOutput': {{'hookEventName': 'SessionStart', 'additionalContext': ctx}}}}))
 " <<< "$CONTEXT"
 """
 

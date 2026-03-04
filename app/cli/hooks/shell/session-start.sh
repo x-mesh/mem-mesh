@@ -2,7 +2,7 @@
 __VERSION_MARKER__
 # Claude Code SessionStart hook: inject mem-mesh session context
 # Fires on session start AND after compaction (context re-injection)
-# Returns additional_context JSON via /api/work/sessions/resume/{project_id}
+# Returns hookSpecificOutput JSON via /api/work/sessions/resume/{project_id}
 #
 # Features:
 # 1. Session resume data injection (existing)
@@ -104,4 +104,9 @@ ${SESSION_SUMMARY}
 ### Rules
 __RULES_TEXT__"
 
-jq -n --arg ctx "$CONTEXT" '{ additional_context: $ctx }'
+jq -n --arg ctx "$CONTEXT" '{
+  hookSpecificOutput: {
+    hookEventName: "SessionStart",
+    additionalContext: $ctx
+  }
+}'

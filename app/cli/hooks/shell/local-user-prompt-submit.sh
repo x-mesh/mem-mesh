@@ -2,7 +2,7 @@
 __VERSION_MARKER__
 # UserPromptSubmit hook: keyword-filtered context search + save reminder (local mode)
 # stdin: {prompt, session_id, transcript_path, cwd, ...}
-# Output: {additionalContext: "..."} or exit 0 (no injection)
+# Output: {hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: "..."}} or exit 0
 
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
@@ -148,5 +148,10 @@ ${part}"
   fi
 done
 
-jq -n --arg ctx "$COMBINED" '{additionalContext: $ctx}'
+jq -n --arg ctx "$COMBINED" '{
+  hookSpecificOutput: {
+    hookEventName: "UserPromptSubmit",
+    additionalContext: $ctx
+  }
+}'
 exit 0

@@ -1,7 +1,7 @@
 #!/bin/bash
 __VERSION_MARKER__
 # Cursor sessionStart hook: load mem-mesh session context
-# Returns additional_context JSON for the agent
+# Returns hookSpecificOutput JSON for the agent
 
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || { echo '{}'; exit 0; }
@@ -28,4 +28,9 @@ ${RESUME_DATA}
 ### 작업 규칙
 __RULES_TEXT__"
 
-jq -n --arg ctx "$CONTEXT" '{ additional_context: $ctx }'
+jq -n --arg ctx "$CONTEXT" '{
+  hookSpecificOutput: {
+    hookEventName: "SessionStart",
+    additionalContext: $ctx
+  }
+}'
