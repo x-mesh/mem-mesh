@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 8
+# mem-mesh-hooks prompt-version: 9
 # Cursor sessionStart hook: load mem-mesh session context
 # Returns additional_context JSON for the agent
 

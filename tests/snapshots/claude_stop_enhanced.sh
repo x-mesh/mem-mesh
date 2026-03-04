@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 8
+# mem-mesh-hooks prompt-version: 9
 # Stop hook (enhanced): Haiku API decides save/skip, then saves via mem-mesh API
 # Requires ANTHROPIC_API_KEY env var
 # stdin: {"stop_hook_active":bool,"last_assistant_message":"..."} JSON

@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 8
+# mem-mesh-hooks prompt-version: 9
 # Kiro agentResponse hook: keyword-based category matching + save to mem-mesh
 
 set -euo pipefail
