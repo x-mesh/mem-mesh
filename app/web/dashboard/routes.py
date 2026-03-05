@@ -32,6 +32,7 @@ from ..common.dependencies import (
     get_session_service,
     get_stats_service,
 )
+from ..websocket.realtime import RealtimeNotifier
 from .route_modules import router as modular_router
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Dashboard API"])
 
 router.include_router(modular_router)
+
+_notifier = RealtimeNotifier()
 
 
 def _rules_root() -> Path:
@@ -73,6 +76,40 @@ def _resolve_rule_path(rule_entry: dict) -> Path:
     if not str(candidate).startswith(str(base)):
         raise ValueError("Invalid rule path")
     return candidate
+
+
+@router.post("/internal/notify")
+async def internal_notify(payload: dict) -> dict:
+    """stdio MCP -> WebSocket broadcast bridge.
+
+    stdio MCP 서버가 HttpNotifier를 통해 이 엔드포인트로 이벤트를 보내면,
+    웹서버의 RealtimeNotifier가 WebSocket으로 브로드캐스트합니다.
+    """
+    event_type = payload.get("type")
+    data = payload.get("data", {})
+
+    if event_type == "memory_created":
+        await _notifier.notify_memory_created(data.get("memory", {}))
+    elif event_type == "memory_updated":
+        await _notifier.notify_memory_updated(
+            data.get("memory_id", ""), data.get("memory", {})
+        )
+    elif event_type == "memory_deleted":
+        await _notifier.notify_memory_deleted(
+            data.get("memory_id", ""), data.get("project_id")
+        )
+    elif event_type == "pin_created":
+        await _notifier.notify_pin_created(data.get("pin", {}))
+    elif event_type == "pin_completed":
+        await _notifier.notify_pin_completed(data.get("pin", {}))
+    elif event_type == "pin_promoted":
+        await _notifier.notify_pin_promoted(
+            data.get("pin_id", ""), data.get("memory_id", "")
+        )
+    else:
+        return {"status": "ignored", "reason": f"unknown event type: {event_type}"}
+
+    return {"status": "ok", "type": event_type}
 
 
 @router.get("/")
@@ -601,7 +638,12 @@ async def create_pin(
             user_id=pin.user_id,
         )
 
-        return created_pin.dict()
+        result = created_pin.dict()
+        try:
+            await _notifier.notify_pin_created(result)
+        except Exception:
+            pass
+        return result
     except Exception as e:
         logger.error(f"Create pin error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -699,6 +741,10 @@ async def complete_pin(pin_id: str, pin_service: PinService = Depends(get_pin_se
                 f"This Pin has importance {pin.importance}. Would you like to promote it to Memory?"
             )
 
+        try:
+            await _notifier.notify_pin_completed(result)
+        except Exception:
+            pass
         return result
     except PinNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -718,6 +764,12 @@ async def promote_pin(pin_id: str, pin_service: PinService = Depends(get_pin_ser
     """
     try:
         result = await pin_service.promote_to_memory(pin_id)
+        memory_id = result.get("memory_id", "")
+        if memory_id:
+            try:
+                await _notifier.notify_pin_promoted(pin_id, memory_id)
+            except Exception:
+                pass
         return result
     except PinNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
