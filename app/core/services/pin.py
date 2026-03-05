@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Optional
 
@@ -11,6 +12,11 @@ if TYPE_CHECKING:
 from uuid import uuid4
 
 from app.core.database.base import Database
+from app.core.errors import (
+    InvalidStatusTransitionError,
+    PinAlreadyCompletedError,
+    PinNotFoundError,
+)
 from app.core.schemas.pins import PinResponse, PinUpdate
 from app.core.utils.user import get_current_user
 
@@ -41,22 +47,6 @@ def _parse_tags(raw: object) -> List[str]:
     return []
 
 
-class InvalidStatusTransitionError(Exception):
-    """유효하지 않은 상태 전이"""
-
-    # Exception subclass - no additional implementation needed
-
-
-class PinNotFoundError(Exception):
-    """Pin을 찾을 수 없음"""
-
-    # Exception subclass - no additional implementation needed
-
-
-class PinAlreadyCompletedError(Exception):
-    """이미 완료된 Pin"""
-
-    # Exception subclass - no additional implementation needed
 
 
 # 유효한 상태 전이 정의 (Kanban 드래그 앤 드롭을 위해 모든 전이 허용)
@@ -94,6 +84,7 @@ class PinService:
         auto_importance: bool = False,
         ide_session_id: Optional[str] = None,
         client_type: Optional[str] = None,
+        client: Optional[str] = None,
     ) -> PinResponse:
         """
         새 Pin 생성.
@@ -112,6 +103,9 @@ class PinService:
             PinResponse
         """
         effective_user_id = user_id or get_current_user()
+
+        if not client:
+            client = os.environ.get("MEM_MESH_CLIENT")
 
         # 활성 세션 가져오기 (없으면 자동 생성)
         session = await self.session_service.get_or_create_active_session(
@@ -133,9 +127,9 @@ class PinService:
             """
             INSERT INTO pins (
                 id, session_id, project_id, user_id, content,
-                importance, status, tags, auto_importance, created_at, updated_at
+                importance, status, tags, auto_importance, client, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)
             """,
             (
                 pin_id,
@@ -146,6 +140,7 @@ class PinService:
                 effective_importance,
                 tags_json,
                 1 if auto_importance else 0,
+                client,
                 now,
                 now,
             ),
@@ -159,6 +154,7 @@ class PinService:
             session_id=session.id,
             project_id=project_id,
             user_id=effective_user_id,
+            client=client,
             content=content,
             importance=effective_importance,
             status="open",
@@ -277,6 +273,7 @@ class PinService:
             session_id=pin.session_id,
             project_id=pin.project_id,
             user_id=pin.user_id,
+            client=pin.client,
             content=pin.content,
             importance=pin.importance,
             status="completed",
@@ -561,11 +558,17 @@ class PinService:
         except (KeyError, IndexError):
             auto_importance = False
 
+        try:
+            client = row["client"]
+        except (KeyError, IndexError):
+            client = None
+
         return PinResponse(
             id=row["id"],
             session_id=row["session_id"],
             project_id=row["project_id"],
             user_id=row["user_id"],
+            client=client,
             content=row["content"],
             importance=row["importance"],
             status=row["status"],

@@ -40,8 +40,19 @@ class Database:
     """
 
     def __init__(
-        self, db_path: str, busy_timeout: int = 5000, embedding_dim: int = 384
+        self,
+        db_path: str,
+        busy_timeout: int = 5000,
+        embedding_dim: Optional[int] = None,
     ):
+        if embedding_dim is None:
+            try:
+                from ..config import Settings
+
+                embedding_dim = Settings().embedding_dim
+            except Exception:
+                embedding_dim = 384
+
         self.db_path = db_path
         self.busy_timeout = busy_timeout
         self.embedding_dim = embedding_dim
@@ -308,6 +319,3 @@ class Database:
         async with self._connection.transaction():
             yield
 
-    def __del__(self):
-        if self._connection.connection:
-            self._connection.connection.close()

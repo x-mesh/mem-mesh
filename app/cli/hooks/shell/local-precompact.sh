@@ -141,11 +141,14 @@ try:
         for p in open_pins[:5]:
             if isinstance(p, dict):
                 content = p.get('content', '?')[:80]
-                pid = p.get('id', '?')[:8]
+                pid = p.get('id', '?')
+                client = p.get('client', '') or ''
             else:
                 content = getattr(p, 'content', '?')[:80]
-                pid = getattr(p, 'id', '?')[:8]
-            lines.append(f'- [{pid}] {content}')
+                pid = getattr(p, 'id', '?')
+                client = getattr(p, 'client', '') or ''
+            client_str = f'({client}) ' if client else ''
+            lines.append(f'- [{pid}] {client_str}{content}')
         print('\n'.join(lines))
 
     asyncio.run(get_open_pins())

@@ -16,6 +16,7 @@ class PinCreate(BaseModel):
     importance: Optional[int] = Field(default=None, ge=1, le=5)
     tags: Optional[List[str]] = Field(default=None)
     user_id: Optional[str] = Field(default=None)
+    client: Optional[str] = Field(default=None, max_length=50)
 
     @field_validator("project_id")
     @classmethod
@@ -59,6 +60,7 @@ class PinResponse(BaseModel):
     session_id: str
     project_id: str
     user_id: str
+    client: Optional[str] = Field(default=None)
     content: str
     importance: int
     status: str

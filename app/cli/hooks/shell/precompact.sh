@@ -117,8 +117,10 @@ try:
     lines.append('컨텍스트 압축 전에 완료된 작업은 pin_complete로 정리하세요.')
     for p in open_pins[:5]:
         content = p.get('content', '?')[:80]
-        pid = p.get('id', '?')[:8]
-        lines.append(f'- [{pid}] {content}')
+        pid = p.get('id', '?')
+        client = p.get('client', '') or ''
+        client_str = f'({client}) ' if client else ''
+        lines.append(f'- [{pid}] {client_str}{content}')
     print('\n'.join(lines))
 except Exception:
     pass

@@ -6,7 +6,7 @@ FastMCP와 Pure MCP 모두에서 사용할 수 있습니다.
 """
 
 import os
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from ..core.schemas.requests import AddParams, SearchParams, StatsParams, UpdateParams
 from ..core.storage.base import StorageBackend
@@ -15,6 +15,7 @@ from .prompt_optimizer import PromptOptimizer
 
 if TYPE_CHECKING:
     from ..core.database.base import Database
+    from ..core.schemas.responses import ContextResponse, SearchResponse
     from ..web.websocket.realtime import RealtimeNotifier
 
 logger = get_logger("mcp-tools")
@@ -241,7 +242,7 @@ class MCPToolHandlers:
             raise
 
     def _compress_search_response(
-        self, result: Any, format: str = "standard"
+        self, result: "SearchResponse", format: str = "standard"
     ) -> Dict[str, Any]:
         """검색 결과 압축"""
         results_list = [
@@ -332,7 +333,7 @@ class MCPToolHandlers:
             logger.error("Error in context", error=str(e))
             raise
 
-    def _compress_context_response(self, result: Any) -> Dict[str, Any]:
+    def _compress_context_response(self, result: "ContextResponse") -> Dict[str, Any]:
         """컨텍스트 응답 압축"""
         primary = result.memory if hasattr(result, "memory") else {}
         related = result.related_memories if hasattr(result, "related_memories") else []
@@ -547,6 +548,7 @@ class MCPToolHandlers:
                 auto_importance=auto_importance,
                 ide_session_id=ide_session_id,
                 client_type=client_type,
+                client=client_type or os.environ.get("MEM_MESH_CLIENT"),
             )
 
             response = result.model_dump()
@@ -587,7 +589,8 @@ class MCPToolHandlers:
         logger.info("Tool pin_complete called", pin_id=pin_id)
 
         try:
-            from ..core.services.pin import PinAlreadyCompletedError, PinService
+            from ..core.errors import PinAlreadyCompletedError
+            from ..core.services.pin import PinService
 
             db = self._get_database()
             pin_service = PinService(
@@ -705,7 +708,7 @@ class MCPToolHandlers:
     async def session_resume(
         self,
         project_id: str,
-        expand: Any = False,
+        expand: Union[bool, str] = False,
         limit: int = 10,
         ide_session_id: Optional[str] = None,
         client_type: Optional[str] = None,
@@ -879,7 +882,8 @@ class MCPToolHandlers:
 
         try:
             from ..core.schemas.relations import RelationCreate, RelationType
-            from ..core.services.relation import MemoryNotFoundError, RelationService
+            from ..core.errors import MemoryNotFoundError
+            from ..core.services.relation import RelationService
 
             db = self._get_database()
             service = RelationService(db)

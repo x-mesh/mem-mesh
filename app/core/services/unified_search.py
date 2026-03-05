@@ -16,7 +16,12 @@ import logging
 import math
 import time
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+
+import sqlite3
+
+if TYPE_CHECKING:
+    from .search_quality import SearchIntent
 
 from ..database.base import Database
 from ..embeddings.service import EmbeddingService
@@ -454,7 +459,7 @@ class UnifiedSearchService:
         return query
 
     def _auto_adjust_params(
-        self, intent: Any, search_mode: str, limit: int, category: Optional[str]
+        self, intent: "SearchIntent", search_mode: str, limit: int, category: Optional[str]
     ) -> tuple:
         """의도 기반 파라미터 자동 조정"""
         # 검색 모드 조정
@@ -1010,7 +1015,7 @@ class UnifiedSearchService:
         self,
         result: SearchResponse,
         query: str,
-        intent: Any,
+        intent: "SearchIntent",
         min_quality_score: float,
         sort_by: str,
     ) -> SearchResponse:
@@ -1159,7 +1164,7 @@ class UnifiedSearchService:
             return None
 
     def _calculate_recency_score(
-        self, created_at: Any, oldest: Any, newest: Any
+        self, created_at: Union[str, datetime], oldest: Union[str, datetime], newest: Union[str, datetime]
     ) -> float:
         """최신성 점수 계산"""
         try:
@@ -1363,7 +1368,7 @@ class UnifiedSearchService:
 
         return response
 
-    def _parse_tags(self, row: Any) -> Optional[List[str]]:
+    def _parse_tags(self, row: "sqlite3.Row") -> Optional[List[str]]:
         """태그 파싱"""
         import json
 

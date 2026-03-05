@@ -15,13 +15,11 @@ from app.core.schemas.pins import PinCreate, PinUpdate
 from app.core.schemas.projects import ProjectUpdate
 from app.core.schemas.requests import RuleUpdateParams
 from app.core.services.embedding_manager import EmbeddingManagerService
-from app.core.services.pin import (
-    InvalidStatusTransitionError,
-    PinNotFoundError,
-    PinService,
-)
+from app.core.errors import InvalidStatusTransitionError, PinNotFoundError
+from app.core.services.pin import PinService
 from app.core.services.project import ProjectService
-from app.core.services.session import NoActiveSessionError, SessionService
+from app.core.errors import NoActiveSessionError
+from app.core.services.session import SessionService
 from app.core.services.stats import StatsService
 
 from ..common.dependencies import (
@@ -636,6 +634,7 @@ async def create_pin(
             importance=pin.importance,
             tags=pin.tags,
             user_id=pin.user_id,
+            client=pin.client,
         )
 
         result = created_pin.dict()

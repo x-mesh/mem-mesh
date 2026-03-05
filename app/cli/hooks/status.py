@@ -312,7 +312,7 @@ def cmd_status() -> None:
         print()
         print(header("[Project Local]"))
 
-        # Kiro hooks
+        # Kiro hooks (self-contained .kiro.hook files — always active if present)
         kiro_dir = project_root / ".kiro" / "hooks"
         for name in (
             "auto-save-conversations",
@@ -322,16 +322,38 @@ def cmd_status() -> None:
             hook_file = kiro_dir / f"{name}.kiro.hook"
             print(f"  {name}: {_colorize_status(_check_kiro_hook_version(hook_file))}")
 
-        # Cursor hooks
+        # Claude Code project-local hooks
+        claude_local_dir = project_root / ".claude" / "hooks"
+        claude_local_settings = project_root / ".claude" / "settings.json"
+        claude_local_registered = False
+        if claude_local_settings.exists():
+            try:
+                data = json.loads(claude_local_settings.read_text(encoding="utf-8"))
+                claude_local_registered = bool(data.get("hooks"))
+            except (json.JSONDecodeError, OSError):
+                pass
+        if claude_local_dir.exists():
+            claude_scripts = sorted(claude_local_dir.glob("mem-mesh-*.sh"))
+            for script in claude_scripts:
+                status_str = _check_script_version(script)
+                inactive = "" if claude_local_registered else dim(" (inactive — not in .claude/settings.json)")
+                print(f"  {script.name}: {_colorize_status(status_str)}{inactive}")
+
+        # Cursor project-local hooks
         cursor_dir = project_root / ".cursor" / "hooks"
+        cursor_settings = project_root / ".cursor" / "hooks.json"
+        cursor_registered = cursor_settings.exists() and _count_mem_mesh_hook_entries(cursor_settings) > 0
         for name in (
             "mem-mesh-session-start.sh",
             "mem-mesh-session-end.sh",
             "mem-mesh-auto-save.sh",
         ):
             script = cursor_dir / name
-            print(f"  {name}: {_colorize_status(_check_script_version(script))}")
-        cursor_settings = project_root / ".cursor" / "hooks.json"
+            status_str = _check_script_version(script)
+            if script.exists() and not cursor_registered:
+                print(f"  {name}: {_colorize_status(status_str)}{dim(' (inactive — not in hooks.json)')}")
+            else:
+                print(f"  {name}: {_colorize_status(status_str)}")
         cursor_template = project_root / ".cursor" / "hooks.mem-mesh.example.json"
         if cursor_settings.exists():
             count = _count_mem_mesh_hook_entries(cursor_settings)

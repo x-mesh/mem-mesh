@@ -77,7 +77,9 @@ try:
             lines.append('**미완료 작업:**')
             for p in open_list:
                 content = p.get('content', '?')[:100]
-                lines.append(f'- [pin] {content}')
+                client = p.get('client', '') or ''
+                client_str = f'({client}) ' if client else ''
+                lines.append(f'- [pin] {client_str}{content}')
         if not lines:
             lines.append('No recent activity.')
         print('\n'.join(lines))

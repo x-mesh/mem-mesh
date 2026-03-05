@@ -9,9 +9,9 @@ from datetime import datetime
 import pytest
 
 from app.core.database.base import Database
-from app.core.embeddings.service import EmbeddingService
 from app.core.schemas.responses import ContextResponse
-from app.core.services.context import ContextNotFoundError, ContextService
+from app.core.errors import ContextNotFoundError
+from app.core.services.context import ContextService
 from app.core.services.memory import MemoryService
 
 
@@ -21,7 +21,10 @@ def temp_db():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     yield path
-    os.unlink(path)
+    for ext in ["", "-wal", "-shm"]:
+        p = path + ext
+        if os.path.exists(p):
+            os.unlink(p)
 
 
 @pytest.fixture
@@ -33,10 +36,7 @@ async def db(temp_db):
     await database.close()
 
 
-@pytest.fixture
-def embedding_service():
-    """임베딩 서비스 인스턴스"""
-    return EmbeddingService()
+## embedding_service는 conftest.py의 session-scope fixture 사용
 
 
 @pytest.fixture

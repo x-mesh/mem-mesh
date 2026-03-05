@@ -11,11 +11,8 @@ import pytest
 from app.core.database.base import Database
 from app.core.database.models import Memory
 from app.core.embeddings.service import EmbeddingService
-from app.core.services.memory import (
-    EmbeddingError,
-    MemoryNotFoundError,
-    MemoryService,
-)
+from app.core.errors import EmbeddingError, MemoryNotFoundError
+from app.core.services.memory import MemoryService
 
 
 @pytest.fixture
@@ -29,24 +26,16 @@ async def temp_db():
     yield db
     await db.close()
 
-    # 정리
-    if os.path.exists(db_path):
-        os.unlink(db_path)
-
-
-@pytest.fixture
-def mock_embedding_service():
-    """Mock 임베딩 서비스"""
-    service = Mock(spec=EmbeddingService)
-    service.embed.return_value = [0.1] * 384  # 384차원 벡터
-    service.to_bytes.return_value = b"x" * (384 * 4)  # float32 * 384
-    service.from_bytes.return_value = [0.1] * 384
-    return service
+    # 정리 (WAL/SHM 포함)
+    for ext in ["", "-wal", "-shm"]:
+        p = db_path + ext
+        if os.path.exists(p):
+            os.unlink(p)
 
 
 @pytest.fixture
 async def memory_service(temp_db, mock_embedding_service):
-    """MemoryService 픽스처"""
+    """MemoryService 픽스처 (mock_embedding_service from conftest)"""
     return MemoryService(temp_db, mock_embedding_service)
 
 
@@ -219,13 +208,16 @@ class TestMemoryService:
     async def test_embedding_retry_logic(self, temp_db):
         """임베딩 생성 재시도 로직 테스트"""
         # Given - 처음 두 번은 실패, 세 번째는 성공하는 Mock
+        from app.core.config import Settings
+
+        dim = Settings().embedding_dim
         mock_embedding_service = Mock(spec=EmbeddingService)
         mock_embedding_service.embed.side_effect = [
             Exception("First failure"),
             Exception("Second failure"),
-            [0.1] * 384,  # 세 번째 시도에서 성공
+            [0.1] * dim,  # 세 번째 시도에서 성공
         ]
-        mock_embedding_service.to_bytes.return_value = b"x" * (384 * 4)
+        mock_embedding_service.to_bytes.return_value = b"\x00" * (dim * 4)
 
         memory_service = MemoryService(temp_db, mock_embedding_service)
 

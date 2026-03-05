@@ -14,6 +14,7 @@ class PinCompact(BaseModel):
     content: str = Field(description="80자로 제한된 내용 요약")
     importance: int
     status: str
+    client: Optional[str] = None
 
 
 class SessionCreate(BaseModel):

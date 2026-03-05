@@ -26,9 +26,12 @@ def mock_db():
 @pytest.fixture
 def mock_embedding_service():
     """Mock EmbeddingService"""
+    from app.core.config import Settings
+
+    dim = Settings().embedding_dim
     service = MagicMock()
-    service.embed = MagicMock(return_value=[0.1] * 384)
-    service.to_bytes = MagicMock(return_value=b"mock_embedding")
+    service.embed = MagicMock(return_value=[0.1] * dim)
+    service.to_bytes = MagicMock(return_value=b"\x00" * (dim * 4))
     return service
 
 
