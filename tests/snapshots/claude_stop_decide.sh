@@ -25,11 +25,12 @@ ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null) || ACTI
 MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null) || MESSAGE=""
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT_PATH=""
 log "MESSAGE length: ${#MESSAGE}, preview: ${MESSAGE:0:150}"
-[ ${#MESSAGE} -lt 50 ] && { log "SKIP: message too short (${#MESSAGE})"; exit 0; }
+[ ${#MESSAGE} -lt 50 ] && { log "SKIP: message too short (${#MESSAGE})"; echo "SKIP: message too short"; exit 0; }
 
 # Already saved via MCP
 if echo "$MESSAGE" | grep -q 'mcp__mem-mesh__add'; then
   log "SKIP: already contains mcp__mem-mesh__add"
+  echo "SKIP: already saved via MCP"
   exit 0
 fi
 
@@ -200,14 +201,21 @@ else:
       tags: ["auto-save", "keyword", $category]
     }')
 
-  SAVE_RESP=$(curl -s -w "\nHTTP:%{http_code}" --max-time 5 \
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
     -X POST "${API_URL}/api/memories" \
     -H "Content-Type: application/json" \
-    -d "$PAYLOAD" 2>&1) || true
+    -d "$PAYLOAD" 2>/dev/null) || HTTP_CODE="000"
 
-  log "Memory save: $SAVE_RESP"
+  if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+    SAVE_MSG="Saved memory as ${CATEGORY} (project=${PROJECT_DIR})"
+  else
+    SAVE_MSG="Save failed (HTTP ${HTTP_CODE}), category=${CATEGORY}"
+  fi
+  log "Memory save: $SAVE_MSG"
+  echo "$SAVE_MSG"
 else
   log "SKIP: no keyword match for memory save"
+  echo "SKIP: no keyword match"
 fi
 
 # ── Section B: Auto-pin completion ──
