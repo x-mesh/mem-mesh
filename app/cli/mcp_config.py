@@ -11,12 +11,20 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from urllib.request import urlopen
+from urllib.error import URLError
 
 from app.cli.hooks.colors import bold, dim, err, info, ok, warn
 
 # ── Tool Registry ──
 
 MCP_TOOLS: list[dict] = [
+    {
+        "name": "Claude Code",
+        "key": "claude-code",
+        "config_path": Path.home() / ".claude.json",
+        "detect": lambda: (Path.home() / ".claude").exists(),
+    },
     {
         "name": "Cursor",
         "key": "cursor",
@@ -117,7 +125,7 @@ def generate_mcp_entry(
     if mode == "sse":
         entry: dict = {
             "url": f"{url.rstrip('/')}/mcp/sse",
-            "transport": "sse",
+            "transport": "http",
         }
     else:
         # stdio mode — use the current Python interpreter
@@ -221,6 +229,44 @@ def remove_tool_config(tool: dict) -> tuple[bool, str]:
         return False, f"write failed: {e}"
 
     return True, "removed"
+
+
+def verify_tool_config(tool: dict, url: str = "http://localhost:8000") -> tuple[bool, str]:
+    """Verify that mem-mesh MCP is correctly configured for a tool.
+
+    Checks:
+    1. Config file has mcpServers.mem-mesh entry
+    2. For SSE mode, tests URL reachability (health check)
+
+    Returns (success, message).
+    """
+    config_path: Path = tool["config_path"]
+
+    if not config_path.exists():
+        return False, "config file not found"
+
+    data = read_config(config_path)
+    entry = data.get("mcpServers", {}).get(MCP_SERVER_KEY)
+    if not entry:
+        return False, "mem-mesh entry missing"
+
+    # SSE mode — check URL reachability
+    if "url" in entry:
+        sse_url = entry["url"]
+        # Derive health endpoint from SSE URL
+        health_url = sse_url.rsplit("/mcp/sse", 1)[0] + "/health"
+        try:
+            with urlopen(health_url, timeout=3) as resp:
+                if resp.status == 200:
+                    return True, f"configured (SSE, server reachable)"
+        except (URLError, OSError):
+            return True, f"configured (SSE, server not reachable — start with `python -m app.web`)"
+
+    # stdio mode
+    if "command" in entry:
+        return True, "configured (stdio)"
+
+    return True, "configured"
 
 
 # ── Interactive Flow ──
@@ -358,4 +404,14 @@ def run_mcp_setup(
             print(f"  {ok('✓')} {t['name']}: {msg}")
         else:
             print(f"  {err('✗')} {t['name']}: {msg}")
+    print()
+
+    # Verify configuration
+    print(f"  {bold('Verification:')}")
+    for t in targets:
+        _ok, vmsg = verify_tool_config(t, url=url)
+        if _ok:
+            print(f"  {ok('✓')} {t['name']}: {vmsg}")
+        else:
+            print(f"  {warn('!')} {t['name']}: {vmsg}")
     print()

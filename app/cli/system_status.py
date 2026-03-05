@@ -31,19 +31,29 @@ def _count_installed_hooks(hooks_dir: Path) -> int:
 
 
 def _check_mcp_stdio_config() -> tuple[bool, str]:
-    """Check if MCP stdio server is configured."""
-    config_path = Path.home() / ".claude" / "claude_desktop_config.json"
-    if not config_path.exists():
-        return False, "config not found"
-    try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return False, "parse error"
+    """Check if MCP stdio server is configured.
 
-    mcp_servers = data.get("mcpServers", {})
-    for name, server in mcp_servers.items():
-        if "mem-mesh" in name.lower() or "mem_mesh" in name.lower():
-            return True, f"'{name}'"
+    Checks Claude Code (~/.claude.json) first, then falls back to
+    Claude Desktop config.
+    """
+    candidates = [
+        ("Claude Code", Path.home() / ".claude.json"),
+        ("Claude Desktop", Path.home() / ".claude" / "claude_desktop_config.json"),
+    ]
+
+    for label, config_path in candidates:
+        if not config_path.exists():
+            continue
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        mcp_servers = data.get("mcpServers", {})
+        for name in mcp_servers:
+            if "mem-mesh" in name.lower() or "mem_mesh" in name.lower():
+                return True, f"'{name}' in {label}"
+
     return False, "not configured"
 
 
