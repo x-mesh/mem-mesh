@@ -5,7 +5,8 @@ MCP Tool Handlers - MCP 서버들이 공유하는 Tool 비즈니스 로직.
 FastMCP와 Pure MCP 모두에서 사용할 수 있습니다.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+import os
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from ..core.schemas.requests import AddParams, SearchParams, StatsParams, UpdateParams
 from ..core.storage.base import StorageBackend
@@ -14,6 +15,7 @@ from .prompt_optimizer import PromptOptimizer
 
 if TYPE_CHECKING:
     from ..core.database.base import Database
+    from ..core.schemas.responses import ContextResponse, SearchResponse
     from ..web.websocket.realtime import RealtimeNotifier
 
 logger = get_logger("mcp-tools")
@@ -68,6 +70,10 @@ class MCPToolHandlers:
         Returns:
             dict: 생성된 메모리 정보
         """
+        # Fallback: auto-detect client from environment if not provided
+        if not client:
+            client = os.environ.get("MEM_MESH_CLIENT")
+
         logger.info_with_details(
             "Tool add called",
             details={"content": content, "tags": tags, "source": source, "client": client},
@@ -236,7 +242,7 @@ class MCPToolHandlers:
             raise
 
     def _compress_search_response(
-        self, result: Any, format: str = "standard"
+        self, result: "SearchResponse", format: str = "standard"
     ) -> Dict[str, Any]:
         """검색 결과 압축"""
         results_list = [
@@ -327,7 +333,7 @@ class MCPToolHandlers:
             logger.error("Error in context", error=str(e))
             raise
 
-    def _compress_context_response(self, result: Any) -> Dict[str, Any]:
+    def _compress_context_response(self, result: "ContextResponse") -> Dict[str, Any]:
         """컨텍스트 응답 압축"""
         primary = result.memory if hasattr(result, "memory") else {}
         related = result.related_memories if hasattr(result, "related_memories") else []
@@ -542,6 +548,7 @@ class MCPToolHandlers:
                 auto_importance=auto_importance,
                 ide_session_id=ide_session_id,
                 client_type=client_type,
+                client=client_type or os.environ.get("MEM_MESH_CLIENT"),
             )
 
             response = result.model_dump()
@@ -557,6 +564,14 @@ class MCPToolHandlers:
                 importance=effective_importance,
                 auto=auto_importance,
             )
+
+            # 실시간 알림 전송
+            if self._notifier:
+                try:
+                    await self._notifier.notify_pin_created(response)
+                except Exception as e:
+                    logger.warning(f"Failed to send pin_add notification: {e}")
+
             return response
         except Exception as e:
             logger.error("Error in pin_add", error=str(e))
@@ -574,7 +589,8 @@ class MCPToolHandlers:
         logger.info("Tool pin_complete called", pin_id=pin_id)
 
         try:
-            from ..core.services.pin import PinAlreadyCompletedError, PinService
+            from ..core.errors import PinAlreadyCompletedError
+            from ..core.services.pin import PinService
 
             db = self._get_database()
             pin_service = PinService(
@@ -608,6 +624,14 @@ class MCPToolHandlers:
                 pin_id=pin_id,
                 suggest_promotion=suggest_promotion,
             )
+
+            # 실시간 알림 전송
+            if self._notifier:
+                try:
+                    await self._notifier.notify_pin_completed(response)
+                except Exception as e:
+                    logger.warning(f"Failed to send pin_complete notification: {e}")
+
             return response
         except Exception as e:
             logger.error("Error in pin_complete", error=str(e))
@@ -640,6 +664,42 @@ class MCPToolHandlers:
                 pin_id=pin_id,
                 memory_id=result["memory_id"],
             )
+
+            # 실시간 알림 전송 (pin → memory 승격)
+            if self._notifier:
+                try:
+                    has_memory_service = (
+                        hasattr(self._storage, "memory_service")
+                        and self._storage.memory_service
+                    )
+                    if has_memory_service:
+                        memory = await self._storage.memory_service.get(
+                            result["memory_id"]
+                        )
+                        if memory:
+                            import json as _json
+
+                            memory_data = {
+                                "id": memory.id,
+                                "content": memory.content,
+                                "project_id": memory.project_id,
+                                "category": memory.category,
+                                "tags": (
+                                    _json.loads(memory.tags) if memory.tags else []
+                                ),
+                                "source": memory.source,
+                                "created_at": memory.created_at,
+                                "updated_at": memory.updated_at,
+                            }
+                            await self._notifier.notify_memory_created(memory_data)
+                    await self._notifier.notify_pin_promoted(
+                        pin_id, result["memory_id"]
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to send pin_promote realtime notification: {e}"
+                    )
+
             return result
         except Exception as e:
             logger.error("Error in pin_promote", error=str(e))
@@ -648,7 +708,7 @@ class MCPToolHandlers:
     async def session_resume(
         self,
         project_id: str,
-        expand: Any = False,
+        expand: Union[bool, str] = False,
         limit: int = 10,
         ide_session_id: Optional[str] = None,
         client_type: Optional[str] = None,
@@ -822,7 +882,8 @@ class MCPToolHandlers:
 
         try:
             from ..core.schemas.relations import RelationCreate, RelationType
-            from ..core.services.relation import MemoryNotFoundError, RelationService
+            from ..core.errors import MemoryNotFoundError
+            from ..core.services.relation import RelationService
 
             db = self._get_database()
             service = RelationService(db)

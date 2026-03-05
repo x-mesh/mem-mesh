@@ -5,6 +5,7 @@ import stat
 from functools import lru_cache
 from pathlib import Path
 
+from app.cli.hooks.keywords import KEYWORD_MATCHER_BLOCK
 from app.cli.prompts.behaviors import REFLECT_CONFIG
 from app.cli.prompts.renderers import (
     VERSION_MARKER,
@@ -48,6 +49,8 @@ def _render_template(
     result = result.replace("__REFLECT_TIMEOUT__", str(REFLECT_CONFIG.timeout_seconds))
     # Enhanced stop hook prompt
     result = result.replace("__ENHANCED_PROMPT__", render_enhanced_stop_prompt())
+    # Keyword matcher block (single source of truth)
+    result = result.replace("__KEYWORD_MATCHER__", KEYWORD_MATCHER_BLOCK)
     return result
 
 
@@ -69,6 +72,8 @@ def _render_local_template(
     result = result.replace("__REFLECT_TIMEOUT__", str(REFLECT_CONFIG.timeout_seconds))
     # Enhanced stop hook prompt
     result = result.replace("__ENHANCED_PROMPT__", render_enhanced_stop_prompt())
+    # Keyword matcher block (single source of truth)
+    result = result.replace("__KEYWORD_MATCHER__", KEYWORD_MATCHER_BLOCK)
     return result
 
 

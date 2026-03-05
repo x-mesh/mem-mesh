@@ -41,8 +41,10 @@ def temp_db():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     yield path
-    if os.path.exists(path):
-        os.unlink(path)
+    for ext in ["", "-wal", "-shm"]:
+        p = path + ext
+        if os.path.exists(p):
+            os.unlink(p)
 
 
 @pytest.fixture

@@ -6,12 +6,13 @@ services:
     image: mem-mesh:dev
     container_name: mem-mesh-dev
     ports:
-      - "8001:8000"
+      - "8000:8000"
     volumes:
       - .:/app
       - /app/__pycache__
       - /app/.pytest_cache
       - /app/.hypothesis
+      - model-cache:/home/memmesh/.cache/huggingface
     environment:
       - DATABASE_PATH=/app/data/memories.db
       - LOG_LEVEL=DEBUG
@@ -19,11 +20,15 @@ services:
       - PYTHONUNBUFFERED=1
       - MEM_MESH_SERVER_HOST=0.0.0.0
       - MEM_MESH_SERVER_PORT=8000
-      - MEM_MESH_SERVER_WORKERS=2
+      - MEM_MESH_SERVER_WORKERS=3
 
     stdin_open: true
     tty: true
     command: python -m app.web --reload
+
+volumes:
+  model-cache:
+    name: mem-mesh-model-cache
 
 networks:
   default:

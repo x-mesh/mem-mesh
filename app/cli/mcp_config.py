@@ -11,12 +11,20 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from urllib.request import urlopen
+from urllib.error import URLError
 
 from app.cli.hooks.colors import bold, dim, err, info, ok, warn
 
 # ── Tool Registry ──
 
 MCP_TOOLS: list[dict] = [
+    {
+        "name": "Claude Code",
+        "key": "claude-code",
+        "config_path": Path.home() / ".claude.json",
+        "detect": lambda: (Path.home() / ".claude").exists(),
+    },
     {
         "name": "Cursor",
         "key": "cursor",
@@ -98,6 +106,7 @@ def generate_mcp_entry(
     mode: str,
     url: str = "http://localhost:8000",
     auto_approve: bool = True,
+    tool_key: str = "",
 ) -> dict:
     """Generate a mem-mesh MCP server entry.
 
@@ -105,6 +114,7 @@ def generate_mcp_entry(
         mode: 'sse' or 'stdio'
         url: API server URL (used for SSE mode)
         auto_approve: Whether to add autoApprove list for common tools
+        tool_key: Tool registry key (e.g. 'claude-code', 'cursor') for MEM_MESH_CLIENT env
     """
     approve_list = [
         "add", "search", "context", "update", "delete", "stats",
@@ -117,7 +127,7 @@ def generate_mcp_entry(
     if mode == "sse":
         entry: dict = {
             "url": f"{url.rstrip('/')}/mcp/sse",
-            "transport": "sse",
+            "transport": "http",
         }
     else:
         # stdio mode — use the current Python interpreter
@@ -126,6 +136,11 @@ def generate_mcp_entry(
             "command": python_path,
             "args": ["-m", "app.mcp_stdio"],
         }
+
+    # Inject MEM_MESH_CLIENT env so server auto-tags memories with source tool
+    if tool_key:
+        client_name = tool_key.replace("-", "_")
+        entry["env"] = {"MEM_MESH_CLIENT": client_name}
 
     if auto_approve:
         entry["autoApprove"] = approve_list
@@ -221,6 +236,44 @@ def remove_tool_config(tool: dict) -> tuple[bool, str]:
         return False, f"write failed: {e}"
 
     return True, "removed"
+
+
+def verify_tool_config(tool: dict, url: str = "http://localhost:8000") -> tuple[bool, str]:
+    """Verify that mem-mesh MCP is correctly configured for a tool.
+
+    Checks:
+    1. Config file has mcpServers.mem-mesh entry
+    2. For SSE mode, tests URL reachability (health check)
+
+    Returns (success, message).
+    """
+    config_path: Path = tool["config_path"]
+
+    if not config_path.exists():
+        return False, "config file not found"
+
+    data = read_config(config_path)
+    entry = data.get("mcpServers", {}).get(MCP_SERVER_KEY)
+    if not entry:
+        return False, "mem-mesh entry missing"
+
+    # SSE mode — check URL reachability
+    if "url" in entry:
+        sse_url = entry["url"]
+        # Derive health endpoint from SSE URL
+        health_url = sse_url.rsplit("/mcp/sse", 1)[0] + "/health"
+        try:
+            with urlopen(health_url, timeout=3) as resp:
+                if resp.status == 200:
+                    return True, f"configured (SSE, server reachable)"
+        except (URLError, OSError):
+            return True, f"configured (SSE, server not reachable — start with `python -m app.web`)"
+
+    # stdio mode
+    if "command" in entry:
+        return True, "configured (stdio)"
+
+    return True, "configured"
 
 
 # ── Interactive Flow ──
@@ -341,21 +394,30 @@ def run_mcp_setup(
         print()
         return
 
-    # Generate MCP entry
-    mcp_entry = generate_mcp_entry(mode=mode, url=url)
-
-    # Show what will be written
+    # Show sample MCP entry
+    sample_entry = generate_mcp_entry(mode=mode, url=url, tool_key=targets[0]["key"])
     print(f"  {bold('MCP entry')} ({mode} mode):")
-    entry_json = json.dumps({"mem-mesh": mcp_entry}, indent=2)
+    entry_json = json.dumps({"mem-mesh": sample_entry}, indent=2)
     for line in entry_json.splitlines():
         print(f"    {dim(line)}")
     print()
 
-    # Configure each tool
+    # Configure each tool (with tool-specific MEM_MESH_CLIENT env)
     for t in targets:
+        mcp_entry = generate_mcp_entry(mode=mode, url=url, tool_key=t["key"])
         success, msg = configure_tool(t, mcp_entry, do_backup=True)
         if success:
             print(f"  {ok('✓')} {t['name']}: {msg}")
         else:
             print(f"  {err('✗')} {t['name']}: {msg}")
+    print()
+
+    # Verify configuration
+    print(f"  {bold('Verification:')}")
+    for t in targets:
+        _ok, vmsg = verify_tool_config(t, url=url)
+        if _ok:
+            print(f"  {ok('✓')} {t['name']}: {vmsg}")
+        else:
+            print(f"  {warn('!')} {t['name']}: {vmsg}")
     print()

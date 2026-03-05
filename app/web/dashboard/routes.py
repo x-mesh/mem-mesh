@@ -15,13 +15,11 @@ from app.core.schemas.pins import PinCreate, PinUpdate
 from app.core.schemas.projects import ProjectUpdate
 from app.core.schemas.requests import RuleUpdateParams
 from app.core.services.embedding_manager import EmbeddingManagerService
-from app.core.services.pin import (
-    InvalidStatusTransitionError,
-    PinNotFoundError,
-    PinService,
-)
+from app.core.errors import InvalidStatusTransitionError, PinNotFoundError
+from app.core.services.pin import PinService
 from app.core.services.project import ProjectService
-from app.core.services.session import NoActiveSessionError, SessionService
+from app.core.errors import NoActiveSessionError
+from app.core.services.session import SessionService
 from app.core.services.stats import StatsService
 
 from ..common.dependencies import (
@@ -32,6 +30,7 @@ from ..common.dependencies import (
     get_session_service,
     get_stats_service,
 )
+from ..websocket.realtime import RealtimeNotifier
 from .route_modules import router as modular_router
 
 logger = logging.getLogger(__name__)
@@ -39,6 +38,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Dashboard API"])
 
 router.include_router(modular_router)
+
+_notifier = RealtimeNotifier()
 
 
 def _rules_root() -> Path:
@@ -73,6 +74,40 @@ def _resolve_rule_path(rule_entry: dict) -> Path:
     if not str(candidate).startswith(str(base)):
         raise ValueError("Invalid rule path")
     return candidate
+
+
+@router.post("/internal/notify")
+async def internal_notify(payload: dict) -> dict:
+    """stdio MCP -> WebSocket broadcast bridge.
+
+    stdio MCP 서버가 HttpNotifier를 통해 이 엔드포인트로 이벤트를 보내면,
+    웹서버의 RealtimeNotifier가 WebSocket으로 브로드캐스트합니다.
+    """
+    event_type = payload.get("type")
+    data = payload.get("data", {})
+
+    if event_type == "memory_created":
+        await _notifier.notify_memory_created(data.get("memory", {}))
+    elif event_type == "memory_updated":
+        await _notifier.notify_memory_updated(
+            data.get("memory_id", ""), data.get("memory", {})
+        )
+    elif event_type == "memory_deleted":
+        await _notifier.notify_memory_deleted(
+            data.get("memory_id", ""), data.get("project_id")
+        )
+    elif event_type == "pin_created":
+        await _notifier.notify_pin_created(data.get("pin", {}))
+    elif event_type == "pin_completed":
+        await _notifier.notify_pin_completed(data.get("pin", {}))
+    elif event_type == "pin_promoted":
+        await _notifier.notify_pin_promoted(
+            data.get("pin_id", ""), data.get("memory_id", "")
+        )
+    else:
+        return {"status": "ignored", "reason": f"unknown event type: {event_type}"}
+
+    return {"status": "ok", "type": event_type}
 
 
 @router.get("/")
@@ -279,7 +314,9 @@ async def select_embedding_model(
     # 모델 변경 + DB에 선택 저장 + 백그라운드 다운로드 시작
     embedding_service.switch_model(resolved)
 
-    # DB에 선택한 모델 저장 (재시작 시 자동 로드용)
+    # DB에 선택한 모델 저장
+    # target_embedding_model: 사용자가 선택한 목표 모델 (재시작 시 자동 로드용)
+    # embedding_model: 실제 데이터의 모델 (마이그레이션 완료 후 업데이트)
     from ..lifespan import get_services
     services = get_services()
     db = services.get("db")
@@ -287,8 +324,17 @@ async def select_embedding_model(
         try:
             from app.core.embeddings.service import MODEL_DIMENSIONS
             dim = MODEL_DIMENSIONS.get(resolved, 384)
-            await db._migrator.set_embedding_metadata("embedding_model", resolved)
-            await db._migrator.set_embedding_metadata("embedding_dimension", str(dim))
+
+            # 항상 target 저장 (재시작 시 이 모델로 로드)
+            await db._migrator.set_embedding_metadata("target_embedding_model", resolved)
+            await db._migrator.set_embedding_metadata("target_embedding_dimension", str(dim))
+
+            # 기존 메모리가 없으면 embedding_model도 바로 업데이트 (fresh DB)
+            cursor = await db.execute("SELECT COUNT(*) as count FROM memories")
+            memory_count = cursor.fetchone()["count"]
+            if memory_count == 0:
+                await db._migrator.set_embedding_metadata("embedding_model", resolved)
+                await db._migrator.set_embedding_metadata("embedding_dimension", str(dim))
         except Exception as e:
             logger.warning(f"Failed to persist model selection: {e}")
 
@@ -588,9 +634,15 @@ async def create_pin(
             importance=pin.importance,
             tags=pin.tags,
             user_id=pin.user_id,
+            client=pin.client,
         )
 
-        return created_pin.dict()
+        result = created_pin.dict()
+        try:
+            await _notifier.notify_pin_created(result)
+        except Exception:
+            pass
+        return result
     except Exception as e:
         logger.error(f"Create pin error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -688,6 +740,10 @@ async def complete_pin(pin_id: str, pin_service: PinService = Depends(get_pin_se
                 f"This Pin has importance {pin.importance}. Would you like to promote it to Memory?"
             )
 
+        try:
+            await _notifier.notify_pin_completed(result)
+        except Exception:
+            pass
         return result
     except PinNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -707,6 +763,12 @@ async def promote_pin(pin_id: str, pin_service: PinService = Depends(get_pin_ser
     """
     try:
         result = await pin_service.promote_to_memory(pin_id)
+        memory_id = result.get("memory_id", "")
+        if memory_id:
+            try:
+                await _notifier.notify_pin_promoted(pin_id, memory_id)
+            except Exception:
+                pass
         return result
     except PinNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

@@ -69,6 +69,9 @@ class DashboardPage extends HTMLElement {
       wsClient.off('memory_created', this._bh.c);
       wsClient.off('memory_updated', this._bh.u);
       wsClient.off('memory_deleted', this._bh.d);
+      wsClient.off('pin_created', this._bh.pc);
+      wsClient.off('pin_completed', this._bh.pcomp);
+      wsClient.off('pin_promoted', this._bh.pprom);
       wsClient.off('reconnected', this._bh.r);
     }
     if (this._boundKeydown) {
@@ -84,13 +87,18 @@ class DashboardPage extends HTMLElement {
       c: this.onMemoryCreated.bind(this),
       u: this.onMemoryUpdated.bind(this),
       d: this.onMemoryDeleted.bind(this),
+      pc: this.onPinCreated.bind(this),
+      pcomp: this.onPinCompleted.bind(this),
+      pprom: this.onPinPromoted.bind(this),
       r: () => { this.page = 0; this.memories = []; this.loadData(); },
     };
     wsClient.on('memory_created', this._bh.c);
     wsClient.on('memory_updated', this._bh.u);
     wsClient.on('memory_deleted', this._bh.d);
+    wsClient.on('pin_created', this._bh.pc);
+    wsClient.on('pin_completed', this._bh.pcomp);
+    wsClient.on('pin_promoted', this._bh.pprom);
     wsClient.on('reconnected', this._bh.r);
-    // P5: connect()는 main.js에서 전역으로 호출됨
   }
 
   onMemoryCreated({ memory }) {
@@ -112,6 +120,27 @@ class DashboardPage extends HTMLElement {
     this.memories = this.memories.filter(m => m.id !== memory_id);
     this.renderMemoryList();
     this.refreshStats();
+  }
+
+  onPinCreated({ pin }) {
+    if (!pin) return;
+    if (this.activePins.some(p => p.id === pin.id)) return;
+    this.activePins.unshift(pin);
+    this.renderPins();
+  }
+
+  onPinCompleted({ pin }) {
+    if (!pin) return;
+    // completed pin 제거
+    this.activePins = this.activePins.filter(p => p.id !== pin.id);
+    this.renderPins();
+  }
+
+  onPinPromoted({ pin_id }) {
+    if (!pin_id) return;
+    // promoted pin 제거 (memory_created 이벤트로 memory 추가됨)
+    this.activePins = this.activePins.filter(p => p.id !== pin_id);
+    this.renderPins();
   }
 
   // ── Events ──
@@ -339,10 +368,10 @@ class DashboardPage extends HTMLElement {
     const allPins = this.activePins || [];
     if (allPins.length === 0) { el.innerHTML = ''; return; }
 
-    // Sort: importance DESC, then newest first. Show top 5.
+    // Sort: importance DESC, then newest first. Show top 10.
     const sorted = [...allPins].sort((a, b) => (b.importance || 3) - (a.importance || 3) || new Date(b.created_at) - new Date(a.created_at));
-    const pins = sorted.slice(0, 5);
-    const hasMore = allPins.length > 5;
+    const pins = sorted.slice(0, 10);
+    const hasMore = allPins.length > 10;
 
     const statusColors = { open: 'var(--text-muted)', in_progress: '#d97706' };
 
@@ -350,12 +379,14 @@ class DashboardPage extends HTMLElement {
       const proj = pin.project_id || '—';
       const importance = pin.importance || 3;
       const statusColor = statusColors[pin.status] || 'var(--text-muted)';
-      const preview = (pin.content || '').length > 40 ? pin.content.substring(0, 40) + '…' : pin.content;
+      const preview = (pin.content || '').length > 50 ? pin.content.substring(0, 50) + '…' : pin.content;
 
-      return `<div class="pin-row">
-        <span class="pin-status-dot" style="background:${statusColor}"></span>
-        <span class="pin-imp pin-imp-${importance}">P${importance}</span>
-        <span class="pin-project">${this.esc(proj)}</span>
+      return `<div class="pin-card">
+        <div class="pin-card-top">
+          <span class="pin-status-dot" style="background:${statusColor}"></span>
+          <span class="pin-imp pin-imp-${importance}">P${importance}</span>
+          <span class="pin-project">${this.esc(proj)}</span>
+        </div>
         <span class="pin-content">${this.esc(preview)}</span>
       </div>`;
     }).join('');
@@ -367,7 +398,7 @@ class DashboardPage extends HTMLElement {
           <span class="pins-count">${allPins.length}</span>
           ${hasMore ? '<a class="pins-more" href="#/work">View all</a>' : ''}
         </div>
-        <div class="pins-list">${pinRows}</div>
+        <div class="pins-grid">${pinRows}</div>
       </div>
     `;
   }

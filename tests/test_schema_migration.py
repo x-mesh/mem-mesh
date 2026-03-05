@@ -15,8 +15,10 @@ def temp_db_path():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     yield path
-    if os.path.exists(path):
-        os.unlink(path)
+    for ext in ["", "-wal", "-shm"]:
+        p = path + ext
+        if os.path.exists(p):
+            os.unlink(p)
 
 
 @pytest.mark.asyncio
@@ -135,8 +137,10 @@ async def test_column_exists_check():
 
         await conn.close()
     finally:
-        if os.path.exists(path):
-            os.unlink(path)
+        for ext in ["", "-wal", "-shm"]:
+            p = path + ext
+            if os.path.exists(p):
+                os.unlink(p)
 
 
 @pytest.mark.asyncio
@@ -179,5 +183,7 @@ async def test_add_column_if_missing():
 
         await conn.close()
     finally:
-        if os.path.exists(path):
-            os.unlink(path)
+        for ext in ["", "-wal", "-shm"]:
+            p = path + ext
+            if os.path.exists(p):
+                os.unlink(p)

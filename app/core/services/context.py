@@ -11,13 +11,9 @@ from ..database.base import Database
 from ..embeddings.service import EmbeddingService
 from ..schemas.responses import ContextResponse, RelatedMemory, SearchResult
 
+from ..errors import ContextNotFoundError
+
 logger = logging.getLogger(__name__)
-
-
-class ContextNotFoundError(Exception):
-    """맥락을 찾을 수 없을 때 발생하는 예외"""
-
-    # Exception subclass - no additional implementation needed
 
 
 class ContextService:

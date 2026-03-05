@@ -7,15 +7,28 @@ from typing import Optional
 
 from app.cli.prompts.behaviors import PROMPT_VERSION
 from app.cli.prompts.renderers import (
-    VERSION_MARKER,
-    render_cursor_followup,
     render_kiro_auto_create_pin,
     render_kiro_auto_save,
     render_kiro_load_context,
-    render_rules_text,
 )
 from app.cli.hooks.renderer import _write_script
+from app.cli.hooks.cursor_adapters import (
+    adapt_cursor_before_submit_prompt,
+    adapt_cursor_precompact,
+    adapt_cursor_subagent_start,
+    adapt_cursor_subagent_stop,
+)
 from app.cli.hooks.installer import _build_cursor_hooks_settings
+from app.cli.hooks.templates import (
+    CURSOR_PROJECT_AUTO_SAVE_TEMPLATE,
+    CURSOR_PROJECT_SESSION_END_TEMPLATE,
+    CURSOR_PROJECT_SESSION_START_TEMPLATE,
+    LOCAL_PRECOMPACT_HOOK_TEMPLATE,
+    LOCAL_SUBAGENT_START_HOOK_TEMPLATE,
+    LOCAL_SUBAGENT_STOP_HOOK_TEMPLATE,
+    LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
+)
+from app.cli.hooks.renderer import _render_local_template
 from app.cli.hooks.json_ops import _remove_mem_mesh_hooks_from_json
 
 
@@ -78,134 +91,38 @@ def _sync_cursor_hooks(project_root: Path, project_id: str) -> None:
     """Regenerate project-local Cursor hooks from shared prompts."""
     cursor_dir = project_root / ".cursor" / "hooks"
     cursor_dir.mkdir(parents=True, exist_ok=True)
-
-    # session-start: uses Python direct import (project-local)
-    session_start_content = f"""#!/bin/bash
-{VERSION_MARKER}
-# mem-mesh Session Start Hook for Cursor (project-local)
-# Injects mem-mesh usage instructions into the session context.
-
-set -euo pipefail
-
-INPUT=$(cat)
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-
-RESUME_OUTPUT=""
-RESUME_OUTPUT=$(python3 -c "
-import sys, json
-sys.path.insert(0, '$PROJECT_ROOT')
-try:
-    from app.core.services.pin_service import PinService
-    from app.core.storage.direct import DirectStorageManager
-    import asyncio
-
-    async def get_resume():
-        storage = DirectStorageManager()
-        await storage.initialize()
-        pin_svc = PinService(storage)
-        result = await pin_svc.session_resume('{project_id}', expand='smart')
-        return json.dumps(result, ensure_ascii=False, default=str)
-
-    print(asyncio.run(get_resume()))
-except Exception as e:
-    print(json.dumps({{'error': str(e)}}))
-" 2>/dev/null) || RESUME_OUTPUT='{{"error": "mem-mesh not available"}}'
-
-RULES_TEXT="{render_rules_text(project_id)}"
-
-CONTEXT="## mem-mesh Memory Integration (Auto-loaded)
-
-### 세션 복원 결과
-\\`\\`\\`json
-${{RESUME_OUTPUT}}
-\\`\\`\\`
-
-### 작업 규칙
-$RULES_TEXT"
-
-python3 -c "
-import json, sys
-ctx = sys.stdin.read()
-print(json.dumps({{'additional_context': ctx}}))
-" <<< "$CONTEXT"
-"""
-
-    # auto-save (stop event)
-    followup_msg = render_cursor_followup(project_id)
-    auto_save_content = f"""#!/bin/bash
-{VERSION_MARKER}
-# mem-mesh Auto-Save Hook for Cursor (stop event, project-local)
-
-set -euo pipefail
-
-INPUT=$(cat)
-
-HAS_TOOL_USE=$(echo "$INPUT" | python3 -c "
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    transcript = data.get('transcript', [])
-    meaningful = any(
-        msg.get('type') == 'tool_use' and
-        msg.get('tool_name', '') in ('Edit', 'Write', 'Bash', 'NotebookEdit')
-        for msg in transcript
-        if isinstance(msg, dict)
+    session_start_content = _render_local_template(
+        CURSOR_PROJECT_SESSION_START_TEMPLATE, str(project_root), project_id=project_id
+    ).replace("__PROJECT_ID__", project_id)
+    auto_save_content = _render_local_template(
+        CURSOR_PROJECT_AUTO_SAVE_TEMPLATE, str(project_root), project_id=project_id
     )
-    print('true' if meaningful else 'false')
-except Exception:
-    print('false')
-" 2>/dev/null) || HAS_TOOL_USE="false"
+    session_end_content = _render_local_template(
+        CURSOR_PROJECT_SESSION_END_TEMPLATE, str(project_root), project_id=project_id
+    ).replace("__PROJECT_ID__", project_id)
 
-if [ "$HAS_TOOL_USE" = "true" ]; then
-    python3 -c "
-import json
-print(json.dumps({{'followup_message': '''{followup_msg}'''}}))
-"
-else
-    echo '{{}}'
-fi
-"""
-
-    # session-end
-    session_end_content = f"""#!/bin/bash
-{VERSION_MARKER}
-# mem-mesh Session End Hook for Cursor (project-local)
-
-set -euo pipefail
-
-INPUT=$(cat)
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-
-python3 -c "
-import sys, json
-sys.path.insert(0, '$PROJECT_ROOT')
-try:
-    from app.core.services.pin_service import PinService
-    from app.core.storage.direct import DirectStorageManager
-    import asyncio
-
-    async def end_session():
-        storage = DirectStorageManager()
-        await storage.initialize()
-        pin_svc = PinService(storage)
-        result = await pin_svc.session_end('{project_id}')
-        return result
-
-    asyncio.run(end_session())
-except Exception:
-    pass
-" 2>/dev/null || true
-"""
+    before_submit_prompt_content = adapt_cursor_before_submit_prompt(
+        _render_local_template(LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE, str(project_root))
+    )
+    precompact_content = adapt_cursor_precompact(
+        _render_local_template(LOCAL_PRECOMPACT_HOOK_TEMPLATE, str(project_root))
+    )
+    subagent_start_content = adapt_cursor_subagent_start(
+        _render_local_template(LOCAL_SUBAGENT_START_HOOK_TEMPLATE, str(project_root))
+    )
+    subagent_stop_content = adapt_cursor_subagent_stop(
+        _render_local_template(LOCAL_SUBAGENT_STOP_HOOK_TEMPLATE, str(project_root))
+    )
 
     print("[cursor] Regenerating project-local hooks...")
     scripts = {
         "mem-mesh-session-start.sh": session_start_content,
         "mem-mesh-auto-save.sh": auto_save_content,
         "mem-mesh-session-end.sh": session_end_content,
+        "mem-mesh-before-submit-prompt.sh": before_submit_prompt_content,
+        "mem-mesh-precompact.sh": precompact_content,
+        "mem-mesh-subagent-start.sh": subagent_start_content,
+        "mem-mesh-subagent-stop.sh": subagent_stop_content,
     }
     for name, content in scripts.items():
         _write_script(cursor_dir / name, content)

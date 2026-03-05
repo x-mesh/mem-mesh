@@ -10,6 +10,8 @@ class OnboardingPage extends HTMLElement {
     this.models = [];
     this.selectedModel = null;
     this.pollInterval = null;
+    this._wsActive = false;  // WebSocket이 진행률을 보내고 있는지
+    this._lastWsUpdate = 0;  // 마지막 WS 업데이트 시각
   }
 
   connectedCallback() {
@@ -457,13 +459,19 @@ class OnboardingPage extends HTMLElement {
       }
     }
 
-    const messages = {
-      downloading: 'Downloading model files...',
-      loading: 'Loading model into memory (this may take a moment)...',
-      ready: 'Model ready! Redirecting...',
-      error: 'An error occurred.',
-    };
-    if (text) text.textContent = messages[data.status] || `${pct}%`;
+    if (text) {
+      if (data.status === 'downloading') {
+        text.textContent = pct > 0 ? `Downloading model files... ${pct}%` : 'Preparing download...';
+      } else if (data.status === 'loading') {
+        text.textContent = pct >= 92 ? 'Verifying model...' : 'Loading model into memory...';
+      } else if (data.status === 'ready') {
+        text.textContent = 'Model ready! Redirecting...';
+      } else if (data.status === 'error') {
+        text.textContent = 'An error occurred.';
+      } else {
+        text.textContent = `${pct}%`;
+      }
+    }
 
     if (data.status === 'ready') {
       this.onModelReady();
@@ -475,6 +483,10 @@ class OnboardingPage extends HTMLElement {
   startPolling() {
     if (this.pollInterval) clearInterval(this.pollInterval);
     this.pollInterval = setInterval(async () => {
+      // WebSocket이 활발하면 polling 건너뛰기 (3초 이내 WS 이벤트)
+      if (this._wsActive && Date.now() - this._lastWsUpdate < 3000) {
+        return;
+      }
       try {
         const res = await fetch('/api/embeddings/loading-status');
         const data = await res.json();
@@ -486,14 +498,18 @@ class OnboardingPage extends HTMLElement {
       } catch (e) {
         // Server might be busy, keep polling
       }
-    }, 1500);
+    }, 2000);
   }
 
   setupWebSocket() {
-    // Listen for model_download events via existing WebSocket
+    // WebSocket 이벤트를 우선적으로 사용
     window.addEventListener('ws:model_download', (e) => {
       const data = e.detail;
-      if (data) this.updateProgress(data);
+      if (data) {
+        this._wsActive = true;
+        this._lastWsUpdate = Date.now();
+        this.updateProgress(data);
+      }
     });
   }
 

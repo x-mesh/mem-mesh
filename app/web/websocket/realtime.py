@@ -26,6 +26,9 @@ class EventType(str, Enum):
     MEMORY_CREATED = "memory_created"
     MEMORY_UPDATED = "memory_updated"
     MEMORY_DELETED = "memory_deleted"
+    PIN_CREATED = "pin_created"
+    PIN_COMPLETED = "pin_completed"
+    PIN_PROMOTED = "pin_promoted"
     STATS_UPDATED = "stats_updated"
     CONNECTION_ESTABLISHED = "connection_established"
     HEARTBEAT = "heartbeat"
@@ -118,7 +121,7 @@ class ConnectionManager:
             await websocket.send_text(json.dumps(message))
             return True
         except Exception as e:
-            logger.error(f"Failed to send message to client {client_id}: {e}")
+            logger.debug(f"Failed to send message to client {client_id}, disconnecting: {e}")
             self.disconnect(client_id)
             return False
 
@@ -247,7 +250,11 @@ class RealtimeNotifier:
 
     @staticmethod
     async def notify_memory_created(memory_data: Dict[str, Any]) -> None:
-        """메모리 생성 알림"""
+        """메모리 생성 알림
+
+        broadcast_to_all로 모든 연결된 클라이언트에게 1회만 전송.
+        (이전에는 broadcast_to_all + broadcast_to_project 이중 전송 버그 있었음)
+        """
         message = {
             "type": EventType.MEMORY_CREATED,
             "data": {
@@ -256,23 +263,10 @@ class RealtimeNotifier:
             },
         }
 
-        # 디버깅: 전송되는 메모리 데이터 로깅
-        logger.info(f"WebSocket notify_memory_created - Memory data: {memory_data}")
-
-        # 전체 브로드캐스트
         total_sent = await connection_manager.broadcast_to_all(message)
-
-        # 프로젝트별 브로드캐스트 (있는 경우)
-        project_id = memory_data.get("project_id")
-        if project_id:
-            project_sent = await connection_manager.broadcast_to_project(
-                project_id, message
-            )
-            logger.debug(
-                f"Memory created notification sent to {total_sent} clients ({project_sent} project subscribers)"
-            )
-        else:
-            logger.debug(f"Memory created notification sent to {total_sent} clients")
+        logger.debug(
+            f"Memory created notification sent to {total_sent} clients",
+        )
 
     @staticmethod
     async def notify_memory_updated(
@@ -289,17 +283,7 @@ class RealtimeNotifier:
         }
 
         total_sent = await connection_manager.broadcast_to_all(message)
-
-        project_id = memory_data.get("project_id")
-        if project_id:
-            project_sent = await connection_manager.broadcast_to_project(
-                project_id, message
-            )
-            logger.debug(
-                f"Memory updated notification sent to {total_sent} clients ({project_sent} project subscribers)"
-            )
-        else:
-            logger.debug(f"Memory updated notification sent to {total_sent} clients")
+        logger.debug(f"Memory updated notification sent to {total_sent} clients")
 
     @staticmethod
     async def notify_memory_deleted(
@@ -316,16 +300,61 @@ class RealtimeNotifier:
         }
 
         total_sent = await connection_manager.broadcast_to_all(message)
+        logger.debug(f"Memory deleted notification sent to {total_sent} clients")
 
-        if project_id:
-            project_sent = await connection_manager.broadcast_to_project(
-                project_id, message
-            )
-            logger.debug(
-                f"Memory deleted notification sent to {total_sent} clients ({project_sent} project subscribers)"
-            )
-        else:
-            logger.debug(f"Memory deleted notification sent to {total_sent} clients")
+    @staticmethod
+    async def notify_pin_created(pin_data: Dict[str, Any]) -> None:
+        """Pin 생성 알림"""
+        message = {
+            "type": EventType.PIN_CREATED,
+            "data": {
+                "pin": pin_data,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+        total_sent = await connection_manager.broadcast_to_all(message)
+        logger.debug(f"Pin created notification sent to {total_sent} clients")
+
+    @staticmethod
+    async def notify_pin_completed(pin_data: Dict[str, Any]) -> None:
+        """Pin 완료 알림"""
+        message = {
+            "type": EventType.PIN_COMPLETED,
+            "data": {
+                "pin": pin_data,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+        total_sent = await connection_manager.broadcast_to_all(message)
+        logger.debug(f"Pin completed notification sent to {total_sent} clients")
+
+    @staticmethod
+    async def notify_pin_promoted(pin_id: str, memory_id: str) -> None:
+        """Pin → Memory 승격 알림"""
+        message = {
+            "type": EventType.PIN_PROMOTED,
+            "data": {
+                "pin_id": pin_id,
+                "memory_id": memory_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+        total_sent = await connection_manager.broadcast_to_all(message)
+        logger.debug(f"Pin promoted notification sent to {total_sent} clients")
+
+    @staticmethod
+    async def broadcast(event_type: str, data: Dict[str, Any]) -> int:
+        """범용 이벤트 브로드캐스트 (model_download 등)"""
+        message = {
+            "type": event_type,
+            "data": {
+                **data,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+        total_sent = await connection_manager.broadcast_to_all(message)
+        logger.debug(f"Broadcast '{event_type}' sent to {total_sent} clients")
+        return total_sent
 
     @staticmethod
     async def notify_stats_updated(stats_data: Dict[str, Any]) -> None:
@@ -364,7 +393,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     except WebSocketDisconnect:
         connection_manager.disconnect(client_id)
     except Exception as e:
-        logger.error(f"WebSocket error for client {client_id}: {e}")
+        logger.debug(f"WebSocket error for client {client_id}: {e}")
         connection_manager.disconnect(client_id)
 
 

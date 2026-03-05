@@ -6,7 +6,8 @@ import tempfile
 import pytest
 
 from app.core.database.base import Database
-from app.core.services.pin import PinNotFoundError, PinService
+from app.core.errors import PinNotFoundError
+from app.core.services.pin import PinService
 from app.core.services.session import SessionService
 
 
@@ -25,14 +26,16 @@ async def db():
 
     # 정리
     await database.close()
-    if os.path.exists(db_path):
-        os.unlink(db_path)
+    for ext in ["", "-wal", "-shm"]:
+        p = db_path + ext
+        if os.path.exists(p):
+            os.unlink(p)
 
 
 @pytest.fixture
-async def pin_service(db):
-    """PinService 인스턴스"""
-    return PinService(db)
+async def pin_service(db, mock_embedding_service):
+    """PinService 인스턴스 (mock embedding으로 promote 시 모델 로드 방지)"""
+    return PinService(db, embedding_service=mock_embedding_service)
 
 
 @pytest.fixture

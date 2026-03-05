@@ -78,7 +78,10 @@ def test_install_cursor_local_is_idempotent_and_no_placeholders(
     second_script = session_start.read_text(encoding="utf-8")
     second_settings = settings_path.read_text(encoding="utf-8")
 
-    assert "__" not in second_script
+    import re
+    assert not re.findall(r"__[A-Z0-9_]+__", second_script), (
+        "Unresolved template placeholders found in rendered script"
+    )
     assert first_script == second_script
     assert first_settings == second_settings
 
@@ -126,6 +129,10 @@ def test_sync_cursor_hooks_writes_project_settings_and_is_idempotent(
             "mem-mesh-session-start.sh",
             "mem-mesh-session-end.sh",
             "mem-mesh-auto-save.sh",
+            "mem-mesh-before-submit-prompt.sh",
+            "mem-mesh-precompact.sh",
+            "mem-mesh-subagent-start.sh",
+            "mem-mesh-subagent-stop.sh",
         )
     }
 
@@ -148,5 +155,9 @@ def test_sync_cursor_hooks_writes_project_settings_and_is_idempotent(
     assert first_scripts == second_scripts
 
     template = _read_json(template_path)
+    assert "beforeSubmitPrompt" in template["hooks"]
+    assert "preCompact" in template["hooks"]
+    assert "subagentStart" in template["hooks"]
+    assert "subagentStop" in template["hooks"]
     template_stop = [entry["command"] for entry in template["hooks"]["stop"]]
     assert str(cursor_dir / "mem-mesh-auto-save.sh") in template_stop

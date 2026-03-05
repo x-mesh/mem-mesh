@@ -2,7 +2,7 @@
 __VERSION_MARKER__
 # Claude Code PreCompact hook: save reminder + auto-end session before compaction
 # Ensures unsaved decisions are flagged and session data is preserved
-# Returns {additionalContext: "..."} to remind AI to save before compaction
+# Returns {hookSpecificOutput: {hookEventName: "PreCompact", additionalContext: "..."}} to remind AI to save
 
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
@@ -90,7 +90,7 @@ curl -s -o /dev/null --max-time 5 \
   -X POST "${API_URL}/api/work/sessions/end-by-project/${PROJECT_DIR}?summary=Auto-ended%20by%20PreCompact%20hook" \
   2>/dev/null || true
 
-# ── Return save reminder as additionalContext ──
+# ── Return save reminder as hookSpecificOutput ──
 if [ -n "$SAVE_HINT" ]; then
   CONTEXT="## [IMPORTANT] Context Compaction — Save Checkpoint
 
@@ -99,8 +99,56 @@ ${SAVE_HINT}
 **컨텍스트가 압축됩니다.** 압축 전에 중요한 결정/버그 수정/설계 변경을 mcp__mem-mesh__add로 저장하세요.
 저장 대상: decision, bug, incident, idea, code_snippet 카테고리만.
 일상적 작업은 pin_add로 충분합니다."
+fi
 
-  jq -n --arg ctx "$CONTEXT" '{additionalContext: $ctx}'
-else
+# ── Query open pins via API ──
+OPEN_PINS=""
+OPEN_PINS=$(curl -s --max-time 3 \
+  "${API_URL}/api/work/sessions/resume/${PROJECT_DIR}?expand=false" \
+  2>/dev/null | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    pins = data.get('pins', [])
+    open_pins = [p for p in pins if p.get('status') in ('open', 'in_progress')]
+    if not open_pins:
+        sys.exit(0)
+    lines = ['## 미완료 Pin (' + str(len(open_pins)) + '개)']
+    lines.append('컨텍스트 압축 전에 완료된 작업은 pin_complete로 정리하세요.')
+    for p in open_pins[:5]:
+        content = p.get('content', '?')[:80]
+        pid = p.get('id', '?')
+        client = p.get('client', '') or ''
+        client_str = f'({client}) ' if client else ''
+        lines.append(f'- [{pid}] {client_str}{content}')
+    print('\n'.join(lines))
+except Exception:
+    pass
+" 2>/dev/null) || OPEN_PINS=""
+
+# ── Combine and output ──
+PARTS=()
+[ -n "$SAVE_HINT" ] && PARTS+=("$CONTEXT")
+[ -n "$OPEN_PINS" ] && PARTS+=("$OPEN_PINS")
+
+if [ ${#PARTS[@]} -eq 0 ]; then
   exit 0
 fi
+
+COMBINED=""
+for part in "${PARTS[@]}"; do
+  if [ -n "$COMBINED" ]; then
+    COMBINED="${COMBINED}
+
+${part}"
+  else
+    COMBINED="$part"
+  fi
+done
+
+jq -n --arg ctx "$COMBINED" '{
+  hookSpecificOutput: {
+    hookEventName: "PreCompact",
+    additionalContext: $ctx
+  }
+}'

@@ -20,6 +20,7 @@ from typing import Optional, Union
 from fastmcp import FastMCP
 
 from ..core.config import Settings
+from ..core.notifier import HttpNotifier
 from ..core.services.cache_manager import get_cache_manager
 from ..core.utils.logger import get_logger, setup_logging
 from ..mcp_common.batch_tools import BatchOperationHandler
@@ -55,7 +56,10 @@ async def initialize_storage(settings: Optional[Settings] = None) -> None:
     global tool_handlers, batch_handler
 
     storage = await storage_manager.initialize(settings)
-    tool_handlers = MCPToolHandlers(storage)
+
+    batch_settings = settings or Settings()
+    notifier = HttpNotifier(f"http://localhost:{batch_settings.server_port}")
+    tool_handlers = MCPToolHandlers(storage, notifier=notifier)
 
     # 배치 핸들러 초기화
     from ..core.database.base import Database
@@ -63,7 +67,6 @@ async def initialize_storage(settings: Optional[Settings] = None) -> None:
     from ..core.services.memory import MemoryService
     from ..core.services.search import SearchService
 
-    batch_settings = settings or Settings()
     db = Database(
         batch_settings.database_path, embedding_dim=batch_settings.embedding_dim
     )
@@ -77,9 +80,10 @@ async def initialize_storage(settings: Optional[Settings] = None) -> None:
         search_service=search_service,
         embedding_service=embedding_service,
         db=db,
+        notifier=notifier,
     )
 
-    logger.info("Tool handlers and batch operations initialized with caching")
+    logger.info("Tool handlers and batch operations initialized with HttpNotifier")
 
 
 async def shutdown_storage() -> None:
@@ -109,10 +113,11 @@ async def add(
     project_id: Optional[str] = None,
     category: str = "task",
     source: str = "mcp",
+    client: Optional[str] = None,
     tags: Optional[list[str]] = None,
 ) -> dict:
     """Internal handler for add tool."""
-    return await _get_handlers().add(content, project_id, category, source, tags)
+    return await _get_handlers().add(content, project_id, category, source, client, tags)
 
 
 @mcp.tool(description=TOOL_DESCRIPTIONS["search"])

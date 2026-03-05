@@ -2,7 +2,7 @@
 __VERSION_MARKER__
 # Claude Code SessionStart hook: inject mem-mesh session context (local mode)
 # Fires on session start AND after compaction (context re-injection)
-# Returns additional_context JSON
+# Returns hookSpecificOutput JSON
 #
 # Features:
 # 1. Session resume data injection (existing)
@@ -103,5 +103,5 @@ ${RULES_TEXT}"
 python3 -c "
 import json, sys
 ctx = sys.stdin.read()
-print(json.dumps({'additional_context': ctx}))
+print(json.dumps({'hookSpecificOutput': {'hookEventName': 'SessionStart', 'additionalContext': ctx}}))
 " <<< "$CONTEXT"

@@ -53,6 +53,23 @@ uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 
 **M5. Stop hook 피드백 즉시 실행** — system-reminder에 `"mem-mesh에 저장하세요"` 또는 `mcp__mem-mesh__add` 지시가 포함되어 있으면, **사용자 메시지 처리 전에 반드시 해당 저장을 먼저 실행**한다. Stop hook은 대화 분석 후 저장이 필요하다고 판단한 것이므로, 이 지시를 무시하거나 뒤로 미루면 안 된다.
 
+**M6. Pin Land the Plane** — Hook은 상태 표시/리마인더만 수행(읽기 전용). **모든 pin 생성·완료·승격은 LLM이 판단하고 실행**한다.
+
+Pin 생성 기준:
+
+| 유형 | Pin | 예시 |
+|---|---|---|
+| 코드 변경 요청 | ✅ | "버그 수정해", "함수 추가해" |
+| 구현/리팩토링 | ✅ | "인증 모듈 구현해", "리팩토링 해줘" |
+| 설정/인프라 작업 | ✅ | "Docker 설정 바꿔", "hook 설치해" |
+| 다단계 작업 | ✅ 각 단계별 | "API 설계하고 구현까지" → 2개 pin |
+| 질문/설명 요청 | ❌ | "이 코드 뭐야?", "차이점 알려줘" |
+| 조회/확인 | ❌ | "상태 확인해", "로그 보여줘" |
+| 대화/피드백 | ❌ | "좋아", "계속", "ㅇㅋ" |
+
+생명주기: `pin_add`(착수 직전) → `pin_complete`(완료 즉시) → importance ≥ 4이면 `pin_promote` 판단.
+pin_complete 없이 작업 응답을 끝내지 않는다.
+
 ---
 
 ## SHOULD (권장)
@@ -61,7 +78,7 @@ uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 
 **S2. 맥락 검색** — 과거 결정/설계 언급 시 `search`로 확인 후 코딩.
 
-**S3. Pin 추적** — 진행 중 작업은 `pin_add` → `pin_complete` → (importance ≥ 4 시 `pin_promote`).
+**S3. Pin client 자동 감지** — `client` 필드는 `MEM_MESH_CLIENT` 환경변수에서 자동 설정됨. 생명주기는 M6 참조.
 
 **S4. 토큰 효율** — 여러 메모리 작업은 `batch_operations`로 묶기.
 
@@ -80,6 +97,7 @@ uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 - **비동기**: 모든 DB/벡터 연산은 async/await
 - **입력 검증**: Pydantic 스키마를 거친 후 서비스 호출
 - **sqlite-vec**: `INSERT OR REPLACE` 금지 → DELETE + INSERT
+- **에러 클래스**: `app.core.errors` 단일 소스 — 서비스에 인라인 에러 정의 금지, 반드시 중앙 모듈에서 import
 - **버전 정보**: `app.core.version` 단일 소스
 - **커밋 메시지**: `type: description` (feat, fix, refactor, docs, test, chore)
 

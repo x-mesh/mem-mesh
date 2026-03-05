@@ -16,8 +16,10 @@ from app.core.schemas.responses import (
     DeleteResponse,
     UpdateResponse,
 )
-from app.core.services.context import ContextNotFoundError, ContextService
-from app.core.services.memory import MemoryNotFoundError, MemoryService
+from app.core.errors import ContextNotFoundError
+from app.core.services.context import ContextService
+from app.core.errors import MemoryNotFoundError
+from app.core.services.memory import MemoryService
 
 from ...common.dependencies import (
     get_context_service,

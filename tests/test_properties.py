@@ -6,7 +6,6 @@ import asyncio
 import os
 import re
 import tempfile
-from unittest.mock import Mock
 
 import pytest
 from hypothesis import HealthCheck, given
@@ -16,7 +15,6 @@ from hypothesis.strategies import composite
 
 from app.core.config import Settings
 from app.core.database.base import Database
-from app.core.embeddings.service import EmbeddingService
 from app.core.schemas.requests import AddParams, SearchParams, StatsParams, UpdateParams
 from app.core.services.memory import MemoryService
 from app.core.storage.direct import DirectStorageBackend
@@ -30,17 +28,15 @@ def valid_memory_content(draw):
 
 @composite
 def valid_project_id(draw):
-    """Valid project ID generator"""
+    """Valid project ID generator — must survive AddParams normalization.
+
+    Normalization converts _ to -, strips trailing -, collapses repeats.
+    Use only already-normalized forms to avoid input != stored mismatch.
+    """
     return draw(
         st.one_of(
             st.none(),
-            st.text(
-                alphabet=st.characters(
-                    whitelist_categories=("Ll", "Nd"), whitelist_characters="-_"
-                ),
-                min_size=1,
-                max_size=20,
-            ).filter(lambda x: x and re.match(r"^[a-z0-9_-]+$", x)),
+            st.from_regex(r"[a-z][a-z0-9]{0,19}", fullmatch=True),
         )
     )
 
@@ -78,14 +74,8 @@ async def temp_db_path():
             os.unlink(path)
 
 
-@pytest.fixture
-def mock_embedding_service():
-    """Mock 임베딩 서비스"""
-    service = Mock(spec=EmbeddingService)
-    service.embed.return_value = [0.1] * 384  # 384차원 벡터
-    service.to_bytes.return_value = b"x" * (384 * 4)  # float32 * 384
-    service.from_bytes.return_value = [0.1] * 384
-    return service
+
+# mock_embedding_service is inherited from conftest.py (Settings-based dimension)
 
 
 class TestConcurrencyProperties:

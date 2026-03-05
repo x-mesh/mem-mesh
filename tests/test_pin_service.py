@@ -8,12 +8,9 @@ import tempfile
 import pytest
 
 from app.core.database.base import Database
+from app.core.errors import PinAlreadyCompletedError, PinNotFoundError
 from app.core.schemas.pins import PinUpdate
-from app.core.services.pin import (
-    PinAlreadyCompletedError,
-    PinNotFoundError,
-    PinService,
-)
+from app.core.services.pin import PinService
 
 
 @pytest.fixture
@@ -34,9 +31,9 @@ async def temp_db():
 
 
 @pytest.fixture
-async def pin_service(temp_db):
-    """PinService 픽스처"""
-    return PinService(temp_db)
+async def pin_service(temp_db, mock_embedding_service):
+    """PinService 픽스처 (mock embedding으로 promote 시 모델 로드 방지)"""
+    return PinService(temp_db, embedding_service=mock_embedding_service)
 
 
 class TestPinCRUD:

@@ -22,6 +22,7 @@ class ErrorCode:
     MEMORY_NOT_FOUND = "MEMORY_NOT_FOUND"
     PIN_NOT_FOUND = "PIN_NOT_FOUND"
     SESSION_NOT_FOUND = "SESSION_NOT_FOUND"
+    NO_ACTIVE_SESSION = "NO_ACTIVE_SESSION"
     CONTEXT_NOT_FOUND = "CONTEXT_NOT_FOUND"
     RELATION_NOT_FOUND = "RELATION_NOT_FOUND"
 
@@ -48,6 +49,7 @@ ERROR_HTTP_STATUS = {
     ErrorCode.MEMORY_NOT_FOUND: 404,
     ErrorCode.PIN_NOT_FOUND: 404,
     ErrorCode.SESSION_NOT_FOUND: 404,
+    ErrorCode.NO_ACTIVE_SESSION: 404,
     ErrorCode.CONTEXT_NOT_FOUND: 404,
     ErrorCode.RELATION_NOT_FOUND: 404,
     ErrorCode.DUPLICATE_MEMORY: 409,
@@ -68,6 +70,7 @@ ERROR_JSONRPC_CODE = {
     ErrorCode.MEMORY_NOT_FOUND: -32602,
     ErrorCode.PIN_NOT_FOUND: -32602,
     ErrorCode.SESSION_NOT_FOUND: -32602,
+    ErrorCode.NO_ACTIVE_SESSION: -32602,
     ErrorCode.CONTEXT_NOT_FOUND: -32602,
     ErrorCode.RELATION_NOT_FOUND: -32602,
     ErrorCode.DUPLICATE_MEMORY: -32602,
@@ -123,6 +126,15 @@ class SessionNotFoundError(MemMeshError):
 
     def __init__(self, session_id: str):
         super().__init__(f"Session not found: {session_id}", session_id=session_id)
+
+
+class NoActiveSessionError(MemMeshError):
+    error_code = ErrorCode.NO_ACTIVE_SESSION
+
+    def __init__(self, project_id: str):
+        super().__init__(
+            f"No active session for project: {project_id}", project_id=project_id
+        )
 
 
 class ContextNotFoundError(MemMeshError):
@@ -190,6 +202,13 @@ class DuplicatePromotionError(MemMeshError):
 # ---------------------------------------------------------------------------
 # 429 / 500 Server Errors
 # ---------------------------------------------------------------------------
+class PinAlreadyCompletedError(MemMeshError):
+    error_code = ErrorCode.INVALID_STATUS_TRANSITION
+
+    def __init__(self, pin_id: str):
+        super().__init__(f"Pin already completed: {pin_id}", pin_id=pin_id)
+
+
 class TokenLimitExceededError(MemMeshError):
     error_code = ErrorCode.TOKEN_LIMIT_EXCEEDED
 

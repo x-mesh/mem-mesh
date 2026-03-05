@@ -1,8 +1,8 @@
 #!/bin/bash
 __VERSION_MARKER__
-# UserPromptSubmit hook: keyword-filtered context search + save reminder (local mode)
+# UserPromptSubmit hook: keyword-filtered context search + save reminder + pin tracking (local mode)
 # stdin: {prompt, session_id, transcript_path, cwd, ...}
-# Output: {additionalContext: "..."} or exit 0 (no injection)
+# Output: {hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: "..."}} or exit 0
 
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
@@ -69,7 +69,7 @@ except Exception:
   fi
 fi
 
-# ── Part 2: Save reminder after N turns without mem-mesh save ──
+# ── Part 2: Save reminder + Pin tracking reminder ──
 SAVE_REMINDER_INTERVAL="${MEM_MESH_SAVE_REMINDER_TURNS:-5}"
 
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
@@ -104,18 +104,41 @@ try:
                         for c in content
                         if isinstance(c, dict)
                     )
-                if 'mcp__mem-mesh__add' in str(content) or 'mcp__mem-mesh__pin_add' in str(content):
+                content_str = str(content)
+                if 'mcp__mem-mesh__add' in content_str or 'mcp__mem-mesh__pin_add' in content_str:
                     last_save_turn = turn
                 assistant_turns = turn
 
+    parts = []
     turns_since_save = assistant_turns - last_save_turn
     if turns_since_save >= interval and assistant_turns >= interval:
-        print(f'mem-mesh에 {turns_since_save}턴 동안 저장하지 않았습니다. 중요한 결정/버그 수정/설계 변경이 있었다면 mcp__mem-mesh__add로 저장하세요.')
+        parts.append(f'mem-mesh에 {turns_since_save}턴 동안 저장하지 않았습니다. 중요한 결정/버그 수정/설계 변경이 있었다면 mcp__mem-mesh__add로 저장하세요.')
+
+    if parts:
+        print('\n'.join(parts))
 except Exception:
     pass
 " "$TRANSCRIPT_PATH" "$SAVE_REMINDER_INTERVAL" 2>/dev/null) || REMINDER=""
 
   [ -n "$REMINDER" ] && PARTS+=("$REMINDER")
+fi
+
+# ── Part 3: Pin tracking reminder (no auto-creation) ──
+LOCAL_API_URL="${MEM_MESH_API_URL:-http://localhost:8000}"
+if [ ${#PROMPT} -ge 15 ]; then
+  PIN_REMINDER=$(curl -s --max-time 2 \
+    "${LOCAL_API_URL}/api/work/pins?project_id=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")&status=open&limit=1" \
+    2>/dev/null | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    pins = data if isinstance(data, list) else data.get('pins', data.get('results', []))
+    if len(pins) == 0:
+        print('현재 추적 중인 pin이 없습니다. 작업 요청이라면 pin_add를 호출하세요.')
+except Exception:
+    pass
+" 2>/dev/null) || PIN_REMINDER=""
+  [ -n "$PIN_REMINDER" ] && PARTS+=("$PIN_REMINDER")
 fi
 
 # ── Combine and output ──
@@ -134,5 +157,10 @@ ${part}"
   fi
 done
 
-jq -n --arg ctx "$COMBINED" '{additionalContext: $ctx}'
+jq -n --arg ctx "$COMBINED" '{
+  hookSpecificOutput: {
+    hookEventName: "UserPromptSubmit",
+    additionalContext: $ctx
+  }
+}'
 exit 0

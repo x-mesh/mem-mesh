@@ -241,6 +241,12 @@ async def streamable_http_post(
         body = await request.json()
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
+    except Exception as e:
+        # ClientDisconnect — 클라이언트가 요청 중간에 연결 해제
+        if "Disconnect" in type(e).__name__:
+            logger.debug(f"Client disconnected during request read: {type(e).__name__}")
+            return Response(status_code=499)
+        raise
 
     if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
         raise HTTPException(status_code=400, detail="Invalid JSON-RPC request")
@@ -324,6 +330,11 @@ async def legacy_message_endpoint(
         body = await request.json()
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
+    except Exception as e:
+        if "Disconnect" in type(e).__name__:
+            logger.debug(f"Client disconnected during legacy request: {type(e).__name__}")
+            return Response(status_code=499)
+        raise
 
     if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
         raise HTTPException(status_code=400, detail="Invalid JSON-RPC request")
@@ -345,6 +356,11 @@ async def stateless_tools_call(request: Request):
         body = await request.json()
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
+    except Exception as e:
+        if "Disconnect" in type(e).__name__:
+            logger.debug(f"Client disconnected during tools/call: {type(e).__name__}")
+            return Response(status_code=499)
+        raise
 
     if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
         raise HTTPException(status_code=400, detail="Invalid JSON-RPC request")

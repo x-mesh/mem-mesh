@@ -58,9 +58,19 @@ class EmbeddingManagerService:
             # Silently ignore errors when counting embeddings - table may not exist yet
             pass
 
-        # 일치 여부 확인
+        # target 모델 조회 (온보딩에서 선택한 목표 모델)
+        target_model = await self.db.get_embedding_metadata("target_embedding_model")
+        target_dim_str = await self.db.get_embedding_metadata("target_embedding_dimension")
+        target_dim = int(target_dim_str) if target_dim_str else None
+
+        # 일치 여부 확인: target이 있으면 target vs stored, 없으면 stored vs current
         needs_migration = False
-        if stored_model and stored_model != current_model:
+        if target_model and stored_model and target_model != stored_model:
+            # 온보딩에서 모델 변경 → 기존 데이터 마이그레이션 필요
+            needs_migration = True
+        elif target_dim and stored_dim and target_dim != stored_dim:
+            needs_migration = True
+        elif stored_model and stored_model != current_model:
             needs_migration = True
         elif stored_dim and stored_dim != current_dim:
             needs_migration = True
@@ -68,6 +78,8 @@ class EmbeddingManagerService:
         return {
             "stored_model": stored_model,
             "stored_dimension": stored_dim,
+            "target_model": target_model,
+            "target_dimension": target_dim,
             "current_model": current_model,
             "current_dimension": current_dim,
             "total_memories": total_memories,
@@ -157,6 +169,25 @@ class EmbeddingManagerService:
         finally:
             self._migration_in_progress = False
 
+    async def _recreate_vector_table(self, new_dim: int) -> None:
+        """차원 변경 시 memory_embeddings 가상 테이블 DROP → 재생성"""
+        conn = self.db.connection
+        try:
+            conn.execute("DROP TABLE IF EXISTS memory_embeddings")
+            conn.execute(f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings USING vec0(
+                    memory_id TEXT PRIMARY KEY,
+                    embedding FLOAT[{new_dim}]
+                )
+            """)
+            conn.commit()
+            logger.info(
+                f"Recreated memory_embeddings virtual table with dimension {new_dim}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to recreate vector table: {e}")
+            raise
+
     async def _run_migration(
         self,
         batch_size: int,
@@ -169,6 +200,16 @@ class EmbeddingManagerService:
             "failed": 0,
             "skipped": 0,
         }
+
+        # 마이그레이션은 모든 벡터를 재생성하므로 항상 vec 테이블을 DROP+CREATE
+        # (메타데이터가 손상된 경우에도 안전하게 동작)
+        new_dim = self.embedding_service.dimension
+        self._migration_progress["message"] = (
+            f"Recreating vector table (dim={new_dim})..."
+        )
+        if progress_callback:
+            progress_callback(self._migration_progress)
+        await self._recreate_vector_table(new_dim)
 
         offset = 0
         batch_num = 0
@@ -238,15 +279,19 @@ class EmbeddingManagerService:
             # 약간의 딜레이로 CPU 부하 분산
             await asyncio.sleep(0.01)
 
-        # 메타데이터 업데이트
+        # 메타데이터 업데이트: 실제 데이터 모델을 새 모델로 갱신
         now = datetime.now(timezone.utc).isoformat()
-        await self.db.set_embedding_metadata(
-            "embedding_model", self.embedding_service.model_name
-        )
-        await self.db.set_embedding_metadata(
-            "embedding_dimension", str(self.embedding_service.dimension)
-        )
+        new_model = self.embedding_service.model_name
+        new_dim = str(self.embedding_service.dimension)
+        await self.db.set_embedding_metadata("embedding_model", new_model)
+        await self.db.set_embedding_metadata("embedding_dimension", new_dim)
         await self.db.set_embedding_metadata("last_migration", now)
+
+        # target과 embedding_model이 일치하면 target 정리
+        target = await self.db.get_embedding_metadata("target_embedding_model")
+        if target and target == new_model:
+            await self.db.set_embedding_metadata("target_embedding_model", "")
+            await self.db.set_embedding_metadata("target_embedding_dimension", "")
 
         self._migration_progress["status"] = "completed"
         self._migration_progress["message"] = (
@@ -269,4 +314,9 @@ class EmbeddingManagerService:
         await self.db.set_embedding_metadata("embedding_model", model_name)
         await self.db.set_embedding_metadata("embedding_dimension", str(dimension))
         await self.db.set_embedding_metadata("metadata_set_manually", now)
+        # target과 일치하면 정리
+        target = await self.db.get_embedding_metadata("target_embedding_model")
+        if target and target == model_name:
+            await self.db.set_embedding_metadata("target_embedding_model", "")
+            await self.db.set_embedding_metadata("target_embedding_dimension", "")
         logger.info(f"Model metadata set manually: {model_name} (dim: {dimension})")

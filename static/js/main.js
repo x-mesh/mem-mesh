@@ -162,7 +162,9 @@ class App {
   /**
    * Check if embedding model is ready. Redirect to onboarding if not.
    */
-  async checkEmbeddingStatus() {
+  async checkEmbeddingStatus(retryCount = 0) {
+    const MAX_RETRIES = 90; // 최대 3분 (2초 × 90)
+
     // Don't redirect if already on onboarding
     if (window.location.pathname === '/onboarding') return;
 
@@ -172,17 +174,61 @@ class App {
       const data = await res.json();
 
       if (data.status === 'not_loaded') {
+        // 모델이 선택되지 않은 경우에만 onboarding으로 이동
         this.router.navigate('/onboarding');
         return;
       } else if (data.status === 'downloading' || data.status === 'loading') {
+        // 모델 로딩/다운로드 중 — 배너 표시 후 재확인
+        this.showModelLoadingBanner(data);
+        if (retryCount < MAX_RETRIES) {
+          setTimeout(() => this.checkEmbeddingStatus(retryCount + 1), 2000);
+        } else {
+          // 타임아웃 — onboarding에서 직접 확인하도록 유도
+          this.hideModelLoadingBanner();
+          this.router.navigate('/onboarding');
+        }
+        return;
+      } else if (data.status === 'error') {
+        // 다운로드/로딩 실패 — onboarding에서 재선택
+        this.hideModelLoadingBanner();
         this.router.navigate('/onboarding');
         return;
       }
-      // 'ready' — check for model migration
+      // 'ready' — 배너 제거 후 정상 진행
+      this.hideModelLoadingBanner();
       this.checkMigrationStatus();
     } catch (e) {
       console.warn('Could not check embedding status:', e);
     }
+  }
+
+  /**
+   * Show a banner indicating model is loading/downloading.
+   */
+  showModelLoadingBanner(data) {
+    let banner = document.getElementById('model-loading-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'model-loading-banner';
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:var(--accent-color,#4f46e5);color:white;padding:8px 16px;font-size:0.85rem;display:flex;align-items:center;gap:12px;justify-content:center;';
+      document.body.prepend(banner);
+    }
+    const pct = Math.round((data.progress || 0) * 100);
+    const statusText = data.status === 'downloading'
+      ? `Downloading model${pct > 0 ? ` (${pct}%)` : ''}...`
+      : `Loading model into memory...`;
+    banner.innerHTML = `
+      <span style="display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
+      <span>${statusText} <code style="background:rgba(255,255,255,0.2);padding:1px 6px;border-radius:3px;font-size:0.8rem;">${data.model || ''}</code></span>
+      <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+    `;
+  }
+
+  /**
+   * Hide model loading banner.
+   */
+  hideModelLoadingBanner() {
+    document.getElementById('model-loading-banner')?.remove();
   }
 
   /**

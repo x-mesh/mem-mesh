@@ -2,7 +2,7 @@
 __VERSION_MARKER__
 # Claude Code SessionStart hook: inject mem-mesh session context
 # Fires on session start AND after compaction (context re-injection)
-# Returns additional_context JSON via /api/work/sessions/resume/{project_id}
+# Returns hookSpecificOutput JSON via /api/work/sessions/resume/{project_id}
 #
 # Features:
 # 1. Session resume data injection (existing)
@@ -77,14 +77,9 @@ try:
             lines.append('**미완료 작업:**')
             for p in open_list:
                 content = p.get('content', '?')[:100]
-                lines.append(f'- [pin] {content}')
-        recent = data.get('recent_memories', [])
-        if recent:
-            lines.append('**최근 맥락:**')
-            for r in recent:
-                cat = r.get('category', '?')
-                content = r.get('content', '')[:120].replace('\n', ' ')
-                lines.append(f'- [{cat}] {content}')
+                client = p.get('client', '') or ''
+                client_str = f'({client}) ' if client else ''
+                lines.append(f'- [pin] {client_str}{content}')
         if not lines:
             lines.append('No recent activity.')
         print('\n'.join(lines))
@@ -111,4 +106,9 @@ ${SESSION_SUMMARY}
 ### Rules
 __RULES_TEXT__"
 
-jq -n --arg ctx "$CONTEXT" '{ additional_context: $ctx }'
+jq -n --arg ctx "$CONTEXT" '{
+  hookSpecificOutput: {
+    hookEventName: "SessionStart",
+    additionalContext: $ctx
+  }
+}'

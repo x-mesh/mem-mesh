@@ -233,7 +233,7 @@ class DatabaseConnection:
 
     @asynccontextmanager
     async def transaction(self):
-        """Transaction context manager."""
+        """Transaction context manager. All execute() calls inside use _execute_raw."""
         if not self.connection:
             raise RuntimeError("Database not connected")
 
@@ -246,7 +246,3 @@ class DatabaseConnection:
                 self.connection.execute("ROLLBACK")
                 raise
 
-    def __del__(self):
-        """Cleanup on destruction."""
-        if self.connection:
-            self.connection.close()

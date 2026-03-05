@@ -15,6 +15,12 @@ from app.cli.hooks.constants import (
     KIRO_HOOKS_DIR,
     KIRO_SETTINGS,
 )
+from app.cli.hooks.cursor_adapters import (
+    adapt_cursor_before_submit_prompt,
+    adapt_cursor_precompact,
+    adapt_cursor_subagent_start,
+    adapt_cursor_subagent_stop,
+)
 from app.cli.hooks.templates import (
     CURSOR_SESSION_START_TEMPLATE,
     CURSOR_STOP_TEMPLATE,
@@ -208,35 +214,7 @@ def _build_cursor_hooks_settings(
     scope: str = "global",
 ) -> Dict[str, Any]:
     """Build Cursor hooks settings from a single spec builder."""
-    if scope == "project":
-        return {
-            "version": 1,
-            "hooks": {
-                "sessionStart": [
-                    {
-                        "type": "command",
-                        "command": str(hooks_dir / "mem-mesh-session-start.sh"),
-                        "timeout": 15,
-                    }
-                ],
-                "sessionEnd": [
-                    {
-                        "type": "command",
-                        "command": str(hooks_dir / "mem-mesh-session-end.sh"),
-                        "timeout": 10,
-                    }
-                ],
-                "stop": [
-                    {
-                        "type": "command",
-                        "command": str(hooks_dir / "mem-mesh-auto-save.sh"),
-                        "timeout": 10,
-                    }
-                ],
-            },
-        }
-
-    return {
+    settings: Dict[str, Any] = {
         "version": 1,
         "hooks": {
             "sessionStart": [
@@ -246,10 +224,31 @@ def _build_cursor_hooks_settings(
                     "timeout": 15,
                 }
             ],
-            "stop": [
+            "beforeSubmitPrompt": [
                 {
                     "type": "command",
-                    "command": str(hooks_dir / "mem-mesh-stop.sh"),
+                    "command": str(hooks_dir / "mem-mesh-before-submit-prompt.sh"),
+                    "timeout": 5,
+                }
+            ],
+            "preCompact": [
+                {
+                    "type": "command",
+                    "command": str(hooks_dir / "mem-mesh-precompact.sh"),
+                    "timeout": 10,
+                }
+            ],
+            "subagentStart": [
+                {
+                    "type": "command",
+                    "command": str(hooks_dir / "mem-mesh-subagent-start.sh"),
+                    "timeout": 5,
+                }
+            ],
+            "subagentStop": [
+                {
+                    "type": "command",
+                    "command": str(hooks_dir / "mem-mesh-subagent-stop.sh"),
                     "timeout": 10,
                 }
             ],
@@ -262,6 +261,25 @@ def _build_cursor_hooks_settings(
             ],
         },
     }
+
+    if scope == "project":
+        settings["hooks"]["stop"] = [
+            {
+                "type": "command",
+                "command": str(hooks_dir / "mem-mesh-auto-save.sh"),
+                "timeout": 10,
+            }
+        ]
+        return settings
+
+    settings["hooks"]["stop"] = [
+        {
+            "type": "command",
+            "command": str(hooks_dir / "mem-mesh-stop.sh"),
+            "timeout": 10,
+        }
+    ]
+    return settings
 
 
 def _install_claude(
@@ -539,7 +557,7 @@ def _install_kiro(url: str, mode: str = "api", path: str = "") -> None:
         except (json.JSONDecodeError, OSError):
             existing = {"hooks": []}
 
-    hooks: List[Any] = existing.get("hooks", [])
+    hooks: List[Dict[str, Any]] = existing.get("hooks", [])
 
     # Remove existing mem-mesh hooks, then add new
     hooks = [h for h in hooks if not h.get("name", "").startswith("mem-mesh:")]
@@ -564,7 +582,10 @@ def _install_cursor(
     session_start_script = CURSOR_HOOKS_DIR / "mem-mesh-session-start.sh"
     track_script = CURSOR_HOOKS_DIR / "mem-mesh-track.sh"
     stop_script = CURSOR_HOOKS_DIR / "mem-mesh-stop.sh"
-
+    before_submit_prompt_script = CURSOR_HOOKS_DIR / "mem-mesh-before-submit-prompt.sh"
+    precompact_script = CURSOR_HOOKS_DIR / "mem-mesh-precompact.sh"
+    subagent_start_script = CURSOR_HOOKS_DIR / "mem-mesh-subagent-start.sh"
+    subagent_stop_script = CURSOR_HOOKS_DIR / "mem-mesh-subagent-stop.sh"
     session_end_script = CURSOR_HOOKS_DIR / "mem-mesh-session-end.sh"
 
     if mode == "local":
@@ -579,6 +600,30 @@ def _install_cursor(
             session_end_script,
             _render_local_template(LOCAL_SESSION_END_HOOK_TEMPLATE, path),
         )
+        _write_script(
+            before_submit_prompt_script,
+            adapt_cursor_before_submit_prompt(
+                _render_local_template(LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE, path)
+            ),
+        )
+        _write_script(
+            precompact_script,
+            adapt_cursor_precompact(
+                _render_local_template(LOCAL_PRECOMPACT_HOOK_TEMPLATE, path)
+            ),
+        )
+        _write_script(
+            subagent_start_script,
+            adapt_cursor_subagent_start(
+                _render_local_template(LOCAL_SUBAGENT_START_HOOK_TEMPLATE, path)
+            ),
+        )
+        _write_script(
+            subagent_stop_script,
+            adapt_cursor_subagent_stop(
+                _render_local_template(LOCAL_SUBAGENT_STOP_HOOK_TEMPLATE, path)
+            ),
+        )
     else:
         _write_script(
             session_start_script,
@@ -587,6 +632,7 @@ def _install_cursor(
                 url,
                 source_tag="cursor-hook",
                 ide_tag="cursor",
+                client_tag="cursor",
             ),
         )
         _write_script(
@@ -596,6 +642,7 @@ def _install_cursor(
                 url,
                 source_tag="cursor-hook",
                 ide_tag="cursor",
+                client_tag="cursor",
             ),
         )
         _write_script(
@@ -605,11 +652,64 @@ def _install_cursor(
                 url,
                 source_tag="cursor-hook",
                 ide_tag="cursor",
+                client_tag="cursor",
+            ),
+        )
+        _write_script(
+            before_submit_prompt_script,
+            adapt_cursor_before_submit_prompt(
+                _render_template(
+                    USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
+                    url,
+                    source_tag="cursor-hook",
+                    ide_tag="cursor",
+                    client_tag="cursor",
+                )
+            ),
+        )
+        _write_script(
+            precompact_script,
+            adapt_cursor_precompact(
+                _render_template(
+                    PRECOMPACT_HOOK_TEMPLATE,
+                    url,
+                    source_tag="cursor-hook",
+                    ide_tag="cursor",
+                    client_tag="cursor",
+                )
+            ),
+        )
+        _write_script(
+            subagent_start_script,
+            adapt_cursor_subagent_start(
+                _render_template(
+                    SUBAGENT_START_HOOK_TEMPLATE,
+                    url,
+                    source_tag="cursor-hook",
+                    ide_tag="cursor",
+                    client_tag="cursor",
+                )
+            ),
+        )
+        _write_script(
+            subagent_stop_script,
+            adapt_cursor_subagent_stop(
+                _render_template(
+                    SUBAGENT_STOP_HOOK_TEMPLATE,
+                    url,
+                    source_tag="cursor-hook",
+                    ide_tag="cursor",
+                    client_tag="cursor",
+                )
             ),
         )
     print(f"  -> {session_start_script}")
     print(f"  -> {stop_script}")
     print(f"  -> {session_end_script}")
+    print(f"  -> {before_submit_prompt_script}")
+    print(f"  -> {precompact_script}")
+    print(f"  -> {subagent_start_script}")
+    print(f"  -> {subagent_stop_script}")
 
     # Remove legacy track script if present
     if track_script.exists():

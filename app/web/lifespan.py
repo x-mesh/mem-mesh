@@ -115,14 +115,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Database connected successfully")
 
         # 임베딩 서비스 초기화 (deferred loading — 서버 즉시 시작)
-        # 1. DB에 저장된 모델이 있으면 우선 사용 (이전 온보딩에서 선택한 모델)
-        # 2. 없으면 settings의 모델 사용
+        # 우선순위: target_embedding_model (온보딩 선택) > embedding_model (DB) > settings
         embedding_model = settings.embedding_model
+        target_model = None
+        db_model = None
         try:
+            target_model = await db._migrator.get_embedding_metadata("target_embedding_model")
             db_model = await db._migrator.get_embedding_metadata("embedding_model")
-            if db_model and db_model != embedding_model:
+            if target_model:
+                if target_model != embedding_model:
+                    logger.info(
+                        "Using target model from onboarding selection",
+                        target_model=target_model,
+                        settings_model=embedding_model,
+                    )
+                embedding_model = target_model
+            elif db_model and db_model != embedding_model:
                 logger.info(
-                    "Using model from DB metadata (previously selected via onboarding)",
+                    "Using model from DB metadata",
                     db_model=db_model,
                     settings_model=embedding_model,
                 )
@@ -140,9 +150,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             model_name=embedding_model, preload=False, defer_loading=True
         )
 
-        # 캐시된 모델이 있으면 백그라운드로 로딩 시작
-        if model_cached:
-            logger.info("Model cached, loading in background")
+        # 모델이 이전에 선택된 적이 있으면 (target_model or db_model),
+        # 캐시 여부와 무관하게 백그라운드 로딩/다운로드 시작
+        _has_configured_model = bool(target_model or db_model)
+
+        if model_cached or _has_configured_model:
+            if model_cached:
+                logger.info("Model cached, loading in background")
+                embedding_service._status = "loading"
+            else:
+                logger.info(
+                    "Model previously selected but not cached, downloading in background",
+                    model=embedding_model,
+                )
+                embedding_service._status = "downloading"
 
             _bg_model_name = embedding_model
 
@@ -164,7 +185,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
             embedding_service.load_model_background(on_progress=_on_model_progress)
         else:
-            logger.info("Model not cached, waiting for user selection via onboarding")
+            logger.info("No model configured, waiting for user selection via onboarding")
 
         # 비즈니스 서비스들 초기화
         logger.info("Initializing business services")
@@ -233,6 +254,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         # WebSocket notifier 가져오기
         from .websocket.realtime import notifier
+
+        # BatchOperationHandler에 notifier 주입
+        if batch_handler:
+            batch_handler._notifier = notifier
 
         # MCP 도구 핸들러에 notifier 주입
         sse.set_tool_handlers(

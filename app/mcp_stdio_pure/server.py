@@ -13,6 +13,7 @@ import json
 import sys
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from ..core.notifier import HttpNotifier
 from ..core.utils.logger import setup_logging
 from ..core.version import MCP_PROTOCOL_VERSION, SERVER_INFO
 from ..mcp_common.dispatcher import MCPDispatcher
@@ -129,7 +130,6 @@ async def initialize_storage():
     global tool_handlers, dispatcher, batch_handler
 
     storage = await storage_manager.initialize()
-    tool_handlers = MCPToolHandlers(storage)
 
     from ..core.config import Settings as PureSettings
     from ..core.database.base import Database
@@ -139,6 +139,9 @@ async def initialize_storage():
     from ..mcp_common.batch_tools import BatchOperationHandler
 
     batch_settings = PureSettings()
+    notifier = HttpNotifier(f"http://localhost:{batch_settings.server_port}")
+    tool_handlers = MCPToolHandlers(storage, notifier=notifier)
+
     db = Database(
         batch_settings.database_path, embedding_dim=batch_settings.embedding_dim
     )
@@ -152,11 +155,12 @@ async def initialize_storage():
         search_service=search_service,
         embedding_service=embedding_service,
         db=db,
+        notifier=notifier,
     )
 
     dispatcher = MCPDispatcher(tool_handlers, batch_handler=batch_handler)
 
-    log.info("Tool handlers and batch handler initialized")
+    log.info("Tool handlers and batch handler initialized with HttpNotifier")
 
 
 async def main():

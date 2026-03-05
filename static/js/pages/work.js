@@ -170,7 +170,7 @@ class WorkPage extends HTMLElement {
     const combo = this.querySelector('.wk-proj-combo');
     if (!combo || !combo.setOptions) return;
     const projectIds = this.projects.length > 0
-      ? this.projects.map(p => p.id)
+      ? [...new Set(this.projects.map(p => p.id))]
       : [...new Set(this.pins.map(p => p.project_id).filter(Boolean))];
     const opts = [{ value: '', text: 'All Projects' }];
     projectIds.forEach(id => opts.push({ value: id, text: id }));
@@ -917,7 +917,7 @@ class WorkPage extends HTMLElement {
   openNewPinOverlay() {
     this._removeOverlays();
     const projectOpts = this.projects.length > 0
-      ? this.projects.map(p => p.id)
+      ? [...new Set(this.projects.map(p => p.id))]
       : [...new Set(this.pins.map(p => p.project_id).filter(Boolean))];
     const defaultProject = this.selectedProject || (projectOpts.length > 0 ? projectOpts[0] : 'default');
 

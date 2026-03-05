@@ -37,11 +37,29 @@ collect_ignore = [
 
 
 # ---------------------------------------------------------------------------
+# 글로벌 싱글톤 정리 (테스트 간 메모리 누적 방지)
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _reset_global_singletons():
+    """매 테스트 후 글로벌 싱글톤 상태 초기화"""
+    yield
+    # cache_manager 싱글톤 리셋
+    from app.core.services import cache_manager
+
+    cache_manager._cache_instance = None
+
+    # query_expander 싱글톤 리셋
+    from app.core.services import query_expander
+
+    query_expander._query_expander = None
+
+
+# ---------------------------------------------------------------------------
 # temp_db: 임시 DB 경로 반환 (path-only)
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def temp_db_path():
-    """임시 SQLite DB 파일 경로 (테스트 후 자동 정리)"""
+    """임시 SQLite DB 파일 경로 (테스트 후 자동 정리, WAL/SHM 포함)"""
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     yield path
@@ -65,24 +83,29 @@ async def temp_db(temp_db_path) -> AsyncGenerator[Database, None]:
 
 # ---------------------------------------------------------------------------
 # mock_embedding_service: 단위 테스트용 임베딩 Mock
+# Settings.embedding_dim과 일치하는 차원 사용
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def mock_embedding_service():
-    """임베딩 서비스 Mock (384차원, 동기)"""
+    """임베딩 서비스 Mock (Settings 차원 기반, 동기)"""
+    from app.core.config import Settings
+
+    dim = Settings().embedding_dim
     service = Mock(spec=EmbeddingService)
-    service.embed.return_value = [0.1] * 384
-    service.to_bytes.return_value = b"\x00" * (384 * 4)
-    service.from_bytes.return_value = [0.1] * 384
-    service.embed_batch.return_value = [[0.1] * 384]
+    service.embed.return_value = [0.1] * dim
+    service.to_bytes.return_value = b"\x00" * (dim * 4)
+    service.from_bytes.return_value = [0.1] * dim
+    service.embed_batch.return_value = [[0.1] * dim]
+    service.dimension = dim
     return service
 
 
 # ---------------------------------------------------------------------------
-# embedding_service: 실제 EmbeddingService (통합 테스트용)
+# embedding_service: 실제 EmbeddingService (통합 테스트용, session scope)
 # ---------------------------------------------------------------------------
-@pytest.fixture
+@pytest.fixture(scope="session")
 def embedding_service():
-    """실제 EmbeddingService (모델 preload 안 함)"""
+    """실제 EmbeddingService (session scope — 모델을 한 번만 로드)"""
     return EmbeddingService(preload=False)
 
 

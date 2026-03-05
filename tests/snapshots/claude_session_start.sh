@@ -1,8 +1,8 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 10
+# mem-mesh-hooks prompt-version: 12
 # Claude Code SessionStart hook: inject mem-mesh session context
 # Fires on session start AND after compaction (context re-injection)
-# Returns additional_context JSON via /api/work/sessions/resume/{project_id}
+# Returns hookSpecificOutput JSON via /api/work/sessions/resume/{project_id}
 #
 # Features:
 # 1. Session resume data injection (existing)
@@ -78,13 +78,6 @@ try:
             for p in open_list:
                 content = p.get('content', '?')[:100]
                 lines.append(f'- [pin] {content}')
-        recent = data.get('recent_memories', [])
-        if recent:
-            lines.append('**최근 맥락:**')
-            for r in recent:
-                cat = r.get('category', '?')
-                content = r.get('content', '')[:120].replace('\n', ' ')
-                lines.append(f'- [{cat}] {content}')
         if not lines:
             lines.append('No recent activity.')
         print('\n'.join(lines))
@@ -115,4 +108,9 @@ ${SESSION_SUMMARY}
 4. **맥락 검색 활용** — 과거 결정/작업/설계가 언급되면 코드 작성 전에 search()로 기존 맥락 확인.
 5. **세션 종료** — 사용자가 완료를 명시하면 요청 처리 후 session_end(project_id="mem-mesh")."
 
-jq -n --arg ctx "$CONTEXT" '{ additional_context: $ctx }'
+jq -n --arg ctx "$CONTEXT" '{
+  hookSpecificOutput: {
+    hookEventName: "SessionStart",
+    additionalContext: $ctx
+  }
+}'
