@@ -115,22 +115,39 @@
   color: var(--text-primary);
 }
 
-.pins-list {
+.pins-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  grid-template-rows: auto auto;
+  gap: 6px;
+  padding: 6px;
+}
+
+.pin-card {
   display: flex;
   flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  font-size: 11px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  min-width: 0;
+  overflow: hidden;
 }
 
-.pin-row {
+.pin-card-top {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px var(--space-3);
-  font-size: 11px;
-  border-bottom: 1px solid var(--border-color);
+  gap: 5px;
 }
 
-.pin-row:last-child {
-  border-bottom: none;
+.pin-card .pin-content {
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pin-status-dot {

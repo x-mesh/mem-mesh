@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 8
+# mem-mesh-hooks prompt-version: 12
 # mem-mesh Auto-Save Hook for Cursor (stop event, project-local)
 
 set -euo pipefail

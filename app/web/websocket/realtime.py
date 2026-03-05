@@ -26,6 +26,9 @@ class EventType(str, Enum):
     MEMORY_CREATED = "memory_created"
     MEMORY_UPDATED = "memory_updated"
     MEMORY_DELETED = "memory_deleted"
+    PIN_CREATED = "pin_created"
+    PIN_COMPLETED = "pin_completed"
+    PIN_PROMOTED = "pin_promoted"
     STATS_UPDATED = "stats_updated"
     CONNECTION_ESTABLISHED = "connection_established"
     HEARTBEAT = "heartbeat"
@@ -298,6 +301,46 @@ class RealtimeNotifier:
 
         total_sent = await connection_manager.broadcast_to_all(message)
         logger.debug(f"Memory deleted notification sent to {total_sent} clients")
+
+    @staticmethod
+    async def notify_pin_created(pin_data: Dict[str, Any]) -> None:
+        """Pin 생성 알림"""
+        message = {
+            "type": EventType.PIN_CREATED,
+            "data": {
+                "pin": pin_data,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+        total_sent = await connection_manager.broadcast_to_all(message)
+        logger.debug(f"Pin created notification sent to {total_sent} clients")
+
+    @staticmethod
+    async def notify_pin_completed(pin_data: Dict[str, Any]) -> None:
+        """Pin 완료 알림"""
+        message = {
+            "type": EventType.PIN_COMPLETED,
+            "data": {
+                "pin": pin_data,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+        total_sent = await connection_manager.broadcast_to_all(message)
+        logger.debug(f"Pin completed notification sent to {total_sent} clients")
+
+    @staticmethod
+    async def notify_pin_promoted(pin_id: str, memory_id: str) -> None:
+        """Pin → Memory 승격 알림"""
+        message = {
+            "type": EventType.PIN_PROMOTED,
+            "data": {
+                "pin_id": pin_id,
+                "memory_id": memory_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+        total_sent = await connection_manager.broadcast_to_all(message)
+        logger.debug(f"Pin promoted notification sent to {total_sent} clients")
 
     @staticmethod
     async def broadcast(event_type: str, data: Dict[str, Any]) -> int:

@@ -32,6 +32,9 @@ from app.cli.prompts.renderers import (
     render_rules_text,
 )
 from app.cli.hooks.templates import (
+    CURSOR_PROJECT_AUTO_SAVE_TEMPLATE,
+    CURSOR_PROJECT_SESSION_END_TEMPLATE,
+    CURSOR_PROJECT_SESSION_START_TEMPLATE,
     CURSOR_SESSION_START_TEMPLATE,
     CURSOR_STOP_TEMPLATE,
     ENHANCED_STOP_HOOK_TEMPLATE,
@@ -1431,6 +1434,16 @@ except Exception:
     pass
 " 2>/dev/null || true
 """
+
+    session_start_content = _render_local_template(
+        CURSOR_PROJECT_SESSION_START_TEMPLATE, str(project_root), project_id=project_id
+    ).replace("__PROJECT_ID__", project_id)
+    auto_save_content = _render_local_template(
+        CURSOR_PROJECT_AUTO_SAVE_TEMPLATE, str(project_root), project_id=project_id
+    )
+    session_end_content = _render_local_template(
+        CURSOR_PROJECT_SESSION_END_TEMPLATE, str(project_root), project_id=project_id
+    ).replace("__PROJECT_ID__", project_id)
 
     before_submit_prompt_content = adapt_cursor_before_submit_prompt(
         _render_local_template(LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE, str(project_root))

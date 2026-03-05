@@ -90,8 +90,109 @@ CURSOR_SESSION_END_API = EvalScenario(
     expected_content_patterns=[],
 )
 
+# ---------------------------------------------------------------------------
+# Scenario: Cursor beforeSubmitPrompt hook format
+# ---------------------------------------------------------------------------
+
+CURSOR_BEFORE_SUBMIT_FORMAT = EvalScenario(
+    id="cursor_hooks_04",
+    name="Cursor beforeSubmitPrompt additionalContext JSON",
+    description=(
+        "Cursor beforeSubmitPrompt hook이 additionalContext를 포함한 "
+        "hookSpecificOutput JSON을 출력하는지 검증"
+    ),
+    tier=EvalTier.DETERMINISTIC,
+    tags=["cursor", "hook", "before-submit-prompt", "format"],
+    ide="cursor",
+    hook_event="beforeSubmitPrompt",
+    conversation=[
+        ConversationMessage(
+            role="user",
+            content="Cursor beforeSubmitPrompt 출력 포맷을 검증합니다.",
+        ),
+    ],
+    expected_action=ExpectedAction.SKIP,
+    expected_content_patterns=[],
+)
+
+# ---------------------------------------------------------------------------
+# Scenario: Cursor preCompact hook format
+# ---------------------------------------------------------------------------
+
+CURSOR_PRECOMPACT_FORMAT = EvalScenario(
+    id="cursor_hooks_05",
+    name="Cursor preCompact additionalContext JSON",
+    description=(
+        "Cursor preCompact hook이 additionalContext를 포함한 "
+        "hookSpecificOutput JSON을 출력하는지 검증"
+    ),
+    tier=EvalTier.DETERMINISTIC,
+    tags=["cursor", "hook", "precompact", "format"],
+    ide="cursor",
+    hook_event="preCompact",
+    conversation=[
+        ConversationMessage(
+            role="user",
+            content="Cursor preCompact 출력 포맷을 검증합니다.",
+        ),
+    ],
+    expected_action=ExpectedAction.SKIP,
+    expected_content_patterns=[],
+)
+
+# ---------------------------------------------------------------------------
+# Scenario: Cursor subagentStart hook format
+# ---------------------------------------------------------------------------
+
+CURSOR_SUBAGENT_START_FORMAT = EvalScenario(
+    id="cursor_hooks_06",
+    name="Cursor subagentStart additionalContext JSON",
+    description=(
+        "Cursor subagentStart hook이 additionalContext를 포함한 "
+        "hookSpecificOutput JSON을 출력하는지 검증"
+    ),
+    tier=EvalTier.DETERMINISTIC,
+    tags=["cursor", "hook", "subagent-start", "format"],
+    ide="cursor",
+    hook_event="subagentStart",
+    conversation=[
+        ConversationMessage(
+            role="user",
+            content="Cursor subagentStart 출력 포맷을 검증합니다.",
+        ),
+    ],
+    expected_action=ExpectedAction.SKIP,
+    expected_content_patterns=[],
+)
+
+# ---------------------------------------------------------------------------
+# Scenario: Cursor subagentStop hook script presence
+# ---------------------------------------------------------------------------
+
+CURSOR_SUBAGENT_STOP_SCRIPT = EvalScenario(
+    id="cursor_hooks_07",
+    name="Cursor subagentStop script executable",
+    description="Cursor subagentStop 훅 스크립트가 설치/실행 가능한지 검증",
+    tier=EvalTier.DETERMINISTIC,
+    tags=["cursor", "hook", "subagent-stop", "script"],
+    ide="cursor",
+    hook_event="subagentStop",
+    conversation=[
+        ConversationMessage(
+            role="user",
+            content="Cursor subagentStop 설치 상태를 검증합니다.",
+        ),
+    ],
+    expected_action=ExpectedAction.SKIP,
+    expected_content_patterns=[],
+)
+
 ALL_SCENARIOS = [
     CURSOR_SESSION_START_FORMAT,
     CURSOR_STOP_FOLLOWUP,
     CURSOR_SESSION_END_API,
+    CURSOR_BEFORE_SUBMIT_FORMAT,
+    CURSOR_PRECOMPACT_FORMAT,
+    CURSOR_SUBAGENT_START_FORMAT,
+    CURSOR_SUBAGENT_STOP_SCRIPT,
 ]

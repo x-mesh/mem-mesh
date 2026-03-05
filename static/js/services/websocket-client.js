@@ -213,6 +213,18 @@ export class WebSocketClient {
           }
           break;
 
+        case 'pin_created':
+          this.emit('pin_created', data);
+          break;
+
+        case 'pin_completed':
+          this.emit('pin_completed', data);
+          break;
+
+        case 'pin_promoted':
+          this.emit('pin_promoted', data);
+          break;
+
         case 'model_download':
           this.emit('model_download', data);
           break;

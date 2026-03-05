@@ -21,6 +21,7 @@ from app.cli.hooks.status import (
     cmd_status,
     resolve_api_url,
 )
+from app.cli.hooks.json_ops import _is_mem_mesh_entry
 
 
 def _check_permissions(hooks_dir: Path) -> List[str]:
@@ -55,16 +56,15 @@ def _check_settings_json(settings_path: Path, label: str) -> List[str]:
 
     mem_mesh_count = 0
     if isinstance(hooks, dict):
-        # Claude/Cursor: {"EventName": [{"hooks": [{"command": "..."}]}]}
+        # Claude/Cursor:
+        # - nested: {"EventName": [{"hooks": [{"command": "..."}]}]}
+        # - flat:   {"eventName": [{"type":"command","command":"..."}]}
         for _event, entries in hooks.items():
             if not isinstance(entries, list):
                 continue
             for entry in entries:
-                hook_list = entry.get("hooks", []) if isinstance(entry, dict) else []
-                for hook in hook_list:
-                    cmd = hook.get("command", "")
-                    if "mem-mesh" in cmd:
-                        mem_mesh_count += 1
+                if isinstance(entry, dict) and _is_mem_mesh_entry(entry):
+                    mem_mesh_count += 1
     elif isinstance(hooks, list):
         # Kiro: [{"name": "...", "command": "..."}]
         for entry in hooks:
@@ -76,6 +76,22 @@ def _check_settings_json(settings_path: Path, label: str) -> List[str]:
                 mem_mesh_count += 1
     if mem_mesh_count == 0:
         issues.append(f"{label}: no mem-mesh hooks registered")
+
+    if label == "Cursor" and isinstance(hooks, dict):
+        required_events = {
+            "sessionStart",
+            "beforeSubmitPrompt",
+            "preCompact",
+            "subagentStart",
+            "subagentStop",
+            "stop",
+            "sessionEnd",
+        }
+        missing = sorted(required_events - set(hooks.keys()))
+        if missing:
+            issues.append(
+                f"{label}: missing required hook events ({', '.join(missing)})"
+            )
 
     return issues
 

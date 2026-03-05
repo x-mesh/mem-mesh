@@ -1,5 +1,19 @@
 {
   "hooks": {
+    "beforeSubmitPrompt": [
+      {
+        "command": "/Users/jinwoo/work/project/mem-mesh/.cursor/hooks/mem-mesh-before-submit-prompt.sh",
+        "timeout": 5,
+        "type": "command"
+      }
+    ],
+    "preCompact": [
+      {
+        "command": "/Users/jinwoo/work/project/mem-mesh/.cursor/hooks/mem-mesh-precompact.sh",
+        "timeout": 10,
+        "type": "command"
+      }
+    ],
     "sessionEnd": [
       {
         "command": "/Users/jinwoo/work/project/mem-mesh/.cursor/hooks/mem-mesh-session-end.sh",
@@ -17,6 +31,20 @@
     "stop": [
       {
         "command": "/Users/jinwoo/work/project/mem-mesh/.cursor/hooks/mem-mesh-auto-save.sh",
+        "timeout": 10,
+        "type": "command"
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": "/Users/jinwoo/work/project/mem-mesh/.cursor/hooks/mem-mesh-subagent-start.sh",
+        "timeout": 5,
+        "type": "command"
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": "/Users/jinwoo/work/project/mem-mesh/.cursor/hooks/mem-mesh-subagent-stop.sh",
         "timeout": 10,
         "type": "command"
       }

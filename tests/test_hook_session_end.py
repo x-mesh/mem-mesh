@@ -140,16 +140,24 @@ class TestClaudeHooksSettings:
 
 
 class TestCursorHooksSettings:
-    """Verify Cursor hooks settings include sessionEnd."""
+    """Verify Cursor hooks settings include mapped events."""
 
     def test_global_settings_has_session_end(self, tmp_path) -> None:
         hooks_dir = tmp_path / "hooks"
         hooks_dir.mkdir()
         settings = _build_cursor_hooks_settings(hooks_dir, scope="global")
         assert "sessionEnd" in settings["hooks"]
+        assert "beforeSubmitPrompt" in settings["hooks"]
+        assert "preCompact" in settings["hooks"]
+        assert "subagentStart" in settings["hooks"]
+        assert "subagentStop" in settings["hooks"]
 
     def test_project_settings_has_session_end(self, tmp_path) -> None:
         hooks_dir = tmp_path / "hooks"
         hooks_dir.mkdir()
         settings = _build_cursor_hooks_settings(hooks_dir, scope="project")
         assert "sessionEnd" in settings["hooks"]
+        assert "beforeSubmitPrompt" in settings["hooks"]
+        assert "preCompact" in settings["hooks"]
+        assert "subagentStart" in settings["hooks"]
+        assert "subagentStop" in settings["hooks"]

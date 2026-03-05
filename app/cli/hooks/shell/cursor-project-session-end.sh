@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 12
+__VERSION_MARKER__
 # mem-mesh Session End Hook for Cursor (project-local)
 
 set -euo pipefail
@@ -21,7 +21,7 @@ try:
         storage = DirectStorageManager()
         await storage.initialize()
         pin_svc = PinService(storage)
-        result = await pin_svc.session_end('mem-mesh')
+        result = await pin_svc.session_end('__PROJECT_ID__')
         return result
 
     asyncio.run(end_session())

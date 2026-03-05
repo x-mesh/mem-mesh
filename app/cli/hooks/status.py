@@ -285,9 +285,17 @@ def cmd_status() -> None:
     cursor_session = CURSOR_HOOKS_DIR / "mem-mesh-session-start.sh"
     cursor_stop = CURSOR_HOOKS_DIR / "mem-mesh-stop.sh"
     cursor_session_end = CURSOR_HOOKS_DIR / "mem-mesh-session-end.sh"
+    cursor_before_submit = CURSOR_HOOKS_DIR / "mem-mesh-before-submit-prompt.sh"
+    cursor_precompact = CURSOR_HOOKS_DIR / "mem-mesh-precompact.sh"
+    cursor_subagent_start = CURSOR_HOOKS_DIR / "mem-mesh-subagent-start.sh"
+    cursor_subagent_stop = CURSOR_HOOKS_DIR / "mem-mesh-subagent-stop.sh"
     print(f"  session hook: {_colorize_status(_check_script_version(cursor_session))}")
     print(f"  stop hook:    {_colorize_status(_check_script_version(cursor_stop))}")
     print(f"  session-end:  {_colorize_status(_check_script_version(cursor_session_end))}")
+    print(f"  beforeSubmit: {_colorize_status(_check_script_version(cursor_before_submit))}")
+    print(f"  precompact:   {_colorize_status(_check_script_version(cursor_precompact))}")
+    print(f"  subagentStart:{_colorize_status(_check_script_version(cursor_subagent_start))}")
+    print(f"  subagentStop: {_colorize_status(_check_script_version(cursor_subagent_stop))}")
 
     cursor_url = _extract_url_from_script(cursor_session) or _extract_url_from_script(
         cursor_stop
@@ -328,6 +336,10 @@ def cmd_status() -> None:
             "mem-mesh-session-start.sh",
             "mem-mesh-session-end.sh",
             "mem-mesh-auto-save.sh",
+            "mem-mesh-before-submit-prompt.sh",
+            "mem-mesh-precompact.sh",
+            "mem-mesh-subagent-start.sh",
+            "mem-mesh-subagent-stop.sh",
         ):
             script = cursor_dir / name
             print(f"  {name}: {_colorize_status(_check_script_version(script))}")
