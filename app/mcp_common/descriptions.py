@@ -30,7 +30,9 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "add": (
         "Save a permanent memory (decision, bug, idea, code_snippet, incident). "
         "For short-term work tracking, use pin_add instead. "
-        'Example: {"content": "Chose PostgreSQL because...", "category": "decision"}'
+        'Example: {"content": "Chose PostgreSQL because...", "category": "decision"}\n'
+        "Set client to your tool/IDE name (e.g. 'claude_code', 'cursor', 'kiro', 'vscode') "
+        "so memories are tagged with their source."
     ),
     "pin_add": (
         "Track a short-term work item in the current session. "

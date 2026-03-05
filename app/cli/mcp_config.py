@@ -106,6 +106,7 @@ def generate_mcp_entry(
     mode: str,
     url: str = "http://localhost:8000",
     auto_approve: bool = True,
+    tool_key: str = "",
 ) -> dict:
     """Generate a mem-mesh MCP server entry.
 
@@ -113,6 +114,7 @@ def generate_mcp_entry(
         mode: 'sse' or 'stdio'
         url: API server URL (used for SSE mode)
         auto_approve: Whether to add autoApprove list for common tools
+        tool_key: Tool registry key (e.g. 'claude-code', 'cursor') for MEM_MESH_CLIENT env
     """
     approve_list = [
         "add", "search", "context", "update", "delete", "stats",
@@ -134,6 +136,11 @@ def generate_mcp_entry(
             "command": python_path,
             "args": ["-m", "app.mcp_stdio"],
         }
+
+    # Inject MEM_MESH_CLIENT env so server auto-tags memories with source tool
+    if tool_key:
+        client_name = tool_key.replace("-", "_")
+        entry["env"] = {"MEM_MESH_CLIENT": client_name}
 
     if auto_approve:
         entry["autoApprove"] = approve_list
@@ -387,18 +394,17 @@ def run_mcp_setup(
         print()
         return
 
-    # Generate MCP entry
-    mcp_entry = generate_mcp_entry(mode=mode, url=url)
-
-    # Show what will be written
+    # Show sample MCP entry
+    sample_entry = generate_mcp_entry(mode=mode, url=url, tool_key=targets[0]["key"])
     print(f"  {bold('MCP entry')} ({mode} mode):")
-    entry_json = json.dumps({"mem-mesh": mcp_entry}, indent=2)
+    entry_json = json.dumps({"mem-mesh": sample_entry}, indent=2)
     for line in entry_json.splitlines():
         print(f"    {dim(line)}")
     print()
 
-    # Configure each tool
+    # Configure each tool (with tool-specific MEM_MESH_CLIENT env)
     for t in targets:
+        mcp_entry = generate_mcp_entry(mode=mode, url=url, tool_key=t["key"])
         success, msg = configure_tool(t, mcp_entry, do_backup=True)
         if success:
             print(f"  {ok('✓')} {t['name']}: {msg}")

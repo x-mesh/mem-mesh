@@ -5,6 +5,7 @@ MCP Tool Handlers - MCP 서버들이 공유하는 Tool 비즈니스 로직.
 FastMCP와 Pure MCP 모두에서 사용할 수 있습니다.
 """
 
+import os
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ..core.schemas.requests import AddParams, SearchParams, StatsParams, UpdateParams
@@ -68,6 +69,10 @@ class MCPToolHandlers:
         Returns:
             dict: 생성된 메모리 정보
         """
+        # Fallback: auto-detect client from environment if not provided
+        if not client:
+            client = os.environ.get("MEM_MESH_CLIENT")
+
         logger.info_with_details(
             "Tool add called",
             details={"content": content, "tags": tags, "source": source, "client": client},
@@ -557,6 +562,14 @@ class MCPToolHandlers:
                 importance=effective_importance,
                 auto=auto_importance,
             )
+
+            # 실시간 알림 전송
+            if self._notifier:
+                try:
+                    await self._notifier.notify_pin_created(response)
+                except Exception as e:
+                    logger.warning(f"Failed to send pin_add notification: {e}")
+
             return response
         except Exception as e:
             logger.error("Error in pin_add", error=str(e))
@@ -608,6 +621,14 @@ class MCPToolHandlers:
                 pin_id=pin_id,
                 suggest_promotion=suggest_promotion,
             )
+
+            # 실시간 알림 전송
+            if self._notifier:
+                try:
+                    await self._notifier.notify_pin_completed(response)
+                except Exception as e:
+                    logger.warning(f"Failed to send pin_complete notification: {e}")
+
             return response
         except Exception as e:
             logger.error("Error in pin_complete", error=str(e))
@@ -668,6 +689,9 @@ class MCPToolHandlers:
                                 "updated_at": memory.updated_at,
                             }
                             await self._notifier.notify_memory_created(memory_data)
+                    await self._notifier.notify_pin_promoted(
+                        pin_id, result["memory_id"]
+                    )
                 except Exception as e:
                     logger.warning(
                         f"Failed to send pin_promote realtime notification: {e}"
