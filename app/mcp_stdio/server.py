@@ -113,10 +113,11 @@ async def add(
     project_id: Optional[str] = None,
     category: str = "task",
     source: str = "mcp",
+    client: Optional[str] = None,
     tags: Optional[list[str]] = None,
 ) -> dict:
     """Internal handler for add tool."""
-    return await _get_handlers().add(content, project_id, category, source, tags)
+    return await _get_handlers().add(content, project_id, category, source, client, tags)
 
 
 @mcp.tool(description=TOOL_DESCRIPTIONS["search"])
