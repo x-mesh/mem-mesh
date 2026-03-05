@@ -16,13 +16,9 @@ from app.core.schemas.sessions import (
 from app.core.services.project import ProjectService
 from app.core.utils.user import get_current_user
 
+from app.core.errors import NoActiveSessionError
+
 logger = logging.getLogger(__name__)
-
-
-class NoActiveSessionError(Exception):
-    """활성 세션이 없을 때 발생하는 예외"""
-
-    # Exception subclass - no additional implementation needed
 
 
 class SessionService:

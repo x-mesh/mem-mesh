@@ -31,8 +31,10 @@ async def db():
 
     # 정리
     await database.close()
-    if os.path.exists(db_path):
-        os.unlink(db_path)
+    for ext in ["", "-wal", "-shm"]:
+        p = db_path + ext
+        if os.path.exists(p):
+            os.unlink(p)
 
 
 @pytest.fixture

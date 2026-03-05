@@ -15,11 +15,9 @@ import tempfile
 import pytest
 
 from app.core.database.base import Database
+from app.core.errors import PinAlreadyCompletedError
 from app.core.schemas.pins import PinResponse
-from app.core.services.pin import (
-    PinAlreadyCompletedError,
-    PinService,
-)
+from app.core.services.pin import PinService
 from app.core.services.session import SessionService
 
 
@@ -35,13 +33,15 @@ async def db():
     yield database
 
     await database.close()
-    if os.path.exists(db_path):
-        os.unlink(db_path)
+    for ext in ["", "-wal", "-shm"]:
+        p = db_path + ext
+        if os.path.exists(p):
+            os.unlink(p)
 
 
 @pytest.fixture
-async def pin_service(db):
-    return PinService(db)
+async def pin_service(db, mock_embedding_service):
+    return PinService(db, embedding_service=mock_embedding_service)
 
 
 @pytest.fixture

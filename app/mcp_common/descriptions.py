@@ -37,7 +37,8 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "pin_add": (
         "Track a short-term work item in the current session. "
         "Pins are lightweight and can be promoted to permanent memories via pin_promote after completion. "
-        "Requires project_id. Importance is auto-determined if omitted."
+        "Requires project_id. Importance is auto-determined if omitted. "
+        "Client is auto-detected from MEM_MESH_CLIENT env."
     ),
     "pin_complete": (
         "Mark a pin as completed. Returns a promotion suggestion if importance >= 4. "

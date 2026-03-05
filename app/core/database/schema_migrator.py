@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Current schema version - increment when adding new migrations
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 
 
 class SchemaMigrator:
@@ -39,6 +39,7 @@ class SchemaMigrator:
             4: self._migration_v4_pin_columns_integrity,
             5: self._migration_v5_client_column,
             6: self._migration_v6_session_ide_columns,
+            7: self._migration_v7_pin_client_column,
         }
 
     async def migrate(self) -> None:
@@ -255,3 +256,9 @@ class SchemaMigrator:
                 "Added ide_session_id, client_type columns to sessions table "
                 "via migration v6"
             )
+
+    async def _migration_v7_pin_client_column(self, migrator: "SchemaMigrator") -> None:
+        """Add client column to pins table for tracking creation source."""
+        if await self._table_exists("pins"):
+            await self._add_column_if_missing("pins", "client", "TEXT", "NULL")
+            logger.info("Added client column to pins table via migration v7")

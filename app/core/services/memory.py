@@ -13,25 +13,9 @@ from ..database.models import Memory
 from ..embeddings.service import EmbeddingService
 from ..schemas.responses import AddResponse, DeleteResponse, UpdateResponse
 
+from ..errors import DatabaseError, EmbeddingError, MemoryNotFoundError
+
 logger = logging.getLogger(__name__)
-
-
-class MemoryNotFoundError(Exception):
-    """메모리를 찾을 수 없을 때 발생하는 예외"""
-
-    # Exception subclass - no additional implementation needed
-
-
-class DatabaseError(Exception):
-    """데이터베이스 작업 실패 시 발생하는 예외"""
-
-    # Exception subclass - no additional implementation needed
-
-
-class EmbeddingError(Exception):
-    """임베딩 생성 실패 시 발생하는 예외"""
-
-    # Exception subclass - no additional implementation needed
 
 
 class MemoryService:

@@ -44,7 +44,7 @@ class PinStatistics(BaseModel):
 class OptimizedSessionContext(BaseModel):
     """최적화된 세션 맥락"""
 
-    session_context: Any = Field(..., description="세션 컨텍스트")
+    session_context: Dict[str, Any] = Field(..., description="세션 컨텍스트")
     token_info: TokenInfo = Field(..., description="토큰 정보")
     optimization_applied: bool = Field(..., description="최적화 적용 여부")
     recommendations: List[str] = Field(

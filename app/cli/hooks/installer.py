@@ -557,7 +557,7 @@ def _install_kiro(url: str, mode: str = "api", path: str = "") -> None:
         except (json.JSONDecodeError, OSError):
             existing = {"hooks": []}
 
-    hooks: List[Any] = existing.get("hooks", [])
+    hooks: List[Dict[str, Any]] = existing.get("hooks", [])
 
     # Remove existing mem-mesh hooks, then add new
     hooks = [h for h in hooks if not h.get("name", "").startswith("mem-mesh:")]

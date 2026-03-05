@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from app.core.database.base import Database
+from app.core.errors import MemoryNotFoundError, RelationNotFoundError
 from app.core.schemas.relations import (
     Relation,
     RelationCreate,
@@ -18,18 +19,6 @@ from app.core.schemas.relations import (
     RelationUpdate,
     RelationWithMemory,
 )
-
-
-class RelationNotFoundError(Exception):
-    """관계를 찾을 수 없음"""
-
-    pass
-
-
-class MemoryNotFoundError(Exception):
-    """메모리를 찾을 수 없음"""
-
-    pass
 
 
 class RelationService:

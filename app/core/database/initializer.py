@@ -18,7 +18,7 @@ class DatabaseInitializer:
     Creates all required tables and indexes for mem-mesh.
     """
 
-    def __init__(self, connection: "DatabaseConnection", embedding_dim: int = 384):
+    def __init__(self, connection: "DatabaseConnection", embedding_dim: int = 1024):
         self.connection = connection
         self.embedding_dim = embedding_dim
 
@@ -138,6 +138,7 @@ class DatabaseInitializer:
                 estimated_tokens INTEGER DEFAULT 0,
                 promoted_to_memory_id TEXT,
                 auto_importance INTEGER DEFAULT 0,
+                client TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )

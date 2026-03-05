@@ -15,11 +15,8 @@ from app.core.schemas.relations import (
     RelationUpdate,
     RelationWithMemory,
 )
-from app.core.services.relation import (
-    MemoryNotFoundError,
-    RelationNotFoundError,
-    RelationService,
-)
+from app.core.errors import MemoryNotFoundError, RelationNotFoundError
+from app.core.services.relation import RelationService
 from app.web.common.dependencies import get_relation_service
 
 logger = logging.getLogger(__name__)

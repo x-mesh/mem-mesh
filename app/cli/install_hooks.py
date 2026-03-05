@@ -524,7 +524,7 @@ def _remove_kiro_mem_mesh_hooks(path: Path) -> None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return
-    hooks: List[Any] = data.get("hooks", [])
+    hooks: List[Dict[str, Any]] = data.get("hooks", [])
     data["hooks"] = [h for h in hooks if not h.get("name", "").startswith("mem-mesh:")]
     path.write_text(
         json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -894,7 +894,7 @@ def _install_kiro(url: str, mode: str = "api", path: str = "") -> None:
         except (json.JSONDecodeError, OSError):
             existing = {"hooks": []}
 
-    hooks: List[Any] = existing.get("hooks", [])
+    hooks: List[Dict[str, Any]] = existing.get("hooks", [])
 
     # Remove existing mem-mesh hooks, then add new
     hooks = [h for h in hooks if not h.get("name", "").startswith("mem-mesh:")]
