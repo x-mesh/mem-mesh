@@ -60,7 +60,7 @@ class MCPToolHandlers:
         """Add a new memory to the memory store
 
         Args:
-            content: Memory content (10-10000 characters)
+            content: Memory content (10-50000 characters)
             project_id: Project identifier (optional)
             category: Memory category (task, bug, idea, decision, incident, code_snippet, git-history)
             source: Memory source
@@ -551,13 +551,6 @@ class MCPToolHandlers:
                 client=client_type or os.environ.get("MEM_MESH_CLIENT"),
             )
 
-            response = result.model_dump()
-            if auto_importance:
-                response["importance_note"] = (
-                    f"중요도가 자동으로 {effective_importance}점으로 설정되었습니다. "
-                    "필요시 수정할 수 있습니다."
-                )
-
             logger.info(
                 "Successfully added pin",
                 pin_id=result.id,
@@ -565,13 +558,17 @@ class MCPToolHandlers:
                 auto=auto_importance,
             )
 
-            # 실시간 알림 전송
+            # 실시간 알림 전송 (full response for dashboard)
             if self._notifier:
                 try:
-                    await self._notifier.notify_pin_created(response)
+                    await self._notifier.notify_pin_created(result.model_dump())
                 except Exception as e:
                     logger.warning(f"Failed to send pin_add notification: {e}")
 
+            # MCP 반환은 compact
+            response = {"id": result.id, "importance": effective_importance, "status": result.status}
+            if auto_importance:
+                response["auto_importance"] = True
             return response
         except Exception as e:
             logger.error("Error in pin_add", error=str(e))
@@ -611,28 +608,23 @@ class MCPToolHandlers:
             # 승격 제안 여부 확인
             suggest_promotion = pin_service.should_suggest_promotion(result)
 
-            response = result.model_dump()
-            response["suggest_promotion"] = suggest_promotion
-            if suggest_promotion:
-                response["promotion_message"] = (
-                    f"이 Pin의 중요도가 {result.importance}점입니다. "
-                    "Memory로 승격하시겠습니까? pin_promote 도구를 사용하세요."
-                )
-
             logger.info(
                 "Successfully completed pin",
                 pin_id=pin_id,
                 suggest_promotion=suggest_promotion,
             )
 
-            # 실시간 알림 전송
+            # 실시간 알림 전송 (full response for dashboard)
             if self._notifier:
                 try:
-                    await self._notifier.notify_pin_completed(response)
+                    full_response = result.model_dump()
+                    full_response["suggest_promotion"] = suggest_promotion
+                    await self._notifier.notify_pin_completed(full_response)
                 except Exception as e:
                     logger.warning(f"Failed to send pin_complete notification: {e}")
 
-            return response
+            # MCP 반환은 compact
+            return {"id": pin_id, "status": result.status, "suggest_promotion": suggest_promotion}
         except Exception as e:
             logger.error("Error in pin_complete", error=str(e))
             raise

@@ -16,7 +16,7 @@ class Memory(BaseModel):
     """메모리 데이터 모델"""
 
     id: str = Field(default_factory=lambda: str(uuid4()))
-    content: str = Field(min_length=10, max_length=10000)
+    content: str = Field(min_length=10, max_length=50000)
     content_hash: str = Field(default="")
     project_id: Optional[str] = Field(default=None)
     category: str = Field(default="task")

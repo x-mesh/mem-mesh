@@ -147,7 +147,7 @@ class Settings(BaseSettings):
 
     # Token estimation settings
     enable_token_metadata: bool = Field(
-        default=True,
+        default=False,
         description="Include token estimation metadata (_meta) in MCP responses",
     )
 

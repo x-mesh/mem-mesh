@@ -224,11 +224,11 @@ class ErrorResponse(BaseModel):
         "json_schema_extra": {
             "example": {
                 "error": "INVALID_CONTENT_LENGTH",
-                "message": "Content must be between 10 and 10,000 characters",
+                "message": "Content must be between 10 and 50,000 characters",
                 "details": {
                     "provided_length": 5,
                     "min_length": 10,
-                    "max_length": 10000,
+                    "max_length": 50000,
                 },
             }
         }
