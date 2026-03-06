@@ -127,7 +127,7 @@ def generate_mcp_entry(
     if mode == "sse":
         entry: dict = {
             "url": f"{url.rstrip('/')}/mcp/sse",
-            "transport": "http",
+            "type": "http",
         }
     else:
         # stdio mode — use the current Python interpreter
@@ -244,6 +244,7 @@ def verify_tool_config(tool: dict, url: str = "http://localhost:8000") -> tuple[
     Checks:
     1. Config file has mcpServers.mem-mesh entry
     2. For SSE mode, tests URL reachability (health check)
+    3. For Claude Code, checks project-specific overrides that shadow global config
 
     Returns (success, message).
     """
@@ -257,23 +258,75 @@ def verify_tool_config(tool: dict, url: str = "http://localhost:8000") -> tuple[
     if not entry:
         return False, "mem-mesh entry missing"
 
+    warnings: list[str] = []
+
+    # Claude Code: check project-specific overrides
+    if tool["key"] == "claude-code":
+        warnings.extend(_check_claude_project_overrides(data, entry))
+
     # SSE mode — check URL reachability
     if "url" in entry:
+        # Check transport type key
+        entry_type = entry.get("type") or entry.get("transport")
+        if entry.get("transport") and not entry.get("type"):
+            warnings.append("uses 'transport' key (should be 'type' for Claude Code)")
+
         sse_url = entry["url"]
-        # Derive health endpoint from SSE URL
         health_url = sse_url.rsplit("/mcp/sse", 1)[0] + "/health"
         try:
             with urlopen(health_url, timeout=3) as resp:
                 if resp.status == 200:
-                    return True, f"configured (SSE, server reachable)"
+                    status = "configured (SSE, server reachable)"
         except (URLError, OSError):
-            return True, f"configured (SSE, server not reachable — start with `python -m app.web`)"
+            status = "configured (SSE, server not reachable — start with `python -m app.web`)"
+
+        if warnings:
+            return False, f"{status} — WARN: {'; '.join(warnings)}"
+        return True, status
 
     # stdio mode
     if "command" in entry:
+        if warnings:
+            return False, f"configured (stdio) — WARN: {'; '.join(warnings)}"
         return True, "configured (stdio)"
 
+    if warnings:
+        return False, f"configured — WARN: {'; '.join(warnings)}"
     return True, "configured"
+
+
+def _check_claude_project_overrides(data: dict, global_entry: dict) -> list[str]:
+    """Check if any Claude Code project-specific mcpServers override the global config.
+
+    Common issue: global config has type=http, but project-specific config
+    has type=sse (leftover from migration), causing MCP tool calls to hang.
+    """
+    warnings = []
+    global_type = global_entry.get("type") or global_entry.get("transport", "")
+
+    projects = data.get("projects", {})
+    for project_path, project_conf in projects.items():
+        proj_mcp = project_conf.get("mcpServers", {}).get(MCP_SERVER_KEY)
+        if not proj_mcp:
+            continue
+
+        proj_type = proj_mcp.get("type") or proj_mcp.get("transport", "")
+
+        # Project type differs from global type
+        if proj_type and global_type and proj_type != global_type:
+            short_path = project_path.replace(str(Path.home()), "~")
+            warnings.append(
+                f"project '{short_path}' overrides type={proj_type} "
+                f"(global={global_type}) — MCP may hang"
+            )
+        # Project uses legacy 'transport' key
+        elif proj_mcp.get("transport") and not proj_mcp.get("type"):
+            short_path = project_path.replace(str(Path.home()), "~")
+            warnings.append(
+                f"project '{short_path}' uses 'transport' key (should be 'type')"
+            )
+
+    return warnings
 
 
 # ── Interactive Flow ──
