@@ -37,9 +37,9 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                 "properties": {
                     "content": {
                         "type": "string",
-                        "description": "Memory content (10-10000 characters)",
+                        "description": "Memory content (10-50000 characters)",
                         "minLength": 10,
-                        "maxLength": 10000,
+                        "maxLength": 50000,
                     },
                     "project_id": {
                         "type": "string",
@@ -203,7 +203,7 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": "New content",
                         "minLength": 10,
-                        "maxLength": 10000,
+                        "maxLength": 50000,
                     },
                     "category": {
                         "type": "string",
@@ -444,7 +444,7 @@ def get_batch_tool_schemas() -> List[Dict[str, Any]]:
                                     "type": "string",
                                     "description": "Memory content (for 'add' operations) or Pin content (for 'pin_add')",
                                     "minLength": 10,
-                                    "maxLength": 10000,
+                                    "maxLength": 50000,
                                 },
                                 "query": {
                                     "type": "string",
