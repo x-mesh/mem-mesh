@@ -29,10 +29,26 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mcp", tags=["MCP Streamable HTTP"])
 
-# 세션 저장소: session_id -> Queue
-_sessions: Dict[str, asyncio.Queue] = {}
+# 세션 저장소: session_id -> {"queue": Queue, "client_info": {...}}
+_sessions: Dict[str, Dict[str, Any]] = {}
 _tool_handlers: Optional[MCPToolHandlers] = None
 _dispatcher: Optional[MCPDispatcher] = None
+
+
+def _get_session_queue(session_id: str) -> asyncio.Queue:
+    """세션의 Queue를 반환. dict/Queue 양쪽 호환."""
+    s = _sessions.get(session_id)
+    if s is None:
+        raise KeyError(f"Session not found: {session_id}")
+    return s["queue"] if isinstance(s, dict) else s
+
+
+def _create_session(session_id: str, client_info: Optional[Dict] = None) -> None:
+    """새 세션을 dict 형태로 생성."""
+    _sessions[session_id] = {
+        "queue": asyncio.Queue(),
+        "client_info": client_info or {},
+    }
 
 
 def set_tool_handlers(handlers: MCPToolHandlers, batch_handler=None) -> None:
@@ -115,10 +131,11 @@ async def process_jsonrpc_request(
     try:
         if method == "initialize":
             result = await handle_initialize(params)
-            # 새 세션 ID 생성
+            # 새 세션 ID 생성 + clientInfo 저장
             new_session_id = str(uuid.uuid4())
-            _sessions[new_session_id] = asyncio.Queue()
-            logger.info(f"New session created: {new_session_id}")
+            client_info = params.get("clientInfo", {}) if params else {}
+            _create_session(new_session_id, client_info)
+            logger.info(f"New session created: {new_session_id}, client: {client_info.get('name', 'unknown')}")
             return format_jsonrpc_response(result, req_id), new_session_id
 
         elif method == "tools/list":
@@ -179,7 +196,7 @@ async def streamable_http_get(
     session_id = mcp_session_id
     if not session_id:
         session_id = str(uuid.uuid4())
-        _sessions[session_id] = asyncio.Queue()
+        _create_session(session_id)
         logger.info(f"SSE stream opened with new session: {session_id}")
     elif session_id not in _sessions:
         # 세션이 만료됨
@@ -204,7 +221,7 @@ async def streamable_http_get(
 
                 try:
                     message = await asyncio.wait_for(
-                        _sessions[session_id].get(), timeout=30.0
+                        _get_session_queue(session_id).get(), timeout=30.0
                     )
                     yield {
                         "event": "message",
@@ -258,8 +275,19 @@ async def streamable_http_post(
     if method != "initialize" and mcp_session_id:
         if mcp_session_id not in _sessions:
             # 세션 자동 복구 (서버 재시작 등)
-            _sessions[mcp_session_id] = asyncio.Queue()
+            _create_session(mcp_session_id)
             logger.info(f"Session auto-recovered: {mcp_session_id}")
+
+    # tools/call: 세션의 clientInfo에서 client 자동 주입
+    if method == "tools/call" and mcp_session_id:
+        session_data = _sessions.get(mcp_session_id, {})
+        client_name = session_data.get("client_info", {}).get("name", "")
+        if client_name:
+            params = body.get("params", {})
+            args = params.get("arguments", {})
+            if not args.get("client"):
+                args["client"] = client_name
+                logger.debug(f"Auto-injected client={client_name} from session clientInfo")
 
     # 요청 처리
     response, new_session_id = await process_jsonrpc_request(body)
@@ -321,7 +349,7 @@ async def legacy_message_endpoint(
 
     if session_id not in _sessions:
         if auto_create:
-            _sessions[session_id] = asyncio.Queue()
+            _create_session(session_id)
             logger.info(f"Auto-created session (legacy): {session_id}")
         else:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -344,7 +372,7 @@ async def legacy_message_endpoint(
     response, _ = await process_jsonrpc_request(body)
 
     if response:
-        await _sessions[session_id].put(response)
+        await _get_session_queue(session_id).put(response)
 
     return {"status": "accepted"}
 
