@@ -168,7 +168,11 @@ class MCPDispatcher:
         if "pin_id" not in args:
             return format_tool_error("Missing required argument: pin_id")
 
-        result = await self._tool_handlers.pin_complete(pin_id=args["pin_id"])
+        result = await self._tool_handlers.pin_complete(
+            pin_id=args["pin_id"],
+            promote=args.get("promote", False),
+            category=args.get("category", "task"),
+        )
         return format_tool_response(result)
 
     async def _dispatch_pin_promote(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -199,6 +203,7 @@ class MCPDispatcher:
         result = await self._tool_handlers.session_end(
             project_id=args["project_id"],
             summary=args.get("summary"),
+            auto_complete_pins=args.get("auto_complete_pins", False),
         )
         return format_tool_response(result)
 

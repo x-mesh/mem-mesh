@@ -898,6 +898,7 @@ class SessionService:
         session_id: str,
         summary: Optional[str] = None,
         auto_promote_threshold: int = 4,
+        auto_complete_pins: bool = False,
     ) -> Dict[str, Any]:
         """
         자동 승격과 함께 세션 종료
@@ -906,11 +907,13 @@ class SessionService:
             session_id: 세션 ID
             summary: 세션 요약
             auto_promote_threshold: 자동 승격 중요도 임계값 (기본값: 4)
+            auto_complete_pins: True면 미완료 핀을 자동 완료 후 승격 판단
 
         Returns:
             {
                 "session": SessionResponse,
                 "promoted_pins": List[str],  # 승격된 핀 ID 목록
+                "auto_completed_pins": List[str],  # 자동 완료된 핀 ID 목록
                 "token_savings": Dict[str, Any]
             }
 
@@ -918,6 +921,25 @@ class SessionService:
         """
         from app.core.services.pin import PinService
         from app.core.services.token_tracker import TokenTracker
+
+        pin_service = PinService(self.db, self._embedding_service)
+        auto_completed_pins = []
+
+        # auto_complete_pins: 미완료 핀을 자동 완료
+        if auto_complete_pins:
+            open_pins = await self.db.fetchall(
+                """
+                SELECT id FROM pins
+                WHERE session_id = ? AND status IN ('open', 'in_progress')
+                """,
+                (session_id,),
+            )
+            for row in open_pins:
+                try:
+                    await pin_service.complete_pin(row["id"])
+                    auto_completed_pins.append(row["id"])
+                except Exception as e:
+                    logger.warning(f"Failed to auto-complete pin {row['id']}: {e}")
 
         # 세션 종료
         session = await self.end_session(session_id, summary)
@@ -927,6 +949,7 @@ class SessionService:
             return {
                 "session": None,
                 "promoted_pins": [],
+                "auto_completed_pins": auto_completed_pins,
                 "token_savings": {
                     "total_tokens": 0,
                     "loaded_tokens": 0,
@@ -982,6 +1005,7 @@ class SessionService:
         return {
             "session": session,
             "promoted_pins": promoted_pins,
+            "auto_completed_pins": auto_completed_pins,
             "token_savings": token_savings,
         }
 
