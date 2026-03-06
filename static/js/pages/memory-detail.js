@@ -936,6 +936,10 @@ class MemoryDetailPage extends HTMLElement {
                 <span class="client-badge client-${this.memory.client}">${this.memory.client}</span>
               </div>
             ` : ''}
+            <div class="meta-item">
+              <span class="meta-label">Length:</span>
+              <span class="meta-value">${(this.memory.content || '').length.toLocaleString()} chars</span>
+            </div>
           </div>
           
           <div class="memory-body">
@@ -1088,6 +1092,7 @@ style.textContent = `
     cursor: pointer;
     font-size: 0.875rem;
     transition: var(--transition);
+    height: 2.25rem;
   }
   
   .back-btn:hover {
@@ -1112,6 +1117,13 @@ style.textContent = `
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    height: 2.25rem;
+  }
+
+  .header-buttons button svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
   }
   
   .header-buttons button:hover {
@@ -1154,13 +1166,13 @@ style.textContent = `
     overflow: hidden;
   }
   
-  .memory-meta {
-    padding: 1.5rem;
+  .memory-detail-page .memory-meta {
+    padding: 1rem;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
     display: flex;
     flex-wrap: wrap;
-    gap: 1rem;
+    gap: 0.75rem;
   }
   
   .meta-item {
@@ -1759,7 +1771,7 @@ style.textContent = `
       flex-wrap: wrap;
     }
     
-    .memory-meta {
+    .memory-detail-page .memory-meta {
       flex-direction: column;
       gap: 0.75rem;
     }

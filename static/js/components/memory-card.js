@@ -617,8 +617,8 @@ style.textContent = `
     gap: 1rem;
   }
   
-  .memory-meta {
-    padding: 1px !important;
+  .memory-card .memory-meta {
+    padding: 1px;
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
