@@ -52,16 +52,54 @@ def _create_session(session_id: str, client_info: Optional[Dict] = None) -> None
 
 
 def _detect_client_from_request(request: Request) -> str:
-    """User-Agent 헤더에서 MCP 클라이언트 감지 (fallback)."""
+    """User-Agent 헤더에서 MCP 클라이언트 감지 (fallback).
+
+    순서 중요: 구체적인 패턴을 먼저 매칭해야 오탐 방지.
+    예) "cursor" 보다 "antigravity"가 먼저 와야 함 (일부 UA에 여러 키워드 포함 가능).
+    """
     ua = (request.headers.get("user-agent") or "").lower()
-    if "claude" in ua or "anthropic" in ua:
-        return "claude-code"
-    if "cursor" in ua:
-        return "cursor"
-    if "kiro" in ua:
-        return "kiro"
-    if "vscode" in ua or "visual studio" in ua:
-        return "vscode"
+    if not ua:
+        return ""
+
+    # --- AI coding agents / IDE extensions ---
+    # 구체적 → 일반적 순서
+    _CLIENT_PATTERNS: list[tuple[list[str], str]] = [
+        # AI coding agents
+        (["antigravity"], "antigravity"),
+        (["kiro"], "kiro"),
+        (["cline"], "cline"),
+        (["continue.dev", "continue/"], "continue"),
+        (["aider"], "aider"),
+        (["copilot"], "copilot"),
+        (["cody"], "cody"),
+        (["tabnine"], "tabnine"),
+        (["supermaven"], "supermaven"),
+        (["double.bot", "double-bot"], "double"),
+        (["sourcegraph"], "sourcegraph"),
+        (["codium", "windsurf"], "windsurf"),
+        # IDEs / Editors
+        (["cursor"], "cursor"),
+        (["zed.dev", "zed/"], "zed"),
+        (["neovim", "nvim"], "neovim"),
+        (["emacs"], "emacs"),
+        (["jetbrains", "intellij", "pycharm", "webstorm", "goland", "rider", "phpstorm", "rubymine", "clion", "datagrip"], "jetbrains"),
+        (["vscode", "visual studio code", "vs code"], "vscode"),
+        (["visual studio"], "visual-studio"),
+        (["sublime"], "sublime"),
+        (["eclipse"], "eclipse"),
+        (["xcode"], "xcode"),
+        # AI platforms (web / API)
+        (["claude-code", "claudecode"], "claude-code"),
+        (["claude", "anthropic"], "claude"),
+        (["chatgpt", "openai"], "chatgpt"),
+        (["gemini"], "gemini"),
+        (["perplexity"], "perplexity"),
+    ]
+
+    for patterns, client_name in _CLIENT_PATTERNS:
+        if any(p in ua for p in patterns):
+            return client_name
+
     return ""
 
 
