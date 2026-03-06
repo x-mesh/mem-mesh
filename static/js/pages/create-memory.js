@@ -228,13 +228,13 @@ class CreateMemoryPage extends HTMLElement {
   validateForm() {
     const errors = [];
     
-    // Content is required and must be between 10-10000 characters
+    // Content is required and must be between 10-50000 characters
     if (!this.formData.content.trim()) {
       errors.push('Content is required');
     } else if (this.formData.content.trim().length < 10) {
       errors.push('Content must be at least 10 characters');
-    } else if (this.formData.content.trim().length > 10000) {
-      errors.push('Content must be less than 10,000 characters');
+    } else if (this.formData.content.trim().length > 50000) {
+      errors.push('Content must be less than 50,000 characters');
     }
     
     // Project ID format validation
@@ -278,7 +278,7 @@ class CreateMemoryPage extends HTMLElement {
     const charCount = this.querySelector('.char-count');
     if (charCount) {
       const count = this.formData.content.length;
-      charCount.textContent = `${count}/10,000`;
+      charCount.textContent = `${count}/50,000`;
       
       if (count < 10) {
         charCount.className = 'char-count error';
@@ -568,7 +568,7 @@ class CreateMemoryPage extends HTMLElement {
           <div class="content-editor">
             <div class="editor-toolbar">
               <button type="button" class="preview-toggle">Preview</button>
-              <div class="char-count">0/10,000</div>
+              <div class="char-count">0/50,000</div>
             </div>
             <textarea 
               id="content" 
