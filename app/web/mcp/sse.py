@@ -51,6 +51,20 @@ def _create_session(session_id: str, client_info: Optional[Dict] = None) -> None
     }
 
 
+def _detect_client_from_request(request: Request) -> str:
+    """User-Agent 헤더에서 MCP 클라이언트 감지 (fallback)."""
+    ua = (request.headers.get("user-agent") or "").lower()
+    if "claude" in ua or "anthropic" in ua:
+        return "claude-code"
+    if "cursor" in ua:
+        return "cursor"
+    if "kiro" in ua:
+        return "kiro"
+    if "vscode" in ua or "visual studio" in ua:
+        return "vscode"
+    return ""
+
+
 def set_tool_handlers(handlers: MCPToolHandlers, batch_handler=None) -> None:
     global _tool_handlers, _dispatcher
     _tool_handlers = handlers
@@ -278,16 +292,23 @@ async def streamable_http_post(
             _create_session(mcp_session_id)
             logger.info(f"Session auto-recovered: {mcp_session_id}")
 
-    # tools/call: 세션의 clientInfo에서 client 자동 주입
-    if method == "tools/call" and mcp_session_id:
-        session_data = _sessions.get(mcp_session_id, {})
-        client_name = session_data.get("client_info", {}).get("name", "")
+    # tools/call: 세션의 clientInfo 또는 User-Agent에서 client 자동 주입
+    if method == "tools/call":
+        client_name = ""
+        if mcp_session_id:
+            session_data = _sessions.get(mcp_session_id, {})
+            client_name = session_data.get("client_info", {}).get("name", "")
+        if not client_name:
+            client_name = _detect_client_from_request(request)
+            # 감지된 client를 세션에 저장 (이후 요청에서 재감지 불필요)
+            if client_name and mcp_session_id and mcp_session_id in _sessions:
+                _sessions[mcp_session_id]["client_info"]["name"] = client_name
         if client_name:
             params = body.get("params", {})
             args = params.get("arguments", {})
             if not args.get("client"):
                 args["client"] = client_name
-                logger.debug(f"Auto-injected client={client_name} from session clientInfo")
+                logger.debug(f"Auto-injected client={client_name}")
 
     # 요청 처리
     response, new_session_id = await process_jsonrpc_request(body)
@@ -392,6 +413,14 @@ async def stateless_tools_call(request: Request):
 
     if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
         raise HTTPException(status_code=400, detail="Invalid JSON-RPC request")
+
+    # User-Agent에서 client 자동 주입
+    if body.get("method") == "tools/call":
+        client_name = _detect_client_from_request(request)
+        if client_name:
+            args = body.get("params", {}).get("arguments", {})
+            if not args.get("client"):
+                args["client"] = client_name
 
     response, _ = await process_jsonrpc_request(body)
     return response if response else {"status": "processed"}
