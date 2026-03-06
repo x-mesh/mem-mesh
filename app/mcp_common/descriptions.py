@@ -42,7 +42,8 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     "pin_complete": (
         "Mark a pin as completed. Returns a promotion suggestion if importance >= 4. "
-        "Follow up with pin_promote for important items worth preserving long-term."
+        "Use promote=true to complete and promote in one call (saves a round-trip). "
+        "pin_promote is still available for promoting already-completed pins separately."
     ),
     "session_end": (
         "End the current session for a project. "

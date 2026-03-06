@@ -574,16 +574,23 @@ class MCPToolHandlers:
             logger.error("Error in pin_add", error=str(e))
             raise
 
-    async def pin_complete(self, pin_id: str) -> Dict[str, Any]:
-        """Mark a pin as completed
+    async def pin_complete(
+        self,
+        pin_id: str,
+        promote: bool = False,
+        category: str = "task",
+    ) -> Dict[str, Any]:
+        """Mark a pin as completed, optionally promoting to permanent memory.
 
         Args:
             pin_id: Pin ID to complete
+            promote: If True, also promote to permanent memory (saves a round-trip)
+            category: Memory category when promoting (task, decision, bug, incident, idea, code_snippet)
 
         Returns:
-            dict: Completed pin information with promotion suggestion
+            dict: Completed pin information with promotion suggestion (and memory_id if promoted)
         """
-        logger.info("Tool pin_complete called", pin_id=pin_id)
+        logger.info("Tool pin_complete called", pin_id=pin_id, promote=promote)
 
         try:
             from ..core.errors import PinAlreadyCompletedError
@@ -624,7 +631,29 @@ class MCPToolHandlers:
                     logger.warning(f"Failed to send pin_complete notification: {e}")
 
             # MCP 반환은 compact
-            return {"id": pin_id, "status": result.status, "suggest_promotion": suggest_promotion}
+            response = {"id": pin_id, "status": result.status, "suggest_promotion": suggest_promotion}
+
+            # promote=True이면 자동 승격
+            if promote:
+                try:
+                    promote_result = await pin_service.promote_to_memory(pin_id, category=category)
+                    response["promoted"] = True
+                    response["memory_id"] = promote_result["memory_id"]
+
+                    # 승격 알림
+                    if self._notifier:
+                        try:
+                            await self._notifier.notify_pin_promoted(
+                                pin_id, promote_result["memory_id"]
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to send promote notification: {e}")
+                except Exception as e:
+                    logger.warning(f"Auto-promote failed for pin {pin_id}: {e}")
+                    response["promoted"] = False
+                    response["promote_error"] = str(e)
+
+            return response
         except Exception as e:
             logger.error("Error in pin_complete", error=str(e))
             raise
@@ -781,13 +810,17 @@ class MCPToolHandlers:
             raise
 
     async def session_end(
-        self, project_id: str, summary: Optional[str] = None
+        self,
+        project_id: str,
+        summary: Optional[str] = None,
+        auto_complete_pins: bool = False,
     ) -> Dict[str, Any]:
         """End the current session for a project
 
         Args:
             project_id: Project identifier
             summary: Session summary (auto-generated if not provided)
+            auto_complete_pins: If True, auto-complete all open/in_progress pins before ending
 
         Returns:
             dict: Ended session information
@@ -813,11 +846,15 @@ class MCPToolHandlers:
                 }
 
             result = await session_service.end_with_auto_promotion(
-                session_id=sessions[0].id, summary=summary, auto_promote_threshold=4
+                session_id=sessions[0].id,
+                summary=summary,
+                auto_promote_threshold=4,
+                auto_complete_pins=auto_complete_pins,
             )
 
             session = result.get("session")
             promoted_pins = result.get("promoted_pins", [])
+            auto_completed = result.get("auto_completed_pins", [])
 
             if session is None:
                 return {
@@ -832,11 +869,15 @@ class MCPToolHandlers:
                 response["promotion_message"] = (
                     f"{len(promoted_pins)}개의 중요 Pin이 자동 승격되었습니다."
                 )
+            if auto_completed:
+                response["auto_completed_pins"] = auto_completed
+                response["auto_completed_count"] = len(auto_completed)
 
             logger.info(
                 "Successfully ended session with auto-promotion",
                 session_id=session.id,
                 promoted_count=len(promoted_pins),
+                auto_completed_count=len(auto_completed),
             )
             return response
         except Exception as e:

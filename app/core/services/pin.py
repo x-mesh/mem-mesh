@@ -184,9 +184,7 @@ class PinService:
         # 상태 전이 검증
         if update.status and update.status != pin.status:
             if update.status not in VALID_TRANSITIONS.get(pin.status, set()):
-                raise InvalidStatusTransitionError(
-                    f"Cannot transition from '{pin.status}' to '{update.status}'"
-                )
+                raise InvalidStatusTransitionError(pin.status, update.status)
 
         updates = []
         params = []
@@ -200,6 +198,16 @@ class PinService:
                 else:
                     updates.append(f"{field} = ?")
                     params.append(value)
+
+        # status→completed: completed_at 자동 설정
+        if update.status == "completed" and pin.status != "completed":
+            now_ts = datetime.now(timezone.utc).isoformat()
+            updates.append("completed_at = ?")
+            params.append(now_ts)
+        # completed→다른 상태: completed_at 클리어
+        elif update.status and update.status != "completed" and pin.status == "completed":
+            updates.append("completed_at = ?")
+            params.append(None)
 
         if not updates:
             return pin
@@ -240,9 +248,7 @@ class PinService:
 
         # open → completed는 허용 (in_progress 건너뛰기)
         if pin.status not in ("open", "in_progress"):
-            raise InvalidStatusTransitionError(
-                f"Cannot complete pin with status '{pin.status}'"
-            )
+            raise InvalidStatusTransitionError(pin.status, "completed")
 
         now = datetime.now(timezone.utc).isoformat()
 

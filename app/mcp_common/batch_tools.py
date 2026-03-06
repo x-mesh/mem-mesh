@@ -266,6 +266,7 @@ class BatchOperationHandler:
         add_operations = []
         search_operations = []
         pin_add_operations = []
+        pin_complete_operations = []
 
         for i, op in enumerate(operations):
             op["index"] = i
@@ -275,6 +276,8 @@ class BatchOperationHandler:
                 search_operations.append(op)
             elif op["type"] == "pin_add":
                 pin_add_operations.append(op)
+            elif op["type"] == "pin_complete":
+                pin_complete_operations.append(op)
 
         # 배치 추가 작업 처리
         if add_operations:
@@ -411,6 +414,56 @@ class BatchOperationHandler:
                         }
                     )
 
+        # 배치 pin_complete 작업 처리
+        if pin_complete_operations:
+            from ..core.errors import PinAlreadyCompletedError
+            from ..core.services.pin import PinService
+
+            pin_service = PinService(self.db)
+
+            for op in pin_complete_operations:
+                try:
+                    pin_id = op.get("pin_id", "")
+                    promote = op.get("promote", False)
+                    category = op.get("category", "task")
+
+                    try:
+                        pin_result = await pin_service.complete_pin(pin_id)
+                    except PinAlreadyCompletedError:
+                        pin_result = await pin_service.get_pin(pin_id)
+                        if not pin_result:
+                            raise ValueError(f"Pin not found: {pin_id}")
+
+                    suggest_promotion = pin_service.should_suggest_promotion(pin_result)
+                    entry = {
+                        "index": op["index"],
+                        "type": "pin_complete",
+                        "success": True,
+                        "pin_id": pin_id,
+                        "status": pin_result.status,
+                        "suggest_promotion": suggest_promotion,
+                    }
+
+                    if promote:
+                        try:
+                            promote_result = await pin_service.promote_to_memory(pin_id, category=category)
+                            entry["promoted"] = True
+                            entry["memory_id"] = promote_result["memory_id"]
+                        except Exception as e:
+                            entry["promoted"] = False
+                            entry["promote_error"] = str(e)
+
+                    results.append(entry)
+                except Exception as e:
+                    results.append(
+                        {
+                            "index": op["index"],
+                            "type": "pin_complete",
+                            "success": False,
+                            "error": str(e),
+                        }
+                    )
+
         # 인덱스 순으로 정렬
         results.sort(key=lambda x: x["index"])
 
@@ -419,6 +472,7 @@ class BatchOperationHandler:
             len(add_operations) * 10
             + len(search_operations) * 30
             + len(pin_add_operations) * 5
+            + len(pin_complete_operations) * 5
         )
 
         return {
@@ -431,6 +485,7 @@ class BatchOperationHandler:
                 "add_operations": len(add_operations),
                 "search_operations": len(search_operations),
                 "pin_add_operations": len(pin_add_operations),
+                "pin_complete_operations": len(pin_complete_operations),
             },
         }
 
