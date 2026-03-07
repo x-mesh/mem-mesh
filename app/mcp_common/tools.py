@@ -548,7 +548,7 @@ class MCPToolHandlers:
                 auto_importance=auto_importance,
                 ide_session_id=ide_session_id,
                 client_type=client_type,
-                client=client_type or os.environ.get("MEM_MESH_CLIENT"),
+                client=os.environ.get("MEM_MESH_CLIENT"),
             )
 
             logger.info(

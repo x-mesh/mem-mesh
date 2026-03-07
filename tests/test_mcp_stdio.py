@@ -255,9 +255,8 @@ async def test_pin_add_tool(tool_handlers):
     )
 
     assert "id" in result
-    assert result["content"] == "Implement new feature for user dashboard"
-    assert result["project_id"] == "test-project"
-    assert result["status"] in ("active", "open")
+    assert result["importance"] == 3
+    assert result["status"] == "in_progress"
 
 
 @pytest.mark.asyncio

@@ -258,7 +258,7 @@ class TestGetPinStatistics:
         stats = await pin_service.get_pin_statistics(test_session.id)
 
         assert stats["total"] == 3
-        assert stats["by_status"]["open"] == 2
+        assert stats["by_status"]["in_progress"] == 2
         assert stats["by_status"]["completed"] == 1
         assert stats["by_importance"][1] == 1
         assert stats["by_importance"][3] == 1

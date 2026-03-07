@@ -166,8 +166,7 @@ class TestPinAddWithImportanceAnalyzer:
         )
 
         assert result["importance"] == 5
-        assert result["auto_importance"] is False
-        assert "importance_note" not in result
+        assert "auto_importance" not in result  # compact response omits when not auto
 
     async def test_pin_add_without_importance_auto_determines(self, tools):
         """importance가 없으면 자동으로 추정해야 함"""
@@ -180,8 +179,6 @@ class TestPinAddWithImportanceAnalyzer:
         assert "importance" in result
         assert result["importance"] in range(1, 6)  # 1-5 범위
         assert result["auto_importance"] is True
-        assert "importance_note" in result
-        assert "자동으로" in result["importance_note"]
 
     async def test_pin_add_auto_importance_critical(self, tools):
         """critical 키워드가 있으면 높은 중요도로 추정해야 함"""
@@ -261,7 +258,7 @@ class TestIntegrationWorkflow:
             project_id="test-project",
             importance=4,  # 명시적 지정
         )
-        assert pin3["auto_importance"] is False
+        assert "auto_importance" not in pin3  # compact response omits when not auto
         assert pin3["importance"] == 4
 
         # 2. 세션 재개 (expand=false, 토큰 추적)

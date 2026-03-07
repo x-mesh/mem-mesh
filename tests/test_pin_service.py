@@ -65,7 +65,7 @@ class TestPinCRUD:
         assert pin.content == content
         assert pin.importance == importance
         assert pin.tags == tags
-        assert pin.status == "open"
+        assert pin.status == "in_progress"
         assert pin.completed_at is None
 
     @pytest.mark.asyncio
@@ -142,7 +142,7 @@ class TestPinStatus:
             content="Pin to be completed for testing",
             user_id="test-user",
         )
-        assert pin.status == "open"
+        assert pin.status == "in_progress"
 
         # When
         completed_pin = await pin_service.complete_pin(pin.id)
@@ -154,21 +154,14 @@ class TestPinStatus:
 
     @pytest.mark.asyncio
     async def test_pin_status_transitions(self, pin_service):
-        """Pin 상태 전이 테스트 (open → in_progress → completed)"""
-        # Given
+        """Pin 상태 전이 테스트 (in_progress → completed)"""
+        # Given - default status is in_progress
         pin = await pin_service.create_pin(
             project_id="test-project",
             content="Pin for status transition test",
             user_id="test-user",
         )
-        assert pin.status == "open"
-
-        # When - open → in_progress
-        update_data = PinUpdate(status="in_progress")
-        in_progress_pin = await pin_service.update_pin(pin.id, update_data)
-
-        # Then
-        assert in_progress_pin.status == "in_progress"
+        assert pin.status == "in_progress"
 
         # When - in_progress → completed
         completed_pin = await pin_service.complete_pin(pin.id)

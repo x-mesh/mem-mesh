@@ -135,6 +135,41 @@ class SessionService:
 
         return self._row_to_response(row)
 
+    async def _auto_close_stale_pins(self, project_id: str) -> int:
+        """Stale pin 자동 정리.
+
+        - in_progress 7일 이상 → completed
+        - open 30일 이상 → completed
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        in_progress_cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=7)
+        ).isoformat()
+        open_cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=30)
+        ).isoformat()
+
+        cursor = await self.db.execute(
+            """
+            UPDATE pins
+            SET status = 'completed', completed_at = ?, updated_at = ?
+            WHERE project_id = ?
+            AND (
+                (status = 'in_progress' AND created_at < ?)
+                OR (status = 'open' AND created_at < ?)
+            )
+            """,
+            (now, now, project_id, in_progress_cutoff, open_cutoff),
+        )
+        self.db.connection.commit()
+
+        count = cursor.rowcount
+        if count > 0:
+            logger.info(
+                f"Auto-closed {count} stale pins for project={project_id}"
+            )
+        return count
+
     async def resume_last_session(
         self,
         project_id: str,
@@ -146,6 +181,7 @@ class SessionService:
         마지막 세션 컨텍스트 로드.
 
         흐름:
+        0. stale pin 자동 정리 (in_progress 7일, open 30일)
         1. 활성/일시정지 세션이 있고 핀이 있으면 → 해당 세션 핀 반환
         2. 활성 세션은 있지만 핀이 없으면 → cross-session 핀을 병합하여 반환
         3. 활성 세션이 없으면 → cross-session fallback (최근 7일)
@@ -161,6 +197,9 @@ class SessionService:
             SessionContext 또는 None
         """
         effective_user_id = user_id or get_current_user()
+
+        # Step 0: stale pin 자동 정리
+        await self._auto_close_stale_pins(project_id)
 
         # 가장 최근 세션 조회 (활성 또는 일시정지)
         active_row = await self.db.fetchone(
