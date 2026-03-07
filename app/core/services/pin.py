@@ -129,7 +129,7 @@ class PinService:
                 id, session_id, project_id, user_id, content,
                 importance, status, tags, auto_importance, client, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?, ?, ?, ?, ?)
             """,
             (
                 pin_id,
@@ -157,7 +157,7 @@ class PinService:
             client=client,
             content=content,
             importance=effective_importance,
-            status="open",
+            status="in_progress",
             tags=tags or [],
             completed_at=None,
             lead_time_hours=None,

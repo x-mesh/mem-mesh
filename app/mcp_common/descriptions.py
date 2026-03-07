@@ -19,6 +19,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "session_resume": (
         "Resume the last session for a project. "
         "Call at the START of every conversation to restore active pins and context. "
+        "Auto-cleans stale pins (in_progress 7d, open 30d → completed). "
         'Use expand="smart" for optimal token efficiency.'
     ),
     "search": (
@@ -36,9 +37,9 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     "pin_add": (
         "Track a short-term work item in the current session. "
-        "Pins are lightweight and can be promoted to permanent memories via pin_promote after completion. "
-        "Requires project_id. Importance is auto-determined if omitted. "
-        "Client is auto-detected from MEM_MESH_CLIENT env."
+        "Default status: in_progress. Use open status for pre-planned future tasks. "
+        "Importance is auto-determined if omitted. Returns compact: {id, importance, status}. "
+        "Client auto-detected: HTTP(initialize/User-Agent), stdio(MEM_MESH_CLIENT env)."
     ),
     "pin_complete": (
         "Mark a pin as completed. Returns a promotion suggestion if importance >= 4. "

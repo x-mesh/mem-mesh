@@ -101,7 +101,11 @@ session_resume  pin_add       지식 보존 판단
 ```
 mcp_mem_mesh_session_resume(project_id="mem-mesh", expand="smart", limit=10)
 ```
-Report: `pins_count`, `open_pins`, `completed_pins`
+Report: `pins_count`, `in_progress_pins`, `open_pins`, `completed_pins`
+
+**Stale 자동 정리:** `session_resume` 호출 시 오래된 핀을 자동 완료 처리
+- `in_progress` 상태 7일 경과 → `completed`
+- `open` 상태 30일 경과 → `completed`
 
 **Token Optimization — expand 모드:**
 - `expand="smart"` (권장): status × importance 4-Tier 매트릭스
@@ -118,7 +122,12 @@ Report: `pins_count`, `open_pins`, `completed_pins`
 mcp_mem_mesh_pin_add(content="<description>", project_id="mem-mesh", importance=3, tags=[...])
 ```
 - `3`: normal, `4`: important, `5`: architecture
+- importance 생략 시 내용 기반 자동 추정
+- 기본 상태: `in_progress` (작업 중). 다단계 작업에서 나중 작업은 `open`(계획됨)으로 생성 가능
+- 응답(compact): `{id, importance, status}` — 자동 추정 시 `auto_importance: true` 추가
 - Wait for `pin_id` before proceeding
+
+**클라이언트 감지:** HTTP 모드에서 MCP initialize 핸드셰이크 또는 User-Agent로 자동 감지 (25+ IDE/AI 플랫폼). Stdio 모드에서는 `MEM_MESH_CLIENT` 환경변수 사용.
 
 ### Task Complete
 ```

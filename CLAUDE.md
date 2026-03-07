@@ -54,7 +54,9 @@ uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 **M5. Stop hook 피드백 즉시 실행** — system-reminder에 `"mem-mesh에 저장하세요"` 또는 `mcp__mem-mesh__add` 지시가 포함되어 있으면, **사용자 메시지 처리 전에 반드시 해당 저장을 먼저 실행**한다. Stop hook은 대화 분석 후 저장이 필요하다고 판단한 것이므로, 이 지시를 무시하거나 뒤로 미루면 안 된다.
 
 **M6. Pin Land the Plane** — **파일이 변경되는 작업만 pin**. 질문·설명·조회는 pin 불필요. 다단계 작업은 단계별 pin.
-생명주기: `pin_add`(착수 직전) → `pin_complete`(완료 즉시, `promote=true`로 승격 병합 가능) → pin_complete 없이 작업 응답을 끝내지 않는다.
+상태: `open`(계획됨, 미착수) → `in_progress`(작업 중, **pin_add 기본값**) → `completed`(완료).
+생명주기: `pin_add`(착수 직전, in_progress로 생성) → `pin_complete`(완료 즉시, `promote=true`로 승격 병합 가능) → pin_complete 없이 작업 응답을 끝내지 않는다.
+다단계에서 나중 작업은 `open` 상태로 미리 등록 가능. Stale 자동 정리: in_progress 7일, open 30일 → completed.
 
 ---
 
@@ -64,7 +66,7 @@ uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 
 **S2. 맥락 검색** — 과거 결정/설계 언급 시 `search`로 확인 후 코딩.
 
-**S3. Pin client 자동 감지** — `client` 필드는 `MEM_MESH_CLIENT` 환경변수에서 자동 설정됨. 생명주기는 M6 참조.
+**S3. Pin client 자동 감지** — `client` 필드는 stdio 모드에서 `MEM_MESH_CLIENT` 환경변수, HTTP 모드에서 initialize handshake 또는 User-Agent에서 자동 설정됨. 명시적 전달 불필요.
 
 **S4. 토큰 효율** — 여러 메모리 작업은 `batch_operations`로 묶기.
 

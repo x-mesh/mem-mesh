@@ -422,7 +422,7 @@ async def test_dispatch_pin_tool(tool_handlers, dispatcher_fixture):
         assert "content" in result
         response_data = json.loads(result["content"][0]["text"])
         assert "id" in response_data
-        assert response_data["project_id"] == "test-project"
+        assert response_data["status"] == "in_progress"
     finally:
         server.tool_handlers = original_handlers
         server.dispatcher = original_dispatcher

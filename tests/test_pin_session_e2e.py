@@ -61,7 +61,7 @@ async def test_full_pin_session_flow(services):
         client_type="claude-ai",
     )
     assert pin1.id is not None
-    assert pin1.status == "open"
+    assert pin1.status == "in_progress"
     assert pin1.importance == 4
     assert pin1.project_id == PROJECT_ID
 
