@@ -68,9 +68,12 @@ Tags: 3-6개 (기술 + 모듈 + 액션). 중복 시 `update(memory_id)` 사용.
 ### PIN WORKFLOW (SHOULD)
 
 진행 중 작업 추적:
-1. `pin_add(content, project_id, importance=3)` — 작업 시작
-2. `pin_complete(pin_id)` — 작업 완료
-3. importance ≥ 4 → `pin_promote(pin_id)` — 영구 메모리로 승격
+1. `pin_add(content, project_id, importance=3)` — 작업 시작 (기본 상태: `in_progress`)
+2. `pin_complete(pin_id, promote=true)` — 완료 + 승격을 한 번에 처리
+3. importance ≥ 4 → 별도 승격 시 `pin_promote(pin_id)`
+
+핀 상태: `open`(계획됨) → `in_progress`(작업 중, 기본값) → `completed`(완료)
+Stale 자동 정리: session_resume 시 in_progress 7일, open 30일 경과 → completed
 
 ### BATCH (MAY)
 

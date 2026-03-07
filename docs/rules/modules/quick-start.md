@@ -67,9 +67,9 @@ A: 해결 방법
 ## 4. 세션 관리 (선택, 1분)
 
 ```
-session_resume(project_id="프로젝트명", expand=false)
-pin_add(content="현재 작업", project_id="프로젝트명", importance=3)
-pin_complete(pin_id="...")
+session_resume(project_id="프로젝트명", expand="smart")
+pin_add(content="현재 작업", project_id="프로젝트명", importance=3)  # 기본 상태: in_progress
+pin_complete(pin_id="...", promote=true)  # 완료+승격 한 번에 처리
 ```
 
 ---
