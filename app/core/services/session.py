@@ -141,13 +141,10 @@ class SessionService:
         - in_progress 7일 이상 → completed
         - open 30일 이상 → completed
         """
-        now = datetime.now(timezone.utc).isoformat()
-        in_progress_cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=7)
-        ).isoformat()
-        open_cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=30)
-        ).isoformat()
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        in_progress_cutoff = (now_dt - timedelta(days=7)).isoformat()
+        open_cutoff = (now_dt - timedelta(days=30)).isoformat()
 
         cursor = await self.db.execute(
             """
@@ -155,8 +152,8 @@ class SessionService:
             SET status = 'completed', completed_at = ?, updated_at = ?
             WHERE project_id = ?
             AND (
-                (status = 'in_progress' AND created_at < ?)
-                OR (status = 'open' AND created_at < ?)
+                (status = 'in_progress' AND updated_at < ?)
+                OR (status = 'open' AND updated_at < ?)
             )
             """,
             (now, now, project_id, in_progress_cutoff, open_cutoff),
@@ -449,7 +446,9 @@ class SessionService:
         )
 
         session_id = last_session["id"] if last_session else "cross-session"
-        started_at = last_session["started_at"] if last_session else cutoff
+        started_at = last_session["started_at"] if last_session else (
+            datetime.now(timezone.utc) - timedelta(days=7)
+        ).isoformat()
 
         logger.info(
             f"Cross-session fallback for project={project_id}: "
@@ -701,7 +700,7 @@ class SessionService:
 
         if is_active and is_important:
             # Tier 1: 진행 중 + 중요 → 전체 맥락 필요
-            tags = json.loads(row["tags"]) if row["tags"] else []
+            tags = _parse_tags(row["tags"])
             return {
                 "id": row["id"],
                 "content": content,
@@ -714,7 +713,7 @@ class SessionService:
 
         if is_active:
             # Tier 2: 진행 중 + 일반 → 대략적 내용만
-            tags = json.loads(row["tags"]) if row["tags"] else []
+            tags = _parse_tags(row["tags"])
             return {
                 "id": row["id"],
                 "content": content[:200] + ("..." if len(content) > 200 else ""),
