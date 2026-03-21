@@ -341,7 +341,7 @@ class TestPromoteToMemoryDuplicatePrevention:
         """첫 승격 테스트"""
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Important task to promote",
+            content="Important task to promote — critical architectural decision about database migration strategy that needs permanent memory preservation",
             importance=5,
             user_id="test-user",
         )
@@ -358,7 +358,7 @@ class TestPromoteToMemoryDuplicatePrevention:
         """중복 승격 방지 테스트"""
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Important task to promote",
+            content="Important task to promote — critical architectural decision about database migration strategy that needs permanent memory preservation",
             importance=5,
             user_id="test-user",
         )
@@ -380,7 +380,7 @@ class TestPromoteToMemoryDuplicatePrevention:
         """승격된 핀이 promoted_to_memory_id를 가지는지 테스트"""
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Important task",
+            content="Important task — redesigning the authentication flow to support multi-factor authentication with TOTP and backup codes for enhanced security",
             importance=5,
             user_id="test-user",
         )

@@ -85,6 +85,7 @@ class PinService:
         ide_session_id: Optional[str] = None,
         client_type: Optional[str] = None,
         client: Optional[str] = None,
+        is_staging: bool = False,
     ) -> PinResponse:
         """
         새 Pin 생성.
@@ -127,9 +128,9 @@ class PinService:
             """
             INSERT INTO pins (
                 id, session_id, project_id, user_id, content,
-                importance, status, tags, auto_importance, client, created_at, updated_at
+                importance, status, tags, auto_importance, client, is_staging, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?, ?, ?, ?, ?, ?)
             """,
             (
                 pin_id,
@@ -141,6 +142,7 @@ class PinService:
                 tags_json,
                 1 if auto_importance else 0,
                 client,
+                1 if is_staging else 0,
                 now,
                 now,
             ),
@@ -162,6 +164,7 @@ class PinService:
             completed_at=None,
             lead_time_hours=None,
             auto_importance=auto_importance,
+            is_staging=is_staging,
             created_at=now,
             updated_at=now,
         )

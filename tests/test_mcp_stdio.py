@@ -188,7 +188,7 @@ def test_tool_schemas_valid():
 async def test_add_memory_tool(tool_handlers):
     """add 도구 테스트 - 메모리 생성"""
     result = await tool_handlers.add(
-        content="Test memory content for FastMCP stdio server testing",
+        content="Test memory content for FastMCP stdio server testing — padded to exceed the 100-character quality gate minimum length requirement for valid memories.",
         project_id="test-project",
         category="task",
         source="mcp-test",
@@ -205,7 +205,7 @@ async def test_search_memory_tool(tool_handlers):
     """search 도구 테스트 - 메모리 검색"""
     # 먼저 메모리 추가
     await tool_handlers.add(
-        content="Authentication system implementation with JWT tokens for secure access",
+        content="Authentication system implementation with JWT tokens for secure access — comprehensive identity and access management module for production deployment",
         project_id="test-project",
         category="task",
     )
@@ -224,7 +224,7 @@ async def test_stats_tool(tool_handlers, memory_service):
     """stats 도구 테스트 - 통계 조회"""
     # 테스트용 메모리 추가
     await memory_service.create(
-        content="Test memory for stats verification",
+        content="Test memory for stats verification — created to validate statistics endpoint returns correct aggregated counts and breakdowns",
         project_id="test-project",
         category="task",
         source="test",
@@ -309,7 +309,7 @@ async def test_context_tool(tool_handlers):
     """context 도구 테스트 - 컨텍스트 조회"""
     # 먼저 메모리 추가
     add_result = await tool_handlers.add(
-        content="User authentication system with JWT implementation for API security",
+        content="User authentication system with JWT implementation for API security — includes token refresh, role-based access control, and session management",
         project_id="test-project",
         category="task",
     )
@@ -329,7 +329,7 @@ async def test_update_tool(tool_handlers):
     """update 도구 테스트 - 메모리 업데이트"""
     # 먼저 메모리 추가
     add_result = await tool_handlers.add(
-        content="Original authentication implementation for testing",
+        content="Original authentication implementation for testing — basic username password validation with bcrypt hashing and salting for secure storage",
         project_id="test-project",
         category="task",
     )
@@ -338,7 +338,7 @@ async def test_update_tool(tool_handlers):
     # 메모리 업데이트
     result = await tool_handlers.update(
         memory_id=memory_id,
-        content="Updated authentication implementation with better security measures",
+        content="Updated authentication implementation with better security measures — migrated to OAuth2 with PKCE flow and added rate limiting",
         category="decision",
         tags=["auth", "security", "updated"],
     )
@@ -352,7 +352,7 @@ async def test_delete_tool(tool_handlers):
     """delete 도구 테스트 - 메모리 삭제"""
     # 먼저 메모리 추가
     add_result = await tool_handlers.add(
-        content="Memory to be deleted for testing purposes",
+        content="Memory to be deleted for testing purposes — temporary record created to verify the delete endpoint correctly removes data and returns proper status",
         project_id="test-project",
         category="task",
     )
@@ -370,12 +370,12 @@ async def test_search_with_filters(tool_handlers):
     """search 도구 필터링 테스트"""
     # 다양한 카테고리로 메모리 추가
     await tool_handlers.add(
-        content="Bug fix for login validation error handling",
+        content="Bug fix for login validation error handling — resolved issue where empty password field caused uncaught exception instead of proper validation error",
         project_id="filter-project",
         category="bug",
     )
     await tool_handlers.add(
-        content="New feature idea for user dashboard improvements",
+        content="New feature idea for user dashboard improvements — add real-time activity feed showing recent team changes and notification badges for pending reviews",
         project_id="filter-project",
         category="idea",
     )
@@ -393,7 +393,7 @@ async def test_stats_with_project_filter(tool_handlers, memory_service):
     """stats 도구 프로젝트 필터링 테스트"""
     # 특정 프로젝트에 메모리 추가
     await memory_service.create(
-        content="Test memory for filtered stats verification",
+        content="Test memory for filtered stats verification — created in specific project to validate that stats endpoint correctly filters by project_id parameter",
         project_id="stats-filter-project",
         category="bug",
         source="test",
@@ -438,7 +438,7 @@ async def test_search_response_formats(tool_handlers):
     """search 도구 응답 형식 테스트"""
     # 메모리 추가
     await tool_handlers.add(
-        content="Test content for response format verification testing",
+        content="Test content for response format verification testing — validates that minimal, compact, and standard response formats return correctly structured data",
         project_id="format-test",
         category="task",
     )

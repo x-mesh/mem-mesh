@@ -170,7 +170,7 @@ class TestPromoteBeforeComplete:
         """open 상태의 Pin도 승격 가능 (현재 정책: 허용)"""
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Important decision made during discussion",
+            content="Important decision made during discussion — chose PostgreSQL over MongoDB for the user analytics pipeline due to complex join requirements",
             importance=5,
             user_id="test-user",
         )
@@ -184,7 +184,7 @@ class TestPromoteBeforeComplete:
         """completed 상태의 Pin 승격 — 표준 워크플로우"""
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Completed and ready for promotion task",
+            content="Completed and ready for promotion task — finished implementing the OAuth2 PKCE flow with token refresh and session persistence across restarts",
             importance=4,
             user_id="test-user",
         )
@@ -199,7 +199,7 @@ class TestPromoteBeforeComplete:
         """승격 시 지정한 category가 Memory에 반영되는지 검증"""
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Critical bug found in authentication flow",
+            content="Critical bug found in authentication flow — JWT token validation skips expiry check when clock skew exceeds 30 seconds causing unauthorized access",
             importance=5,
             user_id="test-user",
         )
@@ -234,7 +234,7 @@ class TestCrossSessionContinuity:
         )
         await pin_service.create_pin(
             project_id="test-project",
-            content="Task from session one with enough content",
+            content="Task from session one with enough content — implementing the initial database schema migration for user preferences and notification settings",
             importance=3,
             user_id="test-user",
         )
@@ -248,7 +248,7 @@ class TestCrossSessionContinuity:
         )
         await pin_service.create_pin(
             project_id="test-project",
-            content="Task from session two with enough content",
+            content="Task from session two with enough content — adding integration tests for the REST API endpoints including error handling and rate limiting",
             importance=3,
             user_id="test-user",
         )
@@ -273,7 +273,7 @@ class TestCrossSessionContinuity:
         )
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Incomplete work that should persist across resumes",
+            content="Incomplete work that should persist across resumes — refactoring the search indexing pipeline to support incremental updates instead of full rebuilds",
             importance=4,
             user_id="test-user",
         )
@@ -300,7 +300,7 @@ class TestShouldSuggestBoundary:
         """importance=3 (경계 아래) → suggest=False"""
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Normal importance task content here",
+            content="Normal importance task content here — routine code cleanup removing unused imports and fixing minor linting warnings across the service layer",
             importance=3,
             user_id="test-user",
         )
@@ -312,7 +312,7 @@ class TestShouldSuggestBoundary:
         """importance=4 (경계값) → suggest=True"""
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="High importance task content here",
+            content="High importance task content here — redesigning the caching strategy to use write-through pattern for consistency with read-aside for performance",
             importance=4,
             user_id="test-user",
         )
@@ -324,7 +324,7 @@ class TestShouldSuggestBoundary:
         """importance=5 (최대) → suggest=True"""
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Critical importance task content here",
+            content="Critical importance task content here — migrating from single-node SQLite to WAL mode with connection pooling for concurrent access support",
             importance=5,
             user_id="test-user",
         )
@@ -336,7 +336,7 @@ class TestShouldSuggestBoundary:
         """importance=4이지만 open 상태 → suggest=False (완료 필요)"""
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="High importance but still open task",
+            content="High importance but still open task — planning the migration from REST to GraphQL for the dashboard API with subscription support for real-time updates",
             importance=4,
             user_id="test-user",
         )
@@ -356,7 +356,7 @@ class TestConcurrentComplete:
         """동일 Pin에 대해 동시 complete 호출 → 하나만 성공, 나머지는 PinAlreadyCompletedError"""
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Task to complete concurrently with race condition",
+            content="Task to complete concurrently with race condition — stress testing the pin lifecycle transitions under parallel access to verify atomic state changes",
             importance=3,
             user_id="test-user",
         )

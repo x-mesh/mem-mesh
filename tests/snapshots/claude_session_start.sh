@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 12
+# mem-mesh-hooks prompt-version: 13
 # Claude Code SessionStart hook: inject mem-mesh session context
 # Fires on session start AND after compaction (context re-injection)
 # Returns hookSpecificOutput JSON via /api/work/sessions/resume/{project_id}
@@ -77,7 +77,9 @@ try:
             lines.append('**미완료 작업:**')
             for p in open_list:
                 content = p.get('content', '?')[:100]
-                lines.append(f'- [pin] {content}')
+                client = p.get('client', '') or ''
+                client_str = f'({client}) ' if client else ''
+                lines.append(f'- [pin] {client_str}{content}')
         if not lines:
             lines.append('No recent activity.')
         print('\n'.join(lines))
@@ -103,7 +105,7 @@ ${SESSION_SUMMARY}
 
 ### Rules
 1. **코딩 응답 우선** — 코드와 답변을 먼저 출력. mem-mesh 호출은 답변 완료 후 수행. 응답 서두에 '메모리를 검색하겠습니다' 같은 안내를 넣지 않는다.
-2. **Pin으로 작업 추적** — 작업 시작 시 pin_add(content, project_id="mem-mesh", importance=3), 완료 시 pin_complete. (importance: 3=일반, 4=중요, 5=아키텍처)
+2. **Pin으로 작업 추적 (필수)** — 코드 변경 작업 시 즉시 pin_add(content, project_id="mem-mesh"). 완료 시 반드시 pin_complete 호출 — pin_complete 없이 작업을 끝내지 않는다. 질문/설명/분석은 pin 불필요. (importance: 3=일반, 4=중요, 5=아키텍처)
 3. **영구 메모리는 선별적** — decision, bug, incident, idea, code_snippet만 add()로 저장. 일상적 작업 상태는 pin으로 충분.
 4. **맥락 검색 활용** — 과거 결정/작업/설계가 언급되면 코드 작성 전에 search()로 기존 맥락 확인.
 5. **세션 종료** — 사용자가 완료를 명시하면 요청 처리 후 session_end(project_id="mem-mesh")."

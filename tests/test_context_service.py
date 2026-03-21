@@ -56,21 +56,21 @@ async def test_get_context_basic(context_service, memory_service):
     """기본 맥락 조회 테스트"""
     # 테스트 메모리 생성
     memory1 = await memory_service.create(
-        content="Implemented user authentication system",
+        content="Implemented user authentication system with OAuth2 and session management — padded to meet 100-char minimum.",
         project_id="test-project",
         category="task",
         source="test",
     )
 
     await memory_service.create(
-        content="Added JWT token validation",
+        content="Added JWT token validation and refresh token rotation for secure API access — padded to meet 100-char minimum.",
         project_id="test-project",
         category="task",
         source="test",
     )
 
     await memory_service.create(
-        content="Fixed login bug in authentication",
+        content="Fixed login bug in authentication module causing session invalidation — padded to meet 100-char minimum.",
         project_id="test-project",
         category="bug",
         source="test",
@@ -105,21 +105,21 @@ async def test_get_context_with_project_filter(context_service, memory_service):
     """프로젝트 필터가 있는 맥락 조회 테스트"""
     # 다른 프로젝트의 메모리 생성
     memory1 = await memory_service.create(
-        content="Authentication implementation",
+        content="Authentication implementation using JWT and OAuth2 for project-a service — padded to meet 100-char minimum.",
         project_id="project-a",
         category="task",
         source="test",
     )
 
     await memory_service.create(
-        content="Authentication testing",
+        content="Authentication testing with unit and integration test coverage for project-b — padded to meet minimum.",
         project_id="project-b",
         category="task",
         source="test",
     )
 
     await memory_service.create(
-        content="Authentication documentation",
+        content="Authentication documentation including API reference and usage guides for project-a service — padded here.",
         project_id="project-a",
         category="task",
         source="test",
@@ -150,7 +150,7 @@ async def test_get_context_relationship_classification(context_service, memory_s
     """관계 분류 테스트"""
     # 시간차를 두고 메모리 생성
     await memory_service.create(
-        content="Started authentication work",
+        content="Started authentication work by setting up project structure and dependencies — padded to meet minimum.",
         project_id="test-project",
         category="task",
         source="test",
@@ -158,14 +158,14 @@ async def test_get_context_relationship_classification(context_service, memory_s
 
     # 시간 차이는 데이터베이스 타임스탬프로 자동 생성됨
     memory2 = await memory_service.create(
-        content="Completed authentication implementation",
+        content="Completed authentication implementation with full test coverage and documentation — padded to minimum.",
         project_id="test-project",
         category="task",
         source="test",
     )
 
     await memory_service.create(
-        content="Authentication system is working perfectly",
+        content="Authentication system is working perfectly in production with no reported issues — padded to minimum.",
         project_id="test-project",
         category="task",
         source="test",
@@ -187,7 +187,7 @@ async def test_get_context_depth_expansion(context_service, memory_service):
     memories = []
     for i in range(5):
         memory = await memory_service.create(
-            content=f"Authentication step {i + 1}: implementing feature {i + 1}",
+            content=f"Authentication step {i + 1}: implementing feature {i + 1} with detailed error handling, logging, and monitoring.",
             project_id="test-project",
             category="task",
             source="test",
@@ -217,14 +217,14 @@ async def test_get_context_similarity_threshold(context_service, memory_service)
     """유사도 임계값 테스트"""
     # 완전히 다른 내용의 메모리들 생성
     memory1 = await memory_service.create(
-        content="User authentication implementation with JWT tokens",
+        content="User authentication implementation with JWT tokens, session management, and full OAuth2 integration support.",
         project_id="test-project",
         category="task",
         source="test",
     )
 
     await memory_service.create(
-        content="Database schema migration for products table",
+        content="Database schema migration for products table including index optimization and foreign key constraints.",
         project_id="test-project",
         category="task",
         source="test",
@@ -244,7 +244,7 @@ async def test_get_context_empty_database(context_service, memory_service):
     """빈 데이터베이스에서 맥락 조회 테스트"""
     # 메모리 하나만 생성
     memory = await memory_service.create(
-        content="Single memory in database",
+        content="Single memory in database for isolation testing — padded to satisfy the 100-character quality gate minimum.",
         project_id="test-project",
         category="task",
         source="test",

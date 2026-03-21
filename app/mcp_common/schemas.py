@@ -300,6 +300,11 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
                         "description": "Pin tags",
                         "maxItems": 10,
                     },
+                    "staging": {
+                        "type": "boolean",
+                        "description": "Mark pin as staging (shown in separate staging_pins section on session_resume)",
+                        "default": False,
+                    },
                 },
                 "required": ["content", "project_id"],
                 "additionalProperties": False,
