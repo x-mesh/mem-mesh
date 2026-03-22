@@ -7,12 +7,12 @@ import json
 import logging
 import re
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from ..database.base import Database
 from ..database.models import Memory
 from ..embeddings.service import EmbeddingService
-from ..schemas.responses import AddResponse, DeleteResponse, UpdateResponse
+from ..schemas.responses import AddResponse, ConflictInfo, DeleteResponse, UpdateResponse
 
 from ..errors import (
     DatabaseError,
@@ -84,11 +84,51 @@ logger = logging.getLogger(__name__)
 class MemoryService:
     """메모리 저장/조회/삭제/업데이트 서비스"""
 
-    def __init__(self, db: Database, embedding_service: EmbeddingService):
+    def __init__(
+        self,
+        db: Database,
+        embedding_service: EmbeddingService,
+        conflict_detector: Any = None,
+    ):
         self.db = db
         self.embedding_service = embedding_service
         self.max_retries = 3
-        logger.info("MemoryService initialized")
+
+        # Conflict detector: 외부 주입 또는 설정 기반 자동 생성
+        if conflict_detector is not None:
+            self.conflict_detector = conflict_detector
+        else:
+            self.conflict_detector = self._init_conflict_detector()
+
+        logger.info(
+            "MemoryService initialized (conflict_detection=%s)",
+            self.conflict_detector is not None,
+        )
+
+    @staticmethod
+    def _init_conflict_detector() -> Any:
+        """설정 기반 ConflictDetectorService 자동 생성 (lazy-load, graceful degradation)."""
+        try:
+            from ..config import get_settings
+
+            settings = get_settings()
+            if not settings.enable_conflict_detection:
+                return None
+
+            from .conflict_detector import ConflictDetectorService
+
+            detector = ConflictDetectorService(
+                model_name=settings.conflict_nli_model,
+                preload=False,  # lazy-load: 첫 사용 시 모델 로드
+                contradiction_threshold=settings.conflict_contradiction_threshold,
+                similarity_threshold=settings.conflict_similarity_threshold,
+                max_candidates=settings.conflict_max_candidates,
+            )
+            logger.info("ConflictDetectorService initialized (NLI available=%s)", detector.is_available)
+            return detector
+        except Exception as e:
+            logger.warning("Failed to initialize ConflictDetectorService: %s", e)
+            return None
 
     async def create(
         self,
@@ -139,6 +179,13 @@ class MemoryService:
         embedding_vector = await self._generate_embedding_with_retry(content)
         embedding_bytes = self.embedding_service.to_bytes(embedding_vector)
 
+        # 3.5. 충돌 감지 (conflict detection)
+        conflict_infos: list[ConflictInfo] | None = None
+        if self.conflict_detector is not None:
+            conflict_infos = await self._check_conflicts(
+                content, embedding_vector, project_id
+            )
+
         # 4. Memory 객체 생성
         memory = Memory(
             content=content,
@@ -159,7 +206,10 @@ class MemoryService:
 
             logger.info(f"Memory created successfully: {memory.id}")
             return AddResponse(
-                id=memory.id, status="saved", created_at=memory.created_at
+                id=memory.id,
+                status="saved",
+                created_at=memory.created_at,
+                conflicts=conflict_infos if conflict_infos else None,
             )
 
         except Exception as e:
@@ -501,6 +551,81 @@ class MemoryService:
         except Exception as e:
             logger.error(f"Failed to save to vector index: {e}")
             raise
+
+    async def _check_conflicts(
+        self,
+        content: str,
+        embedding_vector: List[float],
+        project_id: Optional[str] = None,
+    ) -> list[ConflictInfo] | None:
+        """Stage 1+2 충돌 감지: 벡터 유사도 → NLI contradiction 체크.
+
+        Returns:
+            충돌 목록 (없으면 None)
+        """
+        if self.conflict_detector is None:
+            return None
+
+        try:
+            import numpy as np
+
+            embedding_bytes = self.embedding_service.to_bytes(embedding_vector)
+            embedding_array = np.frombuffer(embedding_bytes, dtype=np.float32)
+            embedding_json = json.dumps(embedding_array.tolist())
+
+            # Stage 1: 벡터 유사도로 후보 검색
+            cursor = await self.db.execute(
+                """
+                SELECT m.id, m.content,
+                       vec_distance_cosine(e.embedding, ?) AS distance
+                FROM memory_embeddings e
+                JOIN memories m ON m.id = e.memory_id
+                WHERE m.project_id = ? OR ? IS NULL
+                ORDER BY distance ASC
+                LIMIT ?
+                """,
+                (
+                    embedding_json,
+                    project_id,
+                    project_id,
+                    self.conflict_detector.max_candidates,
+                ),
+            )
+
+            rows = cursor.fetchall()
+            if not rows:
+                return None
+
+            candidates = []
+            for row in rows:
+                # distance → similarity 변환
+                similarity = max(0.0, min(1.0, 1.0 - (row[2] / 2.0)))
+                candidates.append({
+                    "id": row[0],
+                    "content": row[1],
+                    "similarity_score": similarity,
+                })
+
+            # Stage 2: ConflictDetectorService로 충돌 감지
+            conflicts = self.conflict_detector.detect_conflicts(content, candidates)
+
+            if not conflicts:
+                return None
+
+            return [
+                ConflictInfo(
+                    memory_id=c.memory_id,
+                    content_preview=c.content_preview,
+                    contradiction_score=c.contradiction_score,
+                    similarity_score=c.similarity_score,
+                )
+                for c in conflicts
+            ]
+
+        except Exception as e:
+            # 충돌 감지 실패는 저장을 차단하지 않음 (graceful degradation)
+            logger.warning(f"Conflict detection failed (non-blocking): {e}")
+            return None
 
     async def _update_vector_index(
         self, memory_id: str, embedding_bytes: bytes
