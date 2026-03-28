@@ -17,6 +17,8 @@ class ErrorCode:
     INVALID_CONTENT_LENGTH = "INVALID_CONTENT_LENGTH"
     INVALID_IMPORTANCE = "INVALID_IMPORTANCE"
     INVALID_STATUS_TRANSITION = "INVALID_STATUS_TRANSITION"
+    MEMORY_CONTENT_TOO_SHORT = "MEMORY_CONTENT_TOO_SHORT"
+    MEMORY_LOW_QUALITY = "MEMORY_LOW_QUALITY"
 
     # 404 Not Found
     MEMORY_NOT_FOUND = "MEMORY_NOT_FOUND"
@@ -46,6 +48,8 @@ ERROR_HTTP_STATUS = {
     ErrorCode.INVALID_CONTENT_LENGTH: 400,
     ErrorCode.INVALID_IMPORTANCE: 400,
     ErrorCode.INVALID_STATUS_TRANSITION: 400,
+    ErrorCode.MEMORY_CONTENT_TOO_SHORT: 400,
+    ErrorCode.MEMORY_LOW_QUALITY: 400,
     ErrorCode.MEMORY_NOT_FOUND: 404,
     ErrorCode.PIN_NOT_FOUND: 404,
     ErrorCode.SESSION_NOT_FOUND: 404,
@@ -67,6 +71,8 @@ ERROR_JSONRPC_CODE = {
     ErrorCode.INVALID_CONTENT_LENGTH: -32602,
     ErrorCode.INVALID_IMPORTANCE: -32602,
     ErrorCode.INVALID_STATUS_TRANSITION: -32602,
+    ErrorCode.MEMORY_CONTENT_TOO_SHORT: -32602,
+    ErrorCode.MEMORY_LOW_QUALITY: -32602,
     ErrorCode.MEMORY_NOT_FOUND: -32602,
     ErrorCode.PIN_NOT_FOUND: -32602,
     ErrorCode.SESSION_NOT_FOUND: -32602,
@@ -236,4 +242,25 @@ class TokenEstimationError(MemMeshError):
         super().__init__(
             f"Failed to estimate tokens for content of length {content_length}: {original_error}",
             content_length=content_length,
+        )
+
+
+class MemoryContentTooShortError(MemMeshError):
+    error_code = ErrorCode.MEMORY_CONTENT_TOO_SHORT
+
+    def __init__(self, length: int, minimum: int = 100):
+        super().__init__(
+            f"Memory content too short: {length} chars (minimum {minimum})",
+            length=length,
+            minimum=minimum,
+        )
+
+
+class MemoryLowQualityError(MemMeshError):
+    error_code = ErrorCode.MEMORY_LOW_QUALITY
+
+    def __init__(self, prefix: str):
+        super().__init__(
+            f"Memory content rejected: low-quality prefix '{prefix}'",
+            prefix=prefix,
         )

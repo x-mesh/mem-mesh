@@ -139,6 +139,7 @@ class DatabaseInitializer:
                 promoted_to_memory_id TEXT,
                 auto_importance INTEGER DEFAULT 0,
                 client TEXT,
+                is_staging INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )

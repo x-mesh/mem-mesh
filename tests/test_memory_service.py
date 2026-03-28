@@ -46,7 +46,7 @@ class TestMemoryService:
     async def test_create_memory_success(self, memory_service):
         """메모리 생성 성공 테스트"""
         # Given
-        content = "Test memory content for unit testing"
+        content = "Test memory content for unit testing — this string is padded to exceed the 100-character quality gate minimum length requirement."
         project_id = "test-project"
         category = "task"
         source = "test"
@@ -78,7 +78,7 @@ class TestMemoryService:
     async def test_create_memory_duplicate(self, memory_service):
         """중복 메모리 생성 테스트"""
         # Given
-        content = "Duplicate test content for testing"
+        content = "Duplicate test content for testing — padded to exceed 100-character quality gate minimum length requirement here."
         project_id = "test-project"
 
         # When - 첫 번째 생성
@@ -112,12 +112,12 @@ class TestMemoryService:
     async def test_update_memory_content(self, memory_service):
         """메모리 내용 업데이트 테스트"""
         # Given - 메모리 생성
-        original_content = "Original content for update test"
+        original_content = "Original content for update test — padded to exceed 100-character quality gate minimum length requirement here."
         response = await memory_service.create(content=original_content, source="test")
         memory_id = response.id
 
         # When - 내용 업데이트
-        new_content = "Updated content for update test"
+        new_content = "Updated content for update test — padded to exceed 100-character quality gate minimum length requirement here."
         update_response = await memory_service.update(
             memory_id=memory_id, content=new_content
         )
@@ -135,7 +135,7 @@ class TestMemoryService:
     async def test_update_memory_metadata_only(self, memory_service):
         """메모리 메타데이터만 업데이트 테스트"""
         # Given - 메모리 생성
-        content = "Content for metadata update test"
+        content = "Content for metadata update test — padded to exceed 100-character quality gate minimum length requirement here."
         response = await memory_service.create(
             content=content, category="task", source="test"
         )
@@ -177,7 +177,7 @@ class TestMemoryService:
     async def test_delete_memory_success(self, memory_service):
         """메모리 삭제 성공 테스트"""
         # Given - 메모리 생성
-        content = "Content to be deleted for testing"
+        content = "Content to be deleted for testing — padded to exceed 100-character quality gate minimum length requirement here."
         response = await memory_service.create(content=content, source="test")
         memory_id = response.id
 
@@ -223,7 +223,8 @@ class TestMemoryService:
 
         # When
         response = await memory_service.create(
-            content="Test content for retry logic", source="test"
+            content="Test content for retry logic — padded to exceed 100-character quality gate minimum length requirement here.",
+            source="test",
         )
 
         # Then
@@ -242,7 +243,8 @@ class TestMemoryService:
         # When & Then
         with pytest.raises(EmbeddingError):
             await memory_service.create(
-                content="Test content for max retries", source="test"
+                content="Test content for max retries — padded to exceed 100-character quality gate minimum length requirement here.",
+                source="test",
             )
 
         assert mock_embedding_service.embed.call_count == 3  # max_retries

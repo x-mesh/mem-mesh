@@ -121,6 +121,34 @@ class Settings(BaseSettings):
         default="cross-encoder/ms-marco-MiniLM-L6-v2",
         description="Cross-encoder model for reranking",
     )
+
+    # Conflict detection configuration
+    enable_conflict_detection: bool = Field(
+        default=False,
+        description="Enable conflict detection on memory add (opt-in)",
+    )
+    conflict_nli_model: str = Field(
+        default="MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7",
+        description="NLI cross-encoder model for contradiction detection",
+    )
+    conflict_contradiction_threshold: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Minimum contradiction probability to flag as conflict",
+    )
+    conflict_similarity_threshold: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Minimum vector similarity to consider as conflict candidate",
+    )
+    conflict_max_candidates: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Maximum number of candidates to check for conflicts",
+    )
     reranking_top_k_multiplier: int = Field(
         default=3,
         ge=2,

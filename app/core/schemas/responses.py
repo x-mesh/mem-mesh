@@ -5,12 +5,27 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+class ConflictInfo(BaseModel):
+    """충돌 감지 정보"""
+
+    memory_id: str = Field(description="충돌하는 기존 메모리 ID")
+    content_preview: str = Field(description="기존 메모리 내용 미리보기 (최대 200자)")
+    contradiction_score: float = Field(
+        description="모순 확률 (0.0~1.0, NLI 모델 미사용 시 0.0)"
+    )
+    similarity_score: float = Field(description="벡터 유사도 점수 (0.0~1.0)")
+
+
 class AddResponse(BaseModel):
     """메모리 추가 응답"""
 
     id: str = Field(description="생성된 메모리 ID")
     status: str = Field(description="저장 상태 ('saved' 또는 'duplicate')")
     created_at: str = Field(description="생성 시간 (ISO8601 형식)")
+    conflicts: Optional[List[ConflictInfo]] = Field(
+        default=None,
+        description="충돌 감지된 기존 메모리 목록 (conflict_detection 활성화 시)",
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -18,6 +33,7 @@ class AddResponse(BaseModel):
                 "id": "123e4567-e89b-12d3-a456-426614174000",
                 "status": "saved",
                 "created_at": "2024-01-15T10:30:00Z",
+                "conflicts": None,
             }
         }
     }

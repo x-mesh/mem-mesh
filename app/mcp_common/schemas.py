@@ -37,8 +37,8 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                 "properties": {
                     "content": {
                         "type": "string",
-                        "description": "Memory content (10-50000 characters)",
-                        "minLength": 10,
+                        "description": "Memory content (100-50000 characters)",
+                        "minLength": 100,
                         "maxLength": 50000,
                     },
                     "project_id": {
@@ -201,8 +201,8 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                     },
                     "content": {
                         "type": "string",
-                        "description": "New content",
-                        "minLength": 10,
+                        "description": "New content (100-50000 characters)",
+                        "minLength": 100,
                         "maxLength": 50000,
                     },
                     "category": {
@@ -299,6 +299,11 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
                         "items": {"type": "string", "minLength": 1, "maxLength": 50},
                         "description": "Pin tags",
                         "maxItems": 10,
+                    },
+                    "staging": {
+                        "type": "boolean",
+                        "description": "Mark pin as staging (shown in separate staging_pins section on session_resume)",
+                        "default": False,
                     },
                 },
                 "required": ["content", "project_id"],
