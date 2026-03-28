@@ -117,7 +117,7 @@ class TestMemoryService:
         memory_id = response.id
 
         # When - 내용 업데이트
-        new_content = "Updated content for update test"
+        new_content = "Updated content for update test — padded to exceed 100-character quality gate minimum length requirement here."
         update_response = await memory_service.update(
             memory_id=memory_id, content=new_content
         )

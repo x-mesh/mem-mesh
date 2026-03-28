@@ -5,78 +5,19 @@ Memory Service for mem-mesh
 
 import json
 import logging
-import re
 from datetime import datetime
 from typing import Any, List, Optional
 
 from ..database.base import Database
 from ..database.models import Memory
 from ..embeddings.service import EmbeddingService
-from ..schemas.responses import AddResponse, ConflictInfo, DeleteResponse, UpdateResponse
-
 from ..errors import (
     DatabaseError,
     EmbeddingError,
-    MemoryContentTooShortError,
-    MemoryLowQualityError,
     MemoryNotFoundError,
 )
-
-# ---------------------------------------------------------------------------
-# 품질 게이트 상수
-# ---------------------------------------------------------------------------
-_MIN_CONTENT_LENGTH = 100
-
-_LOW_QUALITY_PREFIXES = (
-    "좋습니다",
-    "네.",
-    "네!",
-    "네,",
-    "알겠습니다",
-    "안녕하세요",
-)
-
-_XML_STRIP_PATTERNS = [
-    re.compile(r"<EnvironmentContext>.*?</EnvironmentContext>", re.DOTALL),
-    re.compile(r"<fileTree>.*?</fileTree>", re.DOTALL),
-    re.compile(r"<SPEC>.*?</SPEC>", re.DOTALL),
-]
-
-
-def content_quality_gate(content: str) -> str:
-    """
-    메모리 저장 전 품질 체크 및 콘텐츠 정제.
-
-    1. XML 시스템 태그 스트리핑 (EnvironmentContext, fileTree, SPEC)
-    2. 스트리핑 후 길이 100자 미만이면 MemoryContentTooShortError
-    3. 단순 응답 접두사로 시작하면 MemoryLowQualityError
-
-    Args:
-        content: 원본 메모리 내용
-
-    Returns:
-        정제된 content 문자열
-
-    Raises:
-        MemoryContentTooShortError: 길이 부족
-        MemoryLowQualityError: 저품질 접두사
-    """
-    # 1. XML 시스템 태그 제거
-    cleaned = content
-    for pattern in _XML_STRIP_PATTERNS:
-        cleaned = pattern.sub("", cleaned)
-    cleaned = cleaned.strip()
-
-    # 2. 길이 체크 (스트리핑 후)
-    if len(cleaned) < _MIN_CONTENT_LENGTH:
-        raise MemoryContentTooShortError(length=len(cleaned), minimum=_MIN_CONTENT_LENGTH)
-
-    # 3. 저품질 접두사 체크
-    for prefix in _LOW_QUALITY_PREFIXES:
-        if cleaned.startswith(prefix):
-            raise MemoryLowQualityError(prefix=prefix)
-
-    return cleaned
+from ..schemas.responses import AddResponse, ConflictInfo, DeleteResponse, UpdateResponse
+from .quality_gate import content_quality_gate
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +46,39 @@ class MemoryService:
             self.conflict_detector is not None,
         )
 
+    # ------------------------------------------------------------------
+    # DRY helpers
+    # ------------------------------------------------------------------
+
+    async def _resolve_vector_table(self) -> str:
+        """벡터 인덱스에 사용할 테이블 이름을 반환한다.
+
+        Returns:
+            ``"memory_embeddings"`` (sqlite-vec) 또는
+            ``"memories_vec_fallback"`` (폴백).
+        """
+        cursor = await self.db.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='memory_embeddings'"
+        )
+        if cursor.fetchone():
+            return "memory_embeddings"
+        return "memories_vec_fallback"
+
+    @staticmethod
+    def _embedding_to_json(embedding_bytes: bytes) -> str:
+        """embedding bytes -> JSON 문자열 변환.
+
+        ``np.frombuffer`` + ``json.dumps`` 패턴을 한곳으로 모은다.
+        numpy는 선택적 의존성이므로 호출 시점에 import한다.
+        """
+        import numpy as np
+
+        embedding_array = np.frombuffer(embedding_bytes, dtype=np.float32)
+        return json.dumps(embedding_array.tolist())
+
+    # ------------------------------------------------------------------
+
     @staticmethod
     def _init_conflict_detector() -> Any:
         """설정 기반 ConflictDetectorService 자동 생성 (lazy-load, graceful degradation)."""
@@ -119,12 +93,15 @@ class MemoryService:
 
             detector = ConflictDetectorService(
                 model_name=settings.conflict_nli_model,
-                preload=False,  # lazy-load: 첫 사용 시 모델 로드
+                preload=settings.enable_conflict_detection,  # 활성화 시 자동 preload
                 contradiction_threshold=settings.conflict_contradiction_threshold,
                 similarity_threshold=settings.conflict_similarity_threshold,
                 max_candidates=settings.conflict_max_candidates,
             )
-            logger.info("ConflictDetectorService initialized (NLI available=%s)", detector.is_available)
+            logger.info(
+                "ConflictDetectorService initialized (NLI available=%s)",
+                detector.is_available,
+            )
             return detector
         except Exception as e:
             logger.warning("Failed to initialize ConflictDetectorService: %s", e)
@@ -138,6 +115,7 @@ class MemoryService:
         source: str = "unknown",
         client: Optional[str] = None,
         tags: Optional[List[str]] = None,
+        skip_quality_gate: bool = False,
     ) -> AddResponse:
         """
         새 메모리 생성 (중복 감지 포함)
@@ -157,10 +135,11 @@ class MemoryService:
             EmbeddingError: 임베딩 생성 실패
             DatabaseError: 데이터베이스 작업 실패
         """
-        logger.info(f"Creating memory with content length: {len(content)}")
+        logger.info("Creating memory with content length: %d", len(content))
 
         # 0. 품질 게이트 (스트리핑 + 검증)
-        content = content_quality_gate(content)
+        if not skip_quality_gate:
+            content = content_quality_gate(content)
 
         # 1. content_hash 계산
         content_hash = Memory.compute_hash(content)
@@ -168,7 +147,7 @@ class MemoryService:
         # 2. 중복 체크
         existing_memory = await self._find_duplicate(content_hash, project_id)
         if existing_memory:
-            logger.info(f"Duplicate memory found: {existing_memory['id']}")
+            logger.info("Duplicate memory found: %s", existing_memory["id"])
             return AddResponse(
                 id=existing_memory["id"],
                 status="duplicate",
@@ -204,7 +183,7 @@ class MemoryService:
                 await self.db.add_memory(memory.model_dump())
                 await self._save_to_vector_index(memory.id, embedding_bytes)
 
-            logger.info(f"Memory created successfully: {memory.id}")
+            logger.info("Memory created successfully: %s", memory.id)
             return AddResponse(
                 id=memory.id,
                 status="saved",
@@ -213,8 +192,8 @@ class MemoryService:
             )
 
         except Exception as e:
-            logger.error(f"Failed to save memory: {e}")
-            raise DatabaseError(f"Failed to save memory: {e}")
+            logger.error("Failed to save memory: %s", e)
+            raise DatabaseError(f"Failed to save memory: {e}") from e
 
     async def create_with_embedding(
         self,
@@ -226,7 +205,10 @@ class MemoryService:
         tags: Optional[List[str]] = None,
     ) -> AddResponse:
         """
-        미리 계산된 임베딩과 함께 새 메모리 생성 (배치 작업용)
+        미리 계산된 임베딩과 함께 새 메모리 생성.
+
+        배치/마이그레이션 작업용 -- content_quality_gate 및
+        conflict detection을 의도적으로 생략합니다.
 
         Args:
             content: 메모리 내용
@@ -244,7 +226,8 @@ class MemoryService:
             DatabaseError: 데이터베이스 작업 실패
         """
         logger.info(
-            f"Creating memory with pre-computed embedding, content length: {len(content)}"
+            "Creating memory with pre-computed embedding, content length: %d",
+            len(content),
         )
 
         # 1. content_hash 계산
@@ -253,7 +236,7 @@ class MemoryService:
         # 2. 중복 체크
         existing_memory = await self._find_duplicate(content_hash, project_id)
         if existing_memory:
-            logger.info(f"Duplicate memory found: {existing_memory['id']}")
+            logger.info("Duplicate memory found: %s", existing_memory["id"])
             return AddResponse(
                 id=existing_memory["id"],
                 status="duplicate",
@@ -279,14 +262,14 @@ class MemoryService:
                 await self.db.add_memory(memory.model_dump())
                 await self._save_to_vector_index(memory.id, embedding_bytes)
 
-            logger.info(f"Memory created with pre-computed embedding: {memory.id}")
+            logger.info("Memory created with pre-computed embedding: %s", memory.id)
             return AddResponse(
                 id=memory.id, status="saved", created_at=memory.created_at
             )
 
         except Exception as e:
-            logger.error(f"Failed to save memory with embedding: {e}")
-            raise DatabaseError(f"Failed to save memory: {e}")
+            logger.error("Failed to save memory with embedding: %s", e)
+            raise DatabaseError(f"Failed to save memory: {e}") from e
 
     # Alias for backward compatibility
     async def add_with_embedding(self, *args, **kwargs) -> AddResponse:
@@ -303,7 +286,7 @@ class MemoryService:
         Returns:
             Memory 객체 또는 None
         """
-        logger.debug(f"Getting memory: {memory_id}")
+        logger.debug("Getting memory: %s", memory_id)
 
         try:
             row = await self.db.fetchone(
@@ -318,8 +301,8 @@ class MemoryService:
             return Memory(**memory_dict)
 
         except Exception as e:
-            logger.error(f"Failed to get memory {memory_id}: {e}")
-            raise DatabaseError(f"Failed to get memory: {e}")
+            logger.error("Failed to get memory %s: %s", memory_id, e)
+            raise DatabaseError(f"Failed to get memory: {e}") from e
 
     async def update(
         self,
@@ -345,14 +328,18 @@ class MemoryService:
             EmbeddingError: 임베딩 생성 실패
             DatabaseError: 데이터베이스 작업 실패
         """
-        logger.info(f"Updating memory: {memory_id}")
+        logger.info("Updating memory: %s", memory_id)
 
         # 1. 기존 메모리 조회
         existing_memory = await self.get(memory_id)
         if existing_memory is None:
             raise MemoryNotFoundError(f"Memory not found: {memory_id}")
 
-        # 2. 업데이트할 필드 결정
+        # 2. 품질 게이트 (content 변경 시)
+        if content is not None:
+            content = content_quality_gate(content)
+
+        # 3. 업데이트할 필드 결정
         content_changed = content is not None and content != existing_memory.content
 
         try:
@@ -373,8 +360,8 @@ class MemoryService:
                     # 업데이트 쿼리
                     await self.db.execute(
                         """
-                        UPDATE memories 
-                        SET content = ?, content_hash = ?, category = ?, tags = ?, 
+                        UPDATE memories
+                        SET content = ?, content_hash = ?, category = ?, tags = ?,
                             embedding = ?, updated_at = ?
                         WHERE id = ?
                         """,
@@ -402,7 +389,7 @@ class MemoryService:
 
                     await self.db.execute(
                         """
-                        UPDATE memories 
+                        UPDATE memories
                         SET category = ?, tags = ?, updated_at = ?
                         WHERE id = ?
                         """,
@@ -418,12 +405,12 @@ class MemoryService:
                         ),
                     )
 
-            logger.info(f"Memory updated successfully: {memory_id}")
+            logger.info("Memory updated successfully: %s", memory_id)
             return UpdateResponse(id=memory_id, status="updated")
 
         except Exception as e:
-            logger.error(f"Failed to update memory {memory_id}: {e}")
-            raise DatabaseError(f"Failed to update memory: {e}")
+            logger.error("Failed to update memory %s: %s", memory_id, e)
+            raise DatabaseError(f"Failed to update memory: {e}") from e
 
     async def delete(self, memory_id: str) -> DeleteResponse:
         """
@@ -439,7 +426,7 @@ class MemoryService:
             MemoryNotFoundError: 메모리를 찾을 수 없음
             DatabaseError: 데이터베이스 작업 실패
         """
-        logger.info(f"Deleting memory: {memory_id}")
+        logger.info("Deleting memory: %s", memory_id)
 
         # 1. 메모리 존재 확인
         existing_memory = await self.get(memory_id)
@@ -457,12 +444,12 @@ class MemoryService:
                 # 4. 벡터 인덱스에서 삭제
                 await self._delete_from_vector_index(memory_id)
 
-            logger.info(f"Memory deleted successfully: {memory_id}")
+            logger.info("Memory deleted successfully: %s", memory_id)
             return DeleteResponse(id=memory_id, status="deleted")
 
         except Exception as e:
-            logger.error(f"Failed to delete memory {memory_id}: {e}")
-            raise DatabaseError(f"Failed to delete memory: {e}")
+            logger.error("Failed to delete memory %s: %s", memory_id, e)
+            raise DatabaseError(f"Failed to delete memory: {e}") from e
 
     # Private helper methods
 
@@ -477,8 +464,8 @@ class MemoryService:
             )
             return dict(row) if row else None
         except Exception as e:
-            logger.error(f"Failed to check for duplicates: {e}")
-            raise DatabaseError(f"Failed to check for duplicates: {e}")
+            logger.error("Failed to check for duplicates: %s", e)
+            raise DatabaseError(f"Failed to check for duplicates: {e}") from e
 
     async def _generate_embedding_with_retry(self, content: str) -> List[float]:
         """재시도 로직을 포함한 임베딩 생성"""
@@ -487,14 +474,18 @@ class MemoryService:
         for attempt in range(self.max_retries):
             try:
                 logger.debug(
-                    f"Generating embedding (attempt {attempt + 1}/{self.max_retries})"
+                    "Generating embedding (attempt %d/%d)",
+                    attempt + 1,
+                    self.max_retries,
                 )
                 return self.embedding_service.embed(content)
 
             except Exception as e:
                 last_error = e
                 logger.warning(
-                    f"Embedding generation failed (attempt {attempt + 1}): {e}"
+                    "Embedding generation failed (attempt %d): %s",
+                    attempt + 1,
+                    e,
                 )
 
                 if attempt < self.max_retries - 1:
@@ -504,7 +495,9 @@ class MemoryService:
                     delay = 0.1 * (2**attempt)
                     await asyncio.sleep(min(delay, 1.0))
 
-        logger.error(f"Embedding generation failed after {self.max_retries} attempts")
+        logger.error(
+            "Embedding generation failed after %d attempts", self.max_retries
+        )
         raise EmbeddingError(
             f"Failed to generate embedding after {self.max_retries} attempts: {last_error}"
         )
@@ -514,22 +507,10 @@ class MemoryService:
     ) -> None:
         """벡터 인덱스에 저장"""
         try:
-            # sqlite-vec 테이블이 존재하는지 확인 (올바른 테이블 이름 사용)
-            cursor = await self.db.execute("""
-                SELECT name FROM sqlite_master 
-                WHERE type='table' AND name='memory_embeddings'
-            """)
+            table = await self._resolve_vector_table()
 
-            if cursor.fetchone():
-                # sqlite-vec 사용 - embedding을 JSON 형식으로 변환
-                import json
-
-                import numpy as np
-
-                # bytes를 numpy array로 변환
-                embedding_array = np.frombuffer(embedding_bytes, dtype=np.float32)
-                # JSON 문자열로 변환
-                embedding_json = json.dumps(embedding_array.tolist())
+            if table == "memory_embeddings":
+                embedding_json = self._embedding_to_json(embedding_bytes)
 
                 # vector 테이블에 저장 (DELETE + INSERT 패턴 사용)
                 await self.db.execute(
@@ -539,18 +520,18 @@ class MemoryService:
                     "INSERT INTO memory_embeddings (memory_id, embedding) VALUES (?, ?)",
                     (memory_id, embedding_json),
                 )
-                logger.debug(f"Saved to vector table: {memory_id}")
+                logger.debug("Saved to vector table: %s", memory_id)
             else:
                 # fallback 테이블 사용
                 await self.db.execute(
                     "INSERT INTO memories_vec_fallback (memory_id, embedding) VALUES (?, ?)",
                     (memory_id, embedding_bytes),
                 )
-                logger.debug(f"Saved to fallback table: {memory_id}")
+                logger.debug("Saved to fallback table: %s", memory_id)
 
         except Exception as e:
-            logger.error(f"Failed to save to vector index: {e}")
-            raise
+            logger.error("Failed to save to vector index: %s", e)
+            raise DatabaseError(f"Failed to save to vector index: {e}") from e
 
     async def _check_conflicts(
         self,
@@ -558,7 +539,7 @@ class MemoryService:
         embedding_vector: List[float],
         project_id: Optional[str] = None,
     ) -> list[ConflictInfo] | None:
-        """Stage 1+2 충돌 감지: 벡터 유사도 → NLI contradiction 체크.
+        """Stage 1+2 충돌 감지: 벡터 유사도 -> NLI contradiction 체크.
 
         Returns:
             충돌 목록 (없으면 None)
@@ -567,11 +548,8 @@ class MemoryService:
             return None
 
         try:
-            import numpy as np
-
             embedding_bytes = self.embedding_service.to_bytes(embedding_vector)
-            embedding_array = np.frombuffer(embedding_bytes, dtype=np.float32)
-            embedding_json = json.dumps(embedding_array.tolist())
+            embedding_json = self._embedding_to_json(embedding_bytes)
 
             # Stage 1: 벡터 유사도로 후보 검색
             cursor = await self.db.execute(
@@ -598,7 +576,7 @@ class MemoryService:
 
             candidates = []
             for row in rows:
-                # distance → similarity 변환
+                # distance -> similarity 변환
                 similarity = max(0.0, min(1.0, 1.0 - (row[2] / 2.0)))
                 candidates.append({
                     "id": row[0],
@@ -606,8 +584,12 @@ class MemoryService:
                     "similarity_score": similarity,
                 })
 
-            # Stage 2: ConflictDetectorService로 충돌 감지
-            conflicts = self.conflict_detector.detect_conflicts(content, candidates)
+            # Stage 2: ConflictDetectorService로 충돌 감지 (blocking call -> thread)
+            import asyncio
+
+            conflicts = await asyncio.to_thread(
+                self.conflict_detector.detect_conflicts, content, candidates
+            )
 
             if not conflicts:
                 return None
@@ -624,7 +606,7 @@ class MemoryService:
 
         except Exception as e:
             # 충돌 감지 실패는 저장을 차단하지 않음 (graceful degradation)
-            logger.warning(f"Conflict detection failed (non-blocking): {e}")
+            logger.warning("Conflict detection failed (non-blocking): %s", e)
             return None
 
     async def _update_vector_index(
@@ -632,22 +614,10 @@ class MemoryService:
     ) -> None:
         """벡터 인덱스 업데이트"""
         try:
-            # sqlite-vec 테이블이 존재하는지 확인 (올바른 테이블 이름 사용)
-            cursor = await self.db.execute("""
-                SELECT name FROM sqlite_master 
-                WHERE type='table' AND name='memory_embeddings'
-            """)
+            table = await self._resolve_vector_table()
 
-            if cursor.fetchone():
-                # sqlite-vec 사용 - embedding을 JSON 형식으로 변환
-                import json
-
-                import numpy as np
-
-                # bytes를 numpy array로 변환
-                embedding_array = np.frombuffer(embedding_bytes, dtype=np.float32)
-                # JSON 문자열로 변환
-                embedding_json = json.dumps(embedding_array.tolist())
+            if table == "memory_embeddings":
+                embedding_json = self._embedding_to_json(embedding_bytes)
 
                 # vector 테이블 업데이트 (DELETE + INSERT 패턴 사용)
                 await self.db.execute(
@@ -657,59 +627,53 @@ class MemoryService:
                     "INSERT INTO memory_embeddings (memory_id, embedding) VALUES (?, ?)",
                     (memory_id, embedding_json),
                 )
-                logger.debug(f"Updated vector table: {memory_id}")
+                logger.debug("Updated vector table: %s", memory_id)
             else:
                 # fallback 테이블 사용
                 await self.db.execute(
                     "UPDATE memories_vec_fallback SET embedding = ? WHERE memory_id = ?",
                     (embedding_bytes, memory_id),
                 )
-                logger.debug(f"Updated fallback table: {memory_id}")
+                logger.debug("Updated fallback table: %s", memory_id)
 
         except Exception as e:
-            logger.error(f"Failed to update vector index: {e}")
-            raise
+            logger.error("Failed to update vector index: %s", e)
+            raise DatabaseError(f"Failed to update vector index: {e}") from e
 
     async def _delete_from_fts_index(self, memory_id: str) -> None:
         """FTS5 인덱스에서 명시적 삭제"""
         try:
-            cursor = await self.db.execute("""
-                SELECT name FROM sqlite_master
-                WHERE type='table' AND name='memories_fts'
-            """)
+            cursor = await self.db.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='memories_fts'"
+            )
 
             if cursor.fetchone():
                 await self.db.execute(
                     "DELETE FROM memories_fts WHERE id = ?", (memory_id,)
                 )
-                logger.debug(f"Deleted from FTS index: {memory_id}")
+                logger.debug("Deleted from FTS index: %s", memory_id)
 
         except Exception as e:
-            logger.warning(f"Failed to delete from FTS index (non-fatal): {e}")
+            logger.warning("Failed to delete from FTS index (non-fatal): %s", e)
 
     async def _delete_from_vector_index(self, memory_id: str) -> None:
         """벡터 인덱스에서 삭제"""
         try:
-            # sqlite-vec 테이블이 존재하는지 확인 (올바른 테이블 이름 사용)
-            cursor = await self.db.execute("""
-                SELECT name FROM sqlite_master 
-                WHERE type='table' AND name='memory_embeddings'
-            """)
+            table = await self._resolve_vector_table()
 
-            if cursor.fetchone():
-                # sqlite-vec 사용
+            if table == "memory_embeddings":
                 await self.db.execute(
                     "DELETE FROM memory_embeddings WHERE memory_id = ?", (memory_id,)
                 )
-                logger.debug(f"Deleted from vector table: {memory_id}")
+                logger.debug("Deleted from vector table: %s", memory_id)
             else:
-                # fallback 테이블 사용
                 await self.db.execute(
                     "DELETE FROM memories_vec_fallback WHERE memory_id = ?",
                     (memory_id,),
                 )
-                logger.debug(f"Deleted from fallback table: {memory_id}")
+                logger.debug("Deleted from fallback table: %s", memory_id)
 
         except Exception as e:
-            logger.error(f"Failed to delete from vector index: {e}")
-            raise
+            logger.error("Failed to delete from vector index: %s", e)
+            raise DatabaseError(f"Failed to delete from vector index: {e}") from e

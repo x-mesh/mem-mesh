@@ -5,7 +5,7 @@ content_quality_gate 품질 게이트 단위 테스트
 import pytest
 
 from app.core.errors import MemoryContentTooShortError, MemoryLowQualityError
-from app.core.services.memory import content_quality_gate
+from app.core.services.quality_gate import content_quality_gate
 
 
 class TestContentQualityGate:
@@ -58,6 +58,23 @@ class TestContentQualityGate:
     def test_rejects_low_quality_prefixes(self, prefix):
         """저품질 접두사로 시작하면 MemoryLowQualityError"""
         content = prefix + " " + "추가 내용입니다. " * 20
+        with pytest.raises(MemoryLowQualityError) as exc_info:
+            content_quality_gate(content)
+        assert exc_info.value.details["prefix"] == prefix
+
+    @pytest.mark.parametrize("prefix", [
+        "OK",
+        "Sure",
+        "Got it",
+        "I understand",
+        "Yes,",
+        "Yes.",
+        "Alright",
+        "Okay",
+    ])
+    def test_rejects_english_low_quality_prefixes(self, prefix):
+        """영어 저품질 접두사로 시작하면 MemoryLowQualityError"""
+        content = prefix + " " + "This is additional filler content for testing. " * 10
         with pytest.raises(MemoryLowQualityError) as exc_info:
             content_quality_gate(content)
         assert exc_info.value.details["prefix"] == prefix

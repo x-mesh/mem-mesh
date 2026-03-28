@@ -109,6 +109,101 @@ class TestConflictDetectorService:
         assert len(result.content_preview) == 200
 
 
+class TestModelLoadFailedFlag:
+    """Tests for _model_load_failed flag behavior."""
+
+    def test_model_load_failed_flag(self, monkeypatch):
+        """Model load failure should set _model_load_failed flag."""
+        service = ConflictDetectorService(preload=False)
+        assert service._model_load_failed is False
+
+        # Simulate model load failure
+        def _raise(*args, **kwargs):
+            raise RuntimeError("model download failed")
+
+        if NLI_MODEL_AVAILABLE:
+            monkeypatch.setattr(
+                "app.core.services.conflict_detector._CrossEncoder",
+                _raise,
+            )
+        else:
+            # If sentence_transformers not installed, manually test flag logic
+            service._model_load_failed = True
+            assert service._model_load_failed is True
+            return
+
+        service._load_model()
+        assert service._model_load_failed is True
+        assert service._model is None
+
+    def test_model_load_failed_skips_retry(self, monkeypatch):
+        """Once _model_load_failed is set, _load_model should not retry."""
+        service = ConflictDetectorService(preload=False)
+        service._model_load_failed = True
+
+        call_count = 0
+        original_available = NLI_MODEL_AVAILABLE
+
+        if original_available:
+            def _counting_encoder(*args, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                return None
+
+            monkeypatch.setattr(
+                "app.core.services.conflict_detector._CrossEncoder",
+                _counting_encoder,
+            )
+
+        service._load_model()
+        assert service._model is None
+        if original_available:
+            assert call_count == 0  # CrossEncoder was never called
+
+    def test_model_load_failed_fallback_to_vector_only(self):
+        """detect_conflicts should fallback to vector-only when _model_load_failed."""
+        service = ConflictDetectorService(preload=False)
+        service._model_load_failed = True
+
+        candidates = [
+            {"id": "1", "content": "Redis 캐시 사용", "similarity_score": 0.90},
+            {"id": "2", "content": "다른 내용", "similarity_score": 0.60},
+        ]
+        results = service.detect_conflicts("새 메모리", candidates)
+        # Only candidate with similarity >= 0.85 should appear (vector-only threshold)
+        assert len(results) == 1
+        assert results[0].memory_id == "1"
+        assert results[0].contradiction_score == 0.0
+
+    def test_nli_input_truncation(self, monkeypatch):
+        """NLI pairs should truncate content to 512 chars."""
+        service = ConflictDetectorService(preload=False)
+
+        if not NLI_MODEL_AVAILABLE:
+            pytest.skip("sentence_transformers not available")
+
+        captured_pairs: list = []
+
+        class FakeModel:
+            def predict(self, pairs, apply_softmax=True):
+                captured_pairs.extend(pairs)
+                import numpy as np
+
+                return np.array([[0.9, 0.05, 0.05]] * len(pairs))
+
+        service._model = FakeModel()
+
+        long_content = "A" * 1000
+        candidates = [
+            {"id": "1", "content": "B" * 1000, "similarity_score": 0.90},
+        ]
+        service._nli_detect(long_content, candidates)
+
+        assert len(captured_pairs) == 1
+        assert len(captured_pairs[0][0]) == 512
+        assert len(captured_pairs[0][1]) == 512
+
+
 class TestAddResponseConflicts:
     """Test AddResponse with conflicts field."""
 

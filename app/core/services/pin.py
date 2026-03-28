@@ -346,6 +346,7 @@ class PinService:
             category=category,
             source="pin_promotion",
             tags=promote_tags,
+            skip_quality_gate=True,
         )
 
         # Pin에 promoted_to_memory_id 기록 (삭제하지 않고 유지)

@@ -60,6 +60,7 @@ class ConflictDetectorService:
     ):
         self.model_name = model_name
         self._model: "CrossEncoder | None" = None
+        self._model_load_failed: bool = False
         self.contradiction_threshold = contradiction_threshold
         self.similarity_threshold = similarity_threshold
         self.max_candidates = max_candidates
@@ -78,13 +79,20 @@ class ConflictDetectorService:
         if self._model is not None:
             return
 
+        if self._model_load_failed:
+            return
+
         if not NLI_MODEL_AVAILABLE:
             return
 
-        start = time.time()
-        self._model = _CrossEncoder(self.model_name)
-        elapsed = time.time() - start
-        logger.info("NLI model loaded: %s (%.1fs)", self.model_name, elapsed)
+        try:
+            start = time.time()
+            self._model = _CrossEncoder(self.model_name)
+            elapsed = time.time() - start
+            logger.info("NLI model loaded: %s (%.1fs)", self.model_name, elapsed)
+        except Exception as e:
+            self._model_load_failed = True
+            logger.error("NLI model load failed (will not retry): %s", e)
 
     @property
     def is_available(self) -> bool:
@@ -113,6 +121,18 @@ class ConflictDetectorService:
         """
         if not candidates:
             return []
+
+        # If model loading previously failed, skip NLI entirely
+        if self._model_load_failed:
+            logger.debug("NLI model load previously failed — using vector-only fallback")
+            filtered = [
+                c
+                for c in candidates
+                if c.get("similarity_score", 0) >= self.similarity_threshold
+            ]
+            if not filtered:
+                return []
+            return self._vector_only_detect(filtered[: self.max_candidates])
 
         # Filter by similarity threshold (Stage 1 guard)
         filtered = [
@@ -145,7 +165,7 @@ class ConflictDetectorService:
         """Stage 2: NLI-based contradiction detection."""
         assert self._model is not None
 
-        pairs = [[new_content, c["content"]] for c in candidates]
+        pairs = [[new_content[:512], c["content"][:512]] for c in candidates]
 
         start = time.time()
         # predict returns shape (N, 3) for 3-class NLI
