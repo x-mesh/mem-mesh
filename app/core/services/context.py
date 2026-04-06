@@ -104,7 +104,8 @@ class ContextService:
             # depth에 따른 확장 검색
             if depth > 1 and related_memories:
                 related_memories = await self._expand_search(
-                    related_memories, depth - 1, project_id or primary_memory.project_id
+                    related_memories, depth - 1, project_id or primary_memory.project_id,
+                    exclude_id=primary_memory.id,
                 )
 
             # 유사도 순으로 정렬하고 제한
@@ -277,60 +278,37 @@ class ContextService:
             return []
 
     def _extract_keywords(self, content: str) -> List[str]:
-        """텍스트에서 키워드 추출"""
+        """텍스트에서 키워드 추출 (영어 + 한국어)"""
         import re
-
-        # 간단한 키워드 추출 (단어 길이 3자 이상, 알파벳만)
-        words = re.findall(r"\b[a-zA-Z]{3,}\b", content.lower())
-
-        # 일반적인 단어 제외
-        stop_words = {
-            "the",
-            "and",
-            "for",
-            "are",
-            "but",
-            "not",
-            "you",
-            "all",
-            "can",
-            "had",
-            "her",
-            "was",
-            "one",
-            "our",
-            "out",
-            "day",
-            "get",
-            "has",
-            "him",
-            "his",
-            "how",
-            "man",
-            "new",
-            "now",
-            "old",
-            "see",
-            "two",
-            "way",
-            "who",
-            "boy",
-            "did",
-            "its",
-            "let",
-            "put",
-            "say",
-            "she",
-            "too",
-            "use",
-        }
-
-        keywords = [word for word in words if word not in stop_words]
-
-        # 빈도순으로 정렬 (간단한 방법)
         from collections import Counter
 
-        word_counts = Counter(keywords)
+        # 영어 키워드 (3자 이상)
+        english_words = re.findall(r"\b[a-zA-Z]{3,}\b", content.lower())
+
+        # 한국어 키워드 (2자 이상 연속 한글)
+        korean_words = re.findall(r"[가-힣]{2,}", content)
+
+        # 영어 불용어 제외
+        stop_words = {
+            "the", "and", "for", "are", "but", "not", "you", "all",
+            "can", "had", "her", "was", "one", "our", "out", "day",
+            "get", "has", "him", "his", "how", "man", "new", "now",
+            "old", "see", "two", "way", "who", "boy", "did", "its",
+            "let", "put", "say", "she", "too", "use",
+        }
+
+        # 한국어 불용어 제외
+        korean_stop_words = {
+            "그리고", "하지만", "그래서", "때문에", "대한", "통해",
+            "위해", "있는", "없는", "하는", "되는", "이런", "저런",
+            "그런", "모든", "각각", "여기", "거기",
+        }
+
+        english_keywords = [w for w in english_words if w not in stop_words]
+        korean_keywords = [w for w in korean_words if w not in korean_stop_words]
+
+        # 빈도순 정렬 (한국어 + 영어 통합)
+        word_counts = Counter(english_keywords + korean_keywords)
 
         return [word for word, count in word_counts.most_common(10)]
 
@@ -369,6 +347,7 @@ class ContextService:
         initial_memories: List[RelatedMemory],
         remaining_depth: int,
         project_id: Optional[str],
+        exclude_id: Optional[str] = None,
     ) -> List[RelatedMemory]:
         """깊이 기반 확장 검색"""
         if remaining_depth <= 0 or not initial_memories:
@@ -376,6 +355,8 @@ class ContextService:
 
         expanded_memories = initial_memories.copy()
         processed_ids = {mem.id for mem in initial_memories}
+        if exclude_id:
+            processed_ids.add(exclude_id)
 
         # 각 관련 메모리에 대해 추가 검색
         for memory in initial_memories[:3]:  # 상위 3개만 확장
