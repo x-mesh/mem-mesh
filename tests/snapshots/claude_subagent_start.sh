@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 12
+# mem-mesh-hooks prompt-version: 13
 # SubagentStart hook: inject project context into subagents
 # stdin: {agent_id, agent_type, session_id, ...}
 # Output: {hookSpecificOutput: {hookEventName: "SubagentStart", additionalContext: "..."}}

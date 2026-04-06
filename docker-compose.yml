@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: mem-mesh:latest
-    entrypoint: tail -f /dev/null
+    command: ["uvicorn", "app.web.app:app", "--host", "0.0.0.0", "--port", "8000"]
     container_name: mem-mesh-prod
     network_mode: host
     volumes:

@@ -7,7 +7,7 @@
 
 > Persistent memory for AI agents — hybrid vector + FTS5 search, pin-based session tracking, and NLI conflict detection. Zero external dependencies.
 
-[한국어](./README.ko.md) · [Quick Start](#quick-start) · [MCP Setup](#mcp-setup) · [MCP Tools](#mcp-tools-15) · [Session & Pins](#session--pins) · [Architecture](#architecture) · [Docker](#docker) · [Contributing](#contributing)
+[한국어](./README.md) · [Quick Start](#quick-start) · [MCP Setup](#mcp-setup) · [MCP Tools](#mcp-tools-15) · [Session & Pins](#session--pins) · [Architecture](#architecture) · [Docker](#docker) · [Contributing](#contributing)
 
 ---
 

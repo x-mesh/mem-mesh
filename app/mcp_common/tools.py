@@ -498,6 +498,7 @@ class MCPToolHandlers:
         tags: Optional[List[str]] = None,
         ide_session_id: Optional[str] = None,
         client_type: Optional[str] = None,
+        staging: bool = False,
     ) -> Dict[str, Any]:
         """Add a new pin (short-term task) to the current session
 
@@ -549,6 +550,7 @@ class MCPToolHandlers:
                 ide_session_id=ide_session_id,
                 client_type=client_type,
                 client=None,
+                is_staging=staging,
             )
 
             logger.info(

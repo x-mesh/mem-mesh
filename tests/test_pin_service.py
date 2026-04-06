@@ -74,7 +74,7 @@ class TestPinCRUD:
         # Given
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Test pin content for retrieval",
+            content="Test pin content for retrieval — verifying that pin service correctly stores and returns pin data with all fields intact",
             user_id="test-user",
         )
 
@@ -92,14 +92,14 @@ class TestPinCRUD:
         # Given
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Original pin content for update",
+            content="Original pin content for update — initial content that will be modified to test the update endpoint preserves metadata correctly",
             importance=3,
             user_id="test-user",
         )
 
         # When
         update_data = PinUpdate(
-            content="Updated pin content for testing",
+            content="Updated pin content for testing — modified content verifying that pin service correctly applies updates and returns new version",
             importance=5,
             tags=["updated", "test"],
         )
@@ -107,7 +107,7 @@ class TestPinCRUD:
 
         # Then
         assert updated_pin is not None
-        assert updated_pin.content == "Updated pin content for testing"
+        assert updated_pin.content == "Updated pin content for testing — modified content verifying that pin service correctly applies updates and returns new version"
         assert updated_pin.importance == 5
         assert updated_pin.tags == ["updated", "test"]
 
@@ -117,7 +117,7 @@ class TestPinCRUD:
         # Given
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Pin to be deleted for testing",
+            content="Pin to be deleted for testing — temporary pin created to verify the delete operation correctly removes the pin and its associations",
             user_id="test-user",
         )
         assert await pin_service.get_pin(pin.id) is not None
@@ -139,7 +139,7 @@ class TestPinStatus:
         # Given
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Pin to be completed for testing",
+            content="Pin to be completed for testing — task pin that transitions from in_progress to completed state with proper timestamp recording",
             user_id="test-user",
         )
         assert pin.status == "in_progress"
@@ -158,7 +158,7 @@ class TestPinStatus:
         # Given - default status is in_progress
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Pin for status transition test",
+            content="Pin for status transition test — verifying that pin lifecycle correctly handles open to in_progress to completed state transitions",
             user_id="test-user",
         )
         assert pin.status == "in_progress"
@@ -175,7 +175,7 @@ class TestPinStatus:
         # Given
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Pin already completed for testing",
+            content="Pin already completed for testing — used to verify that re-completing an already completed pin is handled gracefully without errors",
             user_id="test-user",
         )
         await pin_service.complete_pin(pin.id)
@@ -194,7 +194,7 @@ class TestPinPromotion:
         # Given
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Critical security vulnerability needs immediate attention",
+            content="Critical security vulnerability needs immediate attention — SQL injection found in user search endpoint allowing unauthenticated database access",
             importance=4,
             tags=["security", "critical"],
             user_id="test-user",
@@ -218,7 +218,7 @@ class TestPinPromotion:
         # Given
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="High importance pin for promotion",
+            content="High importance pin for promotion — architectural decision to migrate from monolith to microservices for the payment processing module",
             importance=4,
             user_id="test-user",
         )
@@ -236,7 +236,7 @@ class TestPinPromotion:
         # Given
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Low importance pin for testing",
+            content="Low importance pin for testing — minor code style fix updating variable names to follow the project naming convention in utility module",
             importance=2,
             user_id="test-user",
         )
@@ -258,13 +258,13 @@ class TestPinQuery:
         # Given
         pin1 = await pin_service.create_pin(
             project_id="test-project",
-            content="First pin in session for testing",
+            content="First pin in session for testing — initial task in the sprint to set up CI pipeline with automated testing and deployment stages",
             importance=3,
             user_id="test-user",
         )
         await pin_service.create_pin(
             project_id="test-project",
-            content="Second pin in session for testing",
+            content="Second pin in session for testing — follow-up task to configure monitoring dashboards and alerting rules for the new CI pipeline",
             importance=5,
             user_id="test-user",
         )
@@ -284,13 +284,13 @@ class TestPinQuery:
         # Given
         await pin_service.create_pin(
             project_id="test-project",
-            content="Low importance pin for filtering",
+            content="Low importance pin for filtering — routine dependency update bumping minor versions of development tools without breaking changes",
             importance=1,
             user_id="test-user",
         )
         await pin_service.create_pin(
             project_id="test-project",
-            content="High importance pin for filtering",
+            content="High importance pin for filtering — critical database schema migration adding indexes for the most frequently queried columns in production",
             importance=5,
             user_id="test-user",
         )
@@ -359,7 +359,7 @@ class TestPinEdgeCases:
         # Given & When
         pin = await pin_service.create_pin(
             project_id="test-project",
-            content="Pin without explicit importance",
+            content="Pin without explicit importance — general task with no priority specified to verify that auto-importance detection assigns appropriate default value",
             user_id="test-user",
         )
 
@@ -371,7 +371,7 @@ class TestPinEdgeCases:
         """존재하지 않는 Pin 업데이트 테스트"""
         # Given
         non_existent_id = "non-existent-pin-id"
-        update_data = PinUpdate(content="Updated content for testing")
+        update_data = PinUpdate(content="Updated content for testing — modified description with additional context about the implementation approach and expected outcomes of the change")
 
         # When
         result = await pin_service.update_pin(non_existent_id, update_data)

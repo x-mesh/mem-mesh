@@ -389,8 +389,11 @@ class TestStopHookAB:
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
-        assert "additional_context" in data
-        ctx = data["additional_context"]
+        # Support both legacy (additional_context) and new (hookSpecificOutput.additionalContext) formats
+        if "additional_context" in data:
+            ctx = data["additional_context"]
+        else:
+            ctx = data.get("hookSpecificOutput", {}).get("additionalContext", "")
         assert "mem-mesh" in ctx
         assert "Rules" in ctx
 

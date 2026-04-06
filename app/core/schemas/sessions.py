@@ -15,6 +15,7 @@ class PinCompact(BaseModel):
     importance: int
     status: str
     client: Optional[str] = None
+    is_staging: bool = False
 
 
 class SessionCreate(BaseModel):
@@ -66,6 +67,10 @@ class SessionContext(BaseModel):
     pins: List[Union[dict, PinResponse, PinCompact]] = Field(
         default_factory=list,
         description="expand=true: PinResponse 전체, expand=false: PinCompact 요약, expand='smart': dict (4-Tier)",
+    )
+    staging_pins: List[Union[dict, PinResponse, PinCompact]] = Field(
+        default_factory=list,
+        description="is_staging=true인 스테이징 핀 목록",
     )
 
 

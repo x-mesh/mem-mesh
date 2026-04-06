@@ -162,7 +162,15 @@ def test_session_start_outputs_valid_json(tmp_path: Path) -> None:
     assert result.returncode == 0
     # stdout must be parseable JSON
     parsed = json.loads(result.stdout)
-    assert "additional_context" in parsed
+    # Support both legacy and new hook output formats
+    assert "additional_context" in parsed or "hookSpecificOutput" in parsed
+
+
+def _extract_context(parsed: dict) -> str:
+    """Extract context string from either legacy or new hook format."""
+    if "additional_context" in parsed:
+        return parsed["additional_context"]
+    return parsed.get("hookSpecificOutput", {}).get("additionalContext", "")
 
 
 def test_session_start_includes_rules_text(tmp_path: Path) -> None:
@@ -173,7 +181,7 @@ def test_session_start_includes_rules_text(tmp_path: Path) -> None:
     result = _run_hook(script, {})
     assert result.returncode == 0
     parsed = json.loads(result.stdout)
-    context = parsed["additional_context"]
+    context = _extract_context(parsed)
     assert "mem-mesh" in context
 
 

@@ -17,6 +17,7 @@ class PinCreate(BaseModel):
     tags: Optional[List[str]] = Field(default=None)
     user_id: Optional[str] = Field(default=None)
     client: Optional[str] = Field(default=None, max_length=50)
+    is_staging: Optional[bool] = Field(default=False, description="스테이징 핀 여부")
 
     @field_validator("project_id")
     @classmethod
@@ -74,6 +75,7 @@ class PinResponse(BaseModel):
     auto_importance: Optional[bool] = Field(
         default=False, description="자동 중요도 추정 여부"
     )
+    is_staging: bool = Field(default=False, description="스테이징 핀 여부")
     created_at: str
     updated_at: str
 

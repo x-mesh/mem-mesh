@@ -369,13 +369,18 @@ class SessionService:
         expand: Union[bool, str],
     ) -> SessionContext:
         """세션과 핀 데이터로 SessionContext 빌드."""
-        pins = self._expand_pin_rows(pins_data["rows"], expand)
+        all_rows = pins_data["rows"]
+        regular_rows = [r for r in all_rows if not r["is_staging"]]
+        staging_rows = [r for r in all_rows if r["is_staging"]]
+
+        pins = self._expand_pin_rows(regular_rows, expand)
+        staging_pins = self._expand_pin_rows(staging_rows, expand)
 
         # 요약 자동 생성
         summary = session.summary
         if not summary and pins_data["open_count"] > 0:
             open_rows = [
-                r for r in pins_data["rows"]
+                r for r in regular_rows
                 if r["status"] in ("open", "in_progress")
             ][:3]
             if open_rows:
@@ -393,6 +398,7 @@ class SessionService:
             open_pins=pins_data["open_count"],
             completed_pins=pins_data["completed_count"],
             pins=pins,
+            staging_pins=staging_pins,
         )
 
     async def _resume_cross_session(
@@ -658,6 +664,7 @@ class SessionService:
             tags=tags,
             completed_at=row["completed_at"],
             lead_time_hours=lead_time_hours,
+            is_staging=bool(row["is_staging"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -680,6 +687,7 @@ class SessionService:
             "content": truncated_content,
             "importance": row["importance"],
             "status": row["status"],
+            "is_staging": bool(row["is_staging"]),
         }
 
     def _pin_row_to_smart(self, row) -> Dict[str, Any]:

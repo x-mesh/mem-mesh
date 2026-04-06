@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mem-mesh"
-version = "1.1.9"
+version = "1.2.2"
 description = "Centralized memory system for AI development tools"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -12,7 +12,7 @@ authors = [
     {name = "mem-mesh", email = "dev@mem-mesh.com"}
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -20,7 +20,16 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+keywords = ["mcp", "memory", "ai-agent", "sqlite", "vector-search", "llm", "claude", "cursor", "kiro"]
+
+[project.urls]
+Homepage = "https://github.com/JINWOO-J/mem-mesh"
+Repository = "https://github.com/JINWOO-J/mem-mesh"
+Documentation = "https://github.com/JINWOO-J/mem-mesh/blob/main/README.md"
+"Bug Tracker" = "https://github.com/JINWOO-J/mem-mesh/issues"
 
 dependencies = [
     # CLI-only deps (lightweight)
@@ -60,8 +69,8 @@ dev = [
 
 [project.scripts]
 mem-mesh = "app.cli.main:main"
-# Legacy entry points (backward compat)
-mem-mesh-mcp = "src.__main__:main"
+# Legacy entry point (deprecated — will be removed in v2.0)
+# mem-mesh-mcp = "src.__main__:main"
 # App architecture entry points
 mem-mesh-mcp-stdio = "app.mcp_stdio.__main__:main"
 mem-mesh-mcp-pure = "app.mcp_stdio_pure.__main__:main"

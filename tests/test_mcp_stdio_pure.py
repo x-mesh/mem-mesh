@@ -345,7 +345,7 @@ async def test_dispatch_add_tool(tool_handlers, dispatcher_fixture):
         params = {
             "name": "add",
             "arguments": {
-                "content": "Test memory content for dispatch testing purposes",
+                "content": "Test memory content for dispatch testing purposes — validates that the MCP dispatcher correctly routes add tool calls through the handler chain",
                 "project_id": "test-project",
                 "category": "task",
             },
@@ -377,7 +377,7 @@ async def test_dispatch_search_tool(tool_handlers, dispatcher_fixture):
 
     try:
         await tool_handlers.add(
-            content="Authentication system with JWT tokens for testing",
+            content="Authentication system with JWT tokens for testing — comprehensive identity and access management module for production deployment and security",
             project_id="test-project",
             category="task",
         )
@@ -582,7 +582,7 @@ async def test_dispatch_context_tool(tool_handlers, dispatcher_fixture):
 
     try:
         add_result = await tool_handlers.add(
-            content="Test memory for context retrieval testing",
+            content="Test memory for context retrieval testing — validates that context endpoint returns related memories with proper depth traversal and scoring",
             project_id="test-project",
             category="task",
         )
@@ -615,7 +615,7 @@ async def test_dispatch_update_tool(tool_handlers, dispatcher_fixture):
 
     try:
         add_result = await tool_handlers.add(
-            content="Original content for update testing purposes",
+            content="Original content for update testing purposes — basic implementation record that will be modified to verify the update endpoint works correctly",
             project_id="test-project",
             category="task",
         )
@@ -652,7 +652,7 @@ async def test_dispatch_delete_tool(tool_handlers, dispatcher_fixture):
 
     try:
         add_result = await tool_handlers.add(
-            content="Memory to be deleted for testing purposes",
+            content="Memory to be deleted for testing purposes — temporary record created to verify the delete endpoint correctly removes data and returns status",
             project_id="test-project",
             category="task",
         )
@@ -998,7 +998,7 @@ async def test_dispatch_pin_promote_tool(tool_handlers, dispatcher_fixture):
 
     try:
         pin_result = await tool_handlers.pin_add(
-            content="Important task to be promoted",
+            content="Important task to be promoted — critical architectural decision about database migration strategy that should be preserved as permanent memory",
             project_id="test-project",
             importance=5,
         )
@@ -1095,7 +1095,7 @@ async def test_dispatch_pin_complete_tool(tool_handlers, dispatcher_fixture):
 
     try:
         pin_result = await tool_handlers.pin_add(
-            content="Task to be completed via dispatch",
+            content="Task to be completed via dispatch — verifies that pin_complete endpoint correctly transitions pin status and suggests promotion for important items",
             project_id="test-project",
             importance=3,
         )

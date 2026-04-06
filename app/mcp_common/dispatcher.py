@@ -161,6 +161,7 @@ class MCPDispatcher:
             project_id=args["project_id"],
             importance=args.get("importance"),
             tags=args.get("tags"),
+            staging=args.get("staging", False),
         )
         return format_tool_response(result)
 
