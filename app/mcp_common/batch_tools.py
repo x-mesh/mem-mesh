@@ -52,6 +52,8 @@ class BatchOperationHandler:
         category: str = "task",
         source: str = "mcp_batch",
         tags: Optional[List[str]] = None,
+        categories: Optional[List[str]] = None,
+        tags_list: Optional[List[Optional[List[str]]]] = None,
     ) -> Dict[str, Any]:
         """
         Batch add multiple memories with single embedding generation
@@ -59,9 +61,11 @@ class BatchOperationHandler:
         Args:
             contents: List of memory contents to add
             project_id: Project ID for all memories
-            category: Category for all memories
+            category: Default category (used when categories[i] is not provided)
             source: Source for all memories
-            tags: Tags for all memories
+            tags: Default tags (used when tags_list[i] is not provided)
+            categories: Per-item category list (overrides category)
+            tags_list: Per-item tags list (overrides tags)
 
         Returns:
             Dictionary with results and statistics
@@ -78,14 +82,16 @@ class BatchOperationHandler:
             # 각 메모리 저장
             for i, content in enumerate(contents):
                 try:
+                    item_category = (categories[i] if categories and i < len(categories) else None) or category
+                    item_tags = (tags_list[i] if tags_list and i < len(tags_list) else None) or tags
                     # 임베딩과 함께 메모리 추가
                     memory = await self.memory_service.add_with_embedding(
                         content=content,
                         embedding=embeddings[i],
                         project_id=project_id,
-                        category=category,
+                        category=item_category,
                         source=source,
-                        tags=tags,
+                        tags=item_tags,
                     )
                     results.append(
                         {
@@ -210,6 +216,11 @@ class BatchOperationHandler:
                 )
 
                 if cached_result:
+                    # cached_result may be a Pydantic model or dict
+                    if hasattr(cached_result, "model_dump"):
+                        cached_result = cached_result.model_dump()
+                    elif hasattr(cached_result, "dict"):
+                        cached_result = cached_result.dict()
                     results[query] = {
                         "status": "success",
                         "source": "cache",
@@ -228,7 +239,7 @@ class BatchOperationHandler:
                     results[query] = {
                         "status": "success",
                         "source": "search",
-                        "results": search_result.dict(),
+                        "results": search_result.model_dump(),
                     }
 
             except Exception as e:
@@ -286,12 +297,16 @@ class BatchOperationHandler:
                 f"Processing {len(add_operations)} add operations with contents: {[c[:30] for c in contents]}"
             )
 
+            categories = [op.get("category", "task") for op in add_operations]
+            tags_list = [op.get("tags") for op in add_operations]
             batch_add_result = await self.batch_add_memories(
                 contents=contents,
                 project_id=add_operations[0].get("project_id"),
                 category=add_operations[0].get("category", "task"),
                 source=add_operations[0].get("source", "mcp_batch"),
                 tags=add_operations[0].get("tags"),
+                categories=categories,
+                tags_list=tags_list,
             )
 
             logger.info(
@@ -346,13 +361,32 @@ class BatchOperationHandler:
                     search_results = batch_search_result.get("results", {})
                     if query in search_results:
                         query_result = search_results[query]
+                        # query_result["results"] is the full SearchResponse dict
+                        sr = query_result.get("results", {})
+                        # sr may be a SearchResponse dict with its own "results" key,
+                        # or directly a list of results
+                        if isinstance(sr, dict):
+                            inner_results = sr.get("results", [])
+                            total = sr.get("total")
+                        else:
+                            inner_results = sr if isinstance(sr, list) else []
+                            total = query_result.get("total")
+                        # Ensure each result is a plain dict
+                        safe_results = []
+                        for r in inner_results:
+                            if hasattr(r, "model_dump"):
+                                safe_results.append(r.model_dump())
+                            elif hasattr(r, "dict"):
+                                safe_results.append(r.dict())
+                            elif isinstance(r, dict):
+                                safe_results.append(r)
                         results.append(
                             {
                                 "index": op["index"],
                                 "type": "search",
                                 "success": True,
-                                "results": query_result.get("results", []),
-                                "total": query_result.get("total"),
+                                "results": safe_results,
+                                "total": total,
                             }
                         )
             else:

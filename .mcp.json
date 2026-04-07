@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mem-mesh": {
+      "type": "sse",
+      "url": "http://localhost:8000/mcp/sse"
+    }
+  }
+}
