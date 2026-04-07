@@ -393,6 +393,7 @@ class BatchOperationHandler:
                         importance=importance,
                         tags=tags,
                         auto_importance=auto_importance,
+                        client_type=op.get("client_type"),
                     )
                     results.append(
                         {

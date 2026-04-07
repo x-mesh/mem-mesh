@@ -549,7 +549,7 @@ class MCPToolHandlers:
                 auto_importance=auto_importance,
                 ide_session_id=ide_session_id,
                 client_type=client_type,
-                client=os.environ.get("MEM_MESH_CLIENT"),
+                client=None,
                 is_staging=staging,
             )
 

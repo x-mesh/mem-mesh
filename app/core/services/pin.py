@@ -106,7 +106,7 @@ class PinService:
         effective_user_id = user_id or get_current_user()
 
         if not client:
-            client = os.environ.get("MEM_MESH_CLIENT")
+            client = os.environ.get("MEM_MESH_CLIENT") or client_type
 
         # 활성 세션 가져오기 (없으면 자동 생성)
         session = await self.session_service.get_or_create_active_session(

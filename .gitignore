@@ -35,3 +35,8 @@ benchmarks/longmemeval/dbs/
 benchmarks/longmemeval/results_v1_backup/
 
 **/.omc/**
+
+# Internal development scripts
+scripts/internal/
+src__DEPRECATED/
+docs/internal/

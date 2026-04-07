@@ -1,2 +1,0 @@
-## Qwen Added Memories
-- Current directory is /Users/jinwoo/work/project/mem-mesh on macOS (darwin). Project contains files like .env, .env.example, .gitignore, AGENTS.md, analyze_embedding_similarity.py, build.py, debug-search.html, demo_interactive_search.py, demo_query_argument.py, fix_threshold_search.py, mem-mesh-web-ui-project-summary.md, pyproject.toml, README.md, requirements.txt, simple_test.py, and various hidden directories like .gemini, .git, .hypothesis, .kiro, .pytest_cache. Today is January 13, 2026.
