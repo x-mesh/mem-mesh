@@ -62,14 +62,14 @@ class TestSearchService:
         """검색 결과가 있는 경우 테스트"""
         # Given - 테스트 메모리 생성
         await memory_service.create(
-            content="This is a test memory about authentication",
+            content="This is a test memory about authentication including login flow, session tokens, and OAuth2 integration for secure user access",
             project_id="test-project",
             category="task",
             source="test",
         )
 
         await memory_service.create(
-            content="Another memory about database optimization",
+            content="Another memory about database optimization covering query performance tuning, index strategies, and connection pooling for production workloads",
             project_id="test-project",
             category="bug",
             source="test",
@@ -96,11 +96,15 @@ class TestSearchService:
         """프로젝트 필터 검색 테스트"""
         # Given - 다른 프로젝트의 메모리 생성
         await memory_service.create(
-            content="Memory in project A", project_id="project-a", source="test"
+            content="Memory in project A — this record contains detailed information about the authentication module and its integration with external providers",
+            project_id="project-a",
+            source="test",
         )
 
         await memory_service.create(
-            content="Memory in project B", project_id="project-b", source="test"
+            content="Memory in project B — this record documents the database schema migration steps and rollback procedures for the payment service",
+            project_id="project-b",
+            source="test",
         )
 
         # When
@@ -116,11 +120,15 @@ class TestSearchService:
         """카테고리 필터 검색 테스트"""
         # Given
         await memory_service.create(
-            content="Task memory for testing", category="task", source="test"
+            content="Task memory for testing — covers the implementation of user registration flow including email verification and password strength validation",
+            category="task",
+            source="test",
         )
 
         await memory_service.create(
-            content="Bug memory for testing", category="bug", source="test"
+            content="Bug memory for testing — documents a race condition in the session manager that causes intermittent logout failures under high concurrency",
+            category="bug",
+            source="test",
         )
 
         # When
@@ -135,7 +143,8 @@ class TestSearchService:
         # Given - 여러 메모리 생성
         for i in range(5):
             await memory_service.create(
-                content=f"Test memory number {i}", source="test"
+                content=f"Test memory number {i} — this entry is part of a batch insert to validate search result pagination and limit enforcement across multiple records",
+                source="test",
             )
 
         # When
@@ -149,11 +158,13 @@ class TestSearchService:
         """최신성 가중치 검색 테스트"""
         # Given
         await memory_service.create(
-            content="Old memory for recency test", source="test"
+            content="Old memory for recency test — this record was created earlier to verify that time-based scoring correctly deprioritizes older entries in search results",
+            source="test",
         )
 
         await memory_service.create(
-            content="New memory for recency test", source="test"
+            content="New memory for recency test — this record was created recently to verify that time-based scoring correctly boosts newer entries in search results",
+            source="test",
         )
 
         # When

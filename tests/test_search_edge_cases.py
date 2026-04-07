@@ -5,11 +5,14 @@ Edge cases and boundary conditions for search quality
 
 import asyncio
 
+import pytest
+
 from app.core.config import create_settings
 from app.core.schemas.requests import SearchParams
 from app.core.storage.direct import DirectStorageBackend
 
 
+@pytest.mark.skip(reason="Integration test: requires real database and embedding service")
 async def test_edge_cases():
     """엣지 케이스 테스트"""
 
@@ -228,6 +231,7 @@ async def test_edge_cases():
         print("\n✗ 엣지 케이스 처리: 개선 필요 (70% 미만)")
 
 
+@pytest.mark.skip(reason="Integration test: requires real database and embedding service")
 async def test_boundary_conditions():
     """경계 조건 테스트"""
 
@@ -277,6 +281,7 @@ async def test_boundary_conditions():
     await backend.shutdown()
 
 
+@pytest.mark.skip(reason="Integration test: requires real database and embedding service")
 async def test_performance_stress():
     """성능 스트레스 테스트"""
 

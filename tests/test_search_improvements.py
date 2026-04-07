@@ -6,6 +6,8 @@ Score Normalization & Search Warmup
 import asyncio
 import time
 
+import pytest
+
 from app.core.config import create_settings
 from app.core.schemas.requests import SearchParams
 from app.core.services.score_normalizer import ScoreNormalizer
@@ -48,6 +50,7 @@ async def test_score_normalization():
     )
 
 
+@pytest.mark.skip(reason="Integration test: requires real database and embedding service")
 async def test_search_with_normalization():
     """정규화 적용 검색 테스트"""
 
@@ -90,6 +93,7 @@ async def test_search_with_normalization():
     await backend.shutdown()
 
 
+@pytest.mark.skip(reason="Integration test: requires real database and embedding service")
 async def test_search_warmup():
     """검색 워밍업 테스트"""
 
@@ -147,6 +151,7 @@ async def test_search_warmup():
     await backend.shutdown()
 
 
+@pytest.mark.skip(reason="Integration test: requires real database and embedding service")
 async def test_combined_improvements():
     """통합 개선 사항 테스트"""
 

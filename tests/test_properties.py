@@ -23,7 +23,7 @@ from app.core.storage.direct import DirectStorageBackend
 @composite
 def valid_memory_content(draw):
     """Valid memory content generator"""
-    return draw(st.text(min_size=10, max_size=1000).filter(lambda x: x.strip()))
+    return draw(st.text(min_size=100, max_size=1000).filter(lambda x: x.strip()))
 
 
 @composite
@@ -121,7 +121,7 @@ class TestConcurrencyProperties:
         initial_memories = []
         for i in range(5):
             response = await memory_service.create(
-                content=f"Initial memory {i} for concurrent test",
+                content=f"Initial memory {i} for concurrent test — this entry validates that parallel read and write operations maintain data integrity under load",
                 source="test",
                 category="task",
             )
@@ -155,7 +155,7 @@ class TestConcurrencyProperties:
                 for i in range(operations_per_task):
                     # 새 메모리 생성
                     response = await memory_service.create(
-                        content=f"Concurrent memory from writer {task_id}, operation {i}",
+                        content=f"Concurrent memory from writer {task_id}, operation {i} — stress testing simultaneous create operations to ensure no data corruption or race conditions",
                         source="concurrent_test",
                         category="task",
                     )

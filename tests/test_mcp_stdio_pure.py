@@ -625,7 +625,7 @@ async def test_dispatch_update_tool(tool_handlers, dispatcher_fixture):
             "name": "update",
             "arguments": {
                 "memory_id": memory_id,
-                "content": "Updated content with new information",
+                "content": "Updated content with new information — this is an expanded description that meets the minimum character requirement for the content validation rule in mem-mesh",
                 "category": "decision",
             },
         }

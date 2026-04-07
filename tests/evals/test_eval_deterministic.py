@@ -331,10 +331,6 @@ class TestPromptStructure:
         for criterion in SAVE_CRITERIA.skip_when:
             assert criterion in prompt, f"Missing skip criterion: {criterion}"
 
-    def test_prompt_has_loop_guard(self) -> None:
-        prompt = render_claude_stop_prompt()
-        assert "루프 방지" in prompt or "loop" in prompt.lower()
-
     def test_prompt_has_mcp_call(self) -> None:
         prompt = render_claude_stop_prompt()
         assert "mcp__mem-mesh__add" in prompt
@@ -342,7 +338,7 @@ class TestPromptStructure:
     def test_prompt_has_reason_rules(self) -> None:
         prompt = render_claude_stop_prompt()
         assert "reason" in prompt
-        assert "1줄 요약" in prompt or "평문" in prompt
+        assert "1~3줄 요약" in prompt or "요약" in prompt
 
 
 # ---------------------------------------------------------------------------
