@@ -26,7 +26,7 @@ class ImportanceAnalyzer:
     - 1: typo, format, style (오타, 포맷, 스타일)
     """
 
-    DEFAULT_IMPORTANCE = 3  # 기본 중요도
+    DEFAULT_IMPORTANCE = 3  # Default importance
 
     def __init__(self):
         """ImportanceAnalyzer 초기화"""
@@ -42,7 +42,7 @@ class ImportanceAnalyzer:
         """
         return {
             5: [
-                # 영어 키워드
+                # English keywords
                 "architecture",
                 "design",
                 "critical",
@@ -52,7 +52,7 @@ class ImportanceAnalyzer:
                 "infrastructure",
                 "security",
                 "migration",
-                # 한국어 키워드
+                # Korean keywords
                 "아키텍처",
                 "설계",
                 "중대",
@@ -64,7 +64,7 @@ class ImportanceAnalyzer:
                 "구조",
             ],
             4: [
-                # 영어 키워드
+                # English keywords
                 "feature",
                 "implement",
                 "refactor",
@@ -74,7 +74,7 @@ class ImportanceAnalyzer:
                 "integration",
                 "api",
                 "service",
-                # 한국어 키워드
+                # Korean keywords
                 "기능",
                 "구현",
                 "리팩토링",
@@ -85,7 +85,7 @@ class ImportanceAnalyzer:
                 "서비스",
             ],
             3: [
-                # 영어 키워드
+                # English keywords
                 "update",
                 "change",
                 "modify",
@@ -93,7 +93,7 @@ class ImportanceAnalyzer:
                 "issue",
                 "problem",
                 "error",
-                # 한국어 키워드
+                # Korean keywords
                 "업데이트",
                 "변경",
                 "버그",
@@ -103,7 +103,7 @@ class ImportanceAnalyzer:
                 "오류",
             ],
             2: [
-                # 영어 키워드
+                # English keywords
                 "test",
                 "doc",
                 "comment",
@@ -112,7 +112,7 @@ class ImportanceAnalyzer:
                 "example",
                 "guide",
                 "tutorial",
-                # 한국어 키워드
+                # Korean keywords
                 "테스트",
                 "문서",
                 "주석",
@@ -122,7 +122,7 @@ class ImportanceAnalyzer:
                 "설명",
             ],
             1: [
-                # 영어 키워드
+                # English keywords
                 "typo",
                 "format",
                 "style",
@@ -131,7 +131,7 @@ class ImportanceAnalyzer:
                 "lint",
                 "cleanup",
                 "cosmetic",
-                # 한국어 키워드
+                # Korean keywords
                 "오타",
                 "포맷",
                 "스타일",
@@ -166,25 +166,25 @@ class ImportanceAnalyzer:
             logger.warning("Empty content provided, returning default importance")
             return self.DEFAULT_IMPORTANCE
 
-        # 컨텐츠를 소문자로 변환하여 대소문자 무시
+        # Convert content to lowercase to ignore case
         content_lower = content.lower()
 
-        # 태그도 분석에 포함
+        # Include tags in analysis
         tags_text = " ".join(tags) if tags else ""
         tags_lower = tags_text.lower()
 
-        # 전체 텍스트 (컨텐츠 + 태그)
+        # Full text (content + tags)
         full_text = f"{content_lower} {tags_lower}"
 
-        # 각 중요도 레벨별로 키워드 매칭 점수 계산
+        # Calculate keyword matching score for each importance level
         scores: Dict[int, int] = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
 
         for importance, keywords in self.keywords.items():
             for keyword in keywords:
                 keyword_lower = keyword.lower()
 
-                # 영어: 단어 경계(\b) 사용 — "test"는 "testing"과 매칭, "latest"와는 불매칭
-                # 한국어: \b가 동작하지 않으므로 공백/문자열 경계 기반 포함 검사
+                # English: use word boundary (\b) — "test" matches "testing", not "latest"
+                # Korean: \b doesn't work, so use space/string boundary inclusion check
                 if keyword_lower.isascii():
                     pattern = r"\b" + re.escape(keyword_lower) + r"\w*\b"
                     matches = re.findall(pattern, full_text)
@@ -193,24 +193,24 @@ class ImportanceAnalyzer:
                     matches = [t for t in tokens if keyword_lower in t]
 
                 if matches:
-                    # 매칭된 횟수만큼 점수 증가
+                    # Increase score by number of matches
                     scores[importance] += len(matches)
                     logger.debug(
                         f"Keyword '{keyword}' matched {len(matches)} times "
                         f"for importance {importance}"
                     )
 
-        # 가장 높은 점수를 가진 중요도 선택
+        # Select importance with highest score
         max_score = max(scores.values())
 
         if max_score == 0:
-            # 매칭된 키워드가 없으면 기본값 반환
+            # Return default if no keywords matched
             logger.debug(
                 f"No keywords matched, returning default importance: {self.DEFAULT_IMPORTANCE}"
             )
             return self.DEFAULT_IMPORTANCE
 
-        # 동점인 경우 더 높은 중요도 선택
+        # Choose higher importance on tie
         for importance in sorted(scores.keys(), reverse=True):
             if scores[importance] == max_score:
                 logger.info(
@@ -219,7 +219,7 @@ class ImportanceAnalyzer:
                 )
                 return importance
 
-        # 폴백 (이론적으로 도달하지 않음)
+        # Fallback (theoretically unreachable)
         return self.DEFAULT_IMPORTANCE
 
     def get_keywords_for_importance(self, importance: int) -> List[str]:

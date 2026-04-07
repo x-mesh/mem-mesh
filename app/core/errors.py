@@ -7,7 +7,7 @@ MCP JSON-RPC 에러 코드와 HTTP 상태 코드 매핑을 제공합니다.
 
 
 # ---------------------------------------------------------------------------
-# HTTP/JSON-RPC 에러 코드 상수
+# HTTP/JSON-RPC error code constants
 # ---------------------------------------------------------------------------
 class ErrorCode:
     """에러 코드 상수 (HTTP 상태 코드 매핑)"""
@@ -42,7 +42,7 @@ class ErrorCode:
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
-# 에러 코드 → HTTP 상태 코드 매핑
+# Error code → HTTP status code mapping
 ERROR_HTTP_STATUS = {
     ErrorCode.VALIDATION_ERROR: 400,
     ErrorCode.INVALID_CONTENT_LENGTH: 400,
@@ -65,7 +65,7 @@ ERROR_HTTP_STATUS = {
     ErrorCode.INTERNAL_ERROR: 500,
 }
 
-# 에러 코드 → JSON-RPC 에러 코드 매핑
+# Error code → JSON-RPC error code mapping
 ERROR_JSONRPC_CODE = {
     ErrorCode.VALIDATION_ERROR: -32602,  # Invalid params
     ErrorCode.INVALID_CONTENT_LENGTH: -32602,
@@ -90,7 +90,7 @@ ERROR_JSONRPC_CODE = {
 
 
 # ---------------------------------------------------------------------------
-# 기본 예외 클래스
+# Base exception class
 # ---------------------------------------------------------------------------
 class MemMeshError(Exception):
     """mem-mesh 기본 예외"""

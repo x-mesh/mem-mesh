@@ -1,9 +1,14 @@
+# Environment
+.env
+
+# Python
 *.pyc
 *.pyo
 *.pyd
 *.so
 *.egg
-*.egg-info
+*.egg-info/
+mem_mesh.egg-info/
 __pycache__/
 .hypothesis/
 .pytest_cache/
@@ -26,9 +31,14 @@ logs/
 .venv/
 **/results/
 
-# Worktrees
-.cursor/worktrees/
-.claude/worktrees/
+# IDE / Editor / Dev tools
+.cursor/
+.claude/
+.kiro/
+.beads/
+.sisyphus/
+.qwen____/
+.mcp.json
 
 # Benchmark
 benchmarks/longmemeval/dbs/
@@ -36,7 +46,9 @@ benchmarks/longmemeval/results_v1_backup/
 
 **/.omc/**
 
-# Internal development scripts
+# Internal development
 scripts/internal/
 src__DEPRECATED/
 docs/internal/
+PLAN.md
+API_DESIGN_ANALYSIS.md

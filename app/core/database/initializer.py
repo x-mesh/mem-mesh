@@ -58,7 +58,7 @@ class DatabaseInitializer:
         """Create core memory tables."""
         conn = self.connection.connection
 
-        # memories 테이블 생성
+        # Create memories table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS memories (
                 id TEXT PRIMARY KEY,
@@ -75,7 +75,7 @@ class DatabaseInitializer:
             )
         """)
 
-        # embedding_metadata 테이블 생성 (모델 정보 저장용)
+        # Create embedding_metadata table (for storing model info)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS embedding_metadata (
                 key TEXT PRIMARY KEY,
@@ -88,7 +88,7 @@ class DatabaseInitializer:
         """Create work tracking system tables."""
         conn = self.connection.connection
 
-        # projects 테이블 생성
+        # Create projects table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS projects (
                 id TEXT PRIMARY KEY,
@@ -102,7 +102,7 @@ class DatabaseInitializer:
             )
         """)
 
-        # sessions 테이블 생성 (context-token-optimization + IDE session 컬럼 포함)
+        # Create sessions table (includes context-token-optimization + IDE session columns)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
@@ -122,7 +122,7 @@ class DatabaseInitializer:
             )
         """)
 
-        # pins 테이블 생성 (context-token-optimization 컬럼 포함)
+        # Create pins table (includes context-token-optimization columns)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS pins (
                 id TEXT PRIMARY KEY,
@@ -145,7 +145,7 @@ class DatabaseInitializer:
             )
         """)
 
-        # session_stats 테이블 생성 (context-token-optimization)
+        # Create session_stats table (context-token-optimization)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS session_stats (
                 id TEXT PRIMARY KEY,
@@ -160,7 +160,7 @@ class DatabaseInitializer:
             )
         """)
 
-        # token_usage 테이블 생성 (context-token-optimization)
+        # Create token_usage table (context-token-optimization)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS token_usage (
                 id TEXT PRIMARY KEY,
@@ -277,7 +277,7 @@ class DatabaseInitializer:
             )
         """)
 
-        # embedding_metrics 테이블 생성
+        # Create embedding_metrics table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS embedding_metrics (
                 id TEXT PRIMARY KEY,
@@ -292,7 +292,7 @@ class DatabaseInitializer:
             )
         """)
 
-        # alerts 테이블 생성
+        # Create alerts table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS alerts (
                 id TEXT PRIMARY KEY,
@@ -401,10 +401,10 @@ class DatabaseInitializer:
         conn = self.connection.connection
 
         try:
-            # vec0 함수가 사용 가능한지 테스트
+            # Test whether vec0 function is available
             test_result = conn.execute("SELECT vec_version()").fetchone()
             if test_result:
-                # 실제 vector 검색용 테이블 생성
+                # Create table for actual vector search
                 conn.execute(f"""
                     CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings USING vec0(
                         memory_id TEXT PRIMARY KEY,
@@ -423,7 +423,7 @@ class DatabaseInitializer:
         """Create fallback tables for when sqlite-vec is not available."""
         conn = self.connection.connection
 
-        # Fallback 테이블은 항상 생성 (MemoryService에서 사용)
+        # Always create fallback table (used by MemoryService)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS memories_vec_fallback (
                 memory_id TEXT PRIMARY KEY,
@@ -436,7 +436,7 @@ class DatabaseInitializer:
         """Create FTS5 virtual tables for full-text search."""
         conn = self.connection.connection
 
-        # 1. memories_fts 테이블 생성 (content 컬럼 인덱싱)
+        # 1. Create memories_fts table (index content column)
         try:
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
@@ -449,20 +449,20 @@ class DatabaseInitializer:
                 )
             """)
 
-            # 2. 기존 데이터 마이그레이션 (동기화)
-            # FTS 테이블이 비어있을 때만 수행하는 것이 성능상 좋지만,
-            # INSERT OR IGNORE는 id 유니크 제약조건이 없으면 중복 삽입될 수 있음.
-            # FTS5는 PK 개념이 rowid임. id 컬럼은 그냥 컬럼임.
-            # 따라서 중복 방지를 위해 DELETE 후 INSERT 하거나, 별도 로직 필요.
-            # 하지만 여기선 간단하게 INSERT하되, 이미 trigger가 설정되어 있다면 중복은 안 됨(앱 실행 시점)
-            # 안전하게: memories의 id가 memories_fts에 없는 경우만 INSERT
+            # 2. Migrate existing data (synchronize)
+            # Ideally only run when FTS table is empty for performance,
+            # INSERT OR IGNORE can cause duplicates if no unique constraint on id.
+            # FTS5 uses rowid as PK; the id column is just a regular column.
+            # So use DELETE then INSERT to prevent duplicates, or separate logic.
+            # Here we simply INSERT; triggers prevent duplicates once set up (at app startup)
+            # Safe approach: only INSERT if id is not already in memories_fts
             conn.execute("""
                 INSERT INTO memories_fts(id, content, project_id, category, created_at)
                 SELECT id, content, project_id, category, created_at FROM memories
                 WHERE id NOT IN (SELECT id FROM memories_fts)
             """)
 
-            # 3. Triggers 생성 (자동 동기화)
+            # 3. Create triggers (automatic synchronization)
             # INSERT
             conn.execute("""
                 CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN

@@ -19,14 +19,14 @@ def normalize_project_id(v: Optional[str]) -> Optional[str]:
     if not isinstance(v, str) or len(v) == 0:
         raise ValueError("project_id must be a non-empty string")
 
-    # camelCase/PascalCase → kebab-case: 대문자 앞에 하이픈 삽입
+    # camelCase/PascalCase → kebab-case: insert hyphen before uppercase letters
     normalized = re.sub(r"(?<=[a-z0-9])([A-Z])", r"-\1", v)
-    # 연속 대문자 처리: "HTMLParser" → "html-parser"
+    # Handle consecutive uppercase: "HTMLParser" → "html-parser"
     normalized = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1-\2", normalized)
     normalized = normalized.lower()
-    # 공백/언더스코어를 하이픈으로
+    # Replace spaces/underscores with hyphens
     normalized = re.sub(r"[\s_]+", "-", normalized)
-    # 연속 하이픈 제거
+    # Remove consecutive hyphens
     normalized = re.sub(r"-+", "-", normalized).strip("-")
 
     if not re.match(r"^[a-z0-9][a-z0-9_-]*$", normalized):
@@ -87,7 +87,7 @@ VALID_TEMPORAL_MODES = {"filter", "boost", "decay"}
 class SearchParams(BaseModel):
     """메모리 검색 요청 파라미터"""
 
-    query: str = Field(min_length=0)  # 빈 쿼리 허용
+    query: str = Field(min_length=0)  # Allow empty query
     project_id: Optional[str] = Field(default=None)
     category: Optional[str] = Field(default=None)
     limit: int = Field(default=5, ge=1, le=20)
@@ -95,7 +95,7 @@ class SearchParams(BaseModel):
     search_mode: str = Field(
         default="hybrid", description="검색 모드: hybrid, exact, semantic, fuzzy"
     )
-    # 시간 인식 검색 (Temporal-Aware Search)
+    # Time-aware search (Temporal-Aware Search)
     time_range: Optional[str] = Field(
         default=None,
         description="시간 범위 단축어: today, yesterday, this_week, last_week, this_month, last_month, this_quarter",

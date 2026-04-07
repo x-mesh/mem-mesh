@@ -12,17 +12,17 @@ configurable log levels, file logging, and performance monitoring capabilities.
 
 사용법:
 ```python
-# 기본 사용법
+# Basic usage
 from app.core.utils.logger import get_logger, setup_logging
 
-# 로깅 시스템 초기화 (애플리케이션 시작 시 한 번만)
+# Initialize logging system (once at application startup)
 setup_logging()
 
-# 로거 인스턴스 가져오기
+# Get logger instance
 logger = get_logger("my-module")
 logger.info("Hello world", extra_field="value")
 
-# 또는 직접 사용
+# Or use directly
 from app.core.utils.logger import logger
 logger.info("Hello world")
 ```
@@ -38,7 +38,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Generator, Optional, Union
 
-# 전역 로거 인스턴스들을 저장할 딕셔너리
+# Dictionary to store global logger instances
 _loggers: Dict[str, "MemMeshLogger"] = {}
 _initialized = False
 
@@ -89,10 +89,10 @@ class TextFormatter(logging.Formatter):
         )
 
     def format(self, record: logging.LogRecord) -> str:
-        # 기본 메시지 포맷
+        # Default message format
         base_message = super().format(record)
 
-        # extra_fields가 있으면 추가
+        # Append extra_fields if present
         if hasattr(record, "extra_fields"):
             extra_fields = getattr(record, "extra_fields", {})
             if extra_fields:
@@ -104,7 +104,7 @@ class TextFormatter(logging.Formatter):
 
 def get_formatter() -> logging.Formatter:
     """환경변수에 따라 적절한 formatter 반환"""
-    # MEM_MESH_LOG_FORMAT 우선, MCP_LOG_FORMAT deprecated fallback
+    # MEM_MESH_LOG_FORMAT takes priority; MCP_LOG_FORMAT is deprecated fallback
     log_format = (
         os.getenv("MEM_MESH_LOG_FORMAT") or os.getenv("MCP_LOG_FORMAT") or "text"
     ).lower()
@@ -123,19 +123,19 @@ class MemMeshLogger:
     def __init__(self, name: str = "mem-mesh"):
         self.name = name
         self.logger = logging.getLogger(name)
-        # 항상 설정을 적용 (초기화 플래그와 관계없이)
+        # Always apply settings (regardless of initialization flag)
         self._setup_logger()
 
     def _setup_logger(self) -> None:
         """Setup logger with appropriate formatter and handlers."""
-        # 이미 핸들러가 있고 올바른 레벨이 설정되어 있으면 중복 설정 방지
+        # Skip duplicate setup if handlers already exist with correct level
         current_level = self.logger.getEffectiveLevel()
         expected_level = getattr(logging, self._get_log_level().upper(), logging.INFO)
 
         if self.logger.handlers and current_level == expected_level:
             return
 
-        # 기존 핸들러 제거
+        # Remove existing handlers
         self.logger.handlers.clear()
 
         # Set log level from environment or default
@@ -146,18 +146,18 @@ class MemMeshLogger:
         # Get formatter based on environment
         formatter = get_formatter()
 
-        # 출력 대상 설정
+        # Configure output targets
         log_output = self._get_log_output().lower()
         log_file = self._get_log_file()
 
-        # 콘솔 핸들러 추가 (console 또는 both)
+        # Add console handler (console or both)
         if log_output in ["console", "both"]:
             console_handler = logging.StreamHandler(sys.stderr)
             console_handler.setLevel(log_level)
             console_handler.setFormatter(formatter)
             self.logger.addHandler(console_handler)
 
-        # 파일 핸들러 추가 (file 또는 both, 그리고 로그 파일이 설정된 경우)
+        # Add file handler (file or both, when log file is configured)
         if log_file and log_output in ["file", "both"]:
             try:
                 log_path = Path(log_file)
@@ -168,13 +168,13 @@ class MemMeshLogger:
                 file_handler.setFormatter(formatter)
                 self.logger.addHandler(file_handler)
             except Exception as e:
-                # 파일 핸들러 생성 실패 시 stderr로 경고 (콘솔 핸들러가 없을 수도 있으므로 직접 출력)
+                # Warn via stderr on file handler creation failure (may not have console handler)
                 print(
                     f"Warning: Could not create log file {log_file}: {e}",
                     file=sys.stderr,
                 )
 
-        # 핸들러가 하나도 없으면 기본 콘솔 핸들러 추가
+        # Add default console handler if no handlers exist
         if not self.logger.handlers:
             console_handler = logging.StreamHandler(sys.stderr)
             console_handler.setLevel(log_level)
@@ -244,11 +244,11 @@ class MemMeshLogger:
             **kwargs: 추가 필드들
         """
         if self.logger.isEnabledFor(logging.DEBUG) and details:
-            # DEBUG 레벨에서는 details를 kwargs에 병합
+            # At DEBUG level, merge details into kwargs
             combined_kwargs = {**kwargs, **details}
             self.debug(base_msg, **combined_kwargs)
         else:
-            # INFO 레벨에서는 기본 kwargs만 사용
+            # At INFO level, use only base kwargs
             self.info(base_msg, **kwargs)
 
     def _log_with_extra(
@@ -257,7 +257,7 @@ class MemMeshLogger:
         record = self.logger.makeRecord(
             self.logger.name, level, "", 0, message, (), None
         )
-        # 동적으로 extra_fields 속성 추가
+        # Dynamically add extra_fields attribute
         setattr(record, "extra_fields", extra_fields)
         self.logger.handle(record)
 
@@ -348,7 +348,7 @@ def setup_logging(
     """
     global logger, _initialized, _loggers
 
-    # 환경변수 읽기 (MEM_MESH_* 우선, MCP_* deprecated fallback)
+    # Read env vars (MEM_MESH_* preferred; MCP_* deprecated fallback)
     log_level = os.getenv("MEM_MESH_LOG_LEVEL") or os.getenv("MCP_LOG_LEVEL") or "INFO"
     log_file = os.getenv("MEM_MESH_LOG_FILE") or os.getenv("MCP_LOG_FILE") or ""
     log_format = (
@@ -358,7 +358,7 @@ def setup_logging(
         os.getenv("MEM_MESH_LOG_OUTPUT") or os.getenv("MCP_LOG_OUTPUT") or "console"
     )
 
-    # 파일 로깅이 설정된 경우 디렉토리 생성
+    # Create directory if file logging is configured
     if log_file:
         try:
             log_path = Path(log_file)
@@ -369,17 +369,17 @@ def setup_logging(
                 file=sys.stderr,
             )
 
-    # 초기화 플래그 설정
+    # Set initialization flag
     _initialized = True
 
-    # 특정 로거 이름이 지정된 경우 (MCP 서버용)
+    # If a specific logger name is given (for MCP server)
     if logger_name:
         return setup_simple_logger(logger_name)
 
-    # 기본 로거 초기화 (환경변수가 설정되어 있으면 자동으로 파일 핸들러 추가됨)
+    # Initialize default logger (file handler added automatically if env var is set)
     logger = MemMeshLogger()
 
-    # 기존 로거들도 재설정
+    # Also reconfigure existing loggers
     for existing_logger in _loggers.values():
         existing_logger._setup_logger()
 
@@ -404,7 +404,7 @@ def setup_simple_logger(name: str) -> logging.Logger:
     Returns:
         Standard logging.Logger instance
     """
-    # 환경변수 조회 (MEM_MESH_* 우선, MCP_* deprecated fallback)
+    # Look up env vars (MEM_MESH_* preferred; MCP_* deprecated fallback)
     log_level_str = (
         os.getenv("MEM_MESH_LOG_LEVEL") or os.getenv("MCP_LOG_LEVEL") or "INFO"
     ).upper()
@@ -419,7 +419,7 @@ def setup_simple_logger(name: str) -> logging.Logger:
         os.getenv("MEM_MESH_LOG_OUTPUT") or os.getenv("MCP_LOG_OUTPUT") or "console"
     ).lower()
 
-    # 로그 레벨 매핑
+    # Log level mapping
     level_map = {
         "DEBUG": logging.DEBUG,
         "INFO": logging.INFO,
@@ -429,14 +429,14 @@ def setup_simple_logger(name: str) -> logging.Logger:
     }
     log_level = level_map.get(log_level_str, logging.INFO)
 
-    # 로거 생성
+    # Create logger
     simple_logger = logging.getLogger(name)
     simple_logger.setLevel(log_level)
 
-    # 기존 핸들러 제거 (중복 방지)
+    # Remove existing handlers (prevent duplicates)
     simple_logger.handlers.clear()
 
-    # 포맷터 설정
+    # Configure formatter
     if log_format.lower() == "json":
         formatter = JSONFormatter()
     else:
@@ -445,17 +445,17 @@ def setup_simple_logger(name: str) -> logging.Logger:
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
-    # 콘솔 핸들러 추가 (console 또는 both)
+    # Add console handler (console or both)
     if log_output in ["console", "both"]:
         stderr_handler = logging.StreamHandler(sys.stderr)
         stderr_handler.setLevel(log_level)
         stderr_handler.setFormatter(formatter)
         simple_logger.addHandler(stderr_handler)
 
-    # 파일 핸들러 추가 (file 또는 both, 그리고 로그 파일이 설정된 경우)
+    # Add file handler (file or both, when log file is configured)
     if log_file and log_output in ["file", "both"]:
         try:
-            # 디렉토리 생성
+            # Create directory
             log_dir = os.path.dirname(log_file)
             if log_dir and not os.path.exists(log_dir):
                 os.makedirs(log_dir, exist_ok=True)
@@ -468,7 +468,7 @@ def setup_simple_logger(name: str) -> logging.Logger:
         except Exception as e:
             simple_logger.warning(f"Could not create log file {log_file}: {e}")
 
-    # 핸들러가 하나도 없으면 기본 콘솔 핸들러 추가
+    # Add default console handler if no handlers exist
     if not simple_logger.handlers:
         stderr_handler = logging.StreamHandler(sys.stderr)
         stderr_handler.setLevel(log_level)

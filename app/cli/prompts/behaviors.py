@@ -27,8 +27,8 @@ class Rule:
     """A single operational rule injected at session start."""
 
     key: str
-    title: str  # 짧은 제목
-    description: str  # 설명 (project_id 플레이스홀더: {project_id})
+    title: str  # Short title
+    description: str  # Description (project_id placeholder: {project_id})
 
 
 @dataclass(frozen=True)
@@ -37,8 +37,8 @@ class SaveCriteria:
 
     save_when: List[str]
     skip_when: List[str]
-    save_format: str  # MCP 호출 예시
-    idempotency: str  # 중복 저장 방지 규칙
+    save_format: str  # MCP call example
+    idempotency: str  # Duplicate save prevention rule
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,7 @@ class PinCriteria:
 
     create_when: str
     skip_when: str
-    pin_format: str  # MCP 호출 예시
+    pin_format: str  # MCP call example
 
 
 @dataclass(frozen=True)
@@ -56,7 +56,7 @@ class SessionConfig:
 
     resume_call: str
     resume_description: str
-    end_triggers: List[str]  # 사용자의 세션 종료 표현 예시
+    end_triggers: List[str]  # Example user session-end expressions
 
 
 # ---------------------------------------------------------------------------

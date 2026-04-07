@@ -50,7 +50,8 @@ class Database:
                 from ..config import Settings
 
                 embedding_dim = Settings().embedding_dim
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Failed to load settings for embedding_dim, using default 384: {e}")
                 embedding_dim = 384
 
         self.db_path = db_path

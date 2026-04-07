@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 class ContextLoadingParams:
     """맥락 로딩 파라미터"""
 
-    expand: bool  # 상세 로딩 여부
-    limit: int  # 로드할 핀 개수
-    min_importance: int  # 최소 중요도 필터
+    expand: bool  # Whether to load details
+    limit: int  # Number of pins to load
+    min_importance: int  # Minimum importance filter
 
 
 class ContextOptimizer:
@@ -44,7 +44,7 @@ class ContextOptimizer:
         """
         self.session_service = session_service
 
-        # 의도별 기본 파라미터 설정
+        # Set default parameters per intent
         self._intent_params = {
             "debug": ContextLoadingParams(expand=True, limit=5, min_importance=4),
             "explore": ContextLoadingParams(expand=False, limit=20, min_importance=1),
@@ -54,7 +54,7 @@ class ContextOptimizer:
             "review": ContextLoadingParams(expand=False, limit=15, min_importance=1),
         }
 
-        # 기본 파라미터 (의도 불명확 시)
+        # Default parameters (when intent is unclear)
         self._default_params = ContextLoadingParams(
             expand=False, limit=10, min_importance=1
         )
@@ -79,34 +79,34 @@ class ContextOptimizer:
 
         Requirements: 6.1, 6.2, 6.3, 6.4
         """
-        # 의도 타입에 따른 기본 파라미터 선택
+        # Select base parameters based on intent type
         params = self._intent_params.get(intent.intent_type, self._default_params)
 
-        # 기본 파라미터 복사
+        # Copy base parameters
         expand = params.expand
         limit = params.limit
         min_importance = params.min_importance
 
-        # 긴급도에 따른 조정
+        # Adjust based on urgency
         if intent.urgency > 0.8:
-            # 매우 긴급한 경우: 결과 수 줄이고 중요도 높임
+            # Very urgent: reduce result count and raise importance
             limit = min(limit, 5)
             min_importance = max(min_importance, 4)
-            expand = True  # 상세 정보 필요
+            expand = True  # Detail info needed
             logger.debug(
                 f"High urgency detected ({intent.urgency:.2f}): limit={limit}, min_importance={min_importance}"
             )
 
-        # 구체성에 따른 조정
+        # Adjust based on specificity
         if intent.specificity > 0.8:
-            # 매우 구체적인 경우: 정확한 매칭 필요
+            # Very specific: need exact matching
             limit = min(limit, 3)
             expand = True
             logger.debug(
                 f"High specificity detected ({intent.specificity:.2f}): limit={limit}, expand=True"
             )
         elif intent.specificity < 0.3:
-            # 모호한 경우: 넓은 범위 탐색
+            # Vague: explore wider range
             limit = max(limit, 15)
             expand = False
             min_importance = 1
@@ -114,15 +114,15 @@ class ContextOptimizer:
                 f"Low specificity detected ({intent.specificity:.2f}): limit={limit}, expand=False"
             )
 
-        # 시간적 초점에 따른 조정
+        # Adjust based on temporal focus
         if intent.temporal_focus == "recent":
-            # 최근 정보 중심: 더 많은 결과 (최신성 우선)
+            # Recent info focus: more results (recency priority)
             limit = max(limit, 10)
             logger.debug(f"Recent temporal focus: limit={limit}")
 
-        # base_limit 고려 (사용자 명시적 요청)
-        if base_limit != 10:  # 기본값이 아닌 경우
-            # 사용자 요청과 의도 기반 조정의 중간값 사용
+        # Consider base_limit (explicit user request)
+        if base_limit != 10:  # When not default value
+            # Use midpoint between user request and intent-based adjustment
             limit = int((limit + base_limit) / 2)
             logger.debug(f"Adjusted limit with base_limit: {base_limit} -> {limit}")
 
@@ -148,15 +148,15 @@ class ContextOptimizer:
 
         Requirements: 6.1, 6.2, 6.3, 6.4, 6.5
         """
-        # 의도에 따른 파라미터 조정
+        # Adjust parameters based on intent
         expand, limit, min_importance = await self.adjust_for_intent(
             intent=intent, project_id=project_id, base_limit=10
         )
 
-        # 세션 맥락 로드
+        # Load session context
         context = await self.session_service.resume_last_session(
             project_id=project_id,
-            user_id=None,  # 현재 사용자 자동 감지
+            user_id=None,  # Auto-detect current user
             expand=expand,
             limit=limit,
         )
@@ -165,7 +165,7 @@ class ContextOptimizer:
             logger.info(f"No active session found for project: {project_id}")
             return None
 
-        # 중요도 필터링 (expand=True인 경우에만 적용)
+        # Importance filtering (applied only when expand=True)
         if expand and context.pins and min_importance > 1:
             original_count = len(context.pins)
             context.pins = [
@@ -179,7 +179,7 @@ class ContextOptimizer:
                     f"{original_count} -> {filtered_count}"
                 )
 
-        # 토큰 수 추정 (간단한 추정)
+        # Estimate token count (simple estimation)
         estimated_tokens = self._estimate_context_tokens(context, expand)
 
         logger.info(
@@ -208,21 +208,21 @@ class ContextOptimizer:
 
         Requirements: 6.5
         """
-        # 기본 세션 정보 토큰 (~50 토큰)
+        # Base session info tokens (~50 tokens)
         base_tokens = 50
 
-        # 요약 정보 토큰 (~50 토큰)
+        # Summary info tokens (~50 tokens)
         summary_tokens = 50 if context.summary else 0
 
         if not expand:
-            # 요약 모드: 기본 정보만
+            # Summary mode: basic info only
             return base_tokens + summary_tokens
 
-        # 상세 모드: 핀 내용 포함
+        # Detail mode: include pin content
         pin_tokens = 0
         if context.pins:
             for pin in context.pins:
-                # 핀 내용 길이에 따른 토큰 추정 (대략 4자당 1토큰)
+                # Token estimation based on pin content length (~1 token per 4 chars)
                 content_length = len(pin.content) if pin.content else 0
                 pin_tokens += max(50, min(200, content_length // 4))
 

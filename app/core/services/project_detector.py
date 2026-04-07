@@ -16,20 +16,20 @@ class ProjectDetector:
     """프로젝트 자동 감지"""
 
     def __init__(self):
-        # 프로젝트 매핑 규칙 (특별한 경우만)
+        # Project mapping rules (special cases only)
         self.project_mappings = {
-            # 디렉토리명 → 프로젝트 ID
-            # 대부분 디렉토리명을 그대로 사용하도록 변경
-            "kiro": None,  # kiro는 제외
-            "test": None,  # test 디렉토리 제외
-            "tmp": None,  # tmp 디렉토리 제외
-            "temp": None,  # temp 디렉토리 제외
+            # Directory name → project ID
+            # Changed to use directory name as-is in most cases
+            "kiro": None,  # Exclude kiro
+            "test": None,  # Exclude test directory
+            "tmp": None,  # Exclude tmp directory
+            "temp": None,  # Exclude temp directory
         }
 
-        # 프로젝트 패턴 (정규식) - 특별한 경우만
+        # Project patterns (regex) - special cases only
         self.project_patterns = [
-            # 대부분의 경우 디렉토리명을 그대로 사용
-            # 특별한 패턴이 필요한 경우만 추가
+            # Use directory name as-is in most cases
+            # Only add when special patterns are needed
         ]
 
     def detect_from_path(self, path: Optional[str] = None) -> Optional[str]:
@@ -47,10 +47,10 @@ class ProjectDetector:
 
         path_obj = Path(path)
 
-        # 1. 현재 디렉토리명 확인
+        # 1. Check current directory name
         dir_name = path_obj.name.lower()
 
-        # 2. 직접 매핑 확인
+        # 2. Check direct mapping
         if dir_name in self.project_mappings:
             mapped = self.project_mappings[dir_name]
             if mapped:
@@ -60,7 +60,7 @@ class ProjectDetector:
                 logger.info(f"Directory {dir_name} is excluded")
                 return None
 
-        # 3. 패턴 매칭
+        # 3. Pattern matching
         for pattern, template in self.project_patterns:
             match = re.match(pattern, dir_name)
             if match:
@@ -68,13 +68,13 @@ class ProjectDetector:
                 logger.info(f"Project detected from pattern: {dir_name} → {project_id}")
                 return project_id
 
-        # 4. Git 리포지토리 확인
+        # 4. Check Git repository
         git_project = self._detect_from_git(path_obj)
         if git_project:
             return git_project
 
-        # 5. 디렉토리명을 그대로 프로젝트로 사용
-        # (노이즈 방지를 위해 특정 조건 확인)
+        # 5. Use directory name as project as-is
+        # (Check specific conditions to prevent noise)
         if self._is_valid_project_name(dir_name):
             logger.info(f"Using directory name as project: {dir_name}")
             return dir_name
@@ -84,7 +84,7 @@ class ProjectDetector:
     def _detect_from_git(self, path: Path) -> Optional[str]:
         """Git 리포지토리에서 프로젝트 감지"""
         try:
-            # .git 디렉토리 찾기
+            # Find .git directory
             git_dir = None
             current = path
 
@@ -95,12 +95,12 @@ class ProjectDetector:
                 current = current.parent
 
             if git_dir:
-                # Git remote origin 확인
+                # Check Git remote origin
                 config_file = git_dir / ".git" / "config"
                 if config_file.exists():
                     with open(config_file, "r") as f:
                         content = f.read()
-                        # GitHub/GitLab URL에서 리포지토리명 추출
+                        # Extract repository name from GitHub/GitLab URL
                         match = re.search(
                             r"url = .*/([^/]+?)(?:\.git)?$", content, re.MULTILINE
                         )
@@ -109,7 +109,7 @@ class ProjectDetector:
                             logger.info(f"Project detected from git: {repo_name}")
                             return repo_name
 
-                # Git 디렉토리명 사용
+                # Use Git directory name
                 return git_dir.name
 
         except Exception as e:
@@ -119,7 +119,7 @@ class ProjectDetector:
 
     def _is_valid_project_name(self, name: str) -> bool:
         """유효한 프로젝트명인지 확인"""
-        # 제외할 디렉토리명
+        # Directory names to exclude
         excluded = {
             "desktop",
             "downloads",
@@ -142,11 +142,11 @@ class ProjectDetector:
         if name.lower() in excluded:
             return False
 
-        # 너무 짧거나 긴 이름 제외
+        # Exclude names that are too short or too long
         if len(name) < 2 or len(name) > 50:
             return False
 
-        # 특수문자만 있는 경우 제외
+        # Exclude names with only special characters
         if not re.search(r"[a-zA-Z0-9]", name):
             return False
 
@@ -171,7 +171,7 @@ class ProjectDetector:
             "user": os.environ.get("USER", "unknown"),
         }
 
-        # 환경 변수에서 추가 정보
+        # Additional info from environment variables
         if "MEM_MESH_PROJECT" in os.environ:
             context["project"] = os.environ["MEM_MESH_PROJECT"]
 
@@ -181,7 +181,7 @@ class ProjectDetector:
         return context
 
 
-# 싱글톤 인스턴스
+# Singleton instance
 _detector = None
 
 
@@ -204,7 +204,7 @@ def get_search_context() -> Dict[str, Any]:
     detector = get_project_detector()
     context = detector.get_context()
 
-    # 검색 최적화 설정 추가
+    # Add search optimization settings
     context["search_settings"] = {
         "limit": 5,
         "min_score": 0.3,

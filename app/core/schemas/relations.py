@@ -14,13 +14,13 @@ from pydantic import BaseModel, Field
 class RelationType(str, Enum):
     """관계 유형"""
 
-    RELATED = "related"  # 일반적인 관련성
-    PARENT = "parent"  # 부모-자식 관계 (source가 parent)
-    CHILD = "child"  # 자식-부모 관계 (source가 child)
-    SUPERSEDES = "supersedes"  # source가 target을 대체
-    REFERENCES = "references"  # source가 target을 참조
-    DEPENDS_ON = "depends_on"  # source가 target에 의존
-    SIMILAR = "similar"  # 유사한 내용
+    RELATED = "related"  # General relatedness
+    PARENT = "parent"  # Parent-child relationship (source is parent)
+    CHILD = "child"  # Child-parent relationship (source is child)
+    SUPERSEDES = "supersedes"  # source replaces target
+    REFERENCES = "references"  # source references target
+    DEPENDS_ON = "depends_on"  # source depends on target
+    SIMILAR = "similar"  # Similar content
 
 
 class RelationCreate(BaseModel):

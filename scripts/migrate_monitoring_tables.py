@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""모니터링 테이블 마이그레이션 스크립트
+"""Monitoring tables migration script
 
-검색 성능 모니터링을 위한 테이블 생성:
-- search_metrics: 검색 메트릭
-- embedding_metrics: 임베딩 성능 메트릭
-- alerts: 알림
+Creates tables for search performance monitoring:
+- search_metrics: search metrics
+- embedding_metrics: embedding performance metrics
+- alerts: alerts
 """
 
 import asyncio
 import sys
 from pathlib import Path
 
-# 프로젝트 루트를 Python 경로에 추가
+# Add project root to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.database.base import Database
@@ -23,13 +23,13 @@ settings = get_settings()
 
 
 async def create_monitoring_tables():
-    """모니터링 테이블 생성"""
-    
+    """Create monitoring tables"""
+
     db = Database(settings.database_path)
     await db.connect()
-    
+
     try:
-        # search_metrics 테이블
+        # search_metrics table
         logger.info("Creating search_metrics table...")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS search_metrics (
@@ -39,73 +39,73 @@ async def create_monitoring_tables():
                 query_length INTEGER NOT NULL,
                 project_id TEXT,
                 category TEXT,
-                
-                -- 검색 결과
+
+                -- search results
                 result_count INTEGER NOT NULL,
                 avg_similarity_score REAL,
                 top_similarity_score REAL,
-                
-                -- 성능
+
+                -- performance
                 response_time_ms INTEGER NOT NULL,
                 embedding_time_ms INTEGER,
                 search_time_ms INTEGER,
-                
-                -- 압축
+
+                -- compression
                 response_format TEXT,
                 original_size_bytes INTEGER,
                 compressed_size_bytes INTEGER,
-                
-                -- 메타데이터
+
+                -- metadata
                 user_agent TEXT,
                 source TEXT NOT NULL
             )
         """)
-        
-        # 인덱스 생성
+
+        # Create indexes
         logger.info("Creating indexes for search_metrics...")
         await db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_search_metrics_timestamp 
+            CREATE INDEX IF NOT EXISTS idx_search_metrics_timestamp
             ON search_metrics(timestamp)
         """)
         await db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_search_metrics_project 
+            CREATE INDEX IF NOT EXISTS idx_search_metrics_project
             ON search_metrics(project_id)
         """)
         await db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_search_metrics_query 
+            CREATE INDEX IF NOT EXISTS idx_search_metrics_query
             ON search_metrics(query)
         """)
-        
-        # embedding_metrics 테이블
+
+        # embedding_metrics table
         logger.info("Creating embedding_metrics table...")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS embedding_metrics (
                 id TEXT PRIMARY KEY,
                 timestamp DATETIME NOT NULL,
                 operation TEXT NOT NULL,
-                
-                -- 성능
+
+                -- performance
                 count INTEGER NOT NULL,
                 total_time_ms INTEGER NOT NULL,
                 avg_time_per_embedding_ms REAL NOT NULL,
-                
-                -- 캐시
+
+                -- cache
                 cache_hit BOOLEAN NOT NULL,
-                
-                -- 리소스
+
+                -- resources
                 memory_usage_mb REAL,
                 model_name TEXT NOT NULL
             )
         """)
-        
-        # 인덱스 생성
+
+        # Create indexes
         logger.info("Creating indexes for embedding_metrics...")
         await db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_embedding_metrics_timestamp 
+            CREATE INDEX IF NOT EXISTS idx_embedding_metrics_timestamp
             ON embedding_metrics(timestamp)
         """)
-        
-        # alerts 테이블
+
+        # alerts table
         logger.info("Creating alerts table...")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS alerts (
@@ -121,24 +121,24 @@ async def create_monitoring_tables():
                 resolved_by TEXT
             )
         """)
-        
-        # 인덱스 생성
+
+        # Create indexes
         logger.info("Creating indexes for alerts...")
         await db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_alerts_status_timestamp 
+            CREATE INDEX IF NOT EXISTS idx_alerts_status_timestamp
             ON alerts(status, timestamp)
         """)
-        
+
         logger.info("✅ All monitoring tables created successfully!")
-        
-        # 테이블 확인
+
+        # Verify tables
         tables = await db.fetchall("""
-            SELECT name FROM sqlite_master 
+            SELECT name FROM sqlite_master
             WHERE type='table' AND name IN ('search_metrics', 'embedding_metrics', 'alerts')
         """)
-        
+
         logger.info(f"Created tables: {[t['name'] for t in tables]}")
-        
+
     except Exception as e:
         logger.error(f"❌ Migration failed: {e}")
         raise
@@ -147,40 +147,40 @@ async def create_monitoring_tables():
 
 
 async def verify_tables():
-    """테이블 생성 확인"""
-    
+    """Verify tables were created"""
+
     db = Database(settings.database_path)
     await db.connect()
-    
+
     try:
-        # 각 테이블의 스키마 확인
+        # Check schema for each table
         for table in ['search_metrics', 'embedding_metrics', 'alerts']:
             logger.info(f"\n{table} schema:")
             schema = await db.fetchall(f"PRAGMA table_info({table})")
             for col in schema:
                 logger.info(f"  - {col['name']}: {col['type']}")
-            
-            # 인덱스 확인
+
+            # Check indexes
             indexes = await db.fetchall(f"PRAGMA index_list({table})")
             if indexes:
                 logger.info(f"  Indexes: {[idx['name'] for idx in indexes]}")
-        
+
     finally:
         await db.close()
 
 
 async def main():
-    """메인 함수"""
-    
+    """Main function"""
+
     logger.info("Starting monitoring tables migration...")
     logger.info(f"Database path: {settings.database_path}")
-    
-    # 테이블 생성
+
+    # Create tables
     await create_monitoring_tables()
-    
-    # 검증
+
+    # Verify
     await verify_tables()
-    
+
     logger.info("\n✅ Migration completed successfully!")
 
 

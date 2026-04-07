@@ -61,7 +61,7 @@ class MetricsCollector:
                 # Task cancelled - flush loop terminated gracefully
                 pass
 
-        # 남은 버퍼 플러시
+        # Flush remaining buffer
         await self.flush()
         logger.info("MetricsCollector stopped")
 
@@ -123,7 +123,7 @@ class MetricsCollector:
         Returns:
             메트릭 ID
         """
-        # 빈 쿼리는 모니터링에서 제외 (입력 중 상태, 의미 없는 검색)
+        # Exclude empty queries from monitoring (typing state, meaningless search)
         if not query or not query.strip():
             logger.debug("Skipping metric collection for empty query")
             return "skipped-empty-query"
@@ -149,7 +149,7 @@ class MetricsCollector:
         async with self._lock:
             self.search_buffer.append(metric)
 
-            # 버퍼가 가득 차면 자동 플러시
+            # Auto-flush when buffer is full
             if len(self.search_buffer) >= self.buffer_size:
                 await self._flush_search_buffer()
 
@@ -193,7 +193,7 @@ class MetricsCollector:
         async with self._lock:
             self.embedding_buffer.append(metric)
 
-            # 버퍼가 가득 차면 자동 플러시
+            # Auto-flush when buffer is full
             if len(self.embedding_buffer) >= self.buffer_size:
                 await self._flush_embedding_buffer()
 
@@ -211,7 +211,7 @@ class MetricsCollector:
             return
 
         try:
-            # 개별 삽입 (일괄 삽입 메서드가 없으므로)
+            # Individual inserts (no batch insert method available)
             for metric in self.search_buffer:
                 await self.database.execute(
                     """
@@ -257,7 +257,7 @@ class MetricsCollector:
             return
 
         try:
-            # 개별 삽입 (일괄 삽입 메서드가 없으므로)
+            # Individual inserts (no batch insert method available)
             for metric in self.embedding_buffer:
                 await self.database.execute(
                     """
@@ -311,10 +311,10 @@ class MetricsCollector:
         """
         from datetime import timedelta
 
-        # 시작 시간 계산
+        # Calculate start time
         start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + "Z"
 
-        # 기본 쿼리 (빈 쿼리 제외)
+        # Base query (exclude empty queries)
         where_clause = "WHERE timestamp >= ? AND query IS NOT NULL AND query != ''"
         params = [start_time]
 
@@ -322,7 +322,7 @@ class MetricsCollector:
             where_clause += " AND project_id = ?"
             params.append(project_id)
 
-        # 전체 통계
+        # Overall statistics
         total_stats = await self.database.fetchone(
             f"""
             SELECT 
@@ -339,7 +339,7 @@ class MetricsCollector:
             tuple(params),
         )
 
-        # 검색 모드별 통계 (source 기반)
+        # Statistics by search mode (source-based)
         mode_stats = await self.database.fetchall(
             f"""
             SELECT 
@@ -355,7 +355,7 @@ class MetricsCollector:
             tuple(params),
         )
 
-        # 시간대별 검색 트렌드 (시간별)
+        # Search trend by time slot (hourly)
         trend_stats = await self.database.fetchall(
             f"""
             SELECT 
@@ -372,7 +372,7 @@ class MetricsCollector:
             tuple(params),
         )
 
-        # 인기 검색어 Top 10 (해시되지 않은 경우만)
+        # Top 10 popular search terms (only unhashed)
         if not self.hash_queries:
             popular_queries = await self.database.fetchall(
                 f"""
@@ -391,7 +391,7 @@ class MetricsCollector:
         else:
             popular_queries = []
 
-        # 품질 지표 계산
+        # Calculate quality metrics
         total = total_stats["total_searches"] if total_stats else 0
         zero_result_rate = (
             (total_stats["zero_result_count"] / total * 100)
@@ -532,7 +532,7 @@ class MetricsCollector:
         start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + "Z"
 
         try:
-            # 임베딩 캐시 통계
+            # Embedding cache statistics
             embedding_stats = await self.database.fetchone(
                 """
                 SELECT 
@@ -562,7 +562,7 @@ class MetricsCollector:
             )
 
         except Exception as e:
-            # 테이블이 없거나 에러 발생 시 기본값 반환
+            # Return defaults if table missing or error occurs
             logger.warning(f"Failed to fetch embedding metrics: {e}")
             total_ops = 0
             cache_hits = 0

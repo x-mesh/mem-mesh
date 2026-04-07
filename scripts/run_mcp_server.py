@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MCP 서버를 실행하는 스크립트
+Script to run the MCP server.
 """
 
 import subprocess
@@ -11,14 +11,14 @@ import time
 
 
 def run_mcp_server():
-    """MCP 서버 실행"""
-    # 환경변수 설정
+    """Run the MCP server"""
+    # Set environment variables
     env = os.environ.copy()
-    env['MEM_MESH_STORAGE_MODE'] = 'direct'  # 직접 DB 접근
+    env['MEM_MESH_STORAGE_MODE'] = 'direct'  # Direct DB access
     env['MEM_MESH_IGNORE_SSL'] = 'true'
 
-    # MCP 서버 시작
-    print("🚀 MCP 서버 시작...")
+    # Start MCP server
+    print("🚀 Starting MCP server...")
     process = subprocess.Popen(
         [sys.executable, '-m', 'app.mcp_stdio_pure'],
         stdin=subprocess.PIPE,
@@ -28,7 +28,7 @@ def run_mcp_server():
         env=env
     )
 
-    # Initialize 요청
+    # Initialize request
     init_request = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -40,27 +40,27 @@ def run_mcp_server():
         }
     }
 
-    print("📡 Initialize 요청 전송...")
+    print("📡 Sending initialize request...")
     process.stdin.write(__import__('json').dumps(init_request) + '\n')
     process.stdin.flush()
 
-    # 응답 읽기
+    # Read response
     response = process.stdout.readline()
     init_response = __import__('json').loads(response)
-    print(f"✅ Initialize 응답: {init_response['result']['serverInfo']['name']}")
+    print(f"✅ Initialize response: {init_response['result']['serverInfo']['name']}")
 
-    print(f"MCP 서버가 실행 중입니다. PID: {process.pid}")
-    print("이제 다른 프로그램에서 이 서버와 통신할 수 있습니다.")
-    
-    # 서버가 계속 실행되도록 유지
+    print(f"MCP server is running. PID: {process.pid}")
+    print("Other programs can now communicate with this server.")
+
+    # Keep the server running
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n서버 종료 중...")
+        print("\nShutting down server...")
         process.terminate()
         process.wait()
-        print("서버가 종료되었습니다.")
+        print("Server has been shut down.")
 
 
 if __name__ == "__main__":

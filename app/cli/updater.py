@@ -122,7 +122,6 @@ def cmd_update(
         return
 
     try:
-        from app.cli.hooks.constants import DEFAULT_URL
         from app.cli.hooks.status import resolve_api_url, _extract_url_from_script
         from app.cli.hooks.constants import CLAUDE_HOOKS_DIR
         from app.cli.install_hooks import cmd_install

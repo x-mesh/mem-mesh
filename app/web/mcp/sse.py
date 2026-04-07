@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mcp", tags=["MCP Streamable HTTP"])
 
-# 세션 저장소: session_id -> {"queue": Queue, "client_info": {...}}
+# Session store: session_id -> {"queue": Queue, "client_info": {...}}
 _sessions: Dict[str, Dict[str, Any]] = {}
 _tool_handlers: Optional[MCPToolHandlers] = None
 _dispatcher: Optional[MCPDispatcher] = None
@@ -62,7 +62,7 @@ def _detect_client_from_request(request: Request) -> str:
         return ""
 
     # --- AI coding agents / IDE extensions ---
-    # 구체적 → 일반적 순서
+    # Specific → general order
     _CLIENT_PATTERNS: list[tuple[list[str], str]] = [
         # AI coding agents
         (["antigravity"], "antigravity"),
@@ -175,7 +175,7 @@ async def process_jsonrpc_request(
     params = request.get("params", {})
     new_session_id = None
 
-    # Notification (id가 없음) - 응답 불필요
+    # Notification (no id) — no response needed
     if req_id is None:
         logger.debug(f"Received notification: {method}")
         return None, None
@@ -183,7 +183,7 @@ async def process_jsonrpc_request(
     try:
         if method == "initialize":
             result = await handle_initialize(params)
-            # 새 세션 ID 생성 + clientInfo 저장
+            # Generate new session ID + save clientInfo
             new_session_id = str(uuid.uuid4())
             client_info = params.get("clientInfo", {}) if params else {}
             _create_session(new_session_id, client_info)
@@ -222,7 +222,7 @@ def accepts_sse(accept_header: Optional[str]) -> bool:
 def accepts_json(accept_header: Optional[str]) -> bool:
     """Accept 헤더가 JSON을 지원하는지 확인"""
     if not accept_header:
-        return True  # 기본값
+        return True  # Default value
     return "application/json" in accept_header or "*/*" in accept_header
 
 
@@ -238,20 +238,20 @@ async def streamable_http_get(
 
     클라이언트가 서버로부터 메시지를 받기 위한 SSE 스트림을 엽니다.
     """
-    # SSE를 지원하지 않으면 405
+    # Return 405 if SSE is not supported
     if not accepts_sse(accept):
         raise HTTPException(
             status_code=405, detail="This endpoint requires Accept: text/event-stream"
         )
 
-    # 세션 ID가 없으면 새 세션 생성 (backwards compatibility)
+    # Create new session if no session ID (backwards compatibility)
     session_id = mcp_session_id
     if not session_id:
         session_id = str(uuid.uuid4())
         _create_session(session_id)
         logger.info(f"SSE stream opened with new session: {session_id}")
     elif session_id not in _sessions:
-        # 세션이 만료됨
+        # Session has expired
         raise HTTPException(status_code=404, detail="Session not found")
     else:
         logger.info(f"SSE stream opened for existing session: {session_id}")
@@ -259,7 +259,7 @@ async def streamable_http_get(
     async def event_generator():
         event_id = 0
         try:
-            # 기존 SSE transport 호환성: endpoint 이벤트 전송
+            # Legacy SSE transport compatibility: send endpoint event
             yield {
                 "event": "endpoint",
                 "data": f"/mcp/message?session_id={session_id}",
@@ -311,7 +311,7 @@ async def streamable_http_post(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
     except Exception as e:
-        # ClientDisconnect — 클라이언트가 요청 중간에 연결 해제
+        # ClientDisconnect — client disconnected mid-request
         if "Disconnect" in type(e).__name__:
             logger.debug(f"Client disconnected during request read: {type(e).__name__}")
             return Response(status_code=499)
@@ -323,14 +323,14 @@ async def streamable_http_post(
     method = body.get("method")
     logger.debug(f"POST request: method={method}, session={mcp_session_id}")
 
-    # 세션 검증 (initialize 제외)
+    # Validate session (except initialize)
     if method != "initialize" and mcp_session_id:
         if mcp_session_id not in _sessions:
-            # 세션 자동 복구 (서버 재시작 등)
+            # Auto-recover session (e.g. server restart)
             _create_session(mcp_session_id)
             logger.info(f"Session auto-recovered: {mcp_session_id}")
 
-    # tools/call: 세션의 clientInfo 또는 User-Agent에서 client 자동 주입
+    # tools/call: auto-inject client from session clientInfo or User-Agent
     if method == "tools/call":
         client_name = ""
         if mcp_session_id:
@@ -338,7 +338,7 @@ async def streamable_http_post(
             client_name = session_data.get("client_info", {}).get("name", "")
         if not client_name:
             client_name = _detect_client_from_request(request)
-            # 감지된 client를 세션에 저장 (이후 요청에서 재감지 불필요)
+            # Save detected client to session (no need to re-detect on later requests)
             if client_name and mcp_session_id and mcp_session_id in _sessions:
                 _sessions[mcp_session_id]["client_info"]["name"] = client_name
         if client_name:
@@ -348,21 +348,21 @@ async def streamable_http_post(
                 args["client"] = client_name
                 logger.debug(f"Auto-injected client={client_name}")
 
-    # 요청 처리
+    # Process request
     response, new_session_id = await process_jsonrpc_request(body)
 
-    # Notification인 경우 (응답 없음)
+    # If notification (no response)
     if response is None:
         return Response(status_code=202)
 
-    # SSE 스트림으로 응답할지 JSON으로 응답할지 결정
-    # Streamable HTTP에서는 기본적으로 JSON 응답
-    # (SSE는 여러 응답이 필요한 경우에만 사용)
+    # Decide whether to respond via SSE stream or JSON
+    # Streamable HTTP defaults to JSON response
+    # (SSE only used when multiple responses are needed)
 
-    # JSON 응답 생성
+    # Build JSON response
     json_response = JSONResponse(content=response)
 
-    # initialize 응답에 세션 ID 포함
+    # Include session ID in initialize response
     if new_session_id:
         json_response.headers["Mcp-Session-Id"] = new_session_id
 
@@ -390,7 +390,7 @@ async def streamable_http_delete(
 
 
 # ============================================================
-# 기존 HTTP+SSE transport 호환성 엔드포인트 (deprecated)
+# Legacy HTTP+SSE transport compatibility endpoint (deprecated)
 # ============================================================
 
 
@@ -452,7 +452,7 @@ async def stateless_tools_call(request: Request):
     if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
         raise HTTPException(status_code=400, detail="Invalid JSON-RPC request")
 
-    # User-Agent에서 client 자동 주입
+    # Auto-inject client from User-Agent
     if body.get("method") == "tools/call":
         client_name = _detect_client_from_request(request)
         if client_name:

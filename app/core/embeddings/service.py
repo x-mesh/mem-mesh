@@ -3,7 +3,6 @@ Embedding Service for mem-mesh
 텍스트를 벡터로 변환하는 서비스
 """
 
-import asyncio
 import logging
 import os
 import ssl
@@ -17,21 +16,21 @@ import urllib3
 if TYPE_CHECKING:
     from ..services.metrics_collector import MetricsCollector
 
-# MEM_MESH_IGNORE_SSL 환경변수가 설정되어 있으면 SSL 검증 비활성화
+# Disable SSL verification if MEM_MESH_IGNORE_SSL env var is set
 _ignore_ssl = os.getenv("MEM_MESH_IGNORE_SSL", "").lower() in ("1", "true", "yes")
 if _ignore_ssl:
-    # SSL 검증 비활성화
+    # Disable SSL verification
     ssl._create_default_https_context = ssl._create_unverified_context
-    # urllib3 경고 비활성화
+    # Disable urllib3 warnings
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    # 환경변수 설정
+    # Set environment variable
     os.environ["CURL_CA_BUNDLE"] = ""
     os.environ["REQUESTS_CA_BUNDLE"] = ""
     os.environ["SSL_CERT_FILE"] = ""
     os.environ["HF_HUB_DISABLE_SSL_VERIFICATION"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "0"
 
-    # requests 라이브러리 SSL 검증 비활성화
+    # Disable SSL verification for requests library
     import requests
     from requests.adapters import HTTPAdapter
     from urllib3.util.ssl_ import create_urllib3_context
@@ -44,19 +43,19 @@ if _ignore_ssl:
             kwargs["ssl_context"] = ctx
             return super().init_poolmanager(*args, **kwargs)
 
-    # 기본 세션에 SSL 어댑터 적용
+    # Apply SSL adapter to default session
     session = requests.Session()
     session.mount("https://", SSLAdapter())
     session.verify = False
 
-    # huggingface_hub의 기본 세션 패치
+    # Patch huggingface_hub default session
     try:
         import huggingface_hub
 
         huggingface_hub.configure_http_backend(backend_factory=lambda: session)
-    except Exception:
+    except Exception as e:
         # Silently ignore if huggingface_hub is not available or configuration fails
-        pass
+        logger.debug(f"Failed to configure huggingface_hub HTTP backend: {e}")
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -69,7 +68,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-# 모델별 임베딩 차원 매핑
+# Embedding dimension mapping per model
 MODEL_DIMENSIONS = {
     # English lightweight
     "all-MiniLM-L6-v2": 384,
@@ -98,7 +97,7 @@ MODEL_DIMENSIONS = {
     "jhgan/ko-sroberta-sts": 768,
 }
 
-# 모델 이름 별칭 (짧은 이름 -> 전체 이름)
+# Model name aliases (short name -> full name)
 MODEL_ALIASES = {
     "multilingual-e5-small": "intfloat/multilingual-e5-small",
     "multilingual-e5-base": "intfloat/multilingual-e5-base",
@@ -118,7 +117,7 @@ MODEL_ALIASES = {
 }
 
 
-# E5 계열 모델은 query/passage prefix가 필요
+# E5-family models require query/passage prefix
 _E5_MODEL_PATTERNS = ("e5-", "/e5-", "multilingual-e5-")
 
 
@@ -137,16 +136,17 @@ def is_model_cached(model_name: str) -> bool:
         cache_info = scan_cache_dir()
         for repo in cache_info.repos:
             if repo.repo_id == resolved:
-                # 최소한 하나의 revision이 있으면 캐시됨
+                # Cached if at least one revision exists
                 if repo.revisions:
                     return True
         return False
-    except Exception:
-        # huggingface_hub 미설치 또는 캐시 스캔 실패
+    except Exception as e:
+        # huggingface_hub not installed or cache scan failed
+        logger.debug(f"Failed to scan huggingface cache: {e}")
         return False
 
 
-# 선택 가능한 모델 목록 (온보딩 UI용)
+# List of selectable models (for onboarding UI)
 AVAILABLE_MODELS = [
     # ── Korean Specialized ──
     {
@@ -312,14 +312,14 @@ class EmbeddingService:
         self.model: Optional[SentenceTransformer] = None
         self.metrics_collector = metrics_collector
 
-        # 다운로드/로딩 상태 추적
+        # Track download/loading status
         self._status: str = "not_loaded"  # not_loaded | downloading | loading | ready | error
         self._download_progress: float = 0.0
         self._error_message: Optional[str] = None
         self._load_lock = threading.Lock()
         self._defer_loading = defer_loading
 
-        # 설정에서 모델 이름 가져오기
+        # Get model name from settings
         if model_name is None:
             from ..config import Settings
 
@@ -327,19 +327,19 @@ class EmbeddingService:
             model_name = settings.embedding_model
             logger.info(f"Loading model from settings: {model_name}")
 
-        # 모델 별칭 처리 (짧은 이름 -> 전체 이름)
+        # Handle model aliases (short name -> full name)
         self.model_name = MODEL_ALIASES.get(model_name, model_name)
         if self.model_name != model_name:
             logger.info(f"Model alias resolved: {model_name} -> {self.model_name}")
 
-        # E5 모델 여부 (query/passage prefix 자동 적용)
+        # Whether this is an E5 model (auto-apply query/passage prefix)
         self._is_e5 = _is_e5_model(self.model_name)
         if self._is_e5:
             logger.info(
                 "E5 model detected: query/passage prefix will be applied automatically"
             )
 
-        # 기본 차원 설정 (실제 모델 로드 후 업데이트됨)
+        # Set default dimension (updated after actual model load)
         self.dimension: int = MODEL_DIMENSIONS.get(self.model_name, 384)
         logger.info(
             f"EmbeddingService initializing with model: {self.model_name} (dimension: {self.dimension})"
@@ -388,13 +388,13 @@ class EmbeddingService:
             self.model = SentenceTransformer(self.model_name)
             self._download_progress = 0.9
 
-            # 모델 차원 자동 감지
+            # Auto-detect model dimension
             actual_dim = self.model.get_sentence_embedding_dimension()
             if actual_dim != self.dimension:
                 logger.info(f"Updating dimension from {self.dimension} to {actual_dim}")
                 self.dimension = actual_dim
 
-            # 테스트 임베딩으로 모델 검증
+            # Validate model with test embedding
             test_embedding = self.model.encode("test", convert_to_tensor=False)
             if len(test_embedding) != self.dimension:
                 raise ValueError(
@@ -451,19 +451,19 @@ class EmbeddingService:
                     cached = is_model_cached(self.model_name)
 
                     if cached:
-                        # 캐시됨 — 바로 loading 단계
+                        # Cached — proceed directly to loading phase
                         _notify(0.5, "loading")
                     else:
-                        # 미캐시 — snapshot_download로 실제 진행률 추적
+                        # Not cached — track actual progress via snapshot_download
                         _notify(0.0, "downloading")
                         self._download_with_progress(_notify)
 
-                    # 모델 로드 (캐시에서 로드하므로 빠름)
+                    # Load model (fast since loading from cache)
                     _notify(0.85, "loading")
                     self.model = SentenceTransformer(self.model_name)
                     _notify(0.92, "loading")
 
-                    # 차원 자동 감지
+                    # Auto-detect dimension
                     actual_dim = self.model.get_sentence_embedding_dimension()
                     if actual_dim != self.dimension:
                         logger.info(
@@ -471,7 +471,7 @@ class EmbeddingService:
                         )
                         self.dimension = actual_dim
 
-                    # 검증
+                    # Validate
                     test_embedding = self.model.encode(
                         "test", convert_to_tensor=False
                     )
@@ -512,10 +512,10 @@ class EmbeddingService:
             from huggingface_hub import snapshot_download
             import tqdm as tqdm_mod
 
-            # 파일별 다운로드 바이트 추적
+            # Track download bytes per file
             _file_totals: dict = {}  # id -> total
             _file_downloaded: dict = {}  # id -> downloaded
-            _last_reported: list = [0.0]  # 마지막 보고 진행률 (debounce)
+            _last_reported: list = [0.0]  # Last reported progress (debounce)
 
             svc = self
 
@@ -536,9 +536,9 @@ class EmbeddingService:
                     total = sum(_file_totals.values())
                     downloaded = sum(_file_downloaded.values())
                     if total > 0:
-                        # 0.0 ~ 0.80 범위로 매핑
+                        # Map to 0.0 ~ 0.80 range
                         pct = min(downloaded / total, 1.0) * 0.80
-                        # 5% 이상 변동 시에만 보고 (WebSocket 스팸 방지)
+                        # Only report when change exceeds 5% (prevent WebSocket spam)
                         if pct - _last_reported[0] >= 0.05 or pct >= 0.79:
                             _last_reported[0] = pct
                             notify(round(pct, 2), "downloading")
@@ -553,13 +553,13 @@ class EmbeddingService:
             logger.info(f"Model files downloaded: {self.model_name}")
 
         except ImportError:
-            # huggingface_hub 없으면 SentenceTransformer가 직접 다운로드
+            # Without huggingface_hub, SentenceTransformer downloads directly
             logger.warning(
                 "huggingface_hub not available, falling back to basic download"
             )
             notify(0.1, "downloading")
         except Exception as e:
-            # 다운로드 실패 시 SentenceTransformer에 위임 (재시도 기회)
+            # On download failure, delegate to SentenceTransformer (retry opportunity)
             logger.warning(f"snapshot_download failed, falling back: {e}")
             notify(0.1, "downloading")
 
@@ -669,12 +669,12 @@ class EmbeddingService:
 
     def to_bytes(self, embedding: list[float]) -> bytes:
         """임베딩을 bytes로 변환 (SQLite 저장용)"""
-        # 동적 차원 지원
+        # Dynamic dimension support
         return struct.pack(f"{len(embedding)}f", *embedding)
 
     def from_bytes(self, data: bytes) -> list[float]:
         """bytes를 임베딩으로 변환"""
-        # 동적 차원 지원: 데이터 크기에서 차원 계산
+        # Dynamic dimension support: calculate dimension from data size
         num_floats = len(data) // 4  # float32 = 4 bytes
         if len(data) % 4 != 0:
             raise ValueError(
@@ -711,10 +711,10 @@ class EmbeddingService:
 
             total_time_ms = int((time.perf_counter() - start_time) * 1000)
 
-            # 비동기 메서드를 동기 컨텍스트에서 호출
+            # Call async method from synchronous context
             try:
                 asyncio.get_running_loop()
-                # 이미 이벤트 루프가 실행 중이면 태스크로 스케줄링
+                # If event loop is already running, schedule as task
                 asyncio.create_task(
                     self.metrics_collector.collect_embedding_metric(
                         operation=operation,
@@ -725,7 +725,7 @@ class EmbeddingService:
                     )
                 )
             except RuntimeError:
-                # 이벤트 루프가 없으면 새로 생성하여 실행
+                # No event loop — create one and run
                 asyncio.run(
                     self.metrics_collector.collect_embedding_metric(
                         operation=operation,
@@ -736,5 +736,5 @@ class EmbeddingService:
                     )
                 )
         except Exception as e:
-            # 메트릭 수집 실패는 임베딩 생성에 영향을 주지 않음
+            # Metric collection failure does not affect embedding generation
             logger.warning(f"Failed to collect embedding metric: {e}")

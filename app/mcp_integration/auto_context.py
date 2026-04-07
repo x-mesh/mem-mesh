@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-# 상위 디렉토리를 path에 추가
+# Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from app.core.services.project_detector import ProjectDetector
@@ -32,19 +32,19 @@ class MCPAutoContext:
         3. Git 리포지토리명
         4. 상위 디렉토리명
         """
-        # 1. 환경변수 확인
+        # 1. Check environment variable
         if "MEM_MESH_PROJECT" in os.environ:
             return os.environ["MEM_MESH_PROJECT"]
 
-        # 2. 현재 디렉토리 기반 감지
+        # 2. Detect based on current directory
         project = self.detector.detect_from_path()
         if project:
             return project
 
-        # 3. 기본값: 현재 디렉토리명
+        # 3. Default: current directory name
         current_dir = os.path.basename(os.getcwd())
 
-        # kiro로 시작하면 None 반환 (노이즈 방지)
+        # Return None if starts with kiro (noise prevention)
         if current_dir.startswith("kiro"):
             return None
 
@@ -61,29 +61,29 @@ class MCPAutoContext:
         Returns:
             최적화된 검색 파라미터
         """
-        # 현재 프로젝트
+        # Current project
         project = self.get_current_project()
 
-        # 기본 파라미터
+        # Default parameters
         params = {
             "query": query,
             "limit": kwargs.get("limit", 5),
             "min_score": kwargs.get("min_score", 0.3),
         }
 
-        # 프로젝트 필터 추가
+        # Add project filter
         if project:
             params["project_filter"] = project
 
-        # 카테고리 힌트
+        # Category hint
         if "category" in kwargs:
             params["category"] = kwargs["category"]
 
-        # 태그
+        # Tags
         if "tags" in kwargs:
             params["tags"] = kwargs["tags"]
 
-        # 노이즈 필터 설정
+        # Configure noise filter
         params["noise_filter"] = {
             "aggressive": True,
             "exclude_projects": ["kiro-*", "test-*", "tmp-*"],
@@ -138,7 +138,7 @@ def get_current_project_id() -> Optional[str]:
     return auto_context.get_current_project()
 
 
-# CLI 테스트용
+# For CLI testing
 if __name__ == "__main__":
     import json
 
@@ -148,12 +148,12 @@ if __name__ == "__main__":
     print("🔍 MCP 자동 컨텍스트 테스트")
     print("=" * 60)
 
-    # 현재 프로젝트
+    # Current project
     project = auto_context.get_current_project()
     print(f"\n현재 프로젝트: {project}")
     print(f"현재 디렉토리: {os.getcwd()}")
 
-    # 검색 파라미터 생성
+    # Build search parameters
     test_queries = ["토큰", "검색 최적화", "캐시 관리"]
 
     for query in test_queries:
@@ -161,7 +161,7 @@ if __name__ == "__main__":
         print(f"\n검색어: '{query}'")
         print(f"파라미터: {json.dumps(params, indent=2, ensure_ascii=False)}")
 
-    # 프롬프트 컨텍스트
+    # Prompt context
     print("\n" + "=" * 60)
     print("MCP 프롬프트 컨텍스트:")
     print("=" * 60)

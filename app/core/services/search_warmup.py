@@ -55,7 +55,7 @@ class SearchWarmupService:
             "errors": [],
         }
 
-        # 임베딩 모델이 준비되지 않은 경우 warmup 스킵
+        # Skip warmup if embedding model is not ready
         if not embedding_service.is_ready:
             logger.info(
                 "Search warmup skipped: embedding model not ready "
@@ -70,7 +70,7 @@ class SearchWarmupService:
         logger.info("Starting search warmup...")
 
         try:
-            # 1. 임베딩 모델 preload
+            # 1. Preload embedding model
             logger.info("Preloading embedding model...")
             await self._preload_embedding_model(embedding_service)
             results["embedding_preload"] = True
@@ -81,7 +81,7 @@ class SearchWarmupService:
             results["errors"].append(f"Embedding preload: {str(e)}")
 
         try:
-            # 2. 데이터베이스 워밍업
+            # 2. Database warmup
             logger.info("Warming up database...")
             await self._warmup_database(db)
             results["db_warmup"] = True
@@ -92,7 +92,7 @@ class SearchWarmupService:
             results["errors"].append(f"DB warmup: {str(e)}")
 
         try:
-            # 3. 캐시 워밍업 (자주 사용되는 쿼리)
+            # 3. Cache warmup (frequently used queries)
             logger.info("Warming up cache...")
             await self._warmup_cache(embedding_service, cache_manager)
             results["cache_warmup"] = True
@@ -105,7 +105,7 @@ class SearchWarmupService:
         self.warmup_end_time = datetime.now()
         self.is_warmed_up = True
 
-        # 총 시간 계산
+        # Calculate total time
         total_time = (self.warmup_end_time - self.warmup_start_time).total_seconds()
         results["total_time_ms"] = int(total_time * 1000)
 
@@ -115,16 +115,16 @@ class SearchWarmupService:
 
     async def _preload_embedding_model(self, embedding_service):
         """임베딩 모델 preload"""
-        # 더미 텍스트로 모델 로딩
+        # Load model with dummy text
         dummy_texts = ["search", "검색", "quality", "품질"]
 
         for text in dummy_texts:
             _ = embedding_service.embed(text)
-            await asyncio.sleep(0.01)  # 약간의 딜레이
+            await asyncio.sleep(0.01)  # Small delay
 
     async def _warmup_database(self, db):
         """데이터베이스 워밍업"""
-        # 간단한 쿼리로 연결 확인
+        # Verify connection with simple query
         warmup_queries = [
             "SELECT COUNT(*) FROM memories",
             "SELECT COUNT(DISTINCT project_id) FROM memories",
@@ -137,7 +137,7 @@ class SearchWarmupService:
 
     async def _warmup_cache(self, embedding_service, cache_manager):
         """캐시 워밍업 - 자주 사용되는 쿼리 미리 캐싱"""
-        # 자주 사용되는 검색어 목록
+        # List of frequently used search terms
         common_queries = [
             "search",
             "검색",
@@ -155,7 +155,7 @@ class SearchWarmupService:
 
         for query in common_queries:
             try:
-                # 임베딩 생성 및 캐싱
+                # Generate and cache embeddings
                 embedding = embedding_service.embed(query, is_query=True)
                 await cache_manager.cache_embedding(query, embedding)
                 await asyncio.sleep(0.01)
@@ -185,7 +185,7 @@ class SearchWarmupService:
         }
 
 
-# 전역 인스턴스
+# Global instance
 _warmup_service: Optional[SearchWarmupService] = None
 
 

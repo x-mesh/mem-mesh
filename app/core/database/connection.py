@@ -6,7 +6,7 @@ and sqlite-vec extension for vector search capabilities.
 Requirements: 4.1, 4.4 - SQLite WAL mode and busy_timeout configuration
 """
 
-# pysqlite3를 우선적으로 사용 (extension loading 지원)
+# Use pysqlite3 preferentially (supports extension loading)
 try:
     import pysqlite3.dbapi2 as sqlite3
 
@@ -25,7 +25,7 @@ from typing import List, Optional, Tuple
 try:
     import sqlite_vec
 
-    # SQLite extension loading 지원 여부 확인
+    # Check whether SQLite extension loading is supported
     test_conn = sqlite3.connect(":memory:")
     if hasattr(test_conn, "load_extension"):
         SQLITE_VEC_AVAILABLE = True
@@ -83,33 +83,33 @@ class DatabaseConnection:
             if self.connection is not None:
                 return self._vec_loaded
 
-            # 데이터베이스 디렉토리 생성
+            # Create database directory
             db_path = Path(self.db_path)
             db_path.parent.mkdir(parents=True, exist_ok=True)
 
             try:
-                # SQLite 연결 생성
+                # Create SQLite connection
                 self.connection = sqlite3.connect(
                     self.db_path,
                     check_same_thread=False,
                     isolation_level=None,  # autocommit mode
                 )
 
-                # Row factory 설정 (dict 형태로 결과 반환)
+                # Set row factory (return results as dicts)
                 self.connection.row_factory = sqlite3.Row
 
-                # busy_timeout 설정 (Requirement 4.4)
+                # Set busy_timeout (Requirement 4.4)
                 self.connection.execute(f"PRAGMA busy_timeout={self.busy_timeout}")
                 logger.info(f"SQLite busy_timeout set to {self.busy_timeout}ms")
 
-                # WAL 모드 활성화 (Requirement 4.1)
+                # Enable WAL mode (Requirement 4.1)
                 self.connection.execute("PRAGMA journal_mode=WAL")
                 logger.info("SQLite WAL mode enabled")
 
-                # Foreign key 제약 조건 활성화
+                # Enable foreign key constraints
                 self.connection.execute("PRAGMA foreign_keys=ON")
 
-                # sqlite-vec 로드 시도
+                # Attempt to load sqlite-vec
                 self._vec_loaded = self._load_sqlite_vec()
 
                 logger.info(f"Database connected: {self.db_path}")
@@ -132,17 +132,17 @@ class DatabaseConnection:
 
         if SQLITE_VEC_AVAILABLE:
             try:
-                # 방법 1: sqlite-vec Python 패키지로 로드
+                # Method 1: Load via sqlite-vec Python package
                 sqlite_vec.load(self.connection)
                 logger.info("sqlite-vec loaded via Python package")
                 vec_loaded = True
             except Exception as e:
                 logger.warning(f"Failed to load sqlite-vec via Python package: {e}")
 
-        # 방법 2: 직접 extension 로드 시도
+        # Method 2: Attempt direct extension load
         if not vec_loaded and hasattr(self.connection, "load_extension"):
             try:
-                # macOS에서 sqlite-vec extension 직접 로드 시도
+                # Attempt direct sqlite-vec extension load on macOS
                 self.connection.enable_load_extension(True)
                 self.connection.load_extension("vec0")
                 logger.info("sqlite-vec loaded via direct extension loading")
@@ -155,10 +155,10 @@ class DatabaseConnection:
                 except Exception as e:
                     logger.warning(f"Failed to disable extension loading: {e}")
 
-        # 방법 3: 벡터 테이블 생성 테스트
+        # Method 3: Test vector table creation
         if vec_loaded:
             try:
-                # 벡터 기능 테스트
+                # Test vector functionality
                 self.connection.execute("SELECT vec_version()")
                 logger.info("sqlite-vec vector functions are available")
             except Exception as e:
@@ -182,19 +182,19 @@ class DatabaseConnection:
         async with self._lock:
             if self.connection:
                 try:
-                    # 진행 중인 트랜잭션 커밋
+                    # Commit any in-progress transaction
                     self.connection.commit()
                 except Exception as e:
                     logger.warning(f"Error committing final transaction: {e}")
 
                 try:
-                    # WAL 체크포인트 실행 (변경사항을 메인 DB 파일에 반영)
+                    # Run WAL checkpoint (apply changes to main DB file)
                     self.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                 except Exception as e:
                     logger.warning(f"Error during WAL checkpoint: {e}")
 
                 try:
-                    # 연결 종료
+                    # Close connection
                     self.connection.close()
                     logger.info("Database connection closed")
                 except Exception as e:
@@ -242,7 +242,8 @@ class DatabaseConnection:
                 self.connection.execute("BEGIN")
                 yield
                 self.connection.execute("COMMIT")
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Transaction rolled back: {e}")
                 self.connection.execute("ROLLBACK")
                 raise
 

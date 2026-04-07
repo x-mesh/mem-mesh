@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 
 from .descriptions import TOOL_DESCRIPTIONS
 
-# 유효한 카테고리 목록
+# Valid category list
 VALID_CATEGORIES = [
     "task",
     "bug",
@@ -20,10 +20,10 @@ VALID_CATEGORIES = [
     "git-history",
 ]
 
-# 유효한 검색 모드 목록
+# Valid search mode list
 VALID_SEARCH_MODES = ["hybrid", "exact", "semantic", "fuzzy"]
 
-# 서버 정보는 중앙 모듈에서 import
+# Server info imported from central module
 
 
 def get_tool_schemas() -> List[Dict[str, Any]]:
@@ -521,7 +521,7 @@ def get_batch_tool_schemas() -> List[Dict[str, Any]]:
     ]
 
 
-# 유효한 관계 유형 목록
+# Valid relation type list
 VALID_RELATION_TYPES = [
     "related",
     "parent",

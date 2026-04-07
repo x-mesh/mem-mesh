@@ -28,7 +28,7 @@ from ..mcp_common.descriptions import TOOL_DESCRIPTIONS
 from ..mcp_common.storage import StorageManager
 from ..mcp_common.tools import MCPToolHandlers
 
-# 로깅 시스템 초기화
+# Initialize logging system
 setup_logging()
 logger = get_logger("mcp-stdio-server")
 
@@ -41,14 +41,14 @@ logger.info(
     log_file=log_file if log_file else "console_only",
 )
 
-# FastMCP 서버 인스턴스 생성
+# Create FastMCP server instance
 mcp = FastMCP("mem-mesh")
 
-# 스토리지 매니저와 툴 핸들러
+# Storage manager and tool handler
 storage_manager = StorageManager()
 tool_handlers: Optional[MCPToolHandlers] = None
 batch_handler: Optional[BatchOperationHandler] = None
-cache_manager = get_cache_manager()  # 캐시 매니저 초기화
+cache_manager = get_cache_manager()  # Initialize cache manager
 
 
 async def initialize_storage(settings: Optional[Settings] = None) -> None:
@@ -61,7 +61,7 @@ async def initialize_storage(settings: Optional[Settings] = None) -> None:
     notifier = HttpNotifier(f"http://localhost:{batch_settings.server_port}")
     tool_handlers = MCPToolHandlers(storage, notifier=notifier)
 
-    # 배치 핸들러 초기화
+    # Initialize batch handler
     from ..core.database.base import Database
     from ..core.embeddings.service import EmbeddingService
     from ..core.services.memory import MemoryService

@@ -30,7 +30,7 @@ class ProjectService:
         Returns:
             ProjectResponse
         """
-        # 기존 프로젝트 조회
+        # Query existing project
         row = await self.db.fetchone(
             "SELECT * FROM projects WHERE id = ?", (project_id,)
         )
@@ -38,7 +38,7 @@ class ProjectService:
         if row:
             return self._row_to_response(row)
 
-        # 새 프로젝트 자동 생성
+        # Auto-create new project
         now = datetime.now(timezone.utc).isoformat()
 
         await self.db.execute(
@@ -78,12 +78,12 @@ class ProjectService:
         self, project_id: str, update: ProjectUpdate
     ) -> Optional[ProjectResponse]:
         """프로젝트 업데이트"""
-        # 기존 프로젝트 확인
+        # Check existing project
         existing = await self.get_project(project_id)
         if not existing:
             return None
 
-        # 업데이트할 필드 수집
+        # Collect fields to update
         updates = []
         params = []
 
@@ -96,7 +96,7 @@ class ProjectService:
         if not updates:
             return existing
 
-        # updated_at 추가
+        # Add updated_at
         now = datetime.now(timezone.utc).isoformat()
         updates.append("updated_at = ?")
         params.append(now)
@@ -163,15 +163,15 @@ class ProjectService:
         if not existing:
             return False
 
-        # 관련 pins 삭제
+        # Delete related pins
         await self.db.execute("DELETE FROM pins WHERE project_id = ?", (project_id,))
 
-        # 관련 sessions 삭제
+        # Delete related sessions
         await self.db.execute(
             "DELETE FROM sessions WHERE project_id = ?", (project_id,)
         )
 
-        # 프로젝트 삭제
+        # Delete project
         await self.db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         self.db.connection.commit()
 

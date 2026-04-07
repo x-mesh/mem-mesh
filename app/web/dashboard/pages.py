@@ -10,10 +10,10 @@ from fastapi.templating import Jinja2Templates
 
 from app.core.version import __VERSION__
 
-# 페이지 라우터 생성
+# Create page router
 router = APIRouter(tags=["Dashboard Pages"])
 
-# Jinja2 템플릿 설정
+# Configure Jinja2 templates
 templates = Jinja2Templates(directory="templates")
 
 
@@ -131,23 +131,23 @@ async def serve_settings_page(request: Request):
 @router.get("/{path:path}")
 async def serve_spa_routes(request: Request, path: str):
     """SPA 라우팅을 위한 catch-all 라우트"""
-    # API 경로는 제외
+    # Exclude API paths
     if path.startswith("api"):
         raise HTTPException(status_code=404, detail="Not Found")
 
-    # MCP 경로는 제외 (MCP SSE 라우터에서 처리)
+    # Exclude MCP paths (handled by MCP SSE router)
     if path.startswith("mcp"):
         raise HTTPException(status_code=404, detail="Not Found")
 
-    # 정적 파일 경로는 제외 (이미 /static으로 마운트됨)
+    # Exclude static file paths (already mounted at /static)
     if path.startswith("static"):
         raise HTTPException(status_code=404, detail="Not Found")
 
-    # docs 경로는 제외 (FastAPI 자동 문서)
+    # Exclude docs paths (FastAPI auto-docs)
     if path in ["docs", "redoc", "openapi.json"]:
         raise HTTPException(status_code=404, detail="Not Found")
 
-    # 모든 다른 경로는 index.html로 서빙 (SPA 라우팅)
+    # Serve index.html for all other paths (SPA routing)
     return templates.TemplateResponse(
         "index.html", {"request": request, "version": __VERSION__}
     )

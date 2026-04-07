@@ -21,7 +21,7 @@ class ScoringContext:
 
     query: str
     content: str
-    vector_score: float  # 벡터 유사도 점수 (0.0 ~ 1.0)
+    vector_score: float  # Vector similarity score (0.0 ~ 1.0)
     category: Optional[str] = None
     project_id: Optional[str] = None
     tags: Optional[List[str]] = None
@@ -33,9 +33,9 @@ class ScoringResult:
     """스코어링 결과"""
 
     final_score: float
-    breakdown: Dict[str, float]  # 각 스코어러별 점수
-    should_include: bool = True  # 결과에 포함할지 여부
-    reason: Optional[str] = None  # 제외 사유
+    breakdown: Dict[str, float]  # Score per scorer
+    should_include: bool = True  # Whether to include in results
+    reason: Optional[str] = None  # Exclusion reason
 
 
 class BaseScorer(ABC):
@@ -88,12 +88,12 @@ class ExactMatchScorer(BaseScorer):
 
         score = 0.0
 
-        # 1. 부분 문자열 매칭
+        # 1. Substring matching
         if query_lower in content_lower:
             score += self.substring_bonus
             logger.debug(f"Substring match: '{context.query}' in content")
 
-        # 2. 단어 경계 매칭 (더 정확한 매칭)
+        # 2. Word boundary matching (more precise)
         word_boundary_pattern = r"\b" + re.escape(query_lower) + r"\b"
         if re.search(word_boundary_pattern, content_lower):
             score += self.word_boundary_bonus
@@ -159,7 +159,7 @@ class ContentQualityScorer(BaseScorer):
 
         content = context.content.strip()
 
-        # 단순 응답인 경우 페널티
+        # Penalty for simple responses
         if content.lower() in self.simple_responses:
             return self.simple_response_penalty
 
@@ -169,11 +169,11 @@ class ContentQualityScorer(BaseScorer):
         """제외 조건 확인"""
         content = context.content.strip()
 
-        # 최소 길이 미달
+        # Below minimum length
         if len(content) < self.min_length:
             return f"Content too short: {len(content)} < {self.min_length}"
 
-        # 단순 응답이면서 검색어와 정확히 매칭되지 않는 경우
+        # Simple response that doesn't exactly match the search term
         if content.lower() in self.simple_responses:
             if context.query.lower() not in content.lower():
                 return f"Simple response without exact match: '{content}'"
@@ -250,7 +250,7 @@ class TagMatchScorer(BaseScorer):
             if query_lower in tag.lower() or tag.lower() in query_lower:
                 score += self.tag_match_bonus
 
-        return min(score, 0.15)  # 최대 0.15
+        return min(score, 0.15)  # Max 0.15
 
 
 class ScoringPipeline:
@@ -264,7 +264,7 @@ class ScoringPipeline:
         return [
             ExactMatchScorer(weight=1.0),
             ContentQualityScorer(weight=1.0),
-            RecencyScorer(weight=0.1),  # 최소 가중치로 시간 인식 활성화
+            RecencyScorer(weight=0.1),  # Enable time-awareness with minimal weight
             CategoryBoostScorer(weight=1.0),
             TagMatchScorer(weight=1.0),
         ]
@@ -298,7 +298,7 @@ class ScoringPipeline:
         """최종 점수 계산"""
         breakdown = {"vector": context.vector_score}
 
-        # 1. 제외 조건 확인
+        # 1. Check exclusion conditions
         for scorer in self.scorers:
             if scorer.enabled:
                 exclude_reason = scorer.should_exclude(context)
@@ -311,7 +311,7 @@ class ScoringPipeline:
                         reason=exclude_reason,
                     )
 
-        # 2. 각 스코어러의 점수 계산
+        # 2. Calculate score for each scorer
         bonus_score = 0.0
         quality_multiplier = 1.0
 
@@ -323,16 +323,16 @@ class ScoringPipeline:
             breakdown[scorer.name] = score
 
             if scorer.name == "content_quality":
-                # 품질 점수는 곱셈으로 적용
+                # Apply quality score multiplicatively
                 quality_multiplier = score
             else:
-                # 나머지는 가중치 적용하여 합산
+                # Apply weight and accumulate for the rest
                 bonus_score += score * scorer.weight
 
-        # 3. 최종 점수 계산
-        # (벡터 점수 + 보너스) * 품질 배수
+        # 3. Calculate final score
+        # (vector score + bonus) * quality multiplier
         final_score = (context.vector_score + bonus_score) * quality_multiplier
-        final_score = max(0.0, min(1.0, final_score))  # 0~1 범위로 제한
+        final_score = max(0.0, min(1.0, final_score))  # Clamp to 0~1 range
 
         breakdown["final"] = final_score
 
@@ -341,7 +341,7 @@ class ScoringPipeline:
         )
 
 
-# 편의를 위한 기본 파이프라인 인스턴스
+# Default pipeline instance for convenience
 default_pipeline = ScoringPipeline()
 
 

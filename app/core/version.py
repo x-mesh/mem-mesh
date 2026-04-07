@@ -11,14 +11,14 @@ from pathlib import Path
 
 def _read_version() -> str:
     """pyproject.toml → importlib.metadata → fallback 순으로 버전을 읽는다."""
-    # 1) pyproject.toml 직접 파싱 (개발 모드에서 make bump 즉시 반영)
+    # 1) Parse pyproject.toml directly (reflects make bump immediately in dev mode)
     pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
     if pyproject.exists():
         for line in pyproject.read_text().splitlines():
             if line.strip().startswith("version"):
                 return line.split("=", 1)[1].strip().strip('"').strip("'")
 
-    # 2) installed package metadata (Docker/production 등)
+    # 2) Installed package metadata (Docker/production, etc.)
     try:
         return _pkg_version("mem-mesh")
     except PackageNotFoundError:
@@ -29,14 +29,14 @@ def _read_version() -> str:
 
 __VERSION__ = _read_version()
 
-# MCP 프로토콜 버전 (Streamable HTTP transport 지원)
+# MCP protocol version (supports Streamable HTTP transport)
 MCP_PROTOCOL_VERSION = "2025-03-26"
 
-# 서버 기본 정보
+# Server basic info
 SERVER_NAME = "mem-mesh"
 SERVER_DESCRIPTION = "MCP server for mem-mesh memory management"
 
-# 서버 정보 딕셔너리 (MCP 프로토콜용)
+# Server info dictionary (for MCP protocol)
 SERVER_INFO = {
     "name": SERVER_NAME,
     "version": __VERSION__,

@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List
 
-from app.cli.prompts.behaviors import PROMPT_VERSION
 from app.cli.hooks.constants import (
     CLAUDE_HOOKS_DIR,
     CLAUDE_SETTINGS,

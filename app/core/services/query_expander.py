@@ -44,19 +44,19 @@ def extract_time_expression(query: str) -> Tuple[Optional[str], str]:
     """
     lower = query.strip()
 
-    # 한국어 시간 표현 (길이 순 내림차 — 긴 패턴 우선)
+    # Korean time expressions (sorted by length descending — longer patterns first)
     for expr in sorted(KOREAN_TIME_EXPRESSIONS, key=len, reverse=True):
         if expr in lower:
             time_range = KOREAN_TIME_EXPRESSIONS[expr]
             cleaned = lower.replace(expr, "").strip()
-            # 남은 쿼리가 비어있으면 원본 유지
+            # Keep original if remaining query is empty
             return (time_range, cleaned if cleaned else query)
 
-    # 영어 시간 표현
+    # English time expressions
     for expr in sorted(ENGLISH_TIME_EXPRESSIONS, key=len, reverse=True):
         if expr in lower.lower():
             time_range = ENGLISH_TIME_EXPRESSIONS[expr]
-            # 대소문자 무시하여 제거
+            # Remove case-insensitively
             cleaned = re.sub(re.escape(expr), "", lower, flags=re.IGNORECASE).strip()
             return (time_range, cleaned if cleaned else query)
 
@@ -68,7 +68,7 @@ class QueryExpander:
 
     def __init__(self):
         """Initialize query expander with translation dictionaries"""
-        # 한국어 → 영어 주요 용어 사전
+        # Korean → English key term dictionary
         self.kr_to_en = {
             "토큰": "token",
             "최적화": "optimization optimize",
@@ -425,7 +425,7 @@ class QueryExpander:
             "총변동거리": "total variation distance",
         }
 
-        # 영어 → 한국어 역방향 사전 생성
+        # Generate English → Korean reverse dictionary
         self.en_to_kr = {}
         for kr, en_terms in self.kr_to_en.items():
             for en_term in en_terms.split():
@@ -443,37 +443,37 @@ class QueryExpander:
         Returns:
             확장된 검색어
         """
-        # 원본 보존
+        # Preserve original
         original = query.lower()
         expanded_terms = set([original])
 
-        # 공백으로 분리
+        # Split by spaces
         words = original.split()
 
         for word in words:
-            # 한국어 → 영어
+            # Korean → English
             if word in self.kr_to_en:
                 en_terms = self.kr_to_en[word].split()
                 expanded_terms.update(en_terms)
 
-            # 영어 → 한국어
+            # English → Korean
             if word in self.en_to_kr:
                 kr_terms = self.en_to_kr[word]
                 expanded_terms.update(kr_terms)
 
-            # 부분 매칭도 시도
+            # Also try partial matching
             for kr, en in self.kr_to_en.items():
                 if kr in word or word in kr:
                     expanded_terms.add(kr)
                     expanded_terms.update(en.split())
 
-        # 중복 제거하고 공백으로 연결
+        # Remove duplicates and join with spaces
         expanded = " ".join(sorted(expanded_terms))
 
-        # 너무 길면 원본과 주요 번역만
+        # If too long, keep original and main translations only
         if len(expanded) > 200:
             main_terms = [original]
-            for word in words[:3]:  # 처음 3개 단어만
+            for word in words[:3]:  # First 3 words only
                 if word in self.kr_to_en:
                     main_terms.append(self.kr_to_en[word].split()[0])
                 elif word in self.en_to_kr:
@@ -510,20 +510,20 @@ class QueryExpander:
         words = query.lower().split()
 
         for word in words:
-            # 한국어면 영어 제안
+            # Suggest English if Korean
             if word in self.kr_to_en:
                 en_terms = self.kr_to_en[word].split()
                 suggestions.extend(en_terms)
 
-            # 영어면 한국어 제안
+            # Suggest Korean if English
             if word in self.en_to_kr:
                 kr_terms = self.en_to_kr[word]
                 suggestions.extend(kr_terms)
 
-        return list(set(suggestions))[:5]  # 최대 5개
+        return list(set(suggestions))[:5]  # Max 5
 
 
-# 싱글톤 인스턴스
+# Singleton instance
 _query_expander = None
 
 

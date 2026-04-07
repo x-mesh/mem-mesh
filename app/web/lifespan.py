@@ -31,7 +31,7 @@ from app.mcp_common.tools import MCPToolHandlers
 
 from .mcp import sse
 
-# 로깅 시스템은 lifespan 함수 내에서 초기화
+# Logging system initialized inside the lifespan function
 logger = None
 
 db: Optional[Database] = None
@@ -55,16 +55,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """애플리케이션 생명주기 관리"""
     global db, embedding_service, memory_service, search_service, context_service, stats_service, embedding_manager, project_service, session_service, pin_service, metrics_collector, relation_service, mcp_storage, oauth_service, logger
 
-    # .env 파일 로드 (최우선)
+    # Load .env file (highest priority)
     load_dotenv()
 
-    # 로깅 시스템 초기화 (.env 로드 후)
+    # Initialize logging system (after .env load)
     from app.core.utils.logger import setup_logging
 
     setup_logging()
     logger = get_logger("mem-mesh-web")
 
-    # 로거 레벨 확인을 위한 디버그 정보
+    # Debug info to verify logger level
     current_level = logger.logger.getEffectiveLevel()
     logger.info(
         "Starting mem-mesh Web Server...",
@@ -74,10 +74,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.debug("Lifespan event triggered - DEBUG logging is working!")
 
     try:
-        # 설정 로드
+        # Load settings
         settings = Settings()
 
-        # 로깅 설정 정보 출력 (.env 파일 로드 후)
+        # Print logging config info (after .env file load)
         log_level = os.getenv("MEM_MESH_LOG_LEVEL", os.getenv("MCP_LOG_LEVEL", "INFO"))
         log_file = os.getenv("MEM_MESH_LOG_FILE", os.getenv("MCP_LOG_FILE", ""))
         log_format = os.getenv(
@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             log_format=log_format,
         )
 
-        # 설정 정보 (배너는 __main__.py에서 출력하므로 여기서는 로그만)
+        # Settings info (banner printed in __main__.py; only log here)
         from app.core.version import __VERSION__
 
         logger.info(
@@ -108,14 +108,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "Initializing database connection", database_path=settings.database_path
         )
 
-        # 데이터베이스 연결
+        # Connect to database
         db = Database(settings.database_path, embedding_dim=settings.embedding_dim)
         await db.connect()
 
         logger.info("Database connected successfully")
 
-        # 임베딩 서비스 초기화 (deferred loading — 서버 즉시 시작)
-        # 우선순위: target_embedding_model (온보딩 선택) > embedding_model (DB) > settings
+        # Initialize embedding service (deferred loading — server starts immediately)
+        # Priority: target_embedding_model (onboarding choice) > embedding_model (DB) > settings
         embedding_model = settings.embedding_model
         target_model = None
         db_model = None
@@ -137,8 +137,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     settings_model=embedding_model,
                 )
                 embedding_model = db_model
-        except Exception:
-            pass  # DB not ready or metadata table missing
+        except Exception as e:
+            logger.debug(f"DB not ready or metadata table missing: {e}")
 
         model_cached = is_model_cached(embedding_model)
         logger.info(
@@ -150,8 +150,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             model_name=embedding_model, preload=False, defer_loading=True
         )
 
-        # 모델이 이전에 선택된 적이 있으면 (target_model or db_model),
-        # 캐시 여부와 무관하게 백그라운드 로딩/다운로드 시작
+        # If a model has been selected before (target_model or db_model),
+        # start background loading/download regardless of cache status
         _has_configured_model = bool(target_model or db_model)
 
         if model_cached or _has_configured_model:
@@ -180,19 +180,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                             {"progress": progress, "status": status, "model": _bg_model_name},
                         ),
                     )
-                except Exception:
-                    pass  # WebSocket not ready yet during startup
+                except Exception as e:
+                    logger.debug(f"WebSocket not ready yet during startup: {e}")
 
             embedding_service.load_model_background(on_progress=_on_model_progress)
         else:
             logger.info("No model configured, waiting for user selection via onboarding")
 
-        # 비즈니스 서비스들 초기화
+        # Initialize business services
         logger.info("Initializing business services")
 
-        # MetricsCollector 초기화 (SearchService보다 먼저)
+        # Initialize MetricsCollector (before SearchService)
         metrics_collector = MetricsCollector(database=db)
-        await metrics_collector.start()  # 백그라운드 플러시 태스크 시작
+        await metrics_collector.start()  # Start background flush task
 
         memory_service = MemoryService(db, embedding_service)
         search_service = UnifiedSearchService(
@@ -212,28 +212,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         stats_service = StatsService(db)
         embedding_manager = EmbeddingManagerService(db, embedding_service)
 
-        # Work Tracking 서비스들 초기화
+        # Initialize Work Tracking services
         project_service = ProjectService(db)
         session_service = SessionService(db, embedding_service=embedding_service)
         pin_service = PinService(db, embedding_service)
         relation_service = RelationService(db)
 
-        # OAuth 서비스 초기화
+        # Initialize OAuth service
         logger.info("Initializing OAuth service")
         oauth_service = OAuthService(db)
         app.state.oauth_service = oauth_service
 
-        # Basic Auth 세션 저장소에 DB 연결
+        # Connect DB to Basic Auth session store
         from .oauth.basic_auth import session_store
 
         session_store.set_database(db)
 
-        # MCP SSE용 스토리지 및 핸들러 초기화
+        # Initialize storage and handlers for MCP SSE
         logger.info("Initializing MCP SSE handlers")
         mcp_storage = DirectStorageBackend(settings.database_path)
         await mcp_storage.initialize()
 
-        # BatchOperationHandler 초기화 (기존 db/embedding 재사용)
+        # Initialize BatchOperationHandler (reuse existing db/embedding)
         batch_handler = None
         try:
             from app.core.services.search import SearchService as LegacySearchService
@@ -252,14 +252,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "BatchOperationHandler init failed, using fallback", error=str(e)
             )
 
-        # WebSocket notifier 가져오기
+        # Get WebSocket notifier
         from .websocket.realtime import notifier
 
-        # BatchOperationHandler에 notifier 주입
+        # Inject notifier into BatchOperationHandler
         if batch_handler:
             batch_handler._notifier = notifier
 
-        # MCP 도구 핸들러에 notifier 주입
+        # Inject notifier into MCP tool handler
         sse.set_tool_handlers(
             MCPToolHandlers(mcp_storage, notifier), batch_handler=batch_handler
         )
@@ -276,10 +276,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error("Failed to initialize application", error=str(e))
         raise
     finally:
-        # 정리 작업 (순서 중요!)
+        # Cleanup tasks (order matters!)
         logger.info("Shutting down mem-mesh application...")
 
-        # MetricsCollector 정리 (버퍼 플러시 및 백그라운드 태스크 중지)
+        # Clean up MetricsCollector (flush buffer and stop background task)
         if metrics_collector:
             try:
                 await metrics_collector.stop()
@@ -287,7 +287,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             except Exception as e:
                 logger.warning("Error stopping MetricsCollector", error=str(e))
 
-        # WebSocket 연결 정리
+        # Clean up WebSocket connections
         try:
             from .websocket.realtime import connection_manager
 
@@ -295,7 +295,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning("Error disconnecting WebSocket connections", error=str(e))
 
-        # MCP 스토리지 정리
+        # Clean up MCP storage
         if mcp_storage:
             try:
                 await mcp_storage.shutdown()
@@ -303,7 +303,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             except Exception as e:
                 logger.warning("Error shutting down MCP storage", error=str(e))
 
-        # 데이터베이스 연결 정리
+        # Clean up database connection
         if db:
             try:
                 await db.close()

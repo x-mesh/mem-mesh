@@ -145,7 +145,8 @@ class UnifiedSearchService:
             _settings = get_settings()
             self._rrf_vector_weight = _settings.rrf_vector_weight
             self._rrf_text_weight = _settings.rrf_text_weight
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to load RRF weights from settings, using defaults: {e}")
             self._rrf_vector_weight = 1.0
             self._rrf_text_weight = 1.2
 
@@ -164,7 +165,7 @@ class UnifiedSearchService:
     def _init_korean_translations(self) -> Dict[str, List[str]]:
         """한영 번역 사전 초기화"""
         return {
-            # 한국어 → 영어
+            # Korean → English
             "토큰": ["token", "tokens"],
             "최적화": ["optimization", "optimize", "optimized"],
             "검색": ["search", "searching", "query"],
@@ -179,7 +180,7 @@ class UnifiedSearchService:
             "필터": ["filter", "filtering"],
             "노이즈": ["noise"],
             "스코어": ["score", "scoring"],
-            # 영어 → 한국어
+            # English → Korean
             "token": ["토큰"],
             "optimization": ["최적화"],
             "search": ["검색"],
@@ -239,12 +240,12 @@ class UnifiedSearchService:
         """
         start_time = time.perf_counter()
 
-        # URL 인코딩된 공백(+) 처리 및 정규화
-        # FastAPI는 '+'를 자동으로 공백으로 변환하지 않으므로 수동 처리
+        # Handle URL-encoded spaces (+) and normalize
+        # FastAPI does not auto-convert '+' to space, so handle manually
         query = query.replace("+", " ").strip() if query else ""
         original_query = query
 
-        # 1. 의도 분석 (품질 기능 활성화 시)
+        # 1. Intent analysis (when quality feature is enabled)
         intent = None
         if self.enable_quality_features and self.intent_analyzer and query:
             intent = self.intent_analyzer.analyze(query)
@@ -254,20 +255,20 @@ class UnifiedSearchService:
                 f"specificity: {intent.specificity:.2f}"
             )
 
-            # 의도 기반 파라미터 자동 조정
+            # Auto-adjust parameters based on intent
             if search_mode == "smart":
                 search_mode, limit, category = self._auto_adjust_params(
                     intent, search_mode, limit, category
                 )
 
-        # 2. 쿼리 확장 (한국어 최적화 활성화 시)
+        # 2. Query expansion (when Korean optimization is enabled)
         expanded_query = query
         if self.enable_korean_optimization and query and search_mode != "exact":
             expanded_query = self._expand_query(query)
             if expanded_query != query:
                 logger.info(f"Query expanded: '{query}' → '{expanded_query[:100]}...'")
 
-        # 3. 캐시 확인 (offset=0인 경우만)
+        # 3. Check cache (only when offset=0)
         if offset == 0 and query:
             cached_results = await self.cache_manager.get_cached_search(
                 query=expanded_query,
@@ -281,7 +282,7 @@ class UnifiedSearchService:
                 )
                 return cached_results
 
-        # 4. 필터 조건 구성
+        # 4. Build filter conditions
         filters = {}
         if project_id:
             filters["project_id"] = project_id
@@ -292,16 +293,16 @@ class UnifiedSearchService:
         if tag:
             filters["tag"] = tag
 
-        # 빈 쿼리 여부 확인 (후처리 스킵 결정용)
+        # Check if query is empty (to decide whether to skip post-processing)
         is_empty_query = not query.strip()
 
-        # 5. 검색 모드에 따른 검색 수행
+        # 5. Perform search based on search mode
         if is_empty_query:
-            # 빈 쿼리: 최근 메모리 반환 (노이즈/품질/정규화 스킵)
+            # Empty query: return recent memories (skip noise/quality/normalization)
             result = await self._get_recent_memories(
                 filters, limit, offset, sort_by, sort_direction
             )
-            # Temporal 필터는 빈 쿼리에서도 적용
+            # Apply temporal filter even for empty query
             if result.results and (
                 time_range or date_from or date_to or temporal_mode == "decay"
             ):
@@ -323,16 +324,16 @@ class UnifiedSearchService:
         elif search_mode == "fuzzy":
             result = await self._fuzzy_search(expanded_query, filters, limit)
         else:
-            # hybrid 또는 smart (기본)
+            # hybrid or smart (default)
             result = await self._hybrid_search(
                 expanded_query, filters, limit, recency_weight
             )
 
-        # 5.5 Reranking (리랭킹 활성화 시 — 정밀 점수 재산정)
+        # 5.5 Reranking (when reranking is enabled — recalculate precise scores)
         if self.reranker and result.results:
             result = self._apply_reranking(result, original_query, limit)
 
-        # 6. 시간 인식 필터/부스트/감쇠 (Temporal-Aware Search)
+        # 6. Temporal filter/boost/decay (Temporal-Aware Search)
         if result.results and (
             time_range or date_from or date_to or temporal_mode == "decay"
         ):
@@ -340,13 +341,13 @@ class UnifiedSearchService:
                 result, time_range, date_from, date_to, temporal_mode
             )
 
-        # 7. 품질 스코어링 및 재정렬 (품질 기능 활성화 시)
+        # 7. Quality scoring and reranking (when quality feature is enabled)
         if self.enable_quality_features and result.results and intent:
             result = await self._apply_quality_scoring(
                 result, original_query, intent, min_quality_score, sort_by
             )
 
-        # 7. 노이즈 필터링 (활성화 시)
+        # 7. Noise filtering (when enabled)
         if self.enable_noise_filter and self.noise_filter and result.results:
             context = {
                 "project": project_id,
@@ -355,13 +356,13 @@ class UnifiedSearchService:
             }
             result = self.noise_filter.apply(result, original_query, context)
 
-        # 8. 프로젝트명 매칭 부스팅 (정규화 전에 적용)
+        # 8. Project name match boosting (applied before normalization)
         if result.results and original_query:
             result = self._boost_project_name_match(original_query, result)
 
-        # 9. 점수 정규화 (활성화 시)
+        # 9. Score normalization (when enabled)
         if self.enable_score_normalization and self.score_normalizer and result.results:
-            # 모든 점수 추출
+            # Extract all scores
             scores = [
                 r.similarity_score
                 for r in result.results
@@ -369,17 +370,17 @@ class UnifiedSearchService:
             ]
 
             if scores:
-                # 정규화 수행
+                # Perform normalization
                 normalized_scores = self.score_normalizer.normalize(scores)
 
-                # 정규화된 점수 적용
+                # Apply normalized scores
                 for i, res in enumerate(result.results):
                     if res.similarity_score is not None and i < len(normalized_scores):
                         res.similarity_score = normalized_scores[i]
 
                 logger.debug(f"Scores normalized: {len(scores)} scores")
 
-        # 9. 캐시 저장 (offset=0인 경우만)
+        # 9. Save to cache (only when offset=0)
         if offset == 0 and query and result.results:
             await self.cache_manager.cache_search_results(
                 query=expanded_query,
@@ -389,7 +390,7 @@ class UnifiedSearchService:
                 limit=limit,
             )
 
-        # 9. 검색 시간 로깅
+        # 9. Log search duration
         search_time = time.perf_counter() - start_time
         logger.info(
             f"Search completed in {search_time:.3f}s - "
@@ -399,19 +400,19 @@ class UnifiedSearchService:
             f"korean: {self.enable_korean_optimization}"
         )
 
-        # 10. 의도 분석 결과 로깅
+        # 10. Log intent analysis result
         if intent:
             logger.debug(
                 f"Intent analysis: type={intent.intent_type}, "
                 f"urgency={intent.urgency}, specificity={intent.specificity}"
             )
 
-        # 11. 메트릭 수집
+        # 11. Collect metrics
         await self._collect_metrics(
             original_query, result, start_time, project_id, category
         )
 
-        # 12. 빈 결과/저품질 결과 시 suggestions 생성
+        # 12. Generate suggestions on empty/low-quality results
         if original_query and (
             not result.results
             or (
@@ -420,7 +421,7 @@ class UnifiedSearchService:
         ):
             result.suggestions = self._generate_suggestions(original_query, project_id)
 
-        # 13. 관계 그래프 확장 (결과가 적을 때만 보충)
+        # 13. Expand with relation graph (supplement only when results are sparse)
         if result.results and len(result.results) < 3:
             related = await self._expand_with_relations(result, limit=3)
             if related:
@@ -437,7 +438,7 @@ class UnifiedSearchService:
         """쿼리 확장 (한영 번역 + Query Expander)"""
         expanded_terms = set([query])
 
-        # 1. Query Expander 사용 (있는 경우)
+        # 1. Use Query Expander (if available)
         if self.query_expander:
             try:
                 expanded = self.query_expander.expand_query(query)
@@ -446,14 +447,14 @@ class UnifiedSearchService:
             except Exception as e:
                 logger.warning(f"Query expander failed: {e}")
 
-        # 2. 한영 번역 추가 (한국어 쿼리인 경우에만)
+        # 2. Add Korean-English translation (only for Korean queries)
         if self.enable_korean_optimization and self._is_korean(query):
             words = query.lower().split()
             for word in words:
                 if word in self.korean_translations:
                     expanded_terms.update(self.korean_translations[word])
 
-        # 3. 결합
+        # 3. Combine
         if len(expanded_terms) > 1:
             return " ".join(expanded_terms)
         return query
@@ -462,7 +463,7 @@ class UnifiedSearchService:
         self, intent: "SearchIntent", search_mode: str, limit: int, category: Optional[str]
     ) -> tuple:
         """의도 기반 파라미터 자동 조정"""
-        # 검색 모드 조정
+        # Adjust search mode
         if intent.intent_type == "debug":
             search_mode = "exact"
         elif intent.intent_type == "explore":
@@ -472,7 +473,7 @@ class UnifiedSearchService:
         else:
             search_mode = "hybrid"
 
-        # 결과 수 조정
+        # Adjust result count
         if intent.urgency > 0.8:
             limit = min(limit, 5)
         elif intent.specificity > 0.8:
@@ -480,7 +481,7 @@ class UnifiedSearchService:
         elif intent.intent_type == "explore":
             limit = max(limit, 10)
 
-        # 카테고리 예측
+        # Predict category
         if not category and intent.expected_category:
             category = intent.expected_category
 
@@ -508,7 +509,7 @@ class UnifiedSearchService:
         if not raw_results:
             return SearchResponse(results=[], total=total_count)
 
-        # SearchResult로 변환
+        # Convert to SearchResult
         search_results = []
         oldest_time = min(row["created_at"] for row in raw_results)
         newest_time = max(row["created_at"] for row in raw_results)
@@ -541,7 +542,7 @@ class UnifiedSearchService:
         """
         RRF 기반 하이브리드 검색 (벡터 + 텍스트 병렬 수행)
         """
-        # 1. 임베딩 생성 (캐시 활용, 검색 쿼리이므로 is_query=True)
+        # 1. Generate embedding (use cache; is_query=True for search queries)
         query_embedding_list = await self.cache_manager.get_cached_embedding(query)
         if query_embedding_list is None:
             query_embedding_list = self.embedding_service.embed(query, is_query=True)
@@ -549,12 +550,12 @@ class UnifiedSearchService:
 
         query_embedding = self.embedding_service.to_bytes(query_embedding_list)
 
-        # 2. 병렬 검색 수행 (Vector + Text)
-        # 리랭킹 활성화 시 더 넓은 후보군 확보 (topk * multiplier)
+        # 2. Perform parallel search (Vector + Text)
+        # Get wider candidate pool when reranking is enabled (topk * multiplier)
         if self.reranker:
             search_limit = limit * self.reranking_top_k_multiplier
         else:
-            search_limit = limit * 2  # RRF를 위해 기본 2배 후보군
+            search_limit = limit * 2  # 2x candidates by default for RRF
 
         # Vector Search Task
         vector_task = self.db.vector_search(
@@ -567,7 +568,7 @@ class UnifiedSearchService:
         # Wait for both
         raw_vector_results, text_response = await asyncio.gather(vector_task, text_task)
 
-        # 3. Vector 결과 처리 (Score 계산)
+        # 3. Process vector results (score calculation)
         vector_search_results = []
         if raw_vector_results:
             self.scoring_pipeline.set_recency_weight(recency_weight)
@@ -607,7 +608,7 @@ class UnifiedSearchService:
                         )
                     )
 
-        # 4. RRF 병합
+        # 4. RRF merge
         if not vector_search_results and not text_response.results:
             return SearchResponse(results=[])
 
@@ -627,7 +628,8 @@ class UnifiedSearchService:
                 created = created.replace(tzinfo=timezone.utc)
             age_days = (datetime.now(timezone.utc) - created).days
             return max(0.0, min(1.0, math.exp(-age_days / 30.0)))
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to calculate recency score: {e}")
             return 0.5
 
     def _is_korean(self, text: str) -> bool:
@@ -662,7 +664,7 @@ class UnifiedSearchService:
         content_map: Dict[str, SearchResult] = {}
         original_scores: Dict[str, float] = {}
 
-        # Vector Results 점수 합산
+        # Accumulate Vector Results scores
         for rank, item in enumerate(vector_results):
             if item.id not in content_map:
                 content_map[item.id] = item
@@ -671,7 +673,7 @@ class UnifiedSearchService:
                 1.0 / (k + rank + 1)
             )
 
-        # Text Results 점수 합산
+        # Accumulate Text Results scores
         for rank, item in enumerate(text_results):
             if item.id not in content_map:
                 content_map[item.id] = item
@@ -682,7 +684,7 @@ class UnifiedSearchService:
             if item.id in original_scores:
                 original_scores[item.id] = min(1.0, original_scores[item.id] + 0.1)
 
-        # RRF 점수 기준 정렬
+        # Sort by RRF score
         sorted_ids = sorted(
             rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True
         )
@@ -715,7 +717,7 @@ class UnifiedSearchService:
         reranked: List[SearchResult] = []
         for rr in rerank_results:
             item = response.results[rr.original_index]
-            # Cross-Encoder 점수를 최종 similarity_score로 사용
+            # Use Cross-Encoder score as final similarity_score
             item.similarity_score = rr.score
             reranked.append(item)
 
@@ -753,13 +755,13 @@ class UnifiedSearchService:
         self, query: str, filters: Dict[str, Any], limit: int
     ) -> SearchResponse:
         """정확한 텍스트 매칭 검색"""
-        # FTS Query 준비
+        # Prepare FTS Query
         clean = query.replace('"', '""')
         tokens = clean.split()
         if not tokens:
             return SearchResponse(results=[])
 
-        # 한국어 복합어 분해: 각 토큰을 서브토큰으로 확장
+        # Decompose Korean compound words: expand each token to sub-tokens
         if self.enable_korean_optimization:
             expanded_token_groups = []
             for t in tokens:
@@ -774,7 +776,7 @@ class UnifiedSearchService:
         else:
             fts_query = " AND ".join([f'"{t}"' for t in tokens])
 
-        # FTS 쿼리 실행
+        # Execute FTS query
         sql = """
             SELECT m.id, m.content, m.created_at, m.project_id, m.category, m.source, m.client, m.tags
             FROM memories_fts fts
@@ -798,9 +800,9 @@ class UnifiedSearchService:
             rows = await self.db.fetchall(sql, tuple(params))
 
             results = []
-            # FTS rank 기반 점수 계산 (순위에 따라 0.9 ~ 0.7 범위)
+            # Calculate score based on FTS rank (0.9 ~ 0.7 range by rank)
             for i, row in enumerate(rows):
-                # 텍스트 매칭은 높은 점수지만 1.0은 아님
+                # Text match gets high score but not 1.0
                 text_score = max(0.7, 0.9 - (i * 0.02))
                 results.append(
                     SearchResult(
@@ -818,15 +820,16 @@ class UnifiedSearchService:
 
             return SearchResponse(results=results, total=len(results))
 
-        except Exception:
-            # FTS 실패 시 (테이블 없음 등) 빈 결과 반환하여 Vector Search만 수행되도록 함
+        except Exception as e:
+            # FTS failure (missing table etc.) — return empty so vector search still runs
+            logger.debug(f"FTS search failed, returning empty results: {e}")
             return SearchResponse(results=[])
 
     async def _semantic_search(
         self, query: str, filters: Dict[str, Any], limit: int, recency_weight: float
     ) -> SearchResponse:
         """순수 의미 기반 벡터 검색"""
-        # 임베딩 생성 (검색 쿼리이므로 is_query=True)
+        # Generate embedding (is_query=True since this is a search query)
         query_embedding_list = await self.cache_manager.get_cached_embedding(query)
         if query_embedding_list is None:
             query_embedding_list = self.embedding_service.embed(query, is_query=True)
@@ -834,7 +837,7 @@ class UnifiedSearchService:
 
         query_embedding = self.embedding_service.to_bytes(query_embedding_list)
 
-        # 벡터 검색
+        # Vector search
         raw_results = await self.db.vector_search(
             embedding=query_embedding, limit=limit, filters=filters
         )
@@ -851,7 +854,7 @@ class UnifiedSearchService:
 
             similarity_score = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
 
-            # 최신성 가중치 적용
+            # Apply recency weight
             if recency_weight > 0.0:
                 recency_score = self._absolute_recency_score(row["created_at"])
                 similarity_score = (
@@ -873,7 +876,7 @@ class UnifiedSearchService:
                 )
             )
 
-        # 1차: similarity_score 내림차순, 2차: created_at 내림차순 (안정적 정렬)
+        # Primary: similarity_score descending, secondary: created_at descending (stable sort)
         search_results.sort(
             key=lambda x: (x.similarity_score, x.created_at or ""), reverse=True
         )
@@ -885,7 +888,7 @@ class UnifiedSearchService:
         """퍼지 검색 (오타 허용)"""
         from difflib import SequenceMatcher
 
-        # 모든 메모리 가져오기
+        # Fetch all memories
         base_query = "SELECT * FROM memories WHERE 1=1"
         params = []
 
@@ -905,7 +908,7 @@ class UnifiedSearchService:
         if not raw_results:
             return SearchResponse(results=[])
 
-        # 퍼지 매칭
+        # Fuzzy matching
         query_words = query.lower().split()
         scored_results = []
 
@@ -934,7 +937,7 @@ class UnifiedSearchService:
 
                 scored_results.append((row, final_score))
 
-        # 정렬 및 제한 (1차: score 내림차순, 2차: created_at 내림차순)
+        # Sort and limit (primary: score descending, secondary: created_at descending)
         scored_results.sort(
             key=lambda x: (x[1], x[0]["created_at"] or ""), reverse=True
         )
@@ -1005,7 +1008,7 @@ class UnifiedSearchService:
                 )
             )
 
-        # 1차: similarity_score 내림차순, 2차: created_at 내림차순 (안정적 정렬)
+        # Primary: similarity_score descending, secondary: created_at descending (stable sort)
         search_results.sort(
             key=lambda x: (x.similarity_score, x.created_at or ""), reverse=True
         )
@@ -1077,8 +1080,8 @@ class UnifiedSearchService:
             try:
                 terms = self.query_expander.suggest_terms(query)
                 suggestions.extend(terms)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to get query expansion suggestions: {e}")
 
         category_hints = ["bug", "decision", "task", "code_snippet", "incident"]
         if self.intent_analyzer:
@@ -1090,8 +1093,8 @@ class UnifiedSearchService:
                 ):
                     category_hints.remove(intent.expected_category)
                     category_hints.insert(0, intent.expected_category)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to analyze intent for suggestions: {e}")
 
         if not suggestions:
             suggestions.append(f"{query} (다른 검색 모드를 시도해보세요)")
@@ -1111,7 +1114,7 @@ class UnifiedSearchService:
             relation_service = RelationService(self.db)
             existing_ids = {r.id for r in result.results}
 
-            # 1단계: 상위 결과의 관계에서 후보 ID 수집
+            # Step 1: Collect candidate IDs from relations of top results
             candidate_ids: Dict[str, float] = {}  # id -> strength
             for item in result.results[:top_n]:
                 links = await relation_service.get_relations_for_memory(
@@ -1133,7 +1136,7 @@ class UnifiedSearchService:
             if not candidate_ids:
                 return None
 
-            # 2단계: 배치 조회로 N+1 제거
+            # Step 2: Batch lookup to eliminate N+1
             placeholders = ",".join("?" for _ in candidate_ids)
             rows = await self.db.fetchall(
                 f"SELECT id, content, created_at, project_id, category, source, client, tags FROM memories WHERE id IN ({placeholders})",
@@ -1175,8 +1178,8 @@ class UnifiedSearchService:
             if isinstance(newest, str):
                 newest = datetime.fromisoformat(newest.replace("Z", "+00:00"))
 
-            # timezone-aware와 timezone-naive datetime 혼합 방지
-            # 모든 datetime을 naive로 통일 (tzinfo 제거)
+            # Prevent mixing timezone-aware and timezone-naive datetimes
+            # Unify all datetimes as naive (strip tzinfo)
             if hasattr(created_at, "tzinfo") and created_at.tzinfo is not None:
                 created_at = created_at.replace(tzinfo=None)
             if hasattr(oldest, "tzinfo") and oldest.tzinfo is not None:
@@ -1194,7 +1197,8 @@ class UnifiedSearchService:
                 return 1.0
 
             return max(0.0, min(1.0, time_from_oldest / total_range))
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to calculate relative recency: {e}")
             return 0.5
 
     # --- Temporal-Aware Search ---
@@ -1247,7 +1251,7 @@ class UnifiedSearchService:
         if not created_at_str:
             return None
         try:
-            # ISO 8601 포맷 처리 (timezone aware/naive 모두)
+            # Handle ISO 8601 format (both timezone-aware and naive)
             dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
@@ -1277,7 +1281,7 @@ class UnifiedSearchService:
         has_range = dt_from is not None or dt_to is not None
 
         if temporal_mode == "filter" and has_range:
-            # 범위 내 결과만 남기기
+            # Keep only results within range
             filtered = []
             for r in response.results:
                 created = self._parse_created_at(r.created_at)
@@ -1296,7 +1300,7 @@ class UnifiedSearchService:
             )
 
         elif temporal_mode == "boost" and has_range:
-            # 범위 내 결과에 점수 부스트 (범위 밖도 유지)
+            # Boost scores for in-range results (keep out-of-range too)
             boost_factor = 1.5
             for r in response.results:
                 created = self._parse_created_at(r.created_at)
@@ -1309,7 +1313,7 @@ class UnifiedSearchService:
                     in_range = False
                 if in_range and r.similarity_score is not None:
                     r.similarity_score = min(1.0, r.similarity_score * boost_factor)
-            # 부스트 후 재정렬
+            # Re-sort after boosting
             response.results.sort(key=lambda x: x.similarity_score or 0.0, reverse=True)
             logger.debug(
                 f"Temporal boost applied: {boost_factor}x for range "
@@ -1317,8 +1321,8 @@ class UnifiedSearchService:
             )
 
         elif temporal_mode == "decay":
-            # 시간 감쇠: 오래될수록 점수 감소
-            decay_rate = 0.01  # 100일 → ~37%
+            # Time decay: score decreases with age
+            decay_rate = 0.01  # 100 days → ~37%
             for r in response.results:
                 created = self._parse_created_at(r.created_at)
                 if created is None or r.similarity_score is None:
@@ -1326,7 +1330,7 @@ class UnifiedSearchService:
                 age_days = max(0.0, (now - created).total_seconds() / 86400.0)
                 decay_factor = math.exp(-decay_rate * age_days)
                 r.similarity_score = r.similarity_score * decay_factor
-            # 감쇠 후 재정렬
+            # Re-sort after decay
             response.results.sort(key=lambda x: x.similarity_score or 0.0, reverse=True)
             logger.debug("Temporal decay applied to search results")
 
@@ -1351,17 +1355,17 @@ class UnifiedSearchService:
             if result.project_id:
                 project_id_lower = result.project_id.lower()
 
-                # 정확한 매칭
+                # Exact match
                 if query_lower == project_id_lower:
-                    result.similarity_score *= 2.0  # 100% 부스팅
+                    result.similarity_score *= 2.0  # 100% boost
                     logger.debug(f"Exact project match boost: {result.project_id}")
 
-                # 부분 매칭
+                # Partial match
                 elif query_lower in project_id_lower or project_id_lower in query_lower:
-                    result.similarity_score *= 1.5  # 50% 부스팅
+                    result.similarity_score *= 1.5  # 50% boost
                     logger.debug(f"Partial project match boost: {result.project_id}")
 
-        # 점수 순으로 재정렬 (1차: similarity_score, 2차: created_at)
+        # Re-sort by score (primary: similarity_score, secondary: created_at)
         response.results.sort(
             key=lambda x: (x.similarity_score, x.created_at or ""), reverse=True
         )
@@ -1388,7 +1392,8 @@ class UnifiedSearchService:
                     )
                 except json.JSONDecodeError:
                     return None
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to parse tags: {e}")
             return None
         return None
 
@@ -1422,16 +1427,16 @@ class UnifiedSearchService:
         """
         start_time = time.perf_counter()
 
-        # 1. 기본 검색 수행
+        # 1. Perform base search
         search_response = await self.search(
             query=query,
             project_id=project_id,
             category=category,
             limit=limit,
-            search_mode="smart",  # 의도 기반 자동 조정 활성화
+            search_mode="smart",  # Enable intent-based auto-adjustment
         )
 
-        # 2. 맥락 최적화가 비활성화되었거나 프로젝트 ID가 없으면 검색 결과만 반환
+        # 2. Return search results only if context optimization is disabled or no project ID
         if not optimize_context or not project_id:
             logger.info(
                 f"Context optimization skipped: "
@@ -1439,7 +1444,7 @@ class UnifiedSearchService:
             )
             return search_response, None
 
-        # 3. 의도 분석 (이미 search()에서 수행되었지만 명시적으로 다시 수행)
+        # 3. Intent analysis (already done in search(), but perform explicitly again)
         intent = None
         if self.enable_quality_features and self.intent_analyzer and query:
             intent = self.intent_analyzer.analyze(query)
@@ -1449,7 +1454,7 @@ class UnifiedSearchService:
                 f"specificity={intent.specificity:.2f}"
             )
         else:
-            # 의도 분석기가 없으면 기본 의도 생성
+            # Generate default intent if no intent analyzer
             from .search_quality import SearchIntent
 
             intent = SearchIntent(
@@ -1462,17 +1467,17 @@ class UnifiedSearchService:
             )
             logger.debug("Using default intent for context optimization")
 
-        # 4. ContextOptimizer를 통한 맥락 로드
+        # 4. Load context via ContextOptimizer
         optimized_context = None
         try:
-            # SessionService와 ContextOptimizer 초기화
+            # Initialize SessionService and ContextOptimizer
             from .context_optimizer import ContextOptimizer
             from .session import SessionService
 
             session_service = SessionService(self.db)
             context_optimizer = ContextOptimizer(session_service)
 
-            # 의도 기반 맥락 로드
+            # Load context based on intent
             optimized_context = await context_optimizer.load_context_for_search(
                 query=query, project_id=project_id, intent=intent
             )
@@ -1488,10 +1493,10 @@ class UnifiedSearchService:
 
         except Exception as e:
             logger.error(f"Failed to load optimized context: {e}", exc_info=True)
-            # 맥락 로드 실패는 치명적이지 않으므로 검색 결과는 반환
+            # Context load failure is non-fatal; return search results anyway
             optimized_context = None
 
-        # 5. 검색 시간 로깅
+        # 5. Log search duration
         search_time = time.perf_counter() - start_time
         logger.info(
             f"Search with context optimization completed in {search_time:.3f}s - "

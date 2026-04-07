@@ -89,7 +89,7 @@ Automatically excluded:
 ### 1. 기본 사용 (프로젝트 자동 감지)
 
 ```python
-# 현재 디렉토리: /Users/jinwoo/work/mem-mesh
+# 현재 디렉토리: /path/to/mem-mesh
 # 자동 감지: mem-mesh-optimization
 
 # 검색 시 자동으로 프로젝트 필터 적용

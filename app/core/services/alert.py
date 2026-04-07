@@ -35,13 +35,13 @@ class AlertType(str, Enum):
 class AlertService:
     """알림 서비스 - 임계값 모니터링 및 알림 관리"""
 
-    # 기본 임계값 설정
+    # Set default thresholds
     DEFAULT_THRESHOLDS = {
-        "min_avg_similarity": 0.5,  # 평균 유사도 최소값
-        "max_no_results_rate": 20.0,  # 결과없음 비율 최대값 (%)
-        "max_response_time_ms": 1000,  # 응답 시간 최대값 (ms)
-        "check_window_minutes": 15,  # 체크 윈도우 (분)
-        "min_samples": 10,  # 최소 샘플 수
+        "min_avg_similarity": 0.5,  # Minimum average similarity
+        "max_no_results_rate": 20.0,  # Maximum no-results rate (%)
+        "max_response_time_ms": 1000,  # Maximum response time (ms)
+        "check_window_minutes": 15,  # Check window (minutes)
+        "min_samples": 10,  # Minimum sample count
     }
 
     def __init__(self, database: Database, thresholds: Optional[Dict[str, Any]] = None):
@@ -98,7 +98,7 @@ class AlertService:
         min_samples = self.thresholds["min_samples"]
 
         try:
-            # 최근 윈도우 내 메트릭 집계
+            # Aggregate metrics within recent window
             end_time = datetime.utcnow()
             start_time = end_time - timedelta(minutes=window_minutes)
 
@@ -110,7 +110,7 @@ class AlertService:
                 )
                 return []
 
-            # 1. 평균 유사도 체크
+            # 1. Check average similarity
             if metrics["avg_similarity"] is not None:
                 if metrics["avg_similarity"] < self.thresholds["min_avg_similarity"]:
                     alert = await self._create_alert_if_not_exists(
@@ -123,7 +123,7 @@ class AlertService:
                     if alert:
                         created_alerts.append(alert)
 
-            # 2. 결과없음 비율 체크
+            # 2. Check no-results rate
             if metrics["no_results_rate"] > self.thresholds["max_no_results_rate"]:
                 severity = (
                     AlertSeverity.ERROR
@@ -140,7 +140,7 @@ class AlertService:
                 if alert:
                     created_alerts.append(alert)
 
-            # 3. 응답 시간 체크
+            # 3. Check response time
             if (
                 metrics["avg_response_time_ms"]
                 > self.thresholds["max_response_time_ms"]
@@ -203,7 +203,7 @@ class AlertService:
         threshold_value: float,
     ) -> Optional[Alert]:
         """중복되지 않은 경우에만 알림 생성"""
-        # 같은 유형의 활성 알림이 있는지 확인
+        # Check if active alert of same type exists
         existing = await self.database.fetchone(
             """
             SELECT id FROM alerts 
@@ -216,7 +216,7 @@ class AlertService:
             logger.debug(f"Alert already exists for type: {alert_type.value}")
             return None
 
-        # 새 알림 생성
+        # Create new alert
         alert = Alert(
             alert_type=alert_type.value,
             severity=severity.value,
@@ -311,7 +311,7 @@ class AlertService:
     async def resolve_alert(self, alert_id: str, resolved_by: str = "user") -> bool:
         """알림 해결 처리"""
         try:
-            # 알림 존재 확인
+            # Verify alert exists
             existing = await self.database.fetchone(
                 "SELECT id, resolved_at FROM alerts WHERE id = ?", (alert_id,)
             )
@@ -324,7 +324,7 @@ class AlertService:
                 logger.info(f"Alert already resolved: {alert_id}")
                 return True
 
-            # 해결 처리
+            # Process resolution
             resolved_at = datetime.utcnow().isoformat() + "Z"
             await self.database.execute(
                 """
@@ -344,12 +344,12 @@ class AlertService:
 
     async def get_alert_summary(self) -> Dict[str, Any]:
         """알림 요약 정보"""
-        # 활성 알림 수
+        # Active alert count
         active_row = await self.database.fetchone(
             "SELECT COUNT(*) as count FROM alerts WHERE resolved_at IS NULL"
         )
 
-        # 심각도별 활성 알림 수
+        # Active alert count by severity
         severity_rows = await self.database.fetchall("""
             SELECT severity, COUNT(*) as count 
             FROM alerts 
@@ -357,7 +357,7 @@ class AlertService:
             GROUP BY severity
             """)
 
-        # 최근 24시간 알림 수
+        # Alert count in last 24 hours
         yesterday = (datetime.utcnow() - timedelta(days=1)).isoformat() + "Z"
         recent_row = await self.database.fetchone(
             "SELECT COUNT(*) as count FROM alerts WHERE timestamp >= ?", (yesterday,)

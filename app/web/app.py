@@ -21,14 +21,14 @@ from .oauth.basic_auth import BasicAuthMiddleware
 from .oauth.middleware import BearerTokenMiddleware
 from .websocket import router as websocket_router
 
-# Jinja2 템플릿 설정
+# Jinja2 template configuration
 templates = Jinja2Templates(directory="templates")
 
 
 def create_app() -> FastAPI:
     """FastAPI 애플리케이션 생성 및 설정"""
 
-    # FastAPI 앱 생성
+    # Create FastAPI app
     app = FastAPI(
         title="mem-mesh",
         description="Central memory server with vector search and context retrieval",
@@ -36,18 +36,18 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # 미들웨어 설정
+    # Configure middleware
     setup_middleware(app)
     app.add_middleware(BearerTokenMiddleware)
     app.add_middleware(BasicAuthMiddleware)  # Basic Auth for web dashboard
 
-    # 예외 핸들러 설정
+    # Configure exception handlers
     setup_exception_handlers(app)
 
-    # 정적 파일 서빙 설정 (라우터보다 먼저 등록)
+    # Configure static file serving (register before routers)
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
-    # 라우터 등록 (순서 중요!)
+    # Register routers (order matters!)
     app.include_router(oauth_router)  # OAuth endpoints
     app.include_router(websocket_router)  # WebSocket
     app.include_router(mcp_sse.router)  # MCP SSE
@@ -55,10 +55,10 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_routes.router)  # Dashboard API
     app.include_router(
         dashboard_pages.router
-    )  # Dashboard Pages (catch-all이 있으므로 마지막)
+    )  # Dashboard Pages (last, because it has a catch-all)
 
     return app
 
 
-# 앱 인스턴스 생성
+# Create app instance
 app = create_app()

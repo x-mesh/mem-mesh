@@ -19,7 +19,7 @@ from app.web.mcp import sse
 
 logger = None
 
-# 전역 서비스 인스턴스
+# Global service instances
 mcp_storage: Optional[DirectStorageBackend] = None
 
 
@@ -40,7 +40,7 @@ async def mcp_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         settings = Settings()
 
-        # 설정 정보 출력
+        # Print settings info
         log_level = os.getenv("MEM_MESH_LOG_LEVEL", "INFO")
         os.getenv("MEM_MESH_LOG_FILE", "")
 
@@ -53,12 +53,12 @@ async def mcp_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         print("  MCP SSE:         /mcp/sse")
         print("=" * 60 + "\n")
 
-        # MCP 스토리지 초기화
+        # Initialize MCP storage
         logger.info("Initializing MCP storage", database_path=settings.database_path)
         mcp_storage = DirectStorageBackend(settings.database_path)
         await mcp_storage.initialize()
 
-        # BatchOperationHandler 초기화
+        # Initialize BatchOperationHandler
         batch_handler = None
         try:
             from app.core.database.base import Database
@@ -85,7 +85,7 @@ async def mcp_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "BatchOperationHandler init failed, using fallback", error=str(e)
             )
 
-        # MCP 도구 핸들러 설정 (notifier 없이)
+        # Configure MCP tool handler (without notifier)
         sse.set_tool_handlers(
             MCPToolHandlers(mcp_storage, notifier=None), batch_handler=batch_handler
         )

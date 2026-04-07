@@ -107,7 +107,7 @@ python -m benchmarks.longmemeval run --config benchmarks/longmemeval/config.yaml
 ## 빠른 시작 (다음 세션)
 
 ```bash
-cd /Users/jinwoo/work/project/mem-mesh
+cd /path/to/mem-mesh
 
 # 테스트 확인
 python -m pytest tests/benchmarks/ -v

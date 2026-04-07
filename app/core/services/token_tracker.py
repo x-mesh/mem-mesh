@@ -64,7 +64,7 @@ class TokenTracker:
             return token_count
         except Exception as e:
             logger.error(f"Token estimation failed: {e}")
-            # 폴백: 간단한 휴리스틱 (평균 4자당 1토큰)
+            # Fallback: simple heuristic (average 1 token per 4 chars)
             fallback_count = max(1, len(content) // 4)
             logger.warning(f"Using fallback estimation: {fallback_count} tokens")
             return fallback_count
@@ -90,7 +90,7 @@ class TokenTracker:
         Requirements: 7.1, 7.2, 7.4
         """
         try:
-            # 1. session_stats 테이블에 기록
+            # 1. Record in session_stats table
             stat_id = str(uuid.uuid4())
             timestamp = datetime.utcnow().isoformat()
 
@@ -113,7 +113,7 @@ class TokenTracker:
                 ),
             )
 
-            # 2. sessions 테이블의 누적 토큰 수 업데이트
+            # 2. Update cumulative token count in sessions table
             await self.db.execute(
                 """
                 UPDATE sessions
@@ -143,16 +143,16 @@ class TokenTracker:
 
         Returns:
             {
-                "total_tokens": int,      # 예상 총 토큰 수 (로드 + 미로드)
-                "loaded_tokens": int,     # 실제 로드된 토큰 수
-                "saved_tokens": int,      # 절감된 토큰 수
-                "savings_rate": float     # 절감률 (0.0-1.0)
+                "total_tokens": int,      # Estimated total tokens (loaded + unloaded)
+                "loaded_tokens": int,     # Actually loaded tokens
+                "saved_tokens": int,      # Saved tokens
+                "savings_rate": float     # Savings rate (0.0-1.0)
             }
 
         Requirements: 7.3, 7.4
         """
         try:
-            # 세션의 토큰 사용량 조회
+            # Query token usage for session
             result = await self.db.fetchone(
                 """
                 SELECT 
@@ -178,10 +178,10 @@ class TokenTracker:
             loaded_tokens = result["total_loaded_tokens"] or 0
             saved_tokens = result["total_saved_tokens"] or 0
 
-            # 총 토큰 수 = 로드된 토큰 + 절감된 토큰
+            # Total tokens = loaded tokens + saved tokens
             total_tokens = loaded_tokens + saved_tokens
 
-            # 절감률 계산 (0으로 나누기 방지)
+            # Calculate savings rate (prevent division by zero)
             if total_tokens > 0:
                 savings_rate = saved_tokens / total_tokens
             else:
@@ -223,7 +223,7 @@ class TokenTracker:
         try:
             threshold = threshold or self.default_threshold
 
-            # 세션의 누적 토큰 수 조회
+            # Query cumulative token count for session
             result = await self.db.fetchone(
                 """
                 SELECT total_loaded_tokens
@@ -341,7 +341,7 @@ class TokenTracker:
             }
         """
         try:
-            # 기본 쿼리
+            # Base query
             query = """
                 SELECT 
                     SUM(tokens_used) as total_used,
@@ -353,7 +353,7 @@ class TokenTracker:
             """
             params = [project_id]
 
-            # 날짜 필터 추가
+            # Add date filter
             if start_date:
                 query += " AND created_at >= ?"
                 params.append(start_date)
@@ -365,7 +365,7 @@ class TokenTracker:
 
             results = await self.db.fetchall(query, tuple(params))
 
-            # 통계 계산
+            # Calculate statistics
             total_used = 0
             total_saved = 0
             operation_breakdown = {}
@@ -375,7 +375,7 @@ class TokenTracker:
                 total_saved += row["total_saved"] or 0
                 operation_breakdown[row["operation_type"]] = row["total_used"] or 0
 
-            # 평균 절감률 계산
+            # Calculate average savings rate
             total_tokens = total_used + total_saved
             avg_savings_rate = total_saved / total_tokens if total_tokens > 0 else 0.0
 
