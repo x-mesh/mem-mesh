@@ -19,9 +19,9 @@ class TokenEstimator:
     tiktoken 라이브러리를 사용하여 OpenAI 모델별 토큰 수를 정확하게 계산합니다.
     """
 
-    # 지원하는 모델과 해당 인코딩
+    # Supported models and their encodings
     MODEL_ENCODINGS: Dict[str, str] = {
-        # GPT-4 모델들
+        # GPT-4 models
         "gpt-4": "cl100k_base",
         "gpt-4-turbo": "cl100k_base",
         "gpt-4-turbo-preview": "cl100k_base",
@@ -31,14 +31,14 @@ class TokenEstimator:
         "gpt-4-32k": "cl100k_base",
         "gpt-4-0613": "cl100k_base",
         "gpt-4-32k-0613": "cl100k_base",
-        # GPT-3.5 모델들
+        # GPT-3.5 models
         "gpt-3.5-turbo": "cl100k_base",
         "gpt-3.5-turbo-16k": "cl100k_base",
         "gpt-3.5-turbo-0125": "cl100k_base",
         "gpt-3.5-turbo-1106": "cl100k_base",
         "gpt-3.5-turbo-0613": "cl100k_base",
         "gpt-3.5-turbo-16k-0613": "cl100k_base",
-        # 레거시 모델들
+        # Legacy models
         "text-davinci-003": "p50k_base",
         "text-davinci-002": "p50k_base",
         "text-curie-001": "r50k_base",
@@ -46,7 +46,7 @@ class TokenEstimator:
         "text-ada-001": "r50k_base",
     }
 
-    DEFAULT_ENCODING = "cl100k_base"  # GPT-4/GPT-3.5-turbo 기본 인코딩
+    DEFAULT_ENCODING = "cl100k_base"  # Default encoding for GPT-4/GPT-3.5-turbo
 
     def __init__(self, default_model: str = "gpt-4"):
         """
@@ -58,7 +58,7 @@ class TokenEstimator:
         self.default_model = default_model
         self._encoders: Dict[str, tiktoken.Encoding] = {}
 
-        # 기본 인코더 미리 로드
+        # Pre-load default encoder
         try:
             self._get_encoder(self.default_model)
             logger.info(
@@ -77,15 +77,15 @@ class TokenEstimator:
         Returns:
             tiktoken.Encoding 객체
         """
-        # 캐시된 인코더가 있으면 반환
+        # Return cached encoder if available
         if model in self._encoders:
             return self._encoders[model]
 
-        # 모델에 해당하는 인코딩 이름 찾기
+        # Find encoding name for the model
         encoding_name = self.MODEL_ENCODINGS.get(model, self.DEFAULT_ENCODING)
 
         try:
-            # 인코더 로드 및 캐싱
+            # Load and cache encoder
             encoder = tiktoken.get_encoding(encoding_name)
             self._encoders[model] = encoder
             logger.debug(f"Loaded encoder '{encoding_name}' for model '{model}'")
@@ -94,7 +94,7 @@ class TokenEstimator:
             logger.error(
                 f"Failed to load encoder '{encoding_name}' for model '{model}': {e}"
             )
-            # 폴백: 기본 인코딩 사용
+            # Fallback: use default encoding
             if encoding_name != self.DEFAULT_ENCODING:
                 logger.info(
                     f"Falling back to default encoding: {self.DEFAULT_ENCODING}"
@@ -139,7 +139,7 @@ class TokenEstimator:
 
         except Exception as e:
             logger.error(f"Token estimation failed for model '{model}': {e}")
-            # 폴백: 간단한 휴리스틱 (평균 4자당 1토큰)
+            # Fallback: simple heuristic (average 1 token per 4 chars)
             fallback_count = max(1, len(content) // 4)
             logger.warning(f"Using fallback estimation: {fallback_count} tokens")
             return fallback_count

@@ -5,7 +5,6 @@ FastAPI 의존성 함수들.
 """
 
 from fastapi import HTTPException
-from fastapi.responses import JSONResponse
 
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService

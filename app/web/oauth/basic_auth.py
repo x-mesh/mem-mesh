@@ -138,8 +138,8 @@ class SessionStore:
                 )
                 self._db.connection.commit()
                 removed = result.rowcount if hasattr(result, "rowcount") else 0
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to remove expired DB sessions: {e}")
 
         expired_keys = [
             k for k, v in self._memory.items() if _utc_now() > v["expires_at"]

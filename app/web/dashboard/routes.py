@@ -144,7 +144,7 @@ async def health_check():
         "embedding_status": embedding_status,
     }
 
-    # 모델 일관성 체크 (DB vs settings)
+    # Model consistency check (DB vs settings)
     if db and es:
         try:
             model_check = await db.check_embedding_model_consistency(
@@ -160,8 +160,8 @@ async def health_check():
                     "current_dim": model_check["current_dim"],
                     "message": model_check["message"],
                 }
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to get migration info: {e}")
 
     return result
 
@@ -298,7 +298,7 @@ async def select_embedding_model(
 
     from app.core.embeddings.service import AVAILABLE_MODELS, MODEL_ALIASES
 
-    # 유효한 모델인지 확인
+    # Verify model is valid
     resolved = MODEL_ALIASES.get(model_name, model_name)
     valid_names = [m["name"] for m in AVAILABLE_MODELS]
     if resolved not in valid_names:
@@ -307,16 +307,16 @@ async def select_embedding_model(
             detail=f"Invalid model. Choose from: {valid_names}",
         )
 
-    # 이미 로딩 중이면 현재 상태 반환
+    # Return current status if already loading
     if embedding_service.status in ("downloading", "loading"):
         return embedding_service.get_status_info()
 
-    # 모델 변경 + DB에 선택 저장 + 백그라운드 다운로드 시작
+    # Change model + save selection to DB + start background download
     embedding_service.switch_model(resolved)
 
-    # DB에 선택한 모델 저장
-    # target_embedding_model: 사용자가 선택한 목표 모델 (재시작 시 자동 로드용)
-    # embedding_model: 실제 데이터의 모델 (마이그레이션 완료 후 업데이트)
+    # Save selected model to DB
+    # target_embedding_model: user-selected target model (for auto-load on restart)
+    # embedding_model: model for actual data (updated after migration completes)
     from ..lifespan import get_services
     services = get_services()
     db = services.get("db")
@@ -325,11 +325,11 @@ async def select_embedding_model(
             from app.core.embeddings.service import MODEL_DIMENSIONS
             dim = MODEL_DIMENSIONS.get(resolved, 384)
 
-            # 항상 target 저장 (재시작 시 이 모델로 로드)
+            # Always save target (load this model on restart)
             await db._migrator.set_embedding_metadata("target_embedding_model", resolved)
             await db._migrator.set_embedding_metadata("target_embedding_dimension", str(dim))
 
-            # 기존 메모리가 없으면 embedding_model도 바로 업데이트 (fresh DB)
+            # If no existing memories, update embedding_model immediately (fresh DB)
             cursor = await db.execute("SELECT COUNT(*) as count FROM memories")
             memory_count = cursor.fetchone()["count"]
             if memory_count == 0:
@@ -351,8 +351,8 @@ async def select_embedding_model(
                     {"progress": progress, "status": status, "model": resolved},
                 ),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to broadcast model download progress: {e}")
 
     embedding_service.load_model_background(on_progress=_on_progress)
     return embedding_service.get_status_info()
@@ -531,12 +531,12 @@ async def resume_session(
         client_type: IDE/tool type (optional, e.g. "claude-ai", "Cursor")
     """
     try:
-        # 1. 먼저 resume로 기존 맥락 로드 (cross-session 포함)
+        # 1. Load existing context via resume (including cross-session)
         context = await session_service.resume_last_session(
             project_id=project_id, user_id=user_id, expand=expand, limit=limit
         )
 
-        # 2. IDE session_id가 있으면 활성 세션에 연결 (resume 이후)
+        # 2. Connect to active session if IDE session_id provided (after resume)
         if ide_session_id:
             await session_service.get_or_create_active_session(
                 project_id=project_id,
@@ -640,8 +640,8 @@ async def create_pin(
         result = created_pin.dict()
         try:
             await _notifier.notify_pin_created(result)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to notify pin created: {e}")
         return result
     except Exception as e:
         logger.error(f"Create pin error: {e}")
@@ -742,8 +742,8 @@ async def complete_pin(pin_id: str, pin_service: PinService = Depends(get_pin_se
 
         try:
             await _notifier.notify_pin_completed(result)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to notify pin completed: {e}")
         return result
     except PinNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -767,8 +767,8 @@ async def promote_pin(pin_id: str, pin_service: PinService = Depends(get_pin_ser
         if memory_id:
             try:
                 await _notifier.notify_pin_promoted(pin_id, memory_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to notify pin promoted: {e}")
         return result
     except PinNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

@@ -45,7 +45,7 @@ class DirectStorageBackend(StorageBackend):
         self.db_path = db_path
         self.busy_timeout = busy_timeout
 
-        # 서비스 인스턴스들
+        # Service instances
         self.db: Optional[Database] = None
         self.embedding_service: Optional[EmbeddingService] = None
         self.memory_service: Optional[MemoryService] = None
@@ -62,7 +62,7 @@ class DirectStorageBackend(StorageBackend):
         데이터베이스 연결을 설정하고 모든 서비스 인스턴스를 생성합니다.
         """
         try:
-            # 데이터베이스 연결
+            # Connect to database
             settings = get_settings()
             self.db = Database(
                 self.db_path,
@@ -71,8 +71,8 @@ class DirectStorageBackend(StorageBackend):
             )
             await self.db.connect()
 
-            # 임베딩 서비스 초기화 (MCP 서버에서는 preload 하지 않음)
-            # DB metadata의 target/stored 모델을 우선 사용 (마이그레이션 완료 상태 반영)
+            # Initialize embedding service (no preload in MCP server)
+            # Prefer target/stored model from DB metadata (reflects completed migration state)
             settings = get_settings()
             embedding_model = settings.embedding_model
             try:
@@ -94,15 +94,15 @@ class DirectStorageBackend(StorageBackend):
                         "Using stored model from DB metadata",
                         db_model=db_model,
                     )
-            except Exception:
-                pass  # DB metadata not available, use settings default
+            except Exception as e:
+                logger.debug(f"DB metadata not available, using settings default: {e}")
 
             self.embedding_service = EmbeddingService(
                 model_name=embedding_model,
-                preload=False,  # MCP 서버에서는 lazy loading 사용
+                preload=False,  # Use lazy loading in MCP server
             )
 
-            # 임베딩 모델 일관성 검증
+            # Validate embedding model consistency
             model_check = await self.db.check_embedding_model_consistency(
                 current_model=self.embedding_service.model_name,
                 current_dim=self.embedding_service.dimension,
@@ -117,11 +117,11 @@ class DirectStorageBackend(StorageBackend):
             else:
                 logger.info(model_check["message"])
 
-            # 비즈니스 서비스들 초기화
+            # Initialize business services
             self.memory_service = MemoryService(self.db, self.embedding_service)
             self.search_service = SearchService(self.db, self.embedding_service)
 
-            # UnifiedSearchService 초기화 (feature flag에 따라)
+            # Initialize UnifiedSearchService (based on feature flag)
             if settings.use_unified_search:
                 logger.info(
                     "Initializing UnifiedSearchService (unified search enabled)"
@@ -145,7 +145,7 @@ class DirectStorageBackend(StorageBackend):
             self.context_service = ContextService(self.db, self.embedding_service)
             self.stats_service = StatsService(self.db)
 
-            # 검색 워밍업 (활성화 시)
+            # Search warmup (if enabled)
             if settings.enable_search_warmup:
                 logger.info("Starting search warmup...")
                 warmup_service = get_warmup_service()
@@ -176,7 +176,7 @@ class DirectStorageBackend(StorageBackend):
                 await self.db.close()
                 self.db = None
 
-            # 서비스 인스턴스들 정리
+            # Clean up service instances
             self.embedding_service = None
             self.memory_service = None
             self.search_service = None
@@ -243,7 +243,7 @@ class DirectStorageBackend(StorageBackend):
         """
         settings = get_settings()
 
-        # UnifiedSearchService 사용 여부 결정
+        # Decide whether to use UnifiedSearchService
         if settings.use_unified_search and self.unified_search_service:
             return await self._search_with_unified_service(params)
         else:
@@ -265,7 +265,7 @@ class DirectStorageBackend(StorageBackend):
                 category=params.category,
                 limit=params.limit,
                 recency_weight=params.recency_weight,
-                search_mode="smart",  # 기본값으로 smart 모드 사용
+                search_mode="smart",  # Use smart mode as default
                 time_range=params.time_range,
                 date_from=params.date_from,
                 date_to=params.date_to,
@@ -442,14 +442,14 @@ class DirectStorageBackend(StorageBackend):
         try:
             logger.debug(f"Getting stats with group_by: {params.group_by}")
 
-            # StatsService의 get_overall_stats 메서드 사용
+            # Use StatsService.get_overall_stats method
             stats_data = await self.stats_service.get_overall_stats(
                 project_id=params.project_id,
                 start_date=params.start_date,
                 end_date=params.end_date,
             )
 
-            # StatsResponse 형태로 변환
+            # Convert to StatsResponse format
             result = StatsResponse(
                 total_memories=stats_data["total_memories"],
                 unique_projects=stats_data["unique_projects"],
@@ -485,7 +485,7 @@ class DirectStorageBackend(StorageBackend):
             raise RuntimeError("Storage backend not initialized")
 
         try:
-            # 데이터베이스에서 직접 메모리 조회
+            # Query memory directly from database
             query = """
                 SELECT id, content, category, project_id, source, tags, created_at, updated_at
                 FROM memories 
@@ -495,7 +495,7 @@ class DirectStorageBackend(StorageBackend):
 
             rows = await self.db.fetchall(query, (limit,))
 
-            # 간단한 메모리 객체로 변환
+            # Convert to simple memory object
             memories = []
             for row in rows:
                 memory = type(

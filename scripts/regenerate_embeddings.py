@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-임베딩 재생성 스크립트 (비대화형)
+Embedding regeneration script (non-interactive).
 """
 
 import asyncio
@@ -11,24 +11,24 @@ from app.core.config import Settings
 
 
 async def regenerate_embeddings():
-    """모든 임베딩 재생성"""
+    """Regenerate all embeddings"""
 
     settings = Settings()
     db = Database(db_path=settings.database_path)
     await db.connect()
 
-    # 다국어 모델로 임베딩 서비스 초기화
+    # Initialize embedding service with multilingual model
     model_name = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     embedding_service = EmbeddingService(model_name=model_name, preload=False)
     embedding_service.load_model()
 
     print("=" * 60)
-    print("🔄 임베딩 재생성 시작")
+    print("🔄 Starting embedding regeneration")
     print("=" * 60)
-    print(f"모델: {embedding_service.model_name}")
-    print(f"차원: {embedding_service.dimension}")
+    print(f"Model: {embedding_service.model_name}")
+    print(f"Dimensions: {embedding_service.dimension}")
 
-    # 모든 메모리 가져오기
+    # Fetch all memories
     conn = db.connection
     cursor = conn.execute("""
         SELECT id, content, project_id, category, tags
@@ -37,10 +37,10 @@ async def regenerate_embeddings():
     """)
     memories = cursor.fetchall()
 
-    print(f"총 {len(memories)}개의 메모리 처리 예정")
+    print(f"Scheduled to process {len(memories)} memories in total")
     print()
 
-    # 배치 처리
+    # Batch processing
     batch_size = 100
     updated_count = 0
     error_count = 0
@@ -57,7 +57,7 @@ async def regenerate_embeddings():
             category = memory[3]
             tags = memory[4]
 
-            # 텍스트 준비
+            # Prepare text
             text_parts = [content]
             if category:
                 text_parts.append(f"Category: {category}")
@@ -70,11 +70,11 @@ async def regenerate_embeddings():
             batch_texts.append(full_text)
             batch_ids.append(memory_id)
 
-        # 배치 임베딩 생성
+        # Generate batch embeddings
         try:
             embeddings = embedding_service.embed_batch(batch_texts)
 
-            # 데이터베이스 업데이트
+            # Update database
             for memory_id, embedding in zip(batch_ids, embeddings):
                 binary_embedding = struct.pack(f'{len(embedding)}f', *embedding)
 
@@ -87,22 +87,22 @@ async def regenerate_embeddings():
             conn.commit()
             updated_count += len(batch)
 
-            # 진행상황 표시
+            # Show progress
             progress = (i + len(batch)) / len(memories) * 100
-            print(f"진행: {progress:.1f}% ({updated_count}/{len(memories)})")
+            print(f"Progress: {progress:.1f}% ({updated_count}/{len(memories)})")
 
         except Exception as e:
-            print(f"❌ 배치 처리 오류: {e}")
+            print(f"❌ Batch processing error: {e}")
             error_count += len(batch)
 
-    # 완료
+    # Done
     print()
     print("=" * 60)
-    print("✅ 임베딩 재생성 완료")
+    print("✅ Embedding regeneration complete")
     print("=" * 60)
-    print(f"성공: {updated_count}개")
-    print(f"실패: {error_count}개")
-    print(f"모델: {model_name}")
+    print(f"Succeeded: {updated_count}")
+    print(f"Failed: {error_count}")
+    print(f"Model: {model_name}")
 
     conn.close()
 

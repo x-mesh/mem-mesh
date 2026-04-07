@@ -37,13 +37,13 @@ class MonitoringService:
         Returns:
             집계된 검색 메트릭
         """
-        # 날짜 포맷 결정
+        # Determine date format
         if aggregation == "hourly":
             group_by = "strftime('%Y-%m-%d %H:00:00', timestamp)"
         else:
             group_by = "strftime('%Y-%m-%d', timestamp)"
 
-        # 기본 조건 (빈 쿼리 제외)
+        # Base conditions (exclude empty queries)
         conditions = [
             "timestamp >= ? AND timestamp <= ?",
             "query IS NOT NULL",
@@ -57,7 +57,7 @@ class MonitoringService:
 
         where_clause = " AND ".join(conditions)
 
-        # 시계열 데이터 조회
+        # Query time-series data
         timeseries_query = f"""
             SELECT 
                 {group_by} as period,
@@ -74,7 +74,7 @@ class MonitoringService:
 
         timeseries = await self.database.fetchall(timeseries_query, tuple(params))
 
-        # 전체 요약 통계
+        # Overall summary statistics
         summary_query = f"""
             SELECT 
                 COUNT(*) as total_searches,
@@ -92,7 +92,7 @@ class MonitoringService:
 
         summary = await self.database.fetchone(summary_query, tuple(params))
 
-        # 결과 없음 비율 계산
+        # Calculate no-results rate
         total = summary["total_searches"] if summary["total_searches"] else 0
         no_results = summary["no_results_count"] if summary["no_results_count"] else 0
         no_results_rate = (no_results / total * 100) if total > 0 else 0
@@ -154,17 +154,17 @@ class MonitoringService:
         """
         cutoff_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
 
-        # 정렬 기준 결정
+        # Determine sort criterion
         order_by = {
             "frequency": "search_count DESC",
-            "similarity": "avg_similarity ASC",  # 낮은 유사도 우선
-            "time": "avg_response_time DESC",  # 느린 응답 우선
+            "similarity": "avg_similarity ASC",  # Low similarity first
+            "time": "avg_response_time DESC",  # Slow response first
         }.get(sort_by, "search_count DESC")
 
-        # 빈 쿼리 제외 조건
+        # Condition to exclude empty queries
         non_empty_query = "query IS NOT NULL AND query != ''"
 
-        # 쿼리별 통계
+        # Statistics per query
         query_stats = await self.database.fetchall(
             f"""
             SELECT 
@@ -183,7 +183,7 @@ class MonitoringService:
             (cutoff_date, limit),
         )
 
-        # Top 10 빈도 쿼리
+        # Top 10 frequent queries
         top_queries = await self.database.fetchall(
             f"""
             SELECT query, COUNT(*) as count
@@ -196,7 +196,7 @@ class MonitoringService:
             (cutoff_date,),
         )
 
-        # 낮은 유사도 쿼리 Top 10
+        # Top 10 low-similarity queries
         low_similarity_queries = await self.database.fetchall(
             f"""
             SELECT query, AVG(avg_similarity_score) as avg_similarity, COUNT(*) as count
@@ -210,7 +210,7 @@ class MonitoringService:
             (cutoff_date,),
         )
 
-        # 결과 없음 쿼리
+        # No-results queries
         no_results_queries = await self.database.fetchall(
             f"""
             SELECT query, COUNT(*) as count
@@ -223,7 +223,7 @@ class MonitoringService:
             (cutoff_date,),
         )
 
-        # 쿼리 길이 분포
+        # Query length distribution
         length_distribution = await self.database.fetchall(
             f"""
             SELECT 
@@ -291,7 +291,7 @@ class MonitoringService:
         Returns:
             임베딩 성능 메트릭
         """
-        # 전체 요약
+        # Overall summary
         summary = await self.database.fetchone(
             """
             SELECT 
@@ -307,7 +307,7 @@ class MonitoringService:
             (start_date.isoformat(), end_date.isoformat()),
         )
 
-        # 작업 유형별 통계
+        # Statistics by operation type
         by_operation = await self.database.fetchall(
             """
             SELECT 
@@ -323,7 +323,7 @@ class MonitoringService:
             (start_date.isoformat(), end_date.isoformat()),
         )
 
-        # 시계열 데이터 (시간별)
+        # Time-series data (hourly)
         timeseries = await self.database.fetchall(
             """
             SELECT 
@@ -339,7 +339,7 @@ class MonitoringService:
             (start_date.isoformat(), end_date.isoformat()),
         )
 
-        # 캐시 히트율 계산
+        # Calculate cache hit rate
         total_ops = summary["total_operations"] if summary["total_operations"] else 0
         cache_hits = summary["cache_hits"] if summary["cache_hits"] else 0
         cache_hit_rate = (cache_hits / total_ops * 100) if total_ops > 0 else 0
@@ -443,7 +443,7 @@ class MonitoringService:
         last_24h = (now - timedelta(hours=24)).isoformat()
         last_7d = (now - timedelta(days=7)).isoformat()
 
-        # 최근 24시간 검색 통계
+        # Search statistics for last 24 hours
         search_24h = await self.database.fetchone(
             """
             SELECT 
@@ -457,7 +457,7 @@ class MonitoringService:
             (last_24h,),
         )
 
-        # 최근 7일 검색 통계
+        # Search statistics for last 7 days
         search_7d = await self.database.fetchone(
             """
             SELECT 
@@ -469,7 +469,7 @@ class MonitoringService:
             (last_7d,),
         )
 
-        # 최근 24시간 임베딩 통계
+        # Embedding statistics for last 24 hours
         embedding_24h = await self.database.fetchone(
             """
             SELECT 
@@ -482,7 +482,7 @@ class MonitoringService:
             (last_24h,),
         )
 
-        # 활성 알림 수
+        # Active alert count
         active_alerts = await self.database.fetchone("""
             SELECT COUNT(*) as count
             FROM alerts

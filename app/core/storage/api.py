@@ -58,7 +58,7 @@ class APIStorageBackend(StorageBackend):
         HTTP 클라이언트를 생성하고 서버 연결을 확인합니다.
         """
         try:
-            # HTTP 클라이언트 생성
+            # Create HTTP client
             self.client = httpx.AsyncClient(
                 base_url=self.base_url,
                 timeout=httpx.Timeout(self.timeout),
@@ -68,7 +68,7 @@ class APIStorageBackend(StorageBackend):
                 },
             )
 
-            # 서버 연결 확인 (health check)
+            # Verify server connection (health check)
             await self._check_server_health()
 
             logger.info("APIStorageBackend initialized successfully")
@@ -153,7 +153,7 @@ class APIStorageBackend(StorageBackend):
         try:
             logger.debug(f"Searching memories via API with query: '{params.query}'")
 
-            # GET 요청을 위한 쿼리 파라미터 구성
+            # Build query parameters for GET request
             query_params = {}
             if params.query:
                 query_params["query"] = params.query
@@ -161,9 +161,9 @@ class APIStorageBackend(StorageBackend):
                 query_params["project_id"] = params.project_id
             if params.category:
                 query_params["category"] = params.category
-            if params.limit != 5:  # 기본값이 아닌 경우만
+            if params.limit != 5:  # Only when not default value
                 query_params["limit"] = params.limit
-            if params.recency_weight != 0.0:  # 기본값이 아닌 경우만
+            if params.recency_weight != 0.0:  # Only when not default value
                 query_params["recency_weight"] = params.recency_weight
 
             response_data = await self._make_request_with_retry(
@@ -208,7 +208,7 @@ class APIStorageBackend(StorageBackend):
                 f"Getting context via API for memory_id: {memory_id}, depth: {depth}"
             )
 
-            # 쿼리 파라미터 구성
+            # Build query parameters
             query_params = {"depth": depth}
             if project_id:
                 query_params["project_id"] = project_id
@@ -324,7 +324,7 @@ class APIStorageBackend(StorageBackend):
         try:
             logger.debug(f"Getting stats via API with group_by: {params.group_by}")
 
-            # 쿼리 파라미터 구성
+            # Build query parameters
             query_params = {}
             if params.project_id:
                 query_params["project_id"] = params.project_id
@@ -332,7 +332,7 @@ class APIStorageBackend(StorageBackend):
                 query_params["start_date"] = params.start_date
             if params.end_date:
                 query_params["end_date"] = params.end_date
-            if params.group_by != "overall":  # 기본값이 아닌 경우만
+            if params.group_by != "overall":  # Only when not default value
                 query_params["group_by"] = params.group_by
 
             response_data = await self._make_request_with_retry(
@@ -387,13 +387,13 @@ class APIStorageBackend(StorageBackend):
         """
         last_error = None
 
-        for attempt in range(self.max_retries + 1):  # 첫 시도 + 재시도
+        for attempt in range(self.max_retries + 1):  # First attempt + retries
             try:
                 logger.debug(
                     f"Making {method} request to {url} (attempt {attempt + 1}/{self.max_retries + 1})"
                 )
 
-                # HTTP 요청 실행
+                # Execute HTTP request
                 if method.upper() == "GET":
                     response = await self.client.get(url, params=params)
                 elif method.upper() == "POST":
@@ -407,15 +407,15 @@ class APIStorageBackend(StorageBackend):
                 else:
                     raise ValueError(f"Unsupported HTTP method: {method}")
 
-                # HTTP 상태 코드 확인
+                # Check HTTP status code
                 if response.status_code == 404:
-                    # 404는 재시도하지 않음
+                    # Do not retry 404
                     response.raise_for_status()
                 elif response.status_code >= 400:
-                    # 4xx, 5xx 에러는 재시도 대상
+                    # Retry on 4xx/5xx errors
                     response.raise_for_status()
 
-                # 성공적인 응답 처리
+                # Handle successful response
                 return response.json()
 
             except httpx.TimeoutException as e:
@@ -428,15 +428,15 @@ class APIStorageBackend(StorageBackend):
 
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 404:
-                    # 404는 재시도하지 않고 즉시 실패
+                    # Fail immediately on 404 without retry
                     logger.error(f"Resource not found (404): {e}")
                     raise RuntimeError(f"Resource not found: {e}")
                 elif e.response.status_code >= 500:
-                    # 5xx 서버 에러는 재시도
+                    # Retry on 5xx server errors
                     last_error = e
                     logger.warning(f"Server error (attempt {attempt + 1}): {e}")
                 else:
-                    # 4xx 클라이언트 에러는 재시도하지 않음
+                    # Do not retry 4xx client errors
                     logger.error(f"Client error (4xx): {e}")
                     raise RuntimeError(f"Client error: {e}")
 
@@ -444,13 +444,13 @@ class APIStorageBackend(StorageBackend):
                 last_error = e
                 logger.warning(f"Unexpected error (attempt {attempt + 1}): {e}")
 
-            # 마지막 시도가 아니면 재시도 대기
+            # Wait before retry if not last attempt
             if attempt < self.max_retries:
-                delay = self.retry_delay * (2**attempt)  # 지수 백오프
+                delay = self.retry_delay * (2**attempt)  # Exponential backoff
                 logger.debug(f"Waiting {delay:.1f}s before retry...")
                 await asyncio.sleep(delay)
 
-        # 모든 재시도 실패
+        # All retries failed
         logger.error(f"All retry attempts failed for {method} {url}")
         raise RuntimeError(
             f"Request failed after {self.max_retries + 1} attempts: {last_error}"

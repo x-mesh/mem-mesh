@@ -4,7 +4,6 @@ Shows all relevant environment variables and their current values.
 """
 
 import os
-from pathlib import Path
 
 from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
 from app.cli.hooks.constants import DEFAULT_URL

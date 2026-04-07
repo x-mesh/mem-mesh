@@ -30,14 +30,14 @@ def get_current_user() -> str:
     if _cached_user is not None:
         return _cached_user
 
-    # 1. USER 환경변수 확인
+    # 1. Check USER environment variable
     user = os.environ.get("USER")
     if user:
         _cached_user = user
         logger.debug(f"User detected from USER env: {user}")
         return user
 
-    # 2. whoami 명령어 시도
+    # 2. Try whoami command
     try:
         result = subprocess.run(["whoami"], capture_output=True, text=True, timeout=5)
         if result.returncode == 0 and result.stdout.strip():
@@ -48,7 +48,7 @@ def get_current_user() -> str:
     except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
         logger.debug(f"whoami failed: {e}")
 
-    # 3. 기본값 반환
+    # 3. Return default value
     _cached_user = "default"
     logger.debug("Using default user")
     return _cached_user

@@ -13,7 +13,7 @@ class PromptOptimizer:
     while maintaining context quality
     """
 
-    # 시스템 프롬프트 템플릿 (IDE에서 사용)
+    # System prompt template (used in IDE)
     SYSTEM_PROMPTS = {
         "minimal": """mem-mesh MCP tools:
 - search(q, limit=3): Find memories
@@ -74,11 +74,11 @@ Use category filter for focused searches.""",
         Generate optimized search prompt for minimal tokens
         """
         if mode == "minimal":
-            # 극도로 압축된 프롬프트
+            # Extremely compressed prompt
             return f"Q:{task[:50]}"
 
         elif mode == "efficient":
-            # 효율적인 프롬프트 (권장)
+            # Efficient prompt (recommended)
             project = context.get("project_id", "")
             category_hint = PromptOptimizer._infer_category(task)
 
@@ -126,14 +126,14 @@ Return only essential memories for this task."""
             return "No results"
 
         if format == "minimal":
-            # 극도로 압축: ID와 점수만
+            # Extreme compression: ID and score only
             lines = []
             for r in results[:5]:
                 lines.append(f"{r['id'][:8]}:{r.get('score', 0):.2f}")
             return " ".join(lines)
 
         elif format == "compact":
-            # 압축: ID, 카테고리, 첫 50자
+            # Compressed: ID, category, first 50 chars
             output = []
             for i, r in enumerate(results[:5], 1):
                 content = r.get("content", "")[:50]
@@ -141,7 +141,7 @@ Return only essential memories for this task."""
             return "\n".join(output)
 
         elif format == "standard":
-            # 표준: 구조화된 요약
+            # Standard: structured summary
             output = []
             for i, r in enumerate(results[:3], 1):
                 output.append(f"""
@@ -152,7 +152,7 @@ Return only essential memories for this task."""
             return "\n".join(output)
 
         else:  # full
-            # 전체 (피하는 것이 좋음)
+            # Full (best avoided)
             return json.dumps(results[:2], indent=2)
 
     @staticmethod
@@ -178,11 +178,11 @@ Return only essential memories for this task."""
             "related_summary": [],
         }
 
-        # 관련 메모리 요약 (최대 3개)
+        # Summarize related memories (max 3)
         for mem in related[:3]:
             compressed["related_summary"].append(
                 {
-                    "cat": mem.get("category", "unk")[:4],  # 카테고리 축약
+                    "cat": mem.get("category", "unk")[:4],  # Category abbreviation
                     "sim": round(mem.get("similarity_score", 0), 2),
                     "hint": mem.get("content", "")[:30],
                 }
@@ -211,7 +211,7 @@ Return only essential memories for this task."""
         if not memories:
             return "[No relevant memories]"
 
-        # 우선순위별 정렬
+        # Sort by priority
         if priority == "relevance":
             sorted_memories = sorted(
                 memories, key=lambda x: x.get("similarity_score", 0), reverse=True
@@ -234,28 +234,28 @@ Return only essential memories for this task."""
                 reverse=True,
             )
 
-        # 토큰 예산에 맞춰 압축
+        # Compress to fit token budget
         output = ["[MEMORY CONTEXT]"]
-        token_count = 50  # 헤더 예상 토큰
+        token_count = 50  # Estimated header tokens
 
         for i, mem in enumerate(sorted_memories, 1):
-            # 각 메모리를 압축 형식으로
-            if token_count > max_tokens * 0.8:  # 80% 도달 시 중단
+            # Compress each memory
+            if token_count > max_tokens * 0.8:  # Stop at 80% capacity
                 output.append(f"... +{len(sorted_memories) - i + 1} more")
                 break
 
-            # 카테고리별 다른 압축 수준
+            # Different compression level per category
             category = mem.get("category", "unknown")
             if category in ["bug", "decision"]:
-                # 중요: 더 많은 내용 포함
+                # Important: include more content
                 snippet = mem.get("content", "")[:150]
                 memory_text = f"\n{i}. [{category}] {snippet}"
             else:
-                # 덜 중요: 매우 압축
+                # Less important: highly compressed
                 snippet = mem.get("content", "")[:50]
                 memory_text = f"\n{i}. {snippet[:30]}..."
 
-            # 예상 토큰 수 계산 (대략 4자 = 1토큰)
+            # Estimate token count (roughly 4 chars = 1 token)
             estimated_tokens = len(memory_text) / 4
             if token_count + estimated_tokens > max_tokens:
                 break
@@ -273,9 +273,9 @@ class SmartMCPClient:
 
     def __init__(self, optimizer: PromptOptimizer):
         self.optimizer = optimizer
-        self.cache = {}  # 로컬 캐시
+        self.cache = {}  # Local cache
         self.last_search = None
-        self.token_budget = 4000  # 기본 토큰 예산
+        self.token_budget = 4000  # Default token budget
 
     async def smart_search(
         self, query: str, use_cache: bool = True, compress: bool = True
@@ -283,15 +283,15 @@ class SmartMCPClient:
         """
         Smart search with caching and compression
         """
-        # 캐시 확인
+        # Check cache
         cache_key = f"search:{query[:50]}"
         if use_cache and cache_key in self.cache:
             return f"[CACHED] {self.cache[cache_key]}"
 
-        # 검색 수행 (MCP 도구 호출)
+        # Perform search (MCP tool call)
         results = await self._mcp_search(query, limit=3)
 
-        # 압축
+        # Compress
         if compress:
             compressed = self.optimizer.compress_search_results(
                 results, max_tokens=500, format="compact"
@@ -299,7 +299,7 @@ class SmartMCPClient:
         else:
             compressed = json.dumps(results)
 
-        # 캐시 저장
+        # Save to cache
         self.cache[cache_key] = compressed
         self.last_search = results
 
@@ -309,13 +309,13 @@ class SmartMCPClient:
         """
         Smart context retrieval with progressive depth
         """
-        # 얕은 깊이부터 시작
+        # Start with shallow depth
         context = await self._mcp_context(memory_id, depth=1)
 
-        # 압축
+        # Compress
         compressed = self.optimizer.compress_context_response(context, max_tokens=800)
 
-        # 필요시에만 깊이 증가
+        # Increase depth only when needed
         if len(compressed.get("related_summary", [])) < 2 and max_depth > 1:
             context = await self._mcp_context(memory_id, depth=2)
             compressed = self.optimizer.compress_context_response(
@@ -337,7 +337,7 @@ class SmartMCPClient:
         )
 
 
-# 사용 예시 프롬프트 템플릿
+# Example usage prompt template
 EXAMPLE_PROMPTS = {
     "efficient_task": """
 I need to {task_description}.

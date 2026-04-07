@@ -6,8 +6,11 @@ PKCE, 시크릿 생성, 해싱 등 유틸리티 함수.
 
 import base64
 import hashlib
+import logging
 import secrets
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def generate_client_id(prefix: str = "mem_") -> str:
@@ -123,7 +126,8 @@ def verify_pkce(
             code_verifier, code_challenge_method
         )
         return secrets.compare_digest(expected_challenge, code_challenge)
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Failed to verify code challenge: {e}")
         return False
 
 

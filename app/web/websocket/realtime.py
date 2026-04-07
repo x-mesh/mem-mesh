@@ -38,13 +38,13 @@ class ConnectionManager:
     """WebSocket 연결 관리자"""
 
     def __init__(self):
-        # 활성 연결들
+        # Active connections
         self.active_connections: Dict[str, WebSocket] = {}
-        # 프로젝트별 구독자들
+        # Per-project subscribers
         self.project_subscribers: Dict[str, Set[str]] = {}
-        # 전체 구독자들
+        # All subscribers
         self.global_subscribers: Set[str] = set()
-        # 하트비트 태스크들
+        # Heartbeat tasks
         self.heartbeat_tasks: Dict[str, asyncio.Task] = {}
 
     async def connect(self, websocket: WebSocket, client_id: str) -> None:
@@ -53,14 +53,14 @@ class ConnectionManager:
         self.active_connections[client_id] = websocket
         self.global_subscribers.add(client_id)
 
-        # 하트비트 시작
+        # Start heartbeat
         self.heartbeat_tasks[client_id] = asyncio.create_task(
             self._heartbeat_loop(client_id)
         )
 
         logger.info(f"WebSocket client connected: {client_id}")
 
-        # 연결 확인 메시지 전송
+        # Send connection confirmation message
         await self.send_to_client(
             client_id,
             {
@@ -81,11 +81,11 @@ class ConnectionManager:
         if client_id in self.global_subscribers:
             self.global_subscribers.remove(client_id)
 
-        # 프로젝트 구독에서 제거
+        # Remove from project subscription
         for project_id, subscribers in self.project_subscribers.items():
             subscribers.discard(client_id)
 
-        # 하트비트 태스크 취소
+        # Cancel heartbeat task
         if client_id in self.heartbeat_tasks:
             self.heartbeat_tasks[client_id].cancel()
             del self.heartbeat_tasks[client_id]
@@ -105,7 +105,7 @@ class ConnectionManager:
         if project_id in self.project_subscribers:
             self.project_subscribers[project_id].discard(client_id)
 
-            # 구독자가 없으면 프로젝트 제거
+            # Remove project if no subscribers remain
             if not self.project_subscribers[project_id]:
                 del self.project_subscribers[project_id]
 
@@ -136,7 +136,7 @@ class ConnectionManager:
             else:
                 disconnected_clients.append(client_id)
 
-        # 연결 해제된 클라이언트 정리
+        # Clean up disconnected clients
         for client_id in disconnected_clients:
             self.disconnect(client_id)
 
@@ -158,7 +158,7 @@ class ConnectionManager:
             else:
                 disconnected_clients.append(client_id)
 
-        # 연결 해제된 클라이언트 정리
+        # Clean up disconnected clients
         for client_id in disconnected_clients:
             self.disconnect(client_id)
 
@@ -168,7 +168,7 @@ class ConnectionManager:
         """하트비트 루프"""
         try:
             while client_id in self.active_connections:
-                await asyncio.sleep(30)  # 30초마다 하트비트
+                await asyncio.sleep(30)  # Heartbeat every 30 seconds
 
                 if client_id in self.active_connections:
                     success = await self.send_to_client(
@@ -196,23 +196,23 @@ class ConnectionManager:
             f"Disconnecting all WebSocket clients ({len(self.active_connections)} connections)"
         )
 
-        # 모든 하트비트 태스크 취소 (빠른 정리)
+        # Cancel all heartbeat tasks (fast cleanup)
         for task in list(self.heartbeat_tasks.values()):
             if not task.done():
                 task.cancel()
 
-        # 모든 WebSocket 연결 닫기 (타임아웃 설정)
+        # Close all WebSocket connections (with timeout)
         close_tasks = []
         for client_id, websocket in list(self.active_connections.items()):
             try:
-                # 비동기로 연결 닫기
+                # Close connection asynchronously
                 close_tasks.append(websocket.close(code=1001, reason="Server shutdown"))
             except Exception as e:
                 logger.warning(
                     f"Error preparing to close WebSocket for client {client_id}: {e}"
                 )
 
-        # 모든 연결 닫기를 병렬로 실행 (최대 2초 대기)
+        # Close all connections in parallel (wait up to 2 seconds)
         if close_tasks:
             try:
                 await asyncio.wait_for(
@@ -221,7 +221,7 @@ class ConnectionManager:
             except asyncio.TimeoutError:
                 logger.warning("WebSocket close operations timed out")
 
-        # 모든 데이터 정리
+        # Clear all data
         self.active_connections.clear()
         self.global_subscribers.clear()
         self.project_subscribers.clear()
@@ -241,7 +241,7 @@ class ConnectionManager:
         }
 
 
-# 전역 연결 관리자
+# Global connection manager
 connection_manager = ConnectionManager()
 
 
@@ -371,7 +371,7 @@ class RealtimeNotifier:
         logger.debug(f"Stats updated notification sent to {total_sent} clients")
 
 
-# WebSocket 엔드포인트
+# WebSocket endpoint
 @router.websocket("/realtime")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     """실시간 업데이트 WebSocket 엔드포인트"""
@@ -379,7 +379,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
     try:
         while True:
-            # 클라이언트로부터 메시지 수신
+            # Receive message from client
             data = await websocket.receive_text()
 
             try:
@@ -451,5 +451,5 @@ async def websocket_stats():
     return connection_manager.get_stats()
 
 
-# 전역 notifier 인스턴스
+# Global notifier instance
 notifier = RealtimeNotifier()

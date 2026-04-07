@@ -15,7 +15,7 @@ MCP Tool Descriptions - 16개 도구 설명의 Single Source of Truth.
 """
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
-    # ===== T1: 매 세션 사용 (2-3문장 + 예시 1개) =====
+    # ===== T1: Used every session (2-3 sentences + 1 example) =====
     "session_resume": (
         "Resume the last session for a project. "
         "Call at the START of every conversation to restore active pins and context. "
@@ -50,7 +50,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "End the current session for a project. "
         "Call when work is done. Optionally provide a summary for session history."
     ),
-    # ===== T2: 자주 사용 (1-2문장) =====
+    # ===== T2: Frequently used (1-2 sentences) =====
     "context": (
         "Retrieve a memory and its related neighbors by memory_id. "
         "Use after search to explore connections between memories."
@@ -60,7 +60,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Execute multiple add/search operations in a single call. "
         "Reduces round-trips and token usage by 30-50%."
     ),
-    # ===== T3: 가끔 사용 (1문장) =====
+    # ===== T3: Occasionally used (1 sentence) =====
     "delete": "Permanently delete a memory by memory_id.",
     "stats": "Get memory count, category breakdown, and project distribution statistics.",
     "pin_promote": "Promote a completed pin to a permanent memory for long-term retention.",

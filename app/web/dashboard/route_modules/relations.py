@@ -39,7 +39,7 @@ async def create_relation(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Create relation error: {e}")
-        # UNIQUE constraint 위반 처리
+        # Handle UNIQUE constraint violation
         if "UNIQUE constraint" in str(e):
             raise HTTPException(status_code=409, detail="Relation already exists")
         raise HTTPException(status_code=500, detail=str(e))

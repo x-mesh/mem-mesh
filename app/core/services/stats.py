@@ -40,7 +40,7 @@ class StatsService:
         start_time = time.time()
 
         try:
-            # 기본 필터 조건 구성
+            # Build base filter conditions
             where_conditions = []
             params = []
 
@@ -60,12 +60,12 @@ class StatsService:
             if where_conditions:
                 where_clause = "WHERE " + " AND ".join(where_conditions)
 
-            # 총 메모리 수 조회
+            # Query total memory count
             total_query = f"SELECT COUNT(*) as total FROM memories {where_clause}"
             total_result = await self.db.fetchone(total_query, tuple(params))
             total_memories = total_result["total"] if total_result else 0
 
-            # 고유 프로젝트 수 조회
+            # Query unique project count
             unique_projects_query = f"""
                 SELECT COUNT(DISTINCT project_id) as unique_projects 
                 FROM memories 
@@ -74,29 +74,29 @@ class StatsService:
             unique_result = await self.db.fetchone(unique_projects_query, tuple(params))
             unique_projects = unique_result["unique_projects"] if unique_result else 0
 
-            # 카테고리별 분포
+            # Distribution by category
             categories_breakdown = await self.get_category_stats(
                 project_id, start_date, end_date
             )
 
-            # 소스별 분포
+            # Distribution by source
             sources_breakdown = await self.get_source_stats(
                 project_id, start_date, end_date
             )
 
-            # 클라이언트 도구별 분포
+            # Distribution by client tool
             clients_breakdown = await self.get_client_stats(
                 project_id, start_date, end_date
             )
 
-            # 프로젝트별 분포 (project_id 필터가 없는 경우에만)
+            # Distribution by project (only when no project_id filter)
             projects_breakdown = {}
             if not project_id:
                 projects_breakdown = await self.get_project_stats(
                     None, start_date, end_date
                 )
 
-            # 날짜 범위 정보
+            # Date range info
             date_range = None
             if start_date or end_date:
                 date_range = {}
@@ -342,7 +342,7 @@ class StatsService:
             프로젝트별 상세 통계 리스트
         """
         try:
-            # 프로젝트별 기본 통계
+            # Basic statistics per project
             query = """
                 SELECT
                     COALESCE(project_id, 'default') as project_id,
@@ -357,12 +357,12 @@ class StatsService:
 
             projects = await self.db.fetchall(query, ())
 
-            # 각 프로젝트의 카테고리와 태그 집계
+            # Aggregate categories and tags per project
             result = []
             for project in projects:
                 pid = project["project_id"]
 
-                # 카테고리 조회
+                # Query categories
                 cat_query = """
                     SELECT DISTINCT category 
                     FROM memories 
@@ -370,7 +370,7 @@ class StatsService:
                 """
                 categories = await self.db.fetchall(cat_query, (pid,))
 
-                # 태그 조회
+                # Query tags
                 tag_query = """
                     SELECT DISTINCT value as tag
                     FROM memories m, json_each(CASE 
@@ -405,7 +405,7 @@ class StatsService:
             logger.error(f"Failed to get projects detail: {e}")
             raise
 
-    # ===== Work Tracking System 통계 =====
+    # ===== Work Tracking System Statistics =====
 
     async def get_pin_stats(
         self, project_id: Optional[str] = None, user_id: Optional[str] = None
@@ -436,7 +436,7 @@ class StatsService:
             if where_conditions:
                 where_clause = "WHERE " + " AND ".join(where_conditions)
 
-            # 상태별 Pin 수
+            # Pin count by status
             status_query = f"""
                 SELECT 
                     status,
@@ -448,10 +448,10 @@ class StatsService:
             status_results = await self.db.fetchall(status_query, tuple(params))
             status_breakdown = {row["status"]: row["count"] for row in status_results}
 
-            # 총 Pin 수
+            # Total pin count
             total_pins = sum(status_breakdown.values())
 
-            # 평균 Lead Time (완료된 Pin만)
+            # Average lead time (completed pins only)
             lead_time_query = f"""
                 SELECT 
                     AVG((julianday(completed_at) - julianday(created_at)) * 24) as avg_lead_time_hours,
@@ -475,7 +475,7 @@ class StatsService:
             )
             lead_time_result["completed_count"] if lead_time_result else 0
 
-            # 중요도별 분포
+            # Distribution by importance
             importance_query = f"""
                 SELECT 
                     importance,
@@ -645,7 +645,7 @@ class StatsService:
             if where_conditions:
                 where_clause = "WHERE " + " AND ".join(where_conditions)
 
-            # 상태별 Session 수
+            # Session count by status
             status_query = f"""
                 SELECT 
                     status,
@@ -657,10 +657,10 @@ class StatsService:
             status_results = await self.db.fetchall(status_query, tuple(params))
             status_breakdown = {row["status"]: row["count"] for row in status_results}
 
-            # 총 Session 수
+            # Total session count
             total_sessions = sum(status_breakdown.values())
 
-            # 평균 세션 시간 (완료된 세션만)
+            # Average session duration (completed sessions only)
             duration_query = f"""
                 SELECT 
                     AVG((julianday(ended_at) - julianday(started_at)) * 24) as avg_duration_hours

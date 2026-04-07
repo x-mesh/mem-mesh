@@ -213,7 +213,8 @@ async def search_with_context(
                     "strategy": getattr(optimized_context, "strategy", None),
                     "token_budget": getattr(optimized_context, "token_budget", None),
                 }
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Failed to serialize optimized context: {e}")
                 context_dict = {"raw": str(optimized_context)}
 
         return ContextSearchResponse(

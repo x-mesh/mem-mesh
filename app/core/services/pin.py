@@ -49,7 +49,7 @@ def _parse_tags(raw: object) -> List[str]:
 
 
 
-# 유효한 상태 전이 정의 (Kanban 드래그 앤 드롭을 위해 모든 전이 허용)
+# Valid state transitions (all transitions allowed for Kanban drag-and-drop)
 VALID_TRANSITIONS = {
     "open": {"open", "in_progress", "completed"},
     "in_progress": {"open", "in_progress", "completed"},
@@ -63,7 +63,7 @@ class PinService:
     def __init__(self, db: Database, embedding_service=None):
         self.db = db
         self._embedding_service = embedding_service
-        # SessionService는 순환 참조 방지를 위해 lazy import
+        # Lazy import SessionService to prevent circular references
         self._session_service = None
 
     @property
@@ -108,14 +108,14 @@ class PinService:
         if not client:
             client = os.environ.get("MEM_MESH_CLIENT") or client_type
 
-        # 활성 세션 가져오기 (없으면 자동 생성)
+        # Get active session (auto-create if none)
         session = await self.session_service.get_or_create_active_session(
             project_id, effective_user_id,
             ide_session_id=ide_session_id,
             client_type=client_type,
         )
 
-        # 중요도 기본값
+        # Default importance
         effective_importance = importance if importance is not None else 3
 
         pin_id = str(uuid4())
@@ -184,7 +184,7 @@ class PinService:
         if not pin:
             return None
 
-        # 상태 전이 검증
+        # Validate state transition
         if update.status and update.status != pin.status:
             if update.status not in VALID_TRANSITIONS.get(pin.status, set()):
                 raise InvalidStatusTransitionError(pin.status, update.status)
@@ -202,12 +202,12 @@ class PinService:
                     updates.append(f"{field} = ?")
                     params.append(value)
 
-        # status→completed: completed_at 자동 설정
+        # status→completed: auto-set completed_at
         if update.status == "completed" and pin.status != "completed":
             now_ts = datetime.now(timezone.utc).isoformat()
             updates.append("completed_at = ?")
             params.append(now_ts)
-        # completed→다른 상태: completed_at 클리어
+        # completed→other state: clear completed_at
         elif update.status and update.status != "completed" and pin.status == "completed":
             updates.append("completed_at = ?")
             params.append(None)
@@ -249,7 +249,7 @@ class PinService:
         if pin.status == "completed":
             raise PinAlreadyCompletedError(f"Pin already completed: {pin_id}")
 
-        # open → completed는 허용 (in_progress 건너뛰기)
+        # open → completed is allowed (skip in_progress)
         if pin.status not in ("open", "in_progress"):
             raise InvalidStatusTransitionError(pin.status, "completed")
 
@@ -267,15 +267,15 @@ class PinService:
 
         logger.info(f"Completed pin: {pin_id}")
 
-        # 재쿼리 없이 기존 pin 데이터로 응답 구성
+        # Build response from existing pin data without re-querying
         lead_time_hours = None
         if pin.created_at:
             try:
                 created = datetime.fromisoformat(pin.created_at.replace("Z", "+00:00"))
                 completed = datetime.fromisoformat(now.replace("Z", "+00:00"))
                 lead_time_hours = (completed - created).total_seconds() / 3600
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to calculate lead time: {e}")
 
         return PinResponse(
             id=pin.id,
@@ -314,7 +314,7 @@ class PinService:
         if not pin:
             raise PinNotFoundError(f"Pin not found: {pin_id}")
 
-        # 중복 승격 방지: 이미 승격된 핀인지 확인
+        # Prevent duplicate promotion: check if pin is already promoted
         if pin.promoted_to_memory_id:
             logger.info(
                 f"Pin {pin_id} already promoted to memory {pin.promoted_to_memory_id}"
@@ -326,19 +326,19 @@ class PinService:
                 "already_promoted": True,
             }
 
-        # Memory 생성 (MemoryService 사용)
+        # Create Memory (using MemoryService)
         from app.core.embeddings.service import EmbeddingService
         from app.core.services.memory import MemoryService
 
-        # EmbeddingService: DI된 인스턴스 재사용, 없으면 새로 생성
+        # EmbeddingService: reuse DI instance, or create new one if not available
         embedding_service = self._embedding_service or EmbeddingService(preload=False)
         memory_service = MemoryService(self.db, embedding_service)
 
-        # importance를 tags에 보존 (Memory에는 importance 필드가 없음)
+        # Preserve importance in tags (Memory has no importance field)
         promote_tags = list(pin.tags) if pin.tags else []
         promote_tags.append(f"importance:{pin.importance}")
 
-        # Memory 생성 → Pin 업데이트 (Memory 생성 실패 시 Pin 변경 없음)
+        # Create Memory → Update Pin (no Pin change if Memory creation fails)
         now = datetime.now(timezone.utc).isoformat()
         memory_response = await memory_service.create(
             content=pin.content,
@@ -349,7 +349,7 @@ class PinService:
             skip_quality_gate=True,
         )
 
-        # Pin에 promoted_to_memory_id 기록 (삭제하지 않고 유지)
+        # Record promoted_to_memory_id on Pin (keep pin without deleting)
         await self.db.execute(
             """
             UPDATE pins
@@ -362,7 +362,7 @@ class PinService:
 
         logger.info(f"Promoted pin {pin_id} to memory {memory_response.id}")
 
-        # 자동 관계 생성 (트랜잭션 밖 — 실패해도 승격은 유지)
+        # Auto-create relations (outside transaction — promotion preserved even if this fails)
         auto_linked = await self._auto_link_session_memories(
             pin.session_id, memory_response.id
         )
@@ -535,7 +535,7 @@ class PinService:
         """DB row를 PinResponse로 변환"""
         tags = _parse_tags(row["tags"])
 
-        # lead_time 계산
+        # Calculate lead_time
         lead_time_hours = None
         if row["completed_at"] and row["created_at"]:
             try:
@@ -546,11 +546,11 @@ class PinService:
                     row["completed_at"].replace("Z", "+00:00")
                 )
                 lead_time_hours = (completed - created).total_seconds() / 3600
-            except Exception:
+            except Exception as e:
                 # Silently ignore errors when calculating lead time - use None if calculation fails
-                pass
+                logger.debug(f"Failed to calculate lead time: {e}")
 
-        # 새로운 컬럼 안전하게 접근
+        # Safely access new columns
         try:
             estimated_tokens = (
                 row["estimated_tokens"] if row["estimated_tokens"] is not None else 0
@@ -620,24 +620,24 @@ class PinService:
         query = "SELECT * FROM pins WHERE session_id = ?"
         params = [session_id]
 
-        # importance 필터
+        # Importance filter
         if min_importance is not None:
             query += " AND importance >= ?"
             params.append(min_importance)
 
-        # status 필터
+        # Status filter
         if status:
             query += " AND status = ?"
             params.append(status)
 
-        # tags 필터 (AND 조건)
+        # Tags filter (AND condition)
         if tags:
             for tag in tags:
-                # JSON 배열에서 태그 검색
+                # Search tags in JSON array
                 query += " AND tags LIKE ?"
                 params.append(f'%"{tag}"%')
 
-        # 정렬 및 제한
+        # Sort and limit
         query += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
 
@@ -660,7 +660,7 @@ class PinService:
                 "promotion_candidates": int
             }
         """
-        # 상태별 집계
+        # Aggregate by status
         status_rows = await self.db.fetchall(
             "SELECT status, COUNT(*) as cnt FROM pins WHERE session_id = ? GROUP BY status",
             (session_id,),
@@ -671,7 +671,7 @@ class PinService:
             by_status[row["status"]] = row["cnt"]
             total += row["cnt"]
 
-        # 중요도별 집계
+        # Aggregate by importance
         importance_rows = await self.db.fetchall(
             "SELECT importance, COUNT(*) as cnt FROM pins WHERE session_id = ? GROUP BY importance",
             (session_id,),
@@ -680,7 +680,7 @@ class PinService:
         for row in importance_rows:
             by_importance[row["importance"]] = row["cnt"]
 
-        # 평균 lead time + 승격 후보 (단일 쿼리)
+        # Average lead time + promotion candidates (single query)
         agg_row = await self.db.fetchone(
             """
             SELECT

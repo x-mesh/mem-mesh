@@ -26,10 +26,10 @@ def create_mcp_app() -> FastAPI:
     setup_middleware(app)
     setup_exception_handlers(app)
 
-    # MCP 라우터만 등록
+    # Register MCP router only
     app.include_router(mcp_sse.router)
 
-    # 헬스체크 엔드포인트
+    # Health check endpoint
     @app.get("/health")
     async def health_check():
         return {"status": "healthy", "service": "mcp-sse"}
@@ -37,5 +37,5 @@ def create_mcp_app() -> FastAPI:
     return app
 
 
-# 앱 인스턴스
+# App instance
 app = create_mcp_app()

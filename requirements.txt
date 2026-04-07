@@ -1,7 +1,7 @@
-# mem-mesh - 중앙 메모리 서버
-# 벡터 검색과 맥락 조회를 지원하는 개발자용 메모리 관리 시스템
+# mem-mesh - Centralized Memory Server
+# Vector search and context retrieval for AI development tools
 
-# PyTorch CPU-only index (NVIDIA 패키지 제외, ~2-3GB 절약)
+# PyTorch CPU-only index (excludes NVIDIA packages, saves ~2-3GB)
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Core web framework
@@ -27,7 +27,7 @@ requests>=2.31.0,<3.0.0
 
 # Database and vector search
 sqlite-vec>=0.0.1a12
-# pysqlite3는 Python 3.13에서 불필요 (내장 sqlite3 사용)
+# pysqlite3 is not needed on Python 3.13+ (built-in sqlite3 is sufficient)
 
 # Basic utilities
 numpy>=1.24.0,<2.0.0
@@ -36,8 +36,8 @@ psutil>=5.9.0,<6.0.0
 # Machine learning and embeddings (CPU-only)
 torch
 sentence-transformers>=2.2.2,<4.0.0
-# torch는 sentence-transformers의 의존성으로 자동 설치됨
-# --extra-index-url로 CPU 전용 빌드 사용 (NVIDIA 패키지 제외)
+# torch is auto-installed as a dependency of sentence-transformers
+# Uses CPU-only build via --extra-index-url (excludes NVIDIA packages)
 transformers>=4.30.0,<5.0.0
 
 # Token counting
@@ -48,4 +48,5 @@ tiktoken>=0.5.0,<1.0.0
 # pytest-asyncio>=0.21.0
 # black>=23.0.0
 # isort>=5.12.0
+# ruff>=0.4.0
 # mypy>=1.7.0

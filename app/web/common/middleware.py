@@ -23,7 +23,7 @@ class NoCacheStaticMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
 
-        # static 파일 요청에 대해 캐시 비활성화
+        # Disable cache for static file requests
         if request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
             response.headers["Pragma"] = "no-cache"
@@ -36,10 +36,10 @@ def setup_middleware(app: FastAPI) -> None:
     """미들웨어 설정"""
     settings = get_settings()
 
-    # Static 파일 캐시 비활성화 미들웨어 (개발용)
+    # Middleware to disable static file cache (for development)
     app.add_middleware(NoCacheStaticMiddleware)
 
-    # CORS 미들웨어 추가
+    # Add CORS middleware
     origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,

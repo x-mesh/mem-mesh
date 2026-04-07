@@ -42,10 +42,10 @@ def create_dashboard_app() -> FastAPI:
 
     setup_exception_handlers(app)
 
-    # 정적 파일 서빙
+    # Serve static files
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
-    # 라우터 등록 (MCP 제외)
+    # Register routers (excluding MCP)
     app.include_router(websocket_router)
     app.include_router(monitoring_router)
     app.include_router(dashboard_routes.router)
@@ -54,5 +54,5 @@ def create_dashboard_app() -> FastAPI:
     return app
 
 
-# 앱 인스턴스
+# App instance
 app = create_dashboard_app()

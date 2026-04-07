@@ -36,13 +36,13 @@ class RelationService:
 
     async def create_relation(self, data: RelationCreate) -> Relation:
         """관계 생성"""
-        # 메모리 존재 확인
+        # Verify memory exists
         if not await self._memory_exists(data.source_id):
             raise MemoryNotFoundError(f"Source memory not found: {data.source_id}")
         if not await self._memory_exists(data.target_id):
             raise MemoryNotFoundError(f"Target memory not found: {data.target_id}")
 
-        # 자기 참조 방지
+        # Prevent self-reference
         if data.source_id == data.target_id:
             raise ValueError("Cannot create relation to self")
 
@@ -188,7 +188,7 @@ class RelationService:
 
             visited.add(current_id)
 
-            # 현재 노드의 관계 조회
+            # Query relations for current node
             node_relations = await self.get_relations_for_memory(
                 current_id,
                 direction="both",
@@ -196,20 +196,20 @@ class RelationService:
             )
 
             for rel in node_relations:
-                # 관계 유형 필터
+                # Filter by relation type
                 if relation_types and rel.relation_type not in relation_types:
                     continue
 
                 relations.append(rel)
 
-                # 다음 탐색 대상 추가
+                # Add to next traversal targets
                 next_id = (
                     rel.target_id if rel.source_id == current_id else rel.source_id
                 )
                 if next_id not in visited:
                     queue.append((next_id, current_depth + 1))
 
-        # 중복 제거
+        # Remove duplicates
         seen_ids = set()
         unique_relations = []
         for rel in relations:
@@ -249,12 +249,12 @@ class RelationService:
         limit: int = 5,
     ) -> List[Relation]:
         """벡터 유사도 기반 자동 연결"""
-        # 현재 메모리의 임베딩으로 유사한 메모리 검색
-        # Note: 실제 구현은 EmbeddingService와 연동 필요
-        # 여기서는 기본 구조만 제공
+        # Search similar memories using current memory's embedding
+        # Note: actual implementation requires integration with EmbeddingService
+        # Only basic structure provided here
 
         created_relations = []
-        # TODO: 벡터 검색 연동 후 구현
+        # TODO: implement after vector search integration
 
         return created_relations
 

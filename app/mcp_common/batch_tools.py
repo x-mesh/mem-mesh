@@ -75,16 +75,16 @@ class BatchOperationHandler:
         errors = []
 
         try:
-            # 배치 임베딩 생성
+            # Generate batch embeddings
             logger.info(f"Generating batch embeddings for {len(contents)} memories")
             embeddings = self.embedding_service.embed_batch(contents)
 
-            # 각 메모리 저장
+            # Save each memory
             for i, content in enumerate(contents):
                 try:
                     item_category = (categories[i] if categories and i < len(categories) else None) or category
                     item_tags = (tags_list[i] if tags_list and i < len(tags_list) else None) or tags
-                    # 임베딩과 함께 메모리 추가
+                    # Add memory with embedding
                     memory = await self.memory_service.add_with_embedding(
                         content=content,
                         embedding=embeddings[i],
@@ -104,7 +104,7 @@ class BatchOperationHandler:
                         }
                     )
 
-                    # WebSocket 실시간 알림
+                    # WebSocket realtime notification
                     if self._notifier:
                         try:
                             memory_data = {
@@ -143,8 +143,8 @@ class BatchOperationHandler:
 
         elapsed_time = (datetime.now() - start_time).total_seconds()
 
-        # 토큰 절감 계산 (배치 처리로 인한 예상 절감)
-        tokens_saved = len(contents) * 10  # 각 개별 임베딩 요청당 약 10 토큰 절감
+        # Calculate token savings (estimated savings from batch processing)
+        tokens_saved = len(contents) * 10  # ~10 tokens saved per individual embedding request
 
         return {
             "status": "success",
@@ -181,7 +181,7 @@ class BatchOperationHandler:
         results = {}
         cache_hits = 0
 
-        # 배치 임베딩 생성 (캐시되지 않은 쿼리들만)
+        # Generate batch embeddings (uncached queries only)
         uncached_queries = []
         cached_embeddings = {}
 
@@ -193,7 +193,7 @@ class BatchOperationHandler:
             else:
                 uncached_queries.append(query)
 
-        # 캐시되지 않은 쿼리들에 대해 배치 임베딩 생성
+        # Generate batch embeddings for uncached queries
         if uncached_queries:
             logger.info(
                 f"Generating batch embeddings for {len(uncached_queries)} uncached queries"
@@ -202,15 +202,15 @@ class BatchOperationHandler:
                 uncached_queries, is_query=True
             )
 
-            # 캐시에 저장
+            # Save to cache
             for query, embedding in zip(uncached_queries, new_embeddings):
                 await self.cache_manager.cache_embedding(query, embedding)
                 cached_embeddings[query] = embedding
 
-        # 각 쿼리에 대해 검색 수행
+        # Perform search for each query
         for query in queries:
             try:
-                # 캐시된 검색 결과 확인
+                # Check cached search results
                 cached_result = await self.cache_manager.get_cached_search(
                     query=query, project_id=project_id, category=category, limit=limit
                 )
@@ -228,7 +228,7 @@ class BatchOperationHandler:
                     }
                     cache_hits += 1
                 else:
-                    # 새로운 검색 수행
+                    # Perform new search
                     search_result = await self.search_service.search(
                         query=query,
                         project_id=project_id,
@@ -247,7 +247,7 @@ class BatchOperationHandler:
                 results[query] = {"status": "failed", "error": str(e)}
 
         elapsed_time = (datetime.now() - start_time).total_seconds()
-        tokens_saved = cache_hits * 50  # 각 캐시 히트당 약 50 토큰 절감
+        tokens_saved = cache_hits * 50  # ~50 tokens saved per cache hit
 
         return {
             "status": "success",
@@ -273,7 +273,7 @@ class BatchOperationHandler:
         start_time = datetime.now()
         results = []
 
-        # 작업 타입별로 분류
+        # Classify by operation type
         add_operations = []
         search_operations = []
         pin_add_operations = []
@@ -290,7 +290,7 @@ class BatchOperationHandler:
             elif op["type"] == "pin_complete":
                 pin_complete_operations.append(op)
 
-        # 배치 추가 작업 처리
+        # Process batch add operations
         if add_operations:
             contents = [op.get("content", "") for op in add_operations]
             logger.info(
@@ -313,10 +313,10 @@ class BatchOperationHandler:
                 f"batch_add_result status: {batch_add_result.get('status')}, results count: {len(batch_add_result.get('results', []))}, errors count: {len(batch_add_result.get('errors', []))}"
             )
 
-            # 결과를 원래 인덱스에 매핑
+            # Map results to original indices
             if batch_add_result.get("status") == "success":
                 for i, op in enumerate(add_operations):
-                    # batch_add_result["results"]는 리스트이고, 각 항목에 index가 있음
+                    # batch_add_result["results"] is a list where each item has an index
                     add_results = batch_add_result.get("results", [])
                     logger.info(
                         f"Mapping add operation {i}: op_index={op['index']}, add_results_len={len(add_results)}"
@@ -333,7 +333,7 @@ class BatchOperationHandler:
                         )
                         logger.info(f"Added result for index {op['index']}")
             else:
-                # 배치 추가 실패 시 모든 작업을 실패로 표시
+                # Mark all operations as failed on batch add failure
                 for op in add_operations:
                     results.append(
                         {
@@ -344,7 +344,7 @@ class BatchOperationHandler:
                         }
                     )
 
-        # 배치 검색 작업 처리
+        # Process batch search operations
         if search_operations:
             queries = [op.get("query", "") for op in search_operations]
             batch_search_result = await self.batch_search(
@@ -354,7 +354,7 @@ class BatchOperationHandler:
                 limit=search_operations[0].get("limit", 5),
             )
 
-            # 결과를 원래 인덱스에 매핑
+            # Map results to original indices
             if batch_search_result.get("status") == "success":
                 for op in search_operations:
                     query = op.get("query", "")
@@ -390,7 +390,7 @@ class BatchOperationHandler:
                             }
                         )
             else:
-                # 배치 검색 실패 시 모든 작업을 실패로 표시
+                # Mark all operations as failed on batch search failure
                 for op in search_operations:
                     results.append(
                         {
@@ -401,7 +401,7 @@ class BatchOperationHandler:
                         }
                     )
 
-        # 배치 pin_add 작업 처리
+        # Process batch pin_add operations
         if pin_add_operations:
             from ..core.services.importance_analyzer import ImportanceAnalyzer
             from ..core.services.pin import PinService
@@ -449,7 +449,7 @@ class BatchOperationHandler:
                         }
                     )
 
-        # 배치 pin_complete 작업 처리
+        # Process batch pin_complete operations
         if pin_complete_operations:
             from ..core.errors import PinAlreadyCompletedError
             from ..core.services.pin import PinService
@@ -499,7 +499,7 @@ class BatchOperationHandler:
                         }
                     )
 
-        # 인덱스 순으로 정렬
+        # Sort by index order
         results.sort(key=lambda x: x["index"])
 
         elapsed_time = (datetime.now() - start_time).total_seconds()

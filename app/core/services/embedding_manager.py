@@ -34,17 +34,17 @@ class EmbeddingManagerService:
 
     async def get_status(self) -> Dict[str, Any]:
         """현재 임베딩 모델 상태 조회"""
-        # DB에 저장된 모델 정보
+        # Model info stored in DB
         stored_model = await self.db.get_embedding_metadata("embedding_model")
         stored_dim_str = await self.db.get_embedding_metadata("embedding_dimension")
         stored_dim = int(stored_dim_str) if stored_dim_str else None
         last_migration = await self.db.get_embedding_metadata("last_migration")
 
-        # 현재 설정된 모델 정보
+        # Currently configured model info
         current_model = self.embedding_service.model_name
         current_dim = self.embedding_service.dimension
 
-        # 메모리 및 벡터 테이블 통계
+        # Memory and vector table statistics
         cursor = await self.db.execute("SELECT COUNT(*) as count FROM memories")
         total_memories = cursor.fetchone()["count"]
 
@@ -54,19 +54,19 @@ class EmbeddingManagerService:
                 "SELECT COUNT(*) as count FROM memory_embeddings"
             )
             vector_count = cursor.fetchone()["count"]
-        except Exception:
-            # Silently ignore errors when counting embeddings - table may not exist yet
-            pass
+        except Exception as e:
+            # Table may not exist yet
+            logger.debug(f"Failed to count embeddings: {e}")
 
-        # target 모델 조회 (온보딩에서 선택한 목표 모델)
+        # Query target model (goal model selected during onboarding)
         target_model = await self.db.get_embedding_metadata("target_embedding_model")
         target_dim_str = await self.db.get_embedding_metadata("target_embedding_dimension")
         target_dim = int(target_dim_str) if target_dim_str else None
 
-        # 일치 여부 확인: target이 있으면 target vs stored, 없으면 stored vs current
+        # Check match: if target exists, compare target vs stored; otherwise stored vs current
         needs_migration = False
         if target_model and stored_model and target_model != stored_model:
-            # 온보딩에서 모델 변경 → 기존 데이터 마이그레이션 필요
+            # Model changed in onboarding → need to migrate existing data
             needs_migration = True
         elif target_dim and stored_dim and target_dim != stored_dim:
             needs_migration = True
@@ -116,7 +116,7 @@ class EmbeddingManagerService:
 
         status = await self.get_status()
 
-        # 마이그레이션 필요 여부 확인
+        # Check whether migration is needed
         if not force and not status["needs_migration"]:
             return {
                 "success": True,
@@ -141,7 +141,7 @@ class EmbeddingManagerService:
             "message": "Starting migration...",
         }
 
-        # 백그라운드에서 마이그레이션 실행
+        # Run migration in background
         import asyncio
 
         asyncio.create_task(
@@ -201,8 +201,8 @@ class EmbeddingManagerService:
             "skipped": 0,
         }
 
-        # 마이그레이션은 모든 벡터를 재생성하므로 항상 vec 테이블을 DROP+CREATE
-        # (메타데이터가 손상된 경우에도 안전하게 동작)
+        # Migration regenerates all vectors, so always DROP+CREATE the vec table
+        # (Safe to run even when metadata is corrupted)
         new_dim = self.embedding_service.dimension
         self._migration_progress["message"] = (
             f"Recreating vector table (dim={new_dim})..."
@@ -215,7 +215,7 @@ class EmbeddingManagerService:
         batch_num = 0
 
         while True:
-            # 메모리 배치 조회
+            # Batch-fetch memories
             cursor = await self.db.execute(
                 "SELECT id, content FROM memories ORDER BY created_at LIMIT ? OFFSET ?",
                 (batch_size, offset),
@@ -233,18 +233,18 @@ class EmbeddingManagerService:
                     memory_id = memory["id"]
                     content = memory["content"]
 
-                    # 새 임베딩 생성
+                    # Generate new embedding
                     embedding = self.embedding_service.embed(content[:2000])
                     embedding_bytes = self.embedding_service.to_bytes(embedding)
 
-                    # memories 테이블 업데이트
+                    # Update memories table
                     now = datetime.now(timezone.utc).isoformat()
                     await self.db.execute(
                         "UPDATE memories SET embedding = ?, updated_at = ? WHERE id = ?",
                         (embedding_bytes, now, memory_id),
                     )
 
-                    # 벡터 테이블 업데이트
+                    # Update vector table
                     embedding_json = json.dumps(embedding)
                     await self.db.execute(
                         "DELETE FROM memory_embeddings WHERE memory_id = ?",
@@ -261,7 +261,7 @@ class EmbeddingManagerService:
                     logger.error(f"Failed to migrate memory {memory['id']}: {e}")
                     stats["failed"] += 1
 
-                # 진행 상황 업데이트
+                # Update progress
                 processed = stats["migrated"] + stats["failed"]
                 self._migration_progress["processed"] = processed
                 self._migration_progress["failed"] = stats["failed"]
@@ -272,14 +272,14 @@ class EmbeddingManagerService:
                 if progress_callback:
                     progress_callback(self._migration_progress)
 
-            # 배치 커밋
+            # Commit batch
             self.db.connection.commit()
             offset += batch_size
 
-            # 약간의 딜레이로 CPU 부하 분산
+            # Small delay to distribute CPU load
             await asyncio.sleep(0.01)
 
-        # 메타데이터 업데이트: 실제 데이터 모델을 새 모델로 갱신
+        # Update metadata: set actual data model to new model
         now = datetime.now(timezone.utc).isoformat()
         new_model = self.embedding_service.model_name
         new_dim = str(self.embedding_service.dimension)
@@ -287,7 +287,7 @@ class EmbeddingManagerService:
         await self.db.set_embedding_metadata("embedding_dimension", new_dim)
         await self.db.set_embedding_metadata("last_migration", now)
 
-        # target과 embedding_model이 일치하면 target 정리
+        # Clear target if it matches embedding_model
         target = await self.db.get_embedding_metadata("target_embedding_model")
         if target and target == new_model:
             await self.db.set_embedding_metadata("target_embedding_model", "")
@@ -314,7 +314,7 @@ class EmbeddingManagerService:
         await self.db.set_embedding_metadata("embedding_model", model_name)
         await self.db.set_embedding_metadata("embedding_dimension", str(dimension))
         await self.db.set_embedding_metadata("metadata_set_manually", now)
-        # target과 일치하면 정리
+        # Clear if it matches target
         target = await self.db.get_embedding_metadata("target_embedding_model")
         if target and target == model_name:
             await self.db.set_embedding_metadata("target_embedding_model", "")

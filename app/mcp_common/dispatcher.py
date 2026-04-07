@@ -262,7 +262,7 @@ class MCPDispatcher:
 
         operations = args["operations"]
 
-        # BatchOperationHandler가 있으면 사용 (배치 임베딩/캐시 최적화)
+        # Use BatchOperationHandler if available (batch embedding/cache optimization)
         if self._batch_handler is not None:
             try:
                 result = await self._batch_handler.batch_operations(
@@ -273,7 +273,7 @@ class MCPDispatcher:
                 logger.error(f"Batch operations failed: {e}")
                 return format_tool_error(f"Batch operations failed: {str(e)}")
 
-        # Fallback: 개별 도구 순차 호출 (BatchOperationHandler 미초기화 시)
+        # Fallback: sequential individual tool calls (when BatchOperationHandler is not initialized)
         try:
             results = []
 

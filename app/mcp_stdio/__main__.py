@@ -10,7 +10,7 @@ from .server import initialize_storage, mcp, shutdown_storage
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    stream=sys.stderr,  # MCP는 stdout을 사용하므로 로그는 stderr로
+    stream=sys.stderr,  # MCP uses stdout, so send logs to stderr
 )
 
 logger = logging.getLogger(__name__)
@@ -23,17 +23,17 @@ async def main():
 
         logger.info(f"Starting MCP server in {settings.storage_mode} mode")
 
-        # 스토리지 초기화
+        # Initialize storage
         await initialize_storage(settings)
 
-        # FastMCP 서버 실행
+        # Run FastMCP server
         await mcp.run_stdio_async()
 
     except Exception as e:
         logger.error(f"Failed to start MCP server: {e}")
         raise
     finally:
-        # 정리
+        # Cleanup
         await shutdown_storage()
 
 

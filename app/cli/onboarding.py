@@ -6,8 +6,6 @@ Performs 3-step setup:
 3. MCP configuration check
 """
 
-import json
-import os
 import shutil
 import subprocess
 import sys

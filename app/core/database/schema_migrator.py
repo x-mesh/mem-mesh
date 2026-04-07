@@ -93,7 +93,8 @@ class SchemaMigrator:
             )
             row = cursor.fetchone()
             return row["version"] if row and row["version"] else 0
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to get schema version, assuming 0: {e}")
             return 0
 
     async def _set_version(self, version: int, description: str = "") -> None:
@@ -115,7 +116,8 @@ class SchemaMigrator:
             cursor = await self.connection.execute(f"PRAGMA table_info({table})")
             columns = [row["name"] for row in cursor.fetchall()]
             return column in columns
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to check column existence: {e}")
             return False
 
     async def _add_column_if_missing(

@@ -1,6 +1,7 @@
 # mem-mesh
 
 [![PyPI version](https://img.shields.io/pypi/v/mem-mesh.svg)](https://pypi.org/project/mem-mesh/)
+[![CI](https://github.com/JINWOO-J/mem-mesh/actions/workflows/ci.yml/badge.svg)](https://github.com/JINWOO-J/mem-mesh/actions/workflows/ci.yml)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05%20%7C%202025--03--26-green.svg)](https://modelcontextprotocol.io/)
@@ -340,6 +341,8 @@ python scripts/migrate_embeddings.py --check-only
 1. Open an issue or pull request
 2. Follow `black` and `ruff` formatting
 3. Add tests for any new behavior
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for details and [CHANGELOG.md](./CHANGELOG.md) for release history.
 
 ---
 

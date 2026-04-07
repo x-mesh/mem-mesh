@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-SQLite → Qdrant 마이그레이션
+SQLite → Qdrant migration
 
-기존 SQLite 데이터를 Qdrant로 마이그레이션
+Migrate existing SQLite data to Qdrant.
 """
 
 import asyncio
@@ -17,75 +17,75 @@ from app.core.config import Settings
 
 
 class QdrantMigrator:
-    """Qdrant 마이그레이션"""
-    
+    """Qdrant migrator"""
+
     def __init__(self, qdrant_url: str, collection_name: str = "mem-mesh"):
         """
         Args:
-            qdrant_url: Qdrant 서버 URL (예: http://localhost:6333)
-            collection_name: 컬렉션 이름
+            qdrant_url: Qdrant server URL (e.g. http://localhost:6333)
+            collection_name: Collection name
         """
         self.settings = Settings()
         self.qdrant_url = qdrant_url
         self.collection_name = collection_name
         self.sqlite_db = None
         self.qdrant_client = None
-    
+
     async def setup(self):
-        """초기화"""
-        # SQLite 연결
+        """Initialize"""
+        # Connect to SQLite
         self.sqlite_db = Database(self.settings.database_path)
         await self.sqlite_db.connect()
-        
-        # Qdrant 클라이언트
+
+        # Qdrant client
         try:
             from qdrant_client import QdrantClient
             from qdrant_client.models import Distance, VectorParams
-            
+
             self.qdrant_client = QdrantClient(url=self.qdrant_url)
             self.Distance = Distance
             self.VectorParams = VectorParams
         except ImportError:
-            print("❌ qdrant-client 패키지가 필요합니다: pip install qdrant-client")
+            print("❌ qdrant-client package is required: pip install qdrant-client")
             sys.exit(1)
-    
+
     async def cleanup(self):
-        """정리"""
+        """Clean up"""
         if self.sqlite_db:
             await self.sqlite_db.close()
-    
+
     async def create_collection(self):
-        """Qdrant 컬렉션 생성"""
-        print(f"Qdrant 컬렉션 생성 중: {self.collection_name}")
-        
-        # 기존 컬렉션 삭제 (선택사항)
+        """Create Qdrant collection"""
+        print(f"Creating Qdrant collection: {self.collection_name}")
+
+        # Delete existing collection (optional)
         try:
             self.qdrant_client.delete_collection(self.collection_name)
-            print("  기존 컬렉션 삭제됨")
+            print("  Existing collection deleted")
         except Exception:
             pass
-        
-        # 새 컬렉션 생성
+
+        # Create new collection
         self.qdrant_client.create_collection(
             collection_name=self.collection_name,
             vectors_config=self.VectorParams(
-                size=384,  # 임베딩 차원
+                size=384,  # Embedding dimensions
                 distance=self.Distance.COSINE
             )
         )
-        
-        print("  ✓ 컬렉션 생성 완료")
-    
+
+        print("  ✓ Collection created")
+
     async def migrate_data(self, batch_size: int = 100):
-        """데이터 마이그레이션"""
-        print("\n데이터 마이그레이션 중...")
-        
+        """Migrate data"""
+        print("\nMigrating data...")
+
         from qdrant_client.models import PointStruct
-        
-        # SQLite에서 데이터 조회
+
+        # Fetch data from SQLite
         rows = await self.sqlite_db.fetchall(
             """
-            SELECT 
+            SELECT
                 m.id, m.content, m.content_hash, m.project_id,
                 m.category, m.source, m.tags, m.created_at, m.updated_at,
                 me.embedding
@@ -94,17 +94,17 @@ class QdrantMigrator:
             WHERE m.project_id = 'mem-mesh'
             """
         )
-        
+
         total = len(rows)
-        print(f"  총 {total}개 메모리 마이그레이션")
-        
-        # 배치 처리
+        print(f"  Migrating {total} memories in total")
+
+        # Batch processing
         for i in range(0, total, batch_size):
             batch = rows[i:i + batch_size]
             points = []
-            
+
             for row in batch:
-                # 임베딩 변환 (bytes → list)
+                # Convert embedding (bytes → list)
                 embedding = None
                 if row["embedding"]:
                     embedding_bytes = row["embedding"]
@@ -112,13 +112,12 @@ class QdrantMigrator:
                         f'{len(embedding_bytes)//4}f',
                         embedding_bytes
                     ))
-                
-                # 임베딩이 없어도 Point 생성 (zero vector 사용)
+
+                # Use zero vector if no embedding available
                 if not embedding:
-                    # 임베딩이 없으면 zero vector 사용
                     embedding = [0.0] * 384
-                
-                # Qdrant Point 생성
+
+                # Create Qdrant Point
                 point = PointStruct(
                     id=row["id"],
                     vector=embedding,
@@ -135,115 +134,115 @@ class QdrantMigrator:
                     }
                 )
                 points.append(point)
-            
-            # Qdrant에 업로드
+
+            # Upload to Qdrant
             if points:
                 self.qdrant_client.upsert(
                     collection_name=self.collection_name,
                     points=points
                 )
-            
-            print(f"  진행: {min(i + batch_size, total)}/{total}")
-        
-        print("  ✓ 마이그레이션 완료")
-    
+
+            print(f"  Progress: {min(i + batch_size, total)}/{total}")
+
+        print("  ✓ Migration complete")
+
     async def verify(self):
-        """마이그레이션 검증"""
-        print("\n마이그레이션 검증 중...")
-        
-        # SQLite 카운트
+        """Verify migration"""
+        print("\nVerifying migration...")
+
+        # SQLite count
         sqlite_count = await self.sqlite_db.fetchone(
             "SELECT COUNT(*) as count FROM memories WHERE project_id = 'mem-mesh'"
         )
-        
-        # Qdrant 카운트
+
+        # Qdrant count
         collection_info = self.qdrant_client.get_collection(self.collection_name)
         qdrant_count = collection_info.points_count
-        
-        print(f"  SQLite:  {sqlite_count['count']}개")
-        print(f"  Qdrant:  {qdrant_count}개")
-        
+
+        print(f"  SQLite:  {sqlite_count['count']}")
+        print(f"  Qdrant:  {qdrant_count}")
+
         if sqlite_count['count'] == qdrant_count:
-            print("  ✓ 검증 성공")
+            print("  ✓ Verification passed")
             return True
         else:
-            print("  ❌ 검증 실패: 개수 불일치")
+            print("  ❌ Verification failed: count mismatch")
             return False
-    
-    async def test_search(self, query: str = "MCP 설정"):
-        """검색 테스트"""
-        print(f"\n검색 테스트: '{query}'")
-        
+
+    async def test_search(self, query: str = "MCP configuration"):
+        """Test search"""
+        print(f"\nSearch test: '{query}'")
+
         from app.core.embeddings.service import EmbeddingService
-        
-        # 임베딩 생성
+
+        # Generate embedding
         embedding_service = EmbeddingService(self.settings)
         await embedding_service.initialize()
-        
+
         try:
             query_embedding = await embedding_service.generate_embedding(query)
-            
-            # Qdrant 검색
+
+            # Qdrant search
             results = self.qdrant_client.search(
                 collection_name=self.collection_name,
                 query_vector=query_embedding.tolist(),
                 limit=5
             )
-            
-            print(f"  결과: {len(results)}개")
+
+            print(f"  Results: {len(results)}")
             for i, result in enumerate(results, 1):
                 print(f"  {i}. [{result.score:.3f}] {result.payload['content'][:80]}...")
-        
+
         finally:
             await embedding_service.cleanup()
 
 
 async def main():
-    """메인 함수"""
+    """Main function"""
     import argparse
-    
-    parser = argparse.ArgumentParser(description="SQLite → Qdrant 마이그레이션")
+
+    parser = argparse.ArgumentParser(description="SQLite → Qdrant migration")
     parser.add_argument(
         "--qdrant-url",
         default="http://localhost:6333",
-        help="Qdrant 서버 URL"
+        help="Qdrant server URL"
     )
     parser.add_argument(
         "--collection",
         default="mem-mesh",
-        help="컬렉션 이름"
+        help="Collection name"
     )
     parser.add_argument(
         "--batch-size",
         type=int,
         default=100,
-        help="배치 크기"
+        help="Batch size"
     )
     parser.add_argument(
         "--test-search",
         action="store_true",
-        help="마이그레이션 후 검색 테스트"
+        help="Run search test after migration"
     )
     args = parser.parse_args()
-    
+
     migrator = QdrantMigrator(args.qdrant_url, args.collection)
-    
+
     try:
         await migrator.setup()
         await migrator.create_collection()
         await migrator.migrate_data(args.batch_size)
         await migrator.verify()
-        
+
         if args.test_search:
             await migrator.test_search()
-        
-        print("\n✅ 마이그레이션 완료!")
-        
+
+        print("\n✅ Migration complete!")
+
     except Exception as e:
-        print(f"\n❌ 오류 발생: {e}")
+        print(f"\n❌ Error: {e}")
         import traceback
         traceback.print_exc()
-    
+
     finally:
         await migrator.cleanup()
 

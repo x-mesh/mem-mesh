@@ -6,7 +6,7 @@ Shows server, hooks, and MCP configuration status in one view.
 import json
 from pathlib import Path
 
-from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
+from app.cli.hooks.colors import dim, err, header, info, ok, warn
 from app.cli.hooks.constants import (
     CLAUDE_HOOKS_DIR,
     CLAUDE_SETTINGS,

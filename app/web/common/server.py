@@ -142,15 +142,15 @@ def create_uvicorn_config(
     Returns:
         Uvicorn 설정 딕셔너리
     """
-    # reload 모드에서는 workers를 1로 고정
+    # Fix workers to 1 in reload mode
     final_workers = 1 if reload else (workers or settings.server_workers)
 
-    # Access log 설정
+    # Configure access log
     access_log_file = setup_access_log(settings, access_log_prefix)
     if access_log_file:
         print(f"Access log file: {access_log_file}")
 
-    # 로그 설정
+    # Configure logging
     log_config = get_uvicorn_log_config(
         access_log_file=access_log_file,
         log_level=settings.log_level,

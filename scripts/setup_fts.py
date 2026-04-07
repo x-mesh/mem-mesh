@@ -5,7 +5,7 @@ from app.core.database.base import Database
 from app.core.database.initializer import DatabaseInitializer
 from app.core.config import Settings
 
-# 로깅 설정
+# Logging configuration
 logging.basicConfig(level=logging.INFO)
 
 async def setup():
@@ -13,10 +13,10 @@ async def setup():
     print(f"Connecting to database: {settings.database_path}")
     db = Database(settings.database_path)
     await db.connect()
-    
-    # Initializer 생성 (db._connection은 DatabaseConnection 객체)
+
+    # Create initializer (db._connection is a DatabaseConnection object)
     initializer = DatabaseInitializer(db._connection)
-    
+
     print("Setting up FTS tables...")
     try:
         await initializer._create_fts_tables()

@@ -88,7 +88,7 @@ class StorageManager:
         return self._storage
 
 
-# 전역 스토리지 매니저 인스턴스 (선택적 사용)
+# Global storage manager instance (optional use)
 _global_manager: Optional[StorageManager] = None
 
 

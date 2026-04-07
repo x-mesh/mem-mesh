@@ -14,7 +14,7 @@ from ..errors import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 품질 게이트 상수
+# Quality gate constants
 # ---------------------------------------------------------------------------
 _MIN_CONTENT_LENGTH = 100
 
@@ -62,13 +62,13 @@ def content_quality_gate(content: str) -> str:
         MemoryContentTooShortError: 길이 부족
         MemoryLowQualityError: 저품질 접두사
     """
-    # 1. XML 시스템 태그 제거
+    # 1. Remove XML system tags
     cleaned = content
     for pattern in _XML_STRIP_PATTERNS:
         cleaned = pattern.sub("", cleaned)
     cleaned = cleaned.strip()
 
-    # 2. 길이 체크 (스트리핑 후)
+    # 2. Length check (after stripping)
     if len(cleaned) < _MIN_CONTENT_LENGTH:
         logger.info(
             "Quality gate rejected: content too short (%d < %d)",
@@ -77,7 +77,7 @@ def content_quality_gate(content: str) -> str:
         )
         raise MemoryContentTooShortError(length=len(cleaned), minimum=_MIN_CONTENT_LENGTH)
 
-    # 3. 저품질 접두사 체크
+    # 3. Check for low-quality prefixes
     for prefix in _LOW_QUALITY_PREFIXES:
         if cleaned.startswith(prefix):
             logger.info(

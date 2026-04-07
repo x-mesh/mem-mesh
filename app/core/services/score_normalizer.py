@@ -53,7 +53,7 @@ class ScoreNormalizer:
         self.sigmoid_k = sigmoid_k
         self.sigmoid_threshold = sigmoid_threshold
 
-        # 통계 캐시
+        # Statistics cache
         self._stats_cache: Optional[ScoreStats] = None
 
         logger.info(f"ScoreNormalizer initialized with method: {method}")
@@ -95,7 +95,7 @@ class ScoreNormalizer:
         Formula: (x - min) / (max - min)
         """
         if len(scores) == 1:
-            return [0.5]  # 단일 값은 중간값으로
+            return [0.5]  # Single value treated as median
 
         min_val = min(scores)
         max_val = max(scores)
@@ -124,10 +124,10 @@ class ScoreNormalizer:
         if std == 0:
             return [0.5] * len(scores)
 
-        # Z-score 계산
+        # Calculate Z-score
         z_scores = [(score - mean) / std for score in scores]
 
-        # Sigmoid로 [0, 1] 범위로 변환
+        # Convert to [0, 1] range via Sigmoid
         import math
 
         normalized = [1 / (1 + math.exp(-z)) for z in z_scores]
@@ -163,10 +163,10 @@ class ScoreNormalizer:
         if len(scores) == 1:
             return [0.5]
 
-        # 점수와 인덱스를 함께 정렬
+        # Sort scores together with their indices
         sorted_scores = sorted(enumerate(scores), key=lambda x: x[1])
 
-        # 백분위 계산
+        # Calculate percentile
         normalized = [0.0] * len(scores)
         for rank, (original_idx, _) in enumerate(sorted_scores):
             percentile = rank / (len(scores) - 1)
@@ -216,33 +216,33 @@ class ScoreNormalizer:
         """
         stats = self.get_stats(scores)
 
-        # 점수 범위 분석
+        # Analyze score range
         score_range = stats.max_score - stats.min_score
 
-        # 추천 로직
+        # Recommendation logic
         if score_range < 0.1:
-            # 점수가 매우 좁은 범위에 몰려있음
+            # Scores are clustered in a very narrow range
             return {
                 "recommended_method": "sigmoid",
                 "stats": stats,
                 "reason": "점수가 좁은 범위에 집중되어 있어 sigmoid로 분산 필요",
             }
         elif stats.std_score < 0.05:
-            # 표준편차가 작음 (점수가 비슷함)
+            # Small standard deviation (scores are similar)
             return {
                 "recommended_method": "percentile",
                 "stats": stats,
                 "reason": "점수가 비슷하여 percentile로 순위 기반 정규화 필요",
             }
         elif score_range > 0.5:
-            # 점수 범위가 넓음
+            # Score range is wide
             return {
                 "recommended_method": "minmax",
                 "stats": stats,
                 "reason": "점수 범위가 넓어 minmax로 정규화 적합",
             }
         else:
-            # 일반적인 경우
+            # General case
             return {
                 "recommended_method": "sigmoid",
                 "stats": stats,
@@ -250,7 +250,7 @@ class ScoreNormalizer:
             }
 
 
-# 전역 인스턴스
+# Global instance
 _normalizer: Optional[ScoreNormalizer] = None
 
 
@@ -273,7 +273,8 @@ def get_score_normalizer(
                 if sigmoid_threshold is not None
                 else settings.sigmoid_threshold
             )
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to load sigmoid settings, using defaults: {e}")
             sigmoid_k = sigmoid_k if sigmoid_k is not None else 10.0
             sigmoid_threshold = (
                 sigmoid_threshold if sigmoid_threshold is not None else 0.45
