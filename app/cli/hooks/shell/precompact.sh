@@ -2,7 +2,7 @@
 __VERSION_MARKER__
 # Claude Code PreCompact hook: save reminder + auto-end session before compaction
 # Ensures unsaved decisions are flagged and session data is preserved
-# Returns {hookSpecificOutput: {hookEventName: "PreCompact", additionalContext: "..."}} to remind AI to save
+# Returns {continue: true, systemMessage: "..."} to remind AI to save
 
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
@@ -147,8 +147,6 @@ ${part}"
 done
 
 jq -n --arg ctx "$COMBINED" '{
-  hookSpecificOutput: {
-    hookEventName: "PreCompact",
-    additionalContext: $ctx
-  }
+  continue: true,
+  systemMessage: $ctx
 }'

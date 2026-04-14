@@ -13,8 +13,7 @@ def adapt_cursor_before_submit_prompt(script: str) -> str:
 def adapt_cursor_precompact(script: str) -> str:
     """Adapt PreCompact script to Cursor preCompact schema."""
     return (
-        script.replace('hookEventName: "PreCompact"', 'hookEventName: "preCompact"')
-        .replace(".transcript_path // empty", ".transcript_path // .transcriptPath // empty")
+        script.replace(".transcript_path // empty", ".transcript_path // .transcriptPath // empty")
         .replace(".session_id // empty", ".session_id // .sessionId // empty")
     )
 
