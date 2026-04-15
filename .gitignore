@@ -17,18 +17,27 @@ __pycache__/
 # Benchmark artifacts
 **/test_benchmark_results.json
 
-# x-build project state (tool-local)
-.xm/
+# Tool-local state (IDE / AI assistants / build harnesses)
+.beads/
+.claude/
+.cursor/
 .hypothesis/
-.pytest_cache/
+.kiro/
 .mypy_cache/
+.omc/
+.pytest_cache/
+.qwen/
 .ruff_cache/
+.sisyphus/
+.vscode/
+.xm/
+
 .coverage
 .coverage.*
 .cache/
 imports/
-.vscode/
-.idea
+.idea/
+
 # Directories to ignore
 data/
 data_bak/
@@ -40,20 +49,12 @@ logs/
 .venv/
 **/results/
 
-# IDE / Editor / Dev tools
-.cursor/
-.claude/
-.kiro/
-.beads/
-.sisyphus/
-.qwen____/
+# MCP project config (local)
 .mcp.json
 
 # Benchmark
 benchmarks/longmemeval/dbs/
 benchmarks/longmemeval/results_v1_backup/
-
-**/.omc/**
 
 # Internal development
 scripts/internal/
