@@ -1,19 +1,17 @@
-<!-- English version — see AGENTS.ko.md for Korean -->
-
 # mem-mesh: AI Memory Management System
 
 ## Project Context & Operations
-**Business Goal:** Provide a centralized memory server that enables AI tools to store and coordinate memories in real-time using vector search and context retrieval.
-**Tech Stack:** Python 3.9+, FastAPI, FastMCP, sqlite-vec, sentence-transformers, MCP Protocol 2024-11-05/2025-03-26 transports.
+**Business Goal:** 중앙 집중식 메모리 서버를 통해 AI 도구가 벡터 검색과 컨텍스트 조회를 활용하여 실시간으로 기억을 저장·조정하도록 지원합니다.  
+**Tech Stack:** Python 3.9+, FastAPI, FastMCP, sqlite-vec, sentence-transformers, MCP Protocol 2024-11-05/2025-03-26 transports.  
 **Operational Commands:**
 ```bash
 # Development
 python -m app.web --reload              # FastAPI + SSE MCP dashboard
-python -m app.mcp_stdio                 # FastMCP-based stdio MCP server
-python -m app.mcp_stdio_pure            # Pure MCP stdio server
+python -m app.mcp_stdio                 # FastMCP 기반 stdio MCP 서버
+python -m app.mcp_stdio_pure            # Pure MCP stdio MCP 서버
 
 # Testing
-python -m pytest tests/                 # Run all tests
+python -m pytest tests/                 # 전체 테스트
 python -c "from app.web.app import app"  # FastAPI import check
 
 # Database Migration
@@ -55,47 +53,48 @@ Note: If port 8000 is already in use locally, it indicates the FastAPI server is
 
 **Git Strategy:**
 - Commit message format: `type: description` (feat, fix, refactor, docs, test, chore).
+- Whenever Korean explanations are needed, pair them with English technical terms for clarity.
 - Use `git --no-pager` variants (`git --no-pager log`, `git --no-pager status`) when reviewing history.
 
 ## Workflow
 **Thinking Process (CoT)**
 
-Before generating code or executing commands, perform a brief <Thinking> step:
+Before generating code or executing commands, you must perform a brief <Thinking> step:
 1. Identify Intent: What is the user's specific goal? (Feat/Fix/Refactor/Query)
 2. Check Context: Which AGENTS.md or module is relevant? (Refer to Context Map)
 3. Verify Constraints: Does this action violate any Golden Rules?
 4. Plan: Outline the step-by-step execution plan.
 
 **Maintenance Policy:**
-When a discrepancy between rules and code is found, immediately submit an improvement proposal and update both this root AGENTS.md and the relevant sub-AGENTS files.
+규칙과 코드 사이에 괴리가 보이면 즉시 개선 제안을 제출하고, 중앙 통제 루트(이 AGENTS.md) 및 관련 AGENT 하위 파일을 동시에 업데이트합니다.
 
 ## Context Map (Action-Based Routing)
-- **[Core Services & Database](./app/core/AGENTS.md)** — When modifying data, embeddings, or services.
-- **[MCP Protocol Implementation](./app/mcp_common/AGENTS.md)** — When working on shared MCP tools, storage, or schemas.
-- **[Web API & Dashboard](./app/web/AGENTS.md)** — When modifying FastAPI app, WebSocket, UI routing, or templates.
-- **[SSE MCP Transport](./app/web/mcp/AGENTS.md)** — When modifying the Streamable HTTP/SSE MCP transport layer.
-- **[FastMCP stdio Server](./app/mcp_stdio/AGENTS.md)** — When working on the FastMCP-based stdio server.
-- **[Pure MCP stdio Server](./app/mcp_stdio_pure/AGENTS.md)** — When adjusting direct MCP protocol implementation or dispatcher.
-- **[Frontend Static Assets](./static/AGENTS.md)** — When modifying JavaScript/CSS/frontend logic.
-- **[Migration & Utility Scripts](./scripts/AGENTS.md)** — When writing or running migration, embedding, QA, or monitoring utilities.
-- **[Testing & Quality](./tests/AGENTS.md)** — When updating pytest suites, integration/regression tests, or test utilities.
-- **[Web Dashboard Pages](./app/web/dashboard/AGENTS.md)** — When enhancing dashboard routes, page templates, or SSE MCP endpoints.
+- **[Core Services & Database](./app/core/AGENTS.md)** — 데이터/임베딩/서비스 변경 시.
+- **[MCP Protocol Implementation](./app/mcp_common/AGENTS.md)** — 공통 MCP 도구, 스토리지, 스키마 작업 시.
+- **[Web API & Dashboard](./app/web/AGENTS.md)** — FastAPI 앱, WebSocket, 전반 UI 라우팅 또는 템플릿 변경 시.
+- **[SSE MCP Transport](./app/web/mcp/AGENTS.md)** — Streamable HTTP/SSE MCP 전송 계층 수정 시.
+- **[FastMCP stdio Server](./app/mcp_stdio/AGENTS.md)** — FastMCP 기반 stdio 서버 작업 시.
+- **[Pure MCP stdio Server](./app/mcp_stdio_pure/AGENTS.md)** — 직접 MCP 프로토콜 구현/디스패처 조정 시.
+- **[Frontend Static Assets](./static/AGENTS.md)** — JavaScript/CSS/프론트엔드 로직 수정 시.
+- **[Migration & Utility Scripts](./scripts/AGENTS.md)** — 마이그레이션, 임베딩/QA/모니터링 유틸리티 작성 또는 실행 시.
+- **[Testing & Quality](./tests/AGENTS.md)** — pytest suites, 통합/회귀 테스트, 테스트 지원 도구 업데이트 시.
+- **[Web Dashboard Pages](./app/web/dashboard/AGENTS.md)** — 대시보드 라우트, 페이지 템플릿, SSE MCP endpoint 고도화 시.
 
 ## Session Context Management
 
-> Detailed implementation guide for the CLAUDE.md Checklist and MUST/SHOULD/MAY rules.
+> CLAUDE.md의 Checklist와 MUST/SHOULD/MAY 규칙에 대한 상세 구현 가이드.
 
 ### Session Lifecycle
 
 ```
-Session Start ──→ Task Tracking ──→ Session End
-     │                 │                 │
-     ▼                 ▼                 ▼
-session_resume     pin_add         Knowledge preservation
-     │             pin_complete         │
-     │             pin_promote      session_end
-     │                 │
-     └──── search (past context) ────┘
+세션 시작 ──→ 작업 추적 ──→ 세션 종료
+   │              │              │
+   ▼              ▼              ▼
+session_resume  pin_add       지식 보존 판단
+   │            pin_complete     │
+   │            pin_promote    session_end
+   │              │
+   └──── search (과거 맥락) ────┘
 ```
 
 ### Session Start
@@ -104,12 +103,17 @@ mcp_mem_mesh_session_resume(project_id="mem-mesh", expand="smart", limit=10)
 ```
 Report: `pins_count`, `in_progress_pins`, `open_pins`, `completed_pins`
 
-**Stale auto-cleanup:** On `session_resume`, old pins are automatically completed:
-- `in_progress` for 7+ days → `completed`
-- `open` for 30+ days → `completed`
+**세션 수명주기:** `session_resume` 은 **조회 전용**이다. 활성 세션이 없으면
+`{"status": "no_session"}` 을 반환하며 세션을 만들지 않는다. 세션은 첫 `pin_add` /
+`add` 호출 시 자동 생성되므로, `no_session` 응답을 받으면 바로 작업을 시작하면
+된다. (세션은 "작업으로 시작된다" — 명시적 start 도구는 없음.)
 
-**Token Optimization — expand modes:**
-- `expand="smart"` (recommended): status × importance 4-Tier matrix
+**Stale 자동 정리:** `session_resume` 호출 시 오래된 핀을 자동 완료 처리
+- `in_progress` 상태 7일 경과 → `completed`
+- `open` 상태 30일 경과 → `completed`
+
+**Token Optimization — expand 모드:**
+- `expand="smart"` (권장): status × importance 4-Tier 매트릭스
   - T1: active + important(≥4) → full content + tags + created_at
   - T2: active + normal(<4) → content[:200] + tags
   - T3: completed + important → content[:80]
@@ -123,12 +127,12 @@ Report: `pins_count`, `in_progress_pins`, `open_pins`, `completed_pins`
 mcp_mem_mesh_pin_add(content="<description>", project_id="mem-mesh", importance=3, tags=[...])
 ```
 - `3`: normal, `4`: important, `5`: architecture
-- If importance is omitted, it is auto-estimated based on content
-- Default status: `in_progress` (active). For multi-step tasks, future steps can be created as `open` (planned)
-- Response (compact): `{id, importance, status}` — includes `auto_importance: true` when auto-estimated
+- importance 생략 시 내용 기반 자동 추정
+- 기본 상태: `in_progress` (작업 중). 다단계 작업에서 나중 작업은 `open`(계획됨)으로 생성 가능
+- 응답(compact): `{id, importance, status}` — 자동 추정 시 `auto_importance: true` 추가
 - Wait for `pin_id` before proceeding
 
-**Client detection:** In HTTP mode, automatically detected from MCP initialize handshake or User-Agent (25+ IDE/AI platforms). In stdio mode, uses the `MEM_MESH_CLIENT` environment variable.
+**클라이언트 감지:** HTTP 모드에서 MCP initialize 핸드셰이크 또는 User-Agent로 자동 감지 (25+ IDE/AI 플랫폼). Stdio 모드에서는 `MEM_MESH_CLIENT` 환경변수 사용.
 
 ### Task Complete
 ```
@@ -141,27 +145,27 @@ If importance ≥ 4: `mcp_mem_mesh_pin_promote(pin_id)`
 mcp_mem_mesh_session_end(project_id="mem-mesh")
 ```
 
-**Knowledge preservation criteria at session end:**
+**세션 종료 시 지식 보존 판단 기준:**
 
-| Event during session | How to save | Example |
-|---------------------|-------------|---------|
-| Architecture decision agreed | `add(category="decision")` | "SQLite + sqlite-vec confirmed as sole vector store" |
-| Complex bug resolved | `add(category="bug")` | "sqlite-vec INSERT OR REPLACE prohibited — use DELETE+INSERT" |
-| System incident recovered | `add(category="incident")` | "Port 8000 conflict caused duplicate server startup" |
-| Improvement idea | `add(category="idea")` | "Consider E5 prefix encoding for Korean search" |
-| Reusable pattern discovered | `add(category="code_snippet")` | batch_operations usage pattern |
-| Task tracked via Pin | `pin_complete` + optionally `pin_promote` | — |
+| 세션에서 발생한 일 | 저장 방법 | 예시 |
+|-----------------|---------|------|
+| 아키텍처 결정 합의 | `add(category="decision")` | "SQLite + sqlite-vec 유일 벡터 저장소 확정" |
+| 복잡한 버그 해결 | `add(category="bug")` | "sqlite-vec INSERT OR REPLACE 금지 — DELETE+INSERT" |
+| 시스템 장애 복구 | `add(category="incident")` | "포트 8000 충돌로 서버 이중 기동 발생" |
+| 개선 아이디어 | `add(category="idea")` | "한국어 검색에 E5 prefix encoding 검토" |
+| 재사용 패턴 발견 | `add(category="code_snippet")` | batch_operations 사용 패턴 |
+| Pin으로 추적 중인 작업 | `pin_complete` + 필요시 `pin_promote` | — |
 
-**Do NOT save**: simple Q&A, file reads, repeated content already stored, all code change records.
-Always include the **reason for the change (WHY)** when saving.
+**저장하지 않는 것**: 단순 Q&A, 파일 읽기, 이미 저장된 내용 반복, 모든 코드 변경 기록.
+저장 시 반드시 **변경 이유(WHY)** 포함.
 
-### Security — Sensitive Information Policy
+### Security — 민감 정보 저장 금지
 
-Never store the following in memories (`add`, `pin_add`):
-- API keys, tokens, secrets, passwords
-- Personally identifiable information (PII): emails, phone numbers, national IDs
-- `.env` file contents, authentication credentials
-- When saving code snippets, replace sensitive values with `<REDACTED>`
+메모리(`add`, `pin_add`)에 아래 정보를 **절대 저장하지 않는다**:
+- API 키, 토큰, 시크릿, 비밀번호
+- 개인식별정보(PII): 이메일, 전화번호, 주민등록번호
+- `.env` 파일 내용, 인증 정보
+- 코드 스니펫 저장 시 민감 값은 `<REDACTED>`로 치환
 
 ### Batch Operations (30-50% token savings)
 ```
@@ -170,6 +174,12 @@ mcp_mem_mesh_batch_operations(operations=[
   {"type": "search", "query": "...", "limit": 5}
 ])
 ```
+
+> **MCP 전용.** `batch_operations` 는 REST API로 노출돼 있지 않다. HTTP
+> 클라이언트는 MCP JSON-RPC 2.0 엔드포인트 `POST /mcp/tools/call` 로
+> `{"name": "batch_operations", "arguments": {...}}` 형태로 호출해야 한다.
+> 각 개별 연산(`add`, `search` 등)은 REST 엔드포인트를 갖고 있으므로,
+> 배치 호출이 불가능한 환경에서는 개별 호출을 직접 합성하면 된다.
 
 ### Memory Relations
 - `link(source_id, target_id, relation_type)` - Create relation
@@ -185,8 +195,8 @@ mcp_mem_mesh_batch_operations(operations=[
 ### Categories
 `task` | `bug` | `idea` | `decision` | `incident` | `code_snippet` | `git-history`
 
-### Anti-Patterns (Avoid These)
-- Hook-based auto-save — causes 63.4% truncation via byte cutting, 20-30% search pollution
-- Recording all file changes to memory — wastes search slots
-- Saving session summaries via `head -c` truncation — breaks UTF-8 encoding
-- Saving code snippets without context — meaningless later without WHY
+### Anti-Patterns (하지 말 것)
+- Hook 기반 자동 저장 — 바이트 절단으로 63.4% truncation, 검색 오염 20-30%
+- 모든 파일 변경을 메모리에 기록 — 검색 슬롯 낭비
+- 세션 요약을 head -c로 잘라 저장 — UTF-8 깨짐
+- 맥락 없이 코드 조각만 저장 — WHY 없으면 나중에 무의미

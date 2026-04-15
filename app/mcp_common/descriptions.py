@@ -17,8 +17,10 @@ MCP Tool Descriptions - 16개 도구 설명의 Single Source of Truth.
 TOOL_DESCRIPTIONS: dict[str, str] = {
     # ===== T1: Used every session (2-3 sentences + 1 example) =====
     "session_resume": (
-        "Resume the last session for a project. "
-        "Call at the START of every conversation to restore active pins and context. "
+        "Query the active session for a project and restore its pins/context. "
+        "Call at the START of every conversation. If no active session exists, "
+        'returns {"status": "no_session"} — start working immediately; the next '
+        "pin_add/add call auto-creates a fresh session. "
         "Auto-cleans stale pins (in_progress 7d, open 30d → completed). "
         'Use expand="smart" for optimal token efficiency.'
     ),
@@ -59,7 +61,9 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "update": "Update content, category, or tags of an existing memory by memory_id.",
     "batch_operations": (
         "Execute multiple add/search operations in a single call. "
-        "Reduces round-trips and token usage by 30-50%."
+        "Reduces round-trips and token usage by 30-50%. "
+        "MCP-only: no dedicated REST endpoint — HTTP clients must call "
+        "POST /mcp/tools/call with name='batch_operations'."
     ),
     # ===== T3: Occasionally used (1 sentence) =====
     "delete": "Permanently delete a memory by memory_id.",

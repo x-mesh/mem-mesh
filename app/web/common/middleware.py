@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import get_settings
+from app.core.errors import MemMeshError
 from app.core.schemas.responses import ErrorResponse
 
 logger = logging.getLogger(__name__)
@@ -71,9 +72,21 @@ def setup_exception_handlers(app: FastAPI) -> None:
             status_code=exc.status_code, content=error_response.model_dump()
         )
 
+    @app.exception_handler(MemMeshError)
+    async def memmesh_exception_handler(request, exc: MemMeshError):
+        """MemMeshError → code-specific HTTP status (422 for content rules, 400/404/409/...)"""
+        error_response = ErrorResponse(
+            error=exc.error_code,
+            message=str(exc),
+            details=exc.details or None,
+        )
+        return JSONResponse(
+            status_code=exc.http_status, content=error_response.model_dump()
+        )
+
     @app.exception_handler(Exception)
     async def general_exception_handler(request, exc: Exception):
-        """일반 예외 핸들러"""
+        """일반 예외 핸들러 — 예상치 못한 예외만 500으로 변환"""
         logger.error(f"Unhandled exception: {exc}")
         error_response = ErrorResponse(
             error="INTERNAL_ERROR", message="Internal server error"

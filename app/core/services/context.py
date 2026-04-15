@@ -22,7 +22,7 @@ class ContextService:
     def __init__(self, db: Database, embedding_service: EmbeddingService):
         self.db = db
         self.embedding_service = embedding_service
-        self.similarity_threshold = 0.3  # Use lower threshold in Context
+        self.similarity_threshold = 0.3  # Context에서는 더 낮은 임계값 사용
         logger.info("ContextService initialized")
 
     async def get_context(
@@ -41,17 +41,17 @@ class ContextService:
         """
         logger.info(f"Getting context for memory_id: {memory_id}, depth: {depth}")
 
-        # 1. Load primary memories
+        # 1. 주요 메모리 로드
         primary_memory = await self._get_primary_memory(memory_id)
         if not primary_memory:
             raise ContextNotFoundError(f"Memory not found: {memory_id}")
 
-        # 2. Search related memories
+        # 2. 관련 메모리 검색
         related_memories = await self._find_related_memories(
             primary_memory, depth, project_id
         )
 
-        # 3. Build timeline sorted by time
+        # 3. 시간순 정렬된 timeline 생성
         timeline = await self._create_timeline(primary_memory, related_memories)
 
         return ContextResponse(
@@ -80,7 +80,7 @@ class ContextService:
             return SearchResult(
                 id=row[0],
                 content=row[1],
-                similarity_score=1.0,  # Primary memory is exact match
+                similarity_score=1.0,  # 주요 메모리는 완전 일치
                 created_at=row[2],
                 project_id=row[3],
                 category=row[4],
@@ -96,21 +96,25 @@ class ContextService:
     ) -> List[RelatedMemory]:
         """관련 메모리 검색"""
         try:
-            # Use text-based search (no sqlite-vec support)
+            # 텍스트 기반 검색 사용 (sqlite-vec 지원 없음)
             related_memories = await self._text_search(
                 primary_memory, depth, project_id
             )
 
-            # Expanded search based on depth
+            # depth에 따른 확장 검색
             if depth > 1 and related_memories:
                 related_memories = await self._expand_search(
-                    related_memories, depth - 1, project_id or primary_memory.project_id,
-                    exclude_id=primary_memory.id,
+                    related_memories, depth - 1, project_id or primary_memory.project_id
                 )
 
-            # Sort by similarity and limit
+            # 확장 경로에서 primary 가 되돌아 들어오는 경우를 방어적으로 차단
+            related_memories = [
+                m for m in related_memories if m.id != primary_memory.id
+            ]
+
+            # 유사도 순으로 정렬하고 제한
             related_memories.sort(key=lambda x: x.similarity_score, reverse=True)
-            return related_memories[: depth * 3]  # Max 3 per depth level
+            return related_memories[: depth * 3]  # depth당 최대 3개
 
         except Exception as e:
             logger.error(f"Error finding related memories: {e}")
@@ -121,12 +125,12 @@ class ContextService:
     ) -> List[RelatedMemory]:
         """벡터 기반 검색"""
         try:
-            # Generate embedding for primary memory
+            # 주요 메모리의 임베딩 생성
             query_embedding = self.embedding_service.embed(primary_memory.content)
             query_bytes = self.embedding_service.to_bytes(query_embedding)
 
-            # Build SQL query
-            where_conditions = ["id != ?"]  # Exclude self
+            # SQL 쿼리 구성
+            where_conditions = ["id != ?"]  # 자기 자신 제외
             params = [primary_memory.id]
 
             if project_id:
@@ -138,7 +142,7 @@ class ContextService:
 
             where_clause = " AND ".join(where_conditions)
 
-            # Vector similarity search
+            # 벡터 유사도 검색
             cursor = self.db.connection.cursor()
             cursor.execute(
                 f"""
@@ -162,17 +166,17 @@ class ContextService:
 
             rows = cursor.fetchall()
 
-            # Convert to RelatedMemory objects and classify relationships
+            # RelatedMemory 객체로 변환 및 관계 분류
             related_memories = []
             primary_created_at = datetime.fromisoformat(
                 primary_memory.created_at.replace("Z", "+00:00")
             )
 
             for row in rows:
-                similarity_score = 1.0 - row[6]  # Convert distance to similarity
+                similarity_score = 1.0 - row[6]  # distance를 similarity로 변환
                 created_at = datetime.fromisoformat(row[2].replace("Z", "+00:00"))
 
-                # Classify relationship
+                # 관계 분류
                 relationship = self._classify_relationship(
                     primary_created_at, created_at, similarity_score
                 )
@@ -199,13 +203,13 @@ class ContextService:
     ) -> List[RelatedMemory]:
         """텍스트 기반 fallback 검색"""
         try:
-            # Extract keywords from primary memory (simple method)
+            # 주요 메모리에서 키워드 추출 (간단한 방법)
             keywords = self._extract_keywords(primary_memory.content)
             if not keywords:
                 return []
 
-            # Build SQL query
-            where_conditions = ["id != ?"]  # Exclude self
+            # SQL 쿼리 구성
+            where_conditions = ["id != ?"]  # 자기 자신 제외
             params = [primary_memory.id]
 
             if project_id:
@@ -215,9 +219,9 @@ class ContextService:
                 where_conditions.append("project_id = ?")
                 params.append(primary_memory.project_id)
 
-            # Add keyword-based search conditions
+            # 키워드 기반 검색 조건 추가
             keyword_conditions = []
-            for keyword in keywords[:5]:  # Use top 5 keywords only
+            for keyword in keywords[:5]:  # 상위 5개 키워드만 사용
                 keyword_conditions.append("content LIKE ?")
                 params.append(f"%{keyword}%")
 
@@ -226,7 +230,7 @@ class ContextService:
 
             where_clause = " AND ".join(where_conditions)
 
-            # Execute text search
+            # 텍스트 검색 실행
             cursor = self.db.connection.cursor()
             cursor.execute(
                 f"""
@@ -241,7 +245,7 @@ class ContextService:
 
             rows = cursor.fetchall()
 
-            # Convert to RelatedMemory objects
+            # RelatedMemory 객체로 변환
             related_memories = []
             primary_created_at = datetime.fromisoformat(
                 primary_memory.created_at.replace("Z", "+00:00")
@@ -250,12 +254,12 @@ class ContextService:
             for row in rows:
                 created_at = datetime.fromisoformat(row[2].replace("Z", "+00:00"))
 
-                # Calculate simple text similarity
+                # 간단한 텍스트 유사도 계산
                 similarity_score = self._calculate_text_similarity(
                     primary_memory.content, row[1]
                 )
 
-                # Classify relationship
+                # 관계 분류
                 relationship = self._classify_relationship(
                     primary_created_at, created_at, similarity_score
                 )
@@ -278,37 +282,60 @@ class ContextService:
             return []
 
     def _extract_keywords(self, content: str) -> List[str]:
-        """텍스트에서 키워드 추출 (영어 + 한국어)"""
+        """텍스트에서 키워드 추출"""
         import re
+
+        # 간단한 키워드 추출 (단어 길이 3자 이상, 알파벳만)
+        words = re.findall(r"\b[a-zA-Z]{3,}\b", content.lower())
+
+        # 일반적인 단어 제외
+        stop_words = {
+            "the",
+            "and",
+            "for",
+            "are",
+            "but",
+            "not",
+            "you",
+            "all",
+            "can",
+            "had",
+            "her",
+            "was",
+            "one",
+            "our",
+            "out",
+            "day",
+            "get",
+            "has",
+            "him",
+            "his",
+            "how",
+            "man",
+            "new",
+            "now",
+            "old",
+            "see",
+            "two",
+            "way",
+            "who",
+            "boy",
+            "did",
+            "its",
+            "let",
+            "put",
+            "say",
+            "she",
+            "too",
+            "use",
+        }
+
+        keywords = [word for word in words if word not in stop_words]
+
+        # 빈도순으로 정렬 (간단한 방법)
         from collections import Counter
 
-        # English keywords (3+ chars)
-        english_words = re.findall(r"\b[a-zA-Z]{3,}\b", content.lower())
-
-        # Korean keywords (2+ consecutive Hangul chars)
-        korean_words = re.findall(r"[가-힣]{2,}", content)
-
-        # Exclude English stopwords
-        stop_words = {
-            "the", "and", "for", "are", "but", "not", "you", "all",
-            "can", "had", "her", "was", "one", "our", "out", "day",
-            "get", "has", "him", "his", "how", "man", "new", "now",
-            "old", "see", "two", "way", "who", "boy", "did", "its",
-            "let", "put", "say", "she", "too", "use",
-        }
-
-        # Exclude Korean stopwords
-        korean_stop_words = {
-            "그리고", "하지만", "그래서", "때문에", "대한", "통해",
-            "위해", "있는", "없는", "하는", "되는", "이런", "저런",
-            "그런", "모든", "각각", "여기", "거기",
-        }
-
-        english_keywords = [w for w in english_words if w not in stop_words]
-        korean_keywords = [w for w in korean_words if w not in korean_stop_words]
-
-        # Sort by frequency (Korean + English combined)
-        word_counts = Counter(english_keywords + korean_keywords)
+        word_counts = Counter(keywords)
 
         return [word for word, count in word_counts.most_common(10)]
 
@@ -320,7 +347,7 @@ class ContextService:
         if not words1 or not words2:
             return 0.0
 
-        # Jaccard similarity
+        # Jaccard 유사도
         intersection = len(words1.intersection(words2))
         union = len(words1.union(words2))
 
@@ -332,22 +359,21 @@ class ContextService:
         """관계 분류 (before/after/similar)"""
         time_diff = (primary_time - related_time).total_seconds()
 
-        # 'similar' if high similarity
+        # 높은 유사도면 'similar'
         if similarity_score > 0.8:
             return "similar"
 
-        # Determine before/after by time difference
-        if time_diff > 3600:  # More than 1 hour apart
+        # 시간 차이로 before/after 결정
+        if time_diff > 3600:  # 1시간 이상 차이
             return "before" if related_time < primary_time else "after"
         else:
-            return "similar"  # similar if times are close
+            return "similar"  # 시간이 비슷하면 similar
 
     async def _expand_search(
         self,
         initial_memories: List[RelatedMemory],
         remaining_depth: int,
         project_id: Optional[str],
-        exclude_id: Optional[str] = None,
     ) -> List[RelatedMemory]:
         """깊이 기반 확장 검색"""
         if remaining_depth <= 0 or not initial_memories:
@@ -355,13 +381,11 @@ class ContextService:
 
         expanded_memories = initial_memories.copy()
         processed_ids = {mem.id for mem in initial_memories}
-        if exclude_id:
-            processed_ids.add(exclude_id)
 
-        # Additional search for each related memory
-        for memory in initial_memories[:3]:  # Expand top 3 only
+        # 각 관련 메모리에 대해 추가 검색
+        for memory in initial_memories[:3]:  # 상위 3개만 확장
             try:
-                # Use text-based search (no sqlite-vec support)
+                # 텍스트 기반 검색 사용 (sqlite-vec 지원 없음)
                 additional_memories = await self._text_search_for_expansion(
                     memory, project_id, processed_ids
                 )
@@ -381,26 +405,26 @@ class ContextService:
         self, primary_memory: SearchResult, related_memories: List[RelatedMemory]
     ) -> List[str]:
         """시간순 timeline 생성"""
-        # Sort all memories by time
+        # 모든 메모리를 시간순으로 정렬
         all_memories = []
 
-        # Add primary memories
+        # 주요 메모리 추가
         primary_time = datetime.fromisoformat(
             primary_memory.created_at.replace("Z", "+00:00")
         )
         all_memories.append((primary_time, primary_memory.id))
 
-        # Add related memories
+        # 관련 메모리들 추가
         for memory in related_memories:
             memory_time = datetime.fromisoformat(
                 memory.created_at.replace("Z", "+00:00")
             )
             all_memories.append((memory_time, memory.id))
 
-        # Sort by time
+        # 시간순 정렬
         all_memories.sort(key=lambda x: x[0])
 
-        # Extract and return IDs only
+        # ID만 추출하여 반환
         return [memory_id for _, memory_id in all_memories]
 
     async def _vector_search_for_expansion(
@@ -414,7 +438,7 @@ class ContextService:
             where_conditions = []
             params = []
 
-            # Exclude already-processed memories
+            # 이미 처리된 메모리들 제외
             placeholders = ",".join("?" * len(processed_ids))
             where_conditions.append(f"id NOT IN ({placeholders})")
             params.extend(list(processed_ids))
@@ -444,7 +468,7 @@ class ContextService:
 
             additional_memories = []
             for row in rows:
-                similarity_score = (1.0 - row[6]) * 0.8  # Reduce score for indirect connection
+                similarity_score = (1.0 - row[6]) * 0.8  # 간접 연결이므로 점수 감소
                 created_at = datetime.fromisoformat(row[2].replace("Z", "+00:00"))
                 memory_time = datetime.fromisoformat(
                     memory.created_at.replace("Z", "+00:00")
@@ -483,7 +507,7 @@ class ContextService:
             where_conditions = []
             params = []
 
-            # Exclude already-processed memories
+            # 이미 처리된 메모리들 제외
             placeholders = ",".join("?" * len(processed_ids))
             where_conditions.append(f"id NOT IN ({placeholders})")
             params.extend(list(processed_ids))
@@ -492,9 +516,9 @@ class ContextService:
                 where_conditions.append("project_id = ?")
                 params.append(project_id)
 
-            # Add keyword-based search conditions
+            # 키워드 기반 검색 조건 추가
             keyword_conditions = []
-            for keyword in keywords[:3]:  # Use top 3 keywords only
+            for keyword in keywords[:3]:  # 상위 3개 키워드만 사용
                 keyword_conditions.append("content LIKE ?")
                 params.append(f"%{keyword}%")
 
@@ -524,7 +548,7 @@ class ContextService:
                     memory.created_at.replace("Z", "+00:00")
                 )
 
-                # Calculate simple text similarity then reduce score
+                # 간단한 텍스트 유사도 계산 후 점수 감소
                 similarity_score = (
                     self._calculate_text_similarity(memory.content, row[1]) * 0.8
                 )
