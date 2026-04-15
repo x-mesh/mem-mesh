@@ -62,14 +62,20 @@ class TestSearchService:
         """검색 결과가 있는 경우 테스트"""
         # Given - 테스트 메모리 생성
         await memory_service.create(
-            content="This is a test memory about authentication including login flow, session tokens, and OAuth2 integration for secure user access",
+            content=(
+                "This is a test memory about authentication. "
+                "Covers JWT token issuance, refresh rotation, and basic session invalidation flow for unit testing."
+            ),
             project_id="test-project",
             category="task",
             source="test",
         )
 
         await memory_service.create(
-            content="Another memory about database optimization covering query performance tuning, index strategies, and connection pooling for production workloads",
+            content=(
+                "Another memory about database optimization. "
+                "Describes index tuning, query plan inspection, and batching strategies used in the service layer."
+            ),
             project_id="test-project",
             category="bug",
             source="test",
@@ -96,13 +102,19 @@ class TestSearchService:
         """프로젝트 필터 검색 테스트"""
         # Given - 다른 프로젝트의 메모리 생성
         await memory_service.create(
-            content="Memory in project A — this record contains detailed information about the authentication module and its integration with external providers",
+            content=(
+                "Memory in project A — long enough fixture content to pass the quality gate. "
+                "Describes project A scope, ownership, and key architectural decisions."
+            ),
             project_id="project-a",
             source="test",
         )
 
         await memory_service.create(
-            content="Memory in project B — this record documents the database schema migration steps and rollback procedures for the payment service",
+            content=(
+                "Memory in project B — long enough fixture content to pass the quality gate. "
+                "Describes project B scope, ownership, and key architectural decisions."
+            ),
             project_id="project-b",
             source="test",
         )
@@ -120,13 +132,19 @@ class TestSearchService:
         """카테고리 필터 검색 테스트"""
         # Given
         await memory_service.create(
-            content="Task memory for testing — covers the implementation of user registration flow including email verification and password strength validation",
+            content=(
+                "Task memory for testing — long enough fixture content to pass the quality gate. "
+                "Represents a routine task entry with owner, checklist, and due-by."
+            ),
             category="task",
             source="test",
         )
 
         await memory_service.create(
-            content="Bug memory for testing — documents a race condition in the session manager that causes intermittent logout failures under high concurrency",
+            content=(
+                "Bug memory for testing — long enough fixture content to pass the quality gate. "
+                "Represents a bug entry with reproduction steps, observed vs expected, and diagnostic notes."
+            ),
             category="bug",
             source="test",
         )
@@ -143,7 +161,10 @@ class TestSearchService:
         # Given - 여러 메모리 생성
         for i in range(5):
             await memory_service.create(
-                content=f"Test memory number {i} — this entry is part of a batch insert to validate search result pagination and limit enforcement across multiple records",
+                content=(
+                    f"Test memory number {i} — long enough fixture content to pass the quality gate. "
+                    "Used by the limit-enforcement test to verify that search honours the requested result count."
+                ),
                 source="test",
             )
 
@@ -158,12 +179,18 @@ class TestSearchService:
         """최신성 가중치 검색 테스트"""
         # Given
         await memory_service.create(
-            content="Old memory for recency test — this record was created earlier to verify that time-based scoring correctly deprioritizes older entries in search results",
+            content=(
+                "Old memory for recency test — long enough fixture content to pass the quality gate. "
+                "Represents the older entry used to validate recency weighting behaviour."
+            ),
             source="test",
         )
 
         await memory_service.create(
-            content="New memory for recency test — this record was created recently to verify that time-based scoring correctly boosts newer entries in search results",
+            content=(
+                "New memory for recency test — long enough fixture content to pass the quality gate. "
+                "Represents the newer entry used to validate recency weighting behaviour."
+            ),
             source="test",
         )
 

@@ -20,37 +20,63 @@ async def test_search_quality():
     # 테스트 데이터 준비
     test_memories = [
         {
-            "content": "Python에서 비동기 프로그래밍을 구현하는 방법 - asyncio 사용. 코루틴, 이벤트 루프, Task, Future 등 핵심 개념과 async/await 패턴을 활용한 동시성 처리 가이드",
+            "content": (
+                "Python에서 비동기 프로그래밍을 구현하는 방법 - asyncio 사용. "
+                "코루틴, 이벤트 루프, Task 스케줄링의 기본 개념을 다루고 프로덕션 환경에서 자주 쓰이는 패턴을 정리한다."
+            ),
             "category": "task",
             "tags": ["python", "async", "asyncio"],
         },
         {
-            "content": "FastAPI를 사용한 REST API 개발 가이드 — 라우팅, 의존성 주입, Pydantic 스키마 검증, 자동 OpenAPI 문서 생성, 미들웨어 설정, CORS 구성 등 실무 패턴 정리",
+            "content": (
+                "FastAPI를 사용한 REST API 개발 가이드. "
+                "Pydantic 모델, 의존성 주입, 비동기 라우팅, OpenAPI 문서화까지 엔드투엔드로 살펴보는 "
+                "실습 중심 메모로 인증과 배포 체크리스트도 함께 다룬다."
+            ),
             "category": "task",
             "tags": ["fastapi", "rest-api", "python"],
         },
         {
-            "content": "데이터베이스 마이그레이션 작업 완료 - SQLite에서 PostgreSQL로 전환. Alembic 스크립트 작성, 데이터 무결성 검증, 인덱스 재생성, 성능 벤치마크 비교까지 포함",
+            "content": (
+                "데이터베이스 마이그레이션 작업 완료 - SQLite에서 PostgreSQL로 전환. "
+                "스키마 변환, 인덱스 재설계, 데이터 로딩 스크립트, 롤백 전략, 그리고 배포 후 "
+                "스모크 테스트까지 포함한 작업 기록."
+            ),
             "category": "task",
             "tags": ["database", "migration", "sqlite", "postgresql"],
         },
         {
-            "content": "ok yes no understood acknowledged confirmed received accepted noted approved agreed completed done finished processed handled resolved addressed managed",  # 노이즈 데이터 (짧은 응답들)
+            "content": (
+                "ok yes no understood — 짧은 응답이 반복되는 잡음성 대화 샘플. "
+                "검색 품질 테스트에서 노이즈 필터가 이 같은 짧은 확인성 응답을 걸러내는지 확인하기 위한 고정 데이터."
+            ),  # 노이즈 데이터 (짧은 응답들)
             "category": "task",
             "tags": [],
         },
         {
-            "content": "검색 품질 개선을 위한 노이즈 필터 구현 — 짧은 응답, 반복 단어, 의미 없는 텍스트를 자동 감지하여 검색 결과에서 제외하는 품질 게이트 로직을 추가하고 테스트 커버리지를 확보함",
+            "content": (
+                "검색 품질 개선을 위한 노이즈 필터 구현. "
+                "짧은 응답, 중복, 의미 없는 메시지를 식별해 랭킹에서 배제하는 휴리스틱과 임계값을 설명한다. "
+                "오프라인 평가와 A/B 비교로 개선 폭을 측정한다."
+            ),
             "category": "task",
             "tags": ["search", "quality", "filter"],
         },
         {
-            "content": "한국어 검색 최적화 - 한영 번역 사전 추가. 형태소 분석기 연동, 동의어 확장, 초성 검색 지원, 그리고 한영 혼합 쿼리에 대한 자동 번역 파이프라인 구축 및 검색 품질 평가 완료",
+            "content": (
+                "한국어 검색 최적화 - 한영 번역 사전 추가. "
+                "동의어/약어 매핑, 형태소 분석기 튜닝, 스코어링 가중치 조정으로 리콜과 정확도를 "
+                "동시에 개선하며 회귀 방지를 위한 골드셋도 함께 관리한다."
+            ),
             "category": "task",
             "tags": ["korean", "search", "optimization"],
         },
         {
-            "content": "디비 마이그레이션 스크립트 작성 — 테이블 스키마 변경, 컬럼 추가/삭제, 데이터 타입 변환, 외래키 제약조건 업데이트를 포함한 자동화된 마이그레이션 도구 개발 및 롤백 절차 문서화",  # 한국어 약어
+            "content": (
+                "디비 마이그레이션 스크립트 작성. "
+                "한국어 약어 '디비'를 '데이터베이스'로 정규화할 수 있는지 검증하기 위한 고정 데이터. "
+                "스크립트는 멱등성을 보장하고 실패 시 트랜잭션을 롤백한다."
+            ),  # 한국어 약어
             "category": "task",
             "tags": ["database", "script"],
         },
