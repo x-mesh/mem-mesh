@@ -204,7 +204,7 @@ class MCPDispatcher:
         result = await self._tool_handlers.session_end(
             project_id=args["project_id"],
             summary=args.get("summary"),
-            auto_complete_pins=args.get("auto_complete_pins", False),
+            auto_complete_pins=args.get("auto_complete_pins", "none"),
         )
         return format_tool_response(result)
 

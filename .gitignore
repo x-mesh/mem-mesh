@@ -10,6 +10,15 @@
 *.egg-info/
 mem_mesh.egg-info/
 __pycache__/
+
+# OS noise
+**/.DS_Store
+
+# Benchmark artifacts
+**/test_benchmark_results.json
+
+# x-build project state (tool-local)
+.xm/
 .hypothesis/
 .pytest_cache/
 .mypy_cache/

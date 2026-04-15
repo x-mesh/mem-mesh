@@ -36,13 +36,13 @@ class RelationService:
 
     async def create_relation(self, data: RelationCreate) -> Relation:
         """관계 생성"""
-        # Verify memory exists
+        # 메모리 존재 확인
         if not await self._memory_exists(data.source_id):
             raise MemoryNotFoundError(f"Source memory not found: {data.source_id}")
         if not await self._memory_exists(data.target_id):
             raise MemoryNotFoundError(f"Target memory not found: {data.target_id}")
 
-        # Prevent self-reference
+        # 자기 참조 방지
         if data.source_id == data.target_id:
             raise ValueError("Cannot create relation to self")
 
@@ -188,7 +188,7 @@ class RelationService:
 
             visited.add(current_id)
 
-            # Query relations for current node
+            # 현재 노드의 관계 조회
             node_relations = await self.get_relations_for_memory(
                 current_id,
                 direction="both",
@@ -196,20 +196,20 @@ class RelationService:
             )
 
             for rel in node_relations:
-                # Filter by relation type
+                # 관계 유형 필터
                 if relation_types and rel.relation_type not in relation_types:
                     continue
 
                 relations.append(rel)
 
-                # Add to next traversal targets
+                # 다음 탐색 대상 추가
                 next_id = (
                     rel.target_id if rel.source_id == current_id else rel.source_id
                 )
                 if next_id not in visited:
                     queue.append((next_id, current_depth + 1))
 
-        # Remove duplicates
+        # 중복 제거
         seen_ids = set()
         unique_relations = []
         for rel in relations:
@@ -248,13 +248,61 @@ class RelationService:
         threshold: float = 0.7,
         limit: int = 5,
     ) -> List[Relation]:
-        """벡터 유사도 기반 자동 연결"""
-        # Search similar memories using current memory's embedding
-        # Note: actual implementation requires integration with EmbeddingService
-        # Only basic structure provided here
+        """벡터 유사도 기반 자동 연결.
 
-        created_relations = []
-        # TODO: implement after vector search integration
+        주어진 메모리와 유사한 메모리를 벡터 검색으로 찾아
+        ``RelationType.SIMILAR`` 관계를 생성한다. 이미 존재하는 관계는
+        ``get_or_create_relation`` 을 통해 중복 생성하지 않는다.
+
+        Args:
+            memory_id: 기준 메모리 ID
+            threshold: 최소 유사도 (0.0-1.0). 거리→유사도 변환 후 필터
+            limit: 생성할 최대 관계 수
+        """
+        if not await self._memory_exists(memory_id):
+            raise MemoryNotFoundError(f"Memory not found: {memory_id}")
+
+        row = await self.db.fetchone(
+            "SELECT embedding FROM memories WHERE id = ?", (memory_id,)
+        )
+        if not row or row["embedding"] is None:
+            return []
+
+        # 자기 자신이 결과에 포함되므로 limit+1 로 조회
+        raw_results = await self.db.vector_search(
+            embedding=row["embedding"], limit=limit + 1, filters=None
+        )
+        if not raw_results:
+            return []
+
+        created_relations: List[Relation] = []
+        for result_row in raw_results:
+            if len(created_relations) >= limit:
+                break
+
+            try:
+                target_id = result_row["id"]
+                distance = float(result_row["distance"])
+            except (IndexError, KeyError, TypeError, ValueError):
+                continue
+
+            if target_id == memory_id:
+                continue
+
+            similarity = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
+            if similarity < threshold:
+                continue
+
+            relation, created = await self.get_or_create_relation(
+                RelationCreate(
+                    source_id=memory_id,
+                    target_id=target_id,
+                    relation_type=RelationType.SIMILAR,
+                    strength=similarity,
+                )
+            )
+            if created:
+                created_relations.append(relation)
 
         return created_relations
 

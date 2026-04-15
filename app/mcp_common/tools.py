@@ -94,11 +94,11 @@ class MCPToolHandlers:
             result = await self._storage.add_memory(params)
             logger.info("Successfully added memory", memory_id=result.id)
 
-            # Send realtime notification — query complete memory data before sending
+            # 실시간 알림 전송 - 완전한 메모리 데이터 조회 후 전송
             logger.debug(f"Checking notifier: {self._notifier is not None}")
             if self._notifier:
                 try:
-                    # Query complete data for created memory (using MemoryService)
+                    # 생성된 메모리의 완전한 데이터 조회 (MemoryService 사용)
                     has_memory_service = (
                         hasattr(self._storage, "memory_service")
                         and self._storage.memory_service
@@ -182,7 +182,7 @@ class MCPToolHandlers:
         )
 
         try:
-            # Auto-extract Korean/English time expressions from query
+            # 쿼리에서 한국어/영어 시간 표현 자동 추출
             if not time_range:
                 from ..core.services.query_expander import extract_time_expression
 
@@ -201,7 +201,7 @@ class MCPToolHandlers:
                 category=category,
                 limit=(
                     limit * 2 if enable_noise_filter else limit
-                ),  # Fetch more to account for filtering
+                ),  # 필터링 고려하여 더 많이 가져옴
                 recency_weight=recency_weight,
                 time_range=time_range,
                 date_from=date_from,
@@ -210,7 +210,7 @@ class MCPToolHandlers:
             )
             result = await self._storage.search_memories(params)
 
-            # Apply noise filter
+            # 노이즈 필터 적용
             if enable_noise_filter and result.results:
                 from ..core.services.noise_filter import SmartSearchFilter
 
@@ -228,7 +228,7 @@ class MCPToolHandlers:
                 filtered=enable_noise_filter,
             )
 
-            # Compress response (if enabled)
+            # 응답 압축 (활성화된 경우)
             if (
                 self._enable_compression
                 and self._optimizer
@@ -259,13 +259,13 @@ class MCPToolHandlers:
         ]
 
         if format == "minimal":
-            # Extreme compression: ID and score only
+            # 극도 압축: ID와 점수만
             compressed_results = [
                 {"id": r["id"][:8], "score": round(r["similarity_score"], 2)}
                 for r in results_list
             ]
         elif format == "compact":
-            # Compressed: ID, category, summary
+            # 압축: ID, 카테고리, 요약
             compressed_results = [
                 {
                     "id": r["id"][:8],
@@ -280,7 +280,7 @@ class MCPToolHandlers:
                 for r in results_list
             ]
         else:  # standard
-            # Standard: include full content but structured
+            # 표준: 전체 내용 포함하되 구조화
             compressed_results = results_list
 
         return {
@@ -320,7 +320,7 @@ class MCPToolHandlers:
             result = await self._storage.get_context(memory_id, depth, project_id)
             logger.info("Context retrieved", memory_count=len(result.related_memories))
 
-            # Compress response (if enabled)
+            # 응답 압축 (활성화된 경우)
             if (
                 self._enable_compression
                 and self._optimizer
@@ -364,7 +364,7 @@ class MCPToolHandlers:
                         else (r.content if hasattr(r, "content") else "")
                     ),
                 }
-                for r in related[:5]  # Max 5
+                for r in related[:5]  # 최대 5개만
             ],
             "compressed": True,
         }
@@ -403,7 +403,7 @@ class MCPToolHandlers:
             result = await self._storage.update_memory(memory_id, params)
             logger.info("Successfully updated memory", memory_id=memory_id)
 
-            # Send realtime notification
+            # 실시간 알림 전송
             if self._notifier:
                 try:
                     await self._notifier.notify_memory_updated(
@@ -429,20 +429,20 @@ class MCPToolHandlers:
         logger.info("Tool delete called", memory_id=memory_id)
 
         try:
-            # Fetch memory info before deletion (to check project ID)
+            # 삭제 전에 메모리 정보 가져오기 (프로젝트 ID 확인용)
             project_id = None
             if self._notifier:
                 try:
-                    # Query memory info (before deletion)
+                    # 메모리 정보 조회 (삭제 전)
                     memory_info = await self._storage.get_memory(memory_id)
                     project_id = memory_info.project_id if memory_info else None
-                except Exception as e:
-                    logger.debug(f"Failed to fetch memory info before delete: {e}")  # deletion proceeds regardless
+                except Exception:
+                    pass  # 조회 실패해도 삭제는 진행
 
             result = await self._storage.delete_memory(memory_id)
             logger.info("Successfully deleted memory", memory_id=memory_id)
 
-            # Send realtime notification
+            # 실시간 알림 전송
             if self._notifier:
                 try:
                     await self._notifier.notify_memory_deleted(memory_id, project_id)
@@ -529,7 +529,7 @@ class MCPToolHandlers:
                 db, getattr(self._storage, "embedding_service", None)
             )
 
-            # Auto-estimate importance via ImportanceAnalyzer if not specified
+            # importance가 명시되지 않으면 ImportanceAnalyzer로 자동 추정
             effective_importance = importance
             auto_importance = False
 
@@ -549,7 +549,7 @@ class MCPToolHandlers:
                 auto_importance=auto_importance,
                 ide_session_id=ide_session_id,
                 client_type=client_type,
-                client=None,
+                client=os.environ.get("MEM_MESH_CLIENT"),
                 is_staging=staging,
             )
 
@@ -560,14 +560,14 @@ class MCPToolHandlers:
                 auto=auto_importance,
             )
 
-            # Send realtime notification (full response for dashboard)
+            # 실시간 알림 전송 (full response for dashboard)
             if self._notifier:
                 try:
                     await self._notifier.notify_pin_created(result.model_dump())
                 except Exception as e:
                     logger.warning(f"Failed to send pin_add notification: {e}")
 
-            # MCP return is compact
+            # MCP 반환은 compact
             response = {"id": result.id, "importance": effective_importance, "status": result.status}
             if auto_importance:
                 response["auto_importance"] = True
@@ -606,7 +606,7 @@ class MCPToolHandlers:
             try:
                 result = await pin_service.complete_pin(pin_id)
             except PinAlreadyCompletedError:
-                # Already completed Pin — return current state
+                # 이미 완료된 Pin - 현재 상태 반환
                 logger.info(
                     "Pin already completed, returning current state", pin_id=pin_id
                 )
@@ -614,7 +614,7 @@ class MCPToolHandlers:
                 if not result:
                     raise ValueError(f"Pin not found: {pin_id}")
 
-            # Check whether to suggest promotion
+            # 승격 제안 여부 확인
             suggest_promotion = pin_service.should_suggest_promotion(result)
 
             logger.info(
@@ -623,7 +623,7 @@ class MCPToolHandlers:
                 suggest_promotion=suggest_promotion,
             )
 
-            # Send realtime notification (full response for dashboard)
+            # 실시간 알림 전송 (full response for dashboard)
             if self._notifier:
                 try:
                     full_response = result.model_dump()
@@ -632,17 +632,17 @@ class MCPToolHandlers:
                 except Exception as e:
                     logger.warning(f"Failed to send pin_complete notification: {e}")
 
-            # MCP return is compact
+            # MCP 반환은 compact
             response = {"id": pin_id, "status": result.status, "suggest_promotion": suggest_promotion}
 
-            # Auto-promote if promote=True
+            # promote=True이면 자동 승격
             if promote:
                 try:
                     promote_result = await pin_service.promote_to_memory(pin_id, category=category)
                     response["promoted"] = True
                     response["memory_id"] = promote_result["memory_id"]
 
-                    # Promotion notification
+                    # 승격 알림
                     if self._notifier:
                         try:
                             await self._notifier.notify_pin_promoted(
@@ -688,7 +688,7 @@ class MCPToolHandlers:
                 memory_id=result["memory_id"],
             )
 
-            # Send realtime notification (pin → memory promotion)
+            # 실시간 알림 전송 (pin → memory 승격)
             if self._notifier:
                 try:
                     has_memory_service = (
@@ -728,6 +728,124 @@ class MCPToolHandlers:
             logger.error("Error in pin_promote", error=str(e))
             raise
 
+    async def pin_list(
+        self,
+        project_id: str,
+        session_id: Optional[str] = None,
+        status: Optional[str] = None,
+        min_importance: Optional[int] = None,
+        tags: Optional[List[str]] = None,
+        limit: int = 10,
+        include_stats: bool = False,
+    ) -> Dict[str, Any]:
+        """List pins with filtering options
+
+        Args:
+            project_id: Project identifier
+            session_id: Filter by specific session (optional)
+            status: Filter by status (open, in_progress, completed)
+            min_importance: Minimum importance score (1-5)
+            tags: Filter by tags (AND condition)
+            limit: Maximum number of pins to return
+            include_stats: Include pin statistics in response
+
+        Returns:
+            dict: Pin list with optional statistics
+        """
+        logger.info(
+            "Tool pin_list called",
+            project_id=project_id,
+            session_id=session_id,
+            status=status,
+            min_importance=min_importance,
+        )
+
+        try:
+            from ..core.services.pin import PinService
+
+            db = self._get_database()
+            pin_service = PinService(
+                db, getattr(self._storage, "embedding_service", None)
+            )
+
+            # Use get_pins for project-level query, get_pins_filtered for session-level
+            needs_client_filter = False
+            if session_id:
+                pins = await pin_service.get_pins_filtered(
+                    session_id=session_id,
+                    min_importance=min_importance,
+                    status=status,
+                    tags=tags,
+                    limit=limit,
+                )
+            else:
+                # When client-side filters are needed, fetch without limit
+                # to avoid returning fewer results than requested
+                needs_client_filter = min_importance is not None or bool(tags)
+                fetch_limit = 200 if needs_client_filter else limit
+                pins = await pin_service.get_pins(
+                    project_id=project_id,
+                    status=status,
+                    limit=fetch_limit,
+                )
+                if min_importance is not None:
+                    pins = [p for p in pins if p.importance >= min_importance]
+                if tags:
+                    pins = [
+                        p
+                        for p in pins
+                        if all(tag in (p.tags or []) for tag in tags)
+                    ]
+                if needs_client_filter:
+                    pins = pins[:limit]
+
+            # Compact pin format + stats in single pass
+            pin_items = []
+            by_status: Dict[str, int] = {"open": 0, "in_progress": 0, "completed": 0}
+            for p in pins:
+                content = (p.content or "")[:200]
+                item: Dict[str, Any] = {
+                    "id": p.id,
+                    "content": content,
+                    "status": p.status,
+                    "importance": p.importance,
+                }
+                if p.tags:
+                    item["tags"] = p.tags
+                if p.session_id:
+                    item["session_id"] = p.session_id
+                if p.completed_at:
+                    item["completed_at"] = p.completed_at
+                pin_items.append(item)
+                if p.status in by_status:
+                    by_status[p.status] += 1
+
+            result: Dict[str, Any] = {
+                "pins": pin_items,
+                "count": len(pin_items),
+                "project_id": project_id,
+            }
+
+            # Include statistics if requested
+            if include_stats and session_id:
+                stats = await pin_service.get_pin_statistics(session_id)
+                result["stats"] = stats
+            elif include_stats:
+                result["stats"] = {
+                    "total": len(pins),
+                    "by_status": by_status,
+                }
+
+            logger.info(
+                "Successfully listed pins",
+                project_id=project_id,
+                count=len(pin_items),
+            )
+            return result
+        except Exception as e:
+            logger.error("Error in pin_list", error=str(e))
+            raise
+
     async def session_resume(
         self,
         project_id: str,
@@ -748,7 +866,7 @@ class MCPToolHandlers:
         Returns:
             dict: Session context with pins and token tracking information
         """
-        # Normalize expand value: bool or "smart"
+        # expand 값 정규화: bool 또는 "smart"
         if isinstance(expand, str) and expand.lower() == "smart":
             normalized_expand = "smart"
         else:
@@ -767,7 +885,7 @@ class MCPToolHandlers:
             db = self._get_database()
             session_service = SessionService(db)
 
-            # Use resume_with_token_tracking method
+            # resume_with_token_tracking 메서드 사용
             session_context, token_info = (
                 await session_service.resume_with_token_tracking(
                     project_id=project_id, expand=normalized_expand, limit=limit
@@ -781,7 +899,7 @@ class MCPToolHandlers:
                     "token_info": token_info,
                 }
 
-            # Connect to active session if ide_session_id provided (after resume)
+            # ide_session_id가 제공되었으면 활성 세션에 연결 (resume 이후)
             if ide_session_id:
                 await session_service.get_or_create_active_session(
                     project_id=project_id,
@@ -789,11 +907,11 @@ class MCPToolHandlers:
                     client_type=client_type,
                 )
 
-            # Return session context together with token info
+            # 세션 컨텍스트와 토큰 정보를 함께 반환
             response = session_context.model_dump()
             response["token_info"] = token_info
 
-            # Token limit warning when expand=false (smart mode is intentional, so excluded)
+            # expand=false일 때 토큰 제한 경고 (smart 모드는 의도적이므로 제외)
             if normalized_expand is False and token_info["loaded_tokens"] > 100:
                 response["token_warning"] = (
                     f"요약 모드에서 {token_info['loaded_tokens']} 토큰이 로드되었습니다. "
@@ -815,14 +933,16 @@ class MCPToolHandlers:
         self,
         project_id: str,
         summary: Optional[str] = None,
-        auto_complete_pins: bool = False,
+        auto_complete_pins: Union[bool, str] = "none",
     ) -> Dict[str, Any]:
         """End the current session for a project
 
         Args:
             project_id: Project identifier
             summary: Session summary (auto-generated if not provided)
-            auto_complete_pins: If True, auto-complete all open/in_progress pins before ending
+            auto_complete_pins: Pin auto-complete strategy: 'none'(default),
+                'in_progress'(complete active only, keep open), 'all'(complete everything).
+                Boolean also accepted (false=none, true=all).
 
         Returns:
             dict: Ended session information
@@ -836,7 +956,7 @@ class MCPToolHandlers:
             embedding_svc = getattr(self._storage, "embedding_service", None)
             session_service = SessionService(db, embedding_service=embedding_svc)
 
-            # Find current active session
+            # 현재 활성 세션 찾기
             sessions = await session_service.list_sessions(
                 project_id=project_id, status="active", limit=1
             )
@@ -923,7 +1043,7 @@ class MCPToolHandlers:
             db = self._get_database()
             service = RelationService(db)
 
-            # Validate relation_type
+            # relation_type 검증
             try:
                 rel_type = RelationType(relation_type)
             except ValueError:
@@ -987,9 +1107,9 @@ class MCPToolHandlers:
 
             db = self._get_database()
 
-            # Query and delete relations
+            # 관계 조회 및 삭제
             if relation_type:
-                # Delete specific type only
+                # 특정 타입만 삭제
                 try:
                     RelationType(relation_type)
                 except ValueError:
@@ -1007,7 +1127,7 @@ class MCPToolHandlers:
                 )
                 deleted_count = cursor.rowcount
             else:
-                # Delete all relations (bidirectional)
+                # 모든 관계 삭제 (양방향)
                 cursor = await db.execute(
                     """
                     DELETE FROM memory_relations 
@@ -1136,7 +1256,7 @@ class MCPToolHandlers:
             db = self._get_database()
             cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
-            # 1. Incomplete pins (open/in_progress)
+            # 1. 미완료 핀 (open/in_progress)
             incomplete_pins = await db.fetchall(
                 """
                 SELECT id, content, importance, status, tags, created_at
@@ -1150,7 +1270,7 @@ class MCPToolHandlers:
                 (project_id, cutoff),
             )
 
-            # 2. Memories saved with low importance (may have importance info in tags; pick low-relevance recent ones)
+            # 2. 저importance로 저장된 메모리 (importance 정보가 태그에 있을 수 있으므로 최근 것 중 관심도 낮은 것)
             low_engagement_memories = await db.fetchall(
                 """
                 SELECT id, content, category, tags, created_at
@@ -1163,7 +1283,7 @@ class MCPToolHandlers:
                 (project_id, cutoff),
             )
 
-            # 3. Recent session summaries
+            # 3. 최근 세션 요약
             recent_sessions = await db.fetchall(
                 """
                 SELECT id, status, summary, started_at, ended_at
@@ -1176,7 +1296,7 @@ class MCPToolHandlers:
                 (project_id, cutoff),
             )
 
-            # 4. Zero-result search queries (if monitoring table exists)
+            # 4. zero-result 검색 쿼리 (monitoring 테이블이 있는 경우)
             zero_result_queries = []
             try:
                 zero_rows = await db.fetchall(
@@ -1195,10 +1315,10 @@ class MCPToolHandlers:
                     {"query": r["query"], "created_at": r["created_at"]}
                     for r in zero_rows
                 ]
-            except Exception as e:
-                logger.debug(f"Failed to fetch zero-result queries: {e}")
+            except Exception:
+                pass
 
-            # 5. Statistics aggregation
+            # 5. 통계 집계
             total_memories = await db.fetchone(
                 """
                 SELECT COUNT(*) as count
@@ -1330,11 +1450,11 @@ class MCPToolHandlers:
 
     def _get_database(self) -> "Database":
         """Storage에서 Database 인스턴스 가져오기"""
-        # DirectStorageBackend has db attribute
+        # DirectStorageBackend의 경우 db 속성이 있음
         if hasattr(self._storage, "db") and self._storage.db is not None:
             return self._storage.db
 
-        # Try accessing database via another method
+        # 다른 방법으로 database 접근 시도
         if hasattr(self._storage, "_db"):
             return self._storage._db
 

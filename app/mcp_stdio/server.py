@@ -232,7 +232,7 @@ async def session_resume(
 async def session_end(
     project_id: str,
     summary: Optional[str] = None,
-    auto_complete_pins: bool = False,
+    auto_complete_pins: Union[bool, str] = "none",
 ) -> dict:
     """Internal handler for session_end tool."""
     return await _get_handlers().session_end(project_id, summary, auto_complete_pins=auto_complete_pins)

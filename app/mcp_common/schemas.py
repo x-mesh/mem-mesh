@@ -418,9 +418,15 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
                         "maxLength": 500,
                     },
                     "auto_complete_pins": {
-                        "type": "boolean",
-                        "description": "If true, auto-complete all open/in_progress pins before ending",
-                        "default": False,
+                        "description": "Pin auto-complete strategy: 'none'(default), 'in_progress'(complete active only, keep open), 'all'(complete everything). Boolean also accepted (false=none, true=all).",
+                        "default": "none",
+                        "oneOf": [
+                            {"type": "boolean"},
+                            {
+                                "type": "string",
+                                "enum": ["none", "in_progress", "all"],
+                            },
+                        ],
                     },
                 },
                 "required": ["project_id"],

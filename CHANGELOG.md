@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `RelationService.auto_link_similar` — vector similarity-based automatic memory linking (replaces prior TODO stub)
+- `auto_complete_pins` strategy parameter on `session_end` — 3-state enum (`none`/`in_progress`/`all`), backwards compatible with boolean
+- `tests/test_auto_complete_strategy.py` covering all strategies + backwards compatibility
+
+### Changed
+- `pin_list` optimization: when client-side filters (`min_importance`, `tags`) apply, fetch up to 200 records then trim to `limit` (prevents fewer-than-requested results); stats calculation merged into the pin iteration loop
+
 ## [1.2.6] - 2026-04-14
 
 ### Fixed

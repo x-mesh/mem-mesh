@@ -48,7 +48,8 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     "session_end": (
         "End the current session for a project. "
-        "Call when work is done. Optionally provide a summary for session history."
+        "Call when work is done. Optionally provide a summary for session history. "
+        "auto_complete_pins strategy: 'none'(default), 'in_progress'(complete active only), 'all'(complete everything)."
     ),
     # ===== T2: Frequently used (1-2 sentences) =====
     "context": (
