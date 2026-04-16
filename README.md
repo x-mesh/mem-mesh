@@ -1,7 +1,7 @@
 # mem-mesh
 
 [![PyPI version](https://img.shields.io/pypi/v/mem-mesh.svg)](https://pypi.org/project/mem-mesh/)
-[![CI](https://github.com/JINWOO-J/mem-mesh/actions/workflows/ci.yml/badge.svg)](https://github.com/JINWOO-J/mem-mesh/actions/workflows/ci.yml)
+[![CI](https://github.com/x-mesh/mem-mesh/actions/workflows/ci.yml/badge.svg)](https://github.com/x-mesh/mem-mesh/actions/workflows/ci.yml)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05%20%7C%202025--03--26-green.svg)](https://modelcontextprotocol.io/)
@@ -45,12 +45,12 @@ Most MCP memory servers are glorified key-value stores. mem-mesh is built for ho
 
 ### Prerequisites
 
-mem-mesh는 `sqlite-vec` 확장을 런타임에 로드하므로, Python의 `sqlite3` 모듈이 **loadable extension** 을 지원해야 합니다.
+mem-mesh loads the `sqlite-vec` extension at runtime, so Python's `sqlite3` module must support **loadable extensions**.
 
-**macOS + pyenv 사용자**: pyenv 의 기본 빌드는 extension loading이 꺼져 있어 `Migration failed: no such module: vec0` 오류가 발생합니다. 다음 중 하나를 선택하세요.
+**macOS + pyenv users**: pyenv's default build ships with extension loading disabled, which causes `Migration failed: no such module: vec0`. Pick one of the following:
 
 ```bash
-# 옵션 A (권장): Homebrew sqlite3 와 함께 Python 재빌드
+# Option A (recommended): rebuild Python against Homebrew sqlite3
 brew install sqlite3
 SQLITE_PREFIX="$(brew --prefix sqlite3)"
 PYTHON_CONFIGURE_OPTS="--enable-loadable-sqlite-extensions" \
@@ -60,19 +60,19 @@ CFLAGS="-I${SQLITE_PREFIX}/include" \
   pyenv install 3.13 --force
 pyenv rehash
 
-# 옵션 B: pysqlite3 바이너리 휠로 우회 (코드의 fallback 자동 사용)
+# Option B: use pysqlite3 binary wheel as fallback (the code auto-detects and uses it)
 pip install pysqlite3-binary
 ```
 
-Linux 배포판 Python, Docker 이미지, conda Python 은 일반적으로 extension loading 이 활성화돼 있어 추가 조치가 필요 없습니다.
+Linux distro Python, Docker images, and conda Python typically ship with extension loading enabled — no extra steps needed.
 
-### 설치 및 실행
+### Install & Run
 
 ```bash
 # Install
 pip install mem-mesh
 # or from source:
-git clone https://github.com/JINWOO-J/mem-mesh && cd mem-mesh && pip install -e .
+git clone https://github.com/x-mesh/mem-mesh && cd mem-mesh && pip install -e .
 
 # Configure (optional)
 cp .env.example .env

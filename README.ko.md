@@ -32,9 +32,34 @@ mem-mesh는 AI 도구(Cursor, Claude Desktop, Kiro 등)가 **벡터 검색**과 
 
 ## Quick Start
 
+### 사전 요구사항
+
+mem-mesh는 `sqlite-vec` 확장을 런타임에 로드하므로, Python의 `sqlite3` 모듈이 **loadable extension** 을 지원해야 합니다.
+
+**macOS + pyenv 사용자**: pyenv 의 기본 빌드는 extension loading이 꺼져 있어 `Migration failed: no such module: vec0` 오류가 발생합니다. 다음 중 하나를 선택하세요.
+
+```bash
+# 옵션 A (권장): Homebrew sqlite3 와 함께 Python 재빌드
+brew install sqlite3
+SQLITE_PREFIX="$(brew --prefix sqlite3)"
+PYTHON_CONFIGURE_OPTS="--enable-loadable-sqlite-extensions" \
+LDFLAGS="-L${SQLITE_PREFIX}/lib" \
+CPPFLAGS="-I${SQLITE_PREFIX}/include" \
+CFLAGS="-I${SQLITE_PREFIX}/include" \
+  pyenv install 3.13 --force
+pyenv rehash
+
+# 옵션 B: pysqlite3 바이너리 휠로 우회 (코드의 fallback 자동 사용)
+pip install pysqlite3-binary
+```
+
+Linux 배포판 Python, Docker 이미지, conda Python 은 일반적으로 extension loading 이 활성화돼 있어 추가 조치가 필요 없습니다.
+
+### 설치 및 실행
+
 ```bash
 # 1. 클론 및 설치
-git clone https://github.com/JINWOO-J/mem-mesh
+git clone https://github.com/x-mesh/mem-mesh
 cd mem-mesh
 pip install -e .
 
@@ -327,6 +352,8 @@ mem-mesh/
 1. 이슈/PR 생성
 2. `black`, `ruff` 준수
 3. 테스트 추가
+
+자세한 내용은 [CONTRIBUTING.md](./CONTRIBUTING.md)를, 릴리즈 히스토리는 [CHANGELOG.md](./CHANGELOG.md)를 참조하세요.
 
 ---
 
