@@ -40,11 +40,13 @@ FROM python:3.13-slim
 
 LABEL org.opencontainers.image.title="mem-mesh" \
       org.opencontainers.image.description="AI Memory Management MCP Server" \
-      org.opencontainers.image.source="https://github.com/JINWOO-J/mem-mesh"
+      org.opencontainers.image.source="https://github.com/x-mesh/mem-mesh"
 
 # Python runtime settings
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    MEM_MESH_SERVER_HOST=0.0.0.0 \
+    MEM_MESH_SERVER_PORT=8000
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
