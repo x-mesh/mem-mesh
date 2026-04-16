@@ -113,7 +113,13 @@ def setup_access_log(settings: Settings, prefix: str = "") -> Optional[str]:
         log_dir = os.path.dirname(settings.log_file)
         access_log_file = os.path.join(log_dir, f"{prefix}access.log")
     else:
-        access_log_file = f"./logs/{prefix}access.log"
+        # Default log dir sits next to the database, not in the CWD.
+        from pathlib import Path
+
+        from app.core.config import _default_data_dir
+
+        log_dir = Path(os.environ.get("XDG_STATE_HOME", _default_data_dir()))
+        access_log_file = str(log_dir / "logs" / f"{prefix}access.log")
 
     os.makedirs(os.path.dirname(access_log_file), exist_ok=True)
     return access_log_file

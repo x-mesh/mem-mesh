@@ -6,10 +6,48 @@ with support for environment variables and .env file loading.
 Supports storage_mode for direct SQLite access or API mode.
 """
 
+import os
+import platform
+from pathlib import Path
 from typing import Literal, Optional
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
+
+
+def _default_data_dir() -> Path:
+    """Return a stable per-user data directory.
+
+    macOS:   ~/Library/Application Support/mem-mesh
+    Linux:   $XDG_DATA_HOME/mem-mesh  (fallback: ~/.local/share/mem-mesh)
+    Windows: %APPDATA%/mem-mesh        (fallback: ~/AppData/Roaming/mem-mesh)
+
+    If a legacy ./data/memories.db exists in the CWD, prefer that for
+    backwards compatibility with existing deployments.
+    """
+    legacy = Path.cwd() / "data" / "memories.db"
+    if legacy.exists():
+        import sys
+        print(
+            f"[mem-mesh] Using legacy database at {legacy} (found in CWD). "
+            f"To use the standard per-user location instead, remove this file "
+            f"or set MEM_MESH_DATABASE_PATH explicitly.",
+            file=sys.stderr,
+        )
+        return legacy.parent
+
+    system = platform.system()
+    if system == "Darwin":
+        return Path.home() / "Library" / "Application Support" / "mem-mesh"
+    if system == "Windows":
+        appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(appdata) / "mem-mesh"
+    xdg = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(xdg) / "mem-mesh"
+
+
+def _default_db_path() -> str:
+    return str(_default_data_dir() / "memories.db")
 
 
 class Settings(BaseSettings):
@@ -36,7 +74,8 @@ class Settings(BaseSettings):
 
     # Database configuration
     database_path: str = Field(
-        default="./data/memories.db", description="Path to SQLite database file"
+        default_factory=lambda: _default_db_path(),
+        description="Path to SQLite database file (default: XDG_DATA_HOME/mem-mesh/memories.db)",
     )
 
     # SQLite WAL settings (Requirements 7.3)
@@ -46,8 +85,11 @@ class Settings(BaseSettings):
 
     # Embedding configuration
     embedding_model: str = Field(
-        default="intfloat/multilingual-e5-large",
-        description="Sentence-transformers model name",
+        default="nlpai-lab/KURE-v1",
+        description=(
+            "Sentence-transformers model name. Default: nlpai-lab/KURE-v1 "
+            "(Korean-tuned BGE-M3, 1024-dim). Override via MEM_MESH_EMBEDDING_MODEL."
+        ),
     )
     embedding_dim: int = Field(default=1024, description="Embedding vector dimensions")
 

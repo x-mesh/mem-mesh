@@ -4,6 +4,8 @@ FastAPI 애플리케이션 생성 및 설정.
 모든 라우터와 미들웨어를 등록하여 완전한 웹 애플리케이션을 구성합니다.
 """
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -21,8 +23,10 @@ from .oauth.basic_auth import BasicAuthMiddleware
 from .oauth.middleware import BearerTokenMiddleware
 from .websocket import router as websocket_router
 
+_WEB_ROOT = Path(__file__).resolve().parent
+
 # Jinja2 template configuration
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory=str(_WEB_ROOT / "templates"))
 
 
 def create_app() -> FastAPI:
@@ -45,7 +49,7 @@ def create_app() -> FastAPI:
     setup_exception_handlers(app)
 
     # Configure static file serving (register before routers)
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+    app.mount("/static", StaticFiles(directory=str(_WEB_ROOT / "static")), name="static")
 
     # Register routers (order matters!)
     app.include_router(oauth_router)  # OAuth endpoints

@@ -43,7 +43,8 @@ _notifier = RealtimeNotifier()
 
 
 def _rules_root() -> Path:
-    return Path(__file__).resolve().parents[3] / "docs" / "rules"
+    # Rules live inside the app.web package so they're packaged into the wheel.
+    return Path(__file__).resolve().parent.parent / "rules"
 
 
 def _rules_index_path() -> Path:
@@ -69,8 +70,11 @@ def _resolve_rule_path(rule_entry: dict) -> Path:
     rule_path = rule_entry.get("path")
     if not rule_path:
         raise ValueError("Invalid rule entry: missing path")
+    # Accept legacy "docs/rules/<file>" entries by stripping the prefix.
+    if rule_path.startswith("docs/rules/"):
+        rule_path = rule_path[len("docs/rules/"):]
     base = _rules_root().resolve()
-    candidate = (Path(__file__).resolve().parents[3] / rule_path).resolve()
+    candidate = (base / rule_path).resolve()
     if not str(candidate).startswith(str(base)):
         raise ValueError("Invalid rule path")
     return candidate
@@ -290,7 +294,7 @@ async def select_embedding_model(
 ):
     """Select and start downloading an embedding model.
 
-    Body: {"model": "intfloat/multilingual-e5-large"}
+    Body: {"model": "nlpai-lab/KURE-v1"}
     """
     model_name = body.get("model")
     if not model_name:

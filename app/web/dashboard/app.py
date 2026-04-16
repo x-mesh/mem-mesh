@@ -4,6 +4,8 @@ Dashboard 전용 FastAPI 애플리케이션.
 MCP SSE 엔드포인트를 제외한 웹 UI와 REST API만 제공합니다.
 """
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -16,7 +18,9 @@ from app.web.lifespan import lifespan
 from app.web.monitoring import router as monitoring_router
 from app.web.websocket import router as websocket_router
 
-templates = Jinja2Templates(directory="templates")
+_WEB_ROOT = Path(__file__).resolve().parent.parent
+
+templates = Jinja2Templates(directory=str(_WEB_ROOT / "templates"))
 
 
 def create_dashboard_app() -> FastAPI:
@@ -43,7 +47,7 @@ def create_dashboard_app() -> FastAPI:
     setup_exception_handlers(app)
 
     # Serve static files
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+    app.mount("/static", StaticFiles(directory=str(_WEB_ROOT / "static")), name="static")
 
     # Register routers (excluding MCP)
     app.include_router(websocket_router)

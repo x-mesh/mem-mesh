@@ -16,6 +16,11 @@ from urllib.error import URLError
 
 from app.cli.hooks.colors import bold, dim, err, info, ok, warn
 
+
+def has_uvx() -> bool:
+    """Return True if `uvx` is available on PATH."""
+    return shutil.which("uvx") is not None
+
 # ── Tool Registry ──
 
 MCP_TOOLS: list[dict] = [
@@ -111,7 +116,7 @@ def generate_mcp_entry(
     """Generate a mem-mesh MCP server entry.
 
     Args:
-        mode: 'sse' or 'stdio'
+        mode: 'uvx', 'stdio', or 'sse'
         url: API server URL (used for SSE mode)
         auto_approve: Whether to add autoApprove list for common tools
         tool_key: Tool registry key (e.g. 'claude-code', 'cursor') for MEM_MESH_CLIENT env
@@ -128,6 +133,13 @@ def generate_mcp_entry(
         entry: dict = {
             "url": f"{url.rstrip('/')}/mcp/sse",
             "type": "http",
+        }
+    elif mode == "uvx":
+        # uvx mode — each MCP client spawns an isolated, cached mem-mesh install.
+        # No pre-install needed; uvx downloads on first run, reuses cache after.
+        entry = {
+            "command": "uvx",
+            "args": ["--from", "mem-mesh[server]", "mem-mesh-mcp-stdio"],
         }
     else:
         # stdio mode — use the current Python interpreter
@@ -348,8 +360,15 @@ def _prompt_choice(prompt: str, options: list[str], default: str = "") -> str:
 def run_mcp_setup(
     url: str = "http://localhost:8000",
     yes: bool = False,
+    preferred_mode: Optional[str] = None,
 ) -> None:
-    """Interactive MCP configuration step for onboarding."""
+    """Interactive MCP configuration step for onboarding.
+
+    Args:
+        url: API URL for SSE mode
+        yes: Non-interactive (auto-pick best mode)
+        preferred_mode: If set ('uvx'|'stdio'|'sse'), skip mode prompt
+    """
     print(bold("[3/3] MCP Configuration"))
     print()
 
@@ -387,25 +406,44 @@ def run_mcp_setup(
             print(f"    {dim('✗')} {t['name']:<16} {dim('not installed')}")
     print()
 
-    if yes:
-        # Non-interactive: configure all detected tools with SSE mode
-        mode = "sse"
+    uvx_available = has_uvx()
+
+    if preferred_mode in ("uvx", "stdio", "sse"):
+        mode = preferred_mode
+        targets = installed_tools
+        print(f"  {bold('Connection mode:')} {info(mode)} {dim('(pre-selected)')}")
+        print()
+    elif yes:
+        # Non-interactive: prefer uvx if available, else SSE
+        mode = "uvx" if uvx_available else "sse"
         targets = installed_tools
     else:
-        # Choose connection mode
+        # Choose connection mode — uvx first if available (recommended)
         print(f"  {bold('Connection mode:')}")
-        mode_options = [
-            f"SSE {dim('(recommended — uses running API server)')}",
-            f"Stdio {dim('(standalone — runs MCP process per tool, no server needed)')}",
-            f"Skip {dim('(configure later)')}",
-        ]
+        mode_options: list[str] = []
+        mode_keys: list[str] = []
+        if uvx_available:
+            mode_options.append(
+                f"uvx {dim('(recommended — auto-spawned by each tool, no server to manage)')}"
+            )
+            mode_keys.append("uvx")
+        mode_options.append(
+            f"SSE {dim('(uses a running API server at ' + url + ')')}"
+        )
+        mode_keys.append("sse")
+        mode_options.append(
+            f"Stdio {dim('(local Python — runs MCP process per tool)')}"
+        )
+        mode_keys.append("stdio")
+        mode_options.append(f"Skip {dim('(configure later)')}")
+        mode_keys.append("skip")
+
         chosen_mode = _prompt_choice("Choose [1]: ", mode_options, default=mode_options[0])
-        mode_idx = mode_options.index(chosen_mode)
-        if mode_idx == 2:
+        mode = mode_keys[mode_options.index(chosen_mode)]
+        if mode == "skip":
             print(f"  {dim('Skipping MCP configuration.')}")
             print()
             return
-        mode = "sse" if mode_idx == 0 else "stdio"
         print()
 
         # Choose which tools to configure

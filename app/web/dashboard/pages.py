@@ -4,8 +4,9 @@ Dashboard 페이지 라우터.
 SPA (Single Page Application) 라우팅을 위한 페이지 서빙을 담당합니다.
 """
 
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse
 from fastapi.templating import Jinja2Templates
 
 from app.core.version import __VERSION__
@@ -13,15 +14,16 @@ from app.core.version import __VERSION__
 # Create page router
 router = APIRouter(tags=["Dashboard Pages"])
 
-# Configure Jinja2 templates
-templates = Jinja2Templates(directory="templates")
+# Configure Jinja2 templates (resolved relative to the app.web package)
+_WEB_ROOT = Path(__file__).resolve().parent.parent
+templates = Jinja2Templates(directory=str(_WEB_ROOT / "templates"))
 
 
 @router.get("/")
 async def serve_web_ui(request: Request):
     """웹 UI 서빙"""
     return templates.TemplateResponse(
-        "index.html", {"request": request, "version": __VERSION__}
+        request, "index.html", {"version": __VERSION__}
     )
 
 
@@ -29,7 +31,7 @@ async def serve_web_ui(request: Request):
 async def serve_about_page(request: Request):
     """About 페이지 서빙 (SPA 라우팅)"""
     return templates.TemplateResponse(
-        "index.html", {"request": request, "version": __VERSION__}
+        request, "index.html", {"version": __VERSION__}
     )
 
 
@@ -37,7 +39,7 @@ async def serve_about_page(request: Request):
 async def serve_dashboard_page(request: Request):
     """Dashboard 페이지 서빙 (SPA 라우팅)"""
     return templates.TemplateResponse(
-        "index.html", {"request": request, "version": __VERSION__}
+        request, "index.html", {"version": __VERSION__}
     )
 
 
@@ -45,7 +47,7 @@ async def serve_dashboard_page(request: Request):
 async def serve_search_page(request: Request):
     """검색 페이지 서빙 (SPA 라우팅)"""
     return templates.TemplateResponse(
-        "index.html", {"request": request, "version": __VERSION__}
+        request, "index.html", {"version": __VERSION__}
     )
 
 
@@ -53,7 +55,7 @@ async def serve_search_page(request: Request):
 async def serve_memory_page(request: Request, memory_id: str):
     """메모리 상세 페이지 서빙 (SPA 라우팅)"""
     return templates.TemplateResponse(
-        "index.html", {"request": request, "version": __VERSION__}
+        request, "index.html", {"version": __VERSION__}
     )
 
 
@@ -61,7 +63,7 @@ async def serve_memory_page(request: Request, memory_id: str):
 async def serve_create_page(request: Request):
     """메모리 생성 페이지 서빙 (SPA 라우팅)"""
     return templates.TemplateResponse(
-        "index.html", {"request": request, "version": __VERSION__}
+        request, "index.html", {"version": __VERSION__}
     )
 
 
@@ -69,7 +71,7 @@ async def serve_create_page(request: Request):
 async def serve_edit_page(request: Request, memory_id: str):
     """메모리 편집 페이지 서빙 (SPA 라우팅)"""
     return templates.TemplateResponse(
-        "index.html", {"request": request, "version": __VERSION__}
+        request, "index.html", {"version": __VERSION__}
     )
 
 
@@ -77,7 +79,7 @@ async def serve_edit_page(request: Request, memory_id: str):
 async def serve_projects_page(request: Request):
     """프로젝트 페이지 서빙 (SPA 라우팅)"""
     return templates.TemplateResponse(
-        "index.html", {"request": request, "version": __VERSION__}
+        request, "index.html", {"version": __VERSION__}
     )
 
 
@@ -85,21 +87,15 @@ async def serve_projects_page(request: Request):
 async def serve_project_page(request: Request, project_id: str):
     """프로젝트 상세 페이지 서빙 (SPA 라우팅)"""
     return templates.TemplateResponse(
-        "index.html", {"request": request, "version": __VERSION__}
+        request, "index.html", {"version": __VERSION__}
     )
-
-
-@router.get("/test")
-async def serve_test_page():
-    """테스트 페이지 서빙"""
-    return FileResponse("test_web_ui.html")
 
 
 @router.get("/analytics")
 async def serve_analytics_page(request: Request):
     """분석 페이지 서빙 (SPA 라우팅)"""
     return templates.TemplateResponse(
-        "index.html", {"request": request, "version": __VERSION__}
+        request, "index.html", {"version": __VERSION__}
     )
 
 
@@ -107,7 +103,7 @@ async def serve_analytics_page(request: Request):
 async def serve_work_page(request: Request):
     """Work Tracking 페이지 서빙 (SPA 라우팅)"""
     return templates.TemplateResponse(
-        "index.html", {"request": request, "version": __VERSION__}
+        request, "index.html", {"version": __VERSION__}
     )
 
 
@@ -115,7 +111,7 @@ async def serve_work_page(request: Request):
 async def serve_monitoring_page(request: Request):
     """모니터링 페이지 서빙 (SPA 라우팅)"""
     return templates.TemplateResponse(
-        "index.html", {"request": request, "version": __VERSION__}
+        request, "index.html", {"version": __VERSION__}
     )
 
 
@@ -123,7 +119,7 @@ async def serve_monitoring_page(request: Request):
 async def serve_settings_page(request: Request):
     """설정 페이지 서빙 (SPA 라우팅)"""
     return templates.TemplateResponse(
-        "index.html", {"request": request, "version": __VERSION__}
+        request, "index.html", {"version": __VERSION__}
     )
 
 
@@ -149,5 +145,5 @@ async def serve_spa_routes(request: Request, path: str):
 
     # Serve index.html for all other paths (SPA routing)
     return templates.TemplateResponse(
-        "index.html", {"request": request, "version": __VERSION__}
+        request, "index.html", {"version": __VERSION__}
     )

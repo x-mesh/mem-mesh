@@ -166,10 +166,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 embedding_service._status = "downloading"
 
             _bg_model_name = embedding_model
+            _last_reported_bucket = {"value": -1}
 
             def _on_model_progress(progress: float, status: str) -> None:
                 from .websocket.realtime import notifier
                 import asyncio
+
+                # Terminal log at 25%-increments so users see progress.
+                bucket = int(progress * 4)
+                if bucket > _last_reported_bucket["value"] or status == "ready":
+                    _last_reported_bucket["value"] = bucket
+                    logger.info(
+                        f"Embedding model {status}: {int(progress * 100)}%",
+                        model=_bg_model_name,
+                    )
 
                 try:
                     loop = asyncio.get_running_loop()

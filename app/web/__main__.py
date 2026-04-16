@@ -40,7 +40,10 @@ def main():
     print("  Tip: For separated mode, use:")
     print("    python -m app.web.dashboard  # Dashboard only")
     print("    python -m app.web.mcp        # MCP only")
-    print("=" * 60 + "\n")
+    print("=" * 60)
+    print("  Loading server modules (first-time boot may take ~30s — imports torch,")
+    print("  embedding model, FastAPI. Subsequent starts are fast.)")
+    print("=" * 60 + "\n", flush=True)
 
     config = create_uvicorn_config(
         app_path="app.web.app:app",

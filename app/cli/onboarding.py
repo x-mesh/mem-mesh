@@ -42,6 +42,36 @@ def _has_docker() -> bool:
     return shutil.which("docker") is not None
 
 
+def _has_uvx() -> bool:
+    """Check if uvx (from astral-sh/uv) is available."""
+    return shutil.which("uvx") is not None
+
+
+def _warm_uvx_cache() -> bool:
+    """Pre-download mem-mesh[server] into uv cache so first MCP spawn is fast.
+
+    Returns True if warm-up succeeded.
+    """
+    print(f"  {dim('Warming uv cache (downloads mem-mesh[server] — can take a minute on first run)...')}")
+    try:
+        result = subprocess.run(
+            ["uvx", "--from", "mem-mesh[server]", "mem-mesh", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        if result.returncode == 0:
+            print(f"  {ok('uv cache warmed — MCP tools will spawn mem-mesh instantly.')}")
+            return True
+        print(f"  {warn('uv cache warm-up returned non-zero; first MCP call may be slow.')}")
+        for line in result.stderr.strip().splitlines()[-3:]:
+            print(f"    {dim(line)}")
+        return False
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"  {warn(f'uv cache warm-up skipped: {exc}')}")
+        return False
+
+
 def _find_compose_file() -> Optional[Path]:
     """Find docker-compose.yml in current working directory."""
     candidates = [
@@ -67,27 +97,32 @@ def _prompt_choice(prompt: str, options: list[str], default: str = "") -> str:
         print(f"    Enter 1-{len(options)}")
 
 
-# Embedding model choices for onboarding
+# Embedding model choices for onboarding (first entry is the default)
 EMBEDDING_MODELS = [
+    (
+        "nlpai-lab/KURE-v1",
+        1024,
+        "Recommended. Korean retrieval SOTA (BGE-M3 fine-tune), ~2.2GB",
+    ),
     (
         "intfloat/multilingual-e5-large",
         1024,
-        "Best quality, multilingual, ~1.1GB",
+        "Balanced multilingual, ~1.1GB",
     ),
     (
         "intfloat/multilingual-e5-base",
         768,
-        "Good balance, multilingual, ~470MB",
+        "Lighter multilingual, ~470MB",
     ),
     (
         "intfloat/multilingual-e5-small",
         384,
-        "Fastest, multilingual, ~118MB",
+        "Fastest multilingual, ~118MB",
     ),
     (
         "all-MiniLM-L6-v2",
         384,
-        "English-optimized, lightweight, ~80MB",
+        "English-only, lightweight, ~80MB",
     ),
 ]
 
@@ -146,7 +181,7 @@ def _prompt_docker_options() -> dict:
 
 def _generate_compose_file(
     port: int = 8000,
-    model_name: str = "intfloat/multilingual-e5-large",
+    model_name: str = "nlpai-lab/KURE-v1",
     embedding_dim: int = 1024,
     use_local_volume: bool = False,
 ) -> Path:
@@ -294,6 +329,8 @@ def cmd_onboarding(
     print(f"  URL: {info(resolved_url)} {dim(f'(from {source})')}")
 
     reachable, message = check_connectivity(resolved_url)
+    preferred_mcp_mode: Optional[str] = None
+
     if reachable:
         print(f"  Status: {ok(message)}")
     else:
@@ -304,14 +341,21 @@ def cmd_onboarding(
             print(dim("  (--yes: skipping server setup)"))
         else:
             # Ask how to set up the server
-            print(f"  {warn('Server is not running. How would you like to set it up?')}")
+            print(f"  {warn('No running server detected. How would you like to set it up?')}")
             print()
 
+            has_uvx = _has_uvx()
             has_docker = _has_docker()
             compose_exists = _find_compose_file() is not None
 
             options = []
             option_keys = []
+
+            if has_uvx:
+                options.append(
+                    f"uvx {dim('(recommended — MCP clients auto-spawn mem-mesh, no server to manage)')}"
+                )
+                option_keys.append("uvx")
 
             if has_docker and compose_exists:
                 options.append(f"Docker {dim('(docker compose up -d)')}")
@@ -334,7 +378,12 @@ def cmd_onboarding(
             chosen_key = option_keys[options.index(chosen)]
 
             print()
-            if chosen_key == "docker":
+            if chosen_key == "uvx":
+                _warm_uvx_cache()
+                preferred_mcp_mode = "uvx"
+                # uvx mode does not require a standing server for MCP,
+                # but hooks + dashboard still do. Reachable stays False.
+            elif chosen_key == "docker":
                 reachable, resolved_url = _setup_server_docker(resolved_url)
                 if not reachable:
                     _fail("Server setup failed.", force)
@@ -354,18 +403,33 @@ def cmd_onboarding(
         print(f"  Target:       {info(target)}")
     print(f"  Profile:      {info(profile)}")
 
+    hook_default = "n" if preferred_mcp_mode == "uvx" else "Y"
+    if preferred_mcp_mode == "uvx":
+        print(
+            f"  {dim('Hooks require a running API server (hook scripts use curl).')}"
+        )
+        print(
+            f"  {dim('With uvx, MCP works without a server but hooks do not. Skip unless you will run the server separately.')}"
+        )
+
     if not yes:
-        answer = input(f"  Install hooks for {target}? [Y/n] ").strip().lower()
-        if answer in ("n", "no"):
+        prompt_label = f"  Install hooks for {target}? [{hook_default}/n] " if hook_default == "Y" else f"  Install hooks for {target}? [y/{hook_default}] "
+        raw = input(prompt_label).strip().lower()
+        if hook_default == "Y":
+            skip_hooks = raw in ("n", "no")
+        else:
+            skip_hooks = raw not in ("y", "yes")
+        if skip_hooks:
             print(dim("  Skipping hook installation."))
             print()
             from app.cli.mcp_config import run_mcp_setup
 
-            run_mcp_setup(url=resolved_url, yes=yes)
-            _print_summary(resolved_url, reachable, False, target)
+            run_mcp_setup(url=resolved_url, yes=yes, preferred_mode=preferred_mcp_mode)
+            _print_summary(resolved_url, reachable, False, target, preferred_mcp_mode)
             return
 
     install_url = resolved_url if resolved_url else DEFAULT_URL
+    hooks_installed = False
 
     try:
         from app.cli.install_hooks import cmd_install
@@ -374,33 +438,46 @@ def cmd_onboarding(
         hooks_installed = True
         print(f"  {ok('Hooks installed successfully.')}")
     except Exception as e:
-        hooks_installed = False
         _fail(f"Hook installation failed: {e}", force)
     print()
 
     # --- Step 3: MCP config ---
     from app.cli.mcp_config import run_mcp_setup
 
-    run_mcp_setup(url=resolved_url, yes=yes)
+    run_mcp_setup(url=resolved_url, yes=yes, preferred_mode=preferred_mcp_mode)
 
     # --- Summary ---
-    _print_summary(resolved_url, reachable, hooks_installed, target)
+    _print_summary(resolved_url, reachable, hooks_installed, target, preferred_mcp_mode)
 
 
 
-def _print_summary(url: str, server_ok: bool, hooks_ok: bool, target: str) -> None:
+def _print_summary(
+    url: str,
+    server_ok: bool,
+    hooks_ok: bool,
+    target: str,
+    mcp_mode: Optional[str] = None,
+) -> None:
     """Print onboarding summary."""
     print(header("=== Setup Complete ==="))
     print()
-    print(f"  API server:  {ok(url) if server_ok else warn(url + ' (not running)')}")
-    print(
-        f"  Dashboard:   {info(url + '/dashboard') if server_ok else dim('unavailable')}"
-    )
+
+    if mcp_mode == "uvx":
+        print(f"  MCP:         {ok('uvx (auto-spawned by each tool)')}")
+        print(f"  Dashboard:   {dim('run `uvx --from \"mem-mesh[server]\" mem-mesh serve` to enable')}")
+    else:
+        print(f"  API server:  {ok(url) if server_ok else warn(url + ' (not running)')}")
+        print(
+            f"  Dashboard:   {info(url + '/dashboard') if server_ok else dim('unavailable')}"
+        )
     print(
         f"  Hooks:       {ok(f'installed ({target})') if hooks_ok else warn('not installed')}"
     )
     print()
-    if not server_ok:
+    if mcp_mode == "uvx":
+        print(f"  {bold('Next step:')} restart your MCP client (Cursor / Claude Desktop / Kiro).")
+        print(dim("             First MCP call spawns mem-mesh from the uv cache."))
+    elif not server_ok:
         print(f"  {bold('Next step:')} Start the server with {info('mem-mesh serve')}")
         print(dim("             Or: docker compose up -d"))
     print(dim("  Run 'mem-mesh status' for full system check."))

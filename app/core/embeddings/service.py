@@ -16,6 +16,18 @@ import urllib3
 if TYPE_CHECKING:
     from ..services.metrics_collector import MetricsCollector
 
+
+def _model_embedding_dim(model) -> int:
+    """Return the embedding dimension across sentence-transformers versions.
+
+    ``get_embedding_dimension`` is the new method name; ``get_sentence_embedding_dimension``
+    is the deprecated one. Prefer new, fall back to old.
+    """
+    getter = getattr(model, "get_embedding_dimension", None) or getattr(
+        model, "get_sentence_embedding_dimension"
+    )
+    return getter()
+
 # Disable SSL verification if MEM_MESH_IGNORE_SSL env var is set
 _ignore_ssl = os.getenv("MEM_MESH_IGNORE_SSL", "").lower() in ("1", "true", "yes")
 if _ignore_ssl:
@@ -389,7 +401,7 @@ class EmbeddingService:
             self._download_progress = 0.9
 
             # Auto-detect model dimension
-            actual_dim = self.model.get_sentence_embedding_dimension()
+            actual_dim = _model_embedding_dim(self.model)
             if actual_dim != self.dimension:
                 logger.info(f"Updating dimension from {self.dimension} to {actual_dim}")
                 self.dimension = actual_dim
@@ -464,7 +476,7 @@ class EmbeddingService:
                     _notify(0.92, "loading")
 
                     # Auto-detect dimension
-                    actual_dim = self.model.get_sentence_embedding_dimension()
+                    actual_dim = _model_embedding_dim(self.model)
                     if actual_dim != self.dimension:
                         logger.info(
                             f"Updating dimension from {self.dimension} to {actual_dim}"

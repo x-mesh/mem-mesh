@@ -43,14 +43,46 @@ Most MCP memory servers are glorified key-value stores. mem-mesh is built for ho
 
 ## Quick Start
 
-### Prerequisites
+### Recommended: uvx (zero Python management)
+
+One tool to install — [uv](https://github.com/astral-sh/uv) — and mem-mesh handles the rest. No virtualenv, no pyenv tweaks, no `sqlite-vec` compile errors. Your MCP client spawns a cached, isolated mem-mesh on-demand.
+
+```bash
+# 1. Install uv (one-time, ~15 seconds)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Run the interactive installer — writes MCP config for detected tools,
+#    offers to install hooks, warms the uv cache.
+uvx --from "mem-mesh[server]" mem-mesh install
+```
+
+That's it. Restart Cursor / Claude Desktop / Kiro and mem-mesh MCP tools are live.
+
+Want the web dashboard too? `uvx --from "mem-mesh[server]" mem-mesh serve` — open http://localhost:8000.
+
+### Alternative: pip install
+
+If you prefer managing Python environments yourself:
+
+```bash
+pip install "mem-mesh[server]"
+mem-mesh install           # same interactive installer
+mem-mesh serve             # web server + SSE MCP at localhost:8000
+```
+
+### Prerequisites (only if NOT using uvx)
 
 mem-mesh loads the `sqlite-vec` extension at runtime, so Python's `sqlite3` module must support **loadable extensions**.
 
-**macOS + pyenv users**: pyenv's default build ships with extension loading disabled, which causes `Migration failed: no such module: vec0`. Pick one of the following:
+- **uvx users** — uv's managed Python builds already have extension loading enabled. Nothing to do.
+- **Linux** — `pysqlite3-binary` wheel installs automatically as a fallback.
+- **macOS** — system Python and Homebrew Python both work. Only pyenv's default build is broken.
+- **Windows** — system Python works; install `pysqlite3-binary` manually if needed.
+
+**macOS + pyenv users** who hit `Migration failed: no such module: vec0`:
 
 ```bash
-# Option A (recommended): rebuild Python against Homebrew sqlite3
+# Option A: rebuild Python against Homebrew sqlite3
 brew install sqlite3
 SQLITE_PREFIX="$(brew --prefix sqlite3)"
 PYTHON_CONFIGURE_OPTS="--enable-loadable-sqlite-extensions" \
@@ -60,36 +92,36 @@ CFLAGS="-I${SQLITE_PREFIX}/include" \
   pyenv install 3.13 --force
 pyenv rehash
 
-# Option B: use pysqlite3 binary wheel as fallback (the code auto-detects and uses it)
-pip install pysqlite3-binary
+# Option B (simplest): just use uvx — it bypasses system Python entirely
 ```
 
-Linux distro Python, Docker images, and conda Python typically ship with extension loading enabled — no extra steps needed.
-
-### Install & Run
-
-```bash
-# Install
-pip install mem-mesh
-# or from source:
-git clone https://github.com/x-mesh/mem-mesh && cd mem-mesh && pip install -e .
-
-# Configure (optional)
-cp .env.example .env
-
-# Run the web server
-python -m app.web --reload
-```
-
-Open http://localhost:8000. The SSE MCP endpoint is at `http://localhost:8000/mcp/sse`.
+Linux distro Python, Docker images, and conda Python ship with extension loading enabled — no extra steps needed.
 
 ---
 
 ## MCP Setup
 
-### Stdio (recommended for local AI tools)
+`mem-mesh install` writes these entries for you automatically. The snippets below are what gets written, for reference.
 
-Add this to your MCP config file. Define it once and share across tools.
+### uvx (recommended)
+
+Zero Python-env management. The MCP client spawns a cached mem-mesh process per call; the first run downloads it, subsequent runs are instant.
+
+```json
+{
+  "mcpServers": {
+    "mem-mesh": {
+      "command": "uvx",
+      "args": ["--from", "mem-mesh[server]", "mem-mesh-mcp-stdio"],
+      "env": { "MEM_MESH_CLIENT": "cursor" }
+    }
+  }
+}
+```
+
+### Stdio (local Python)
+
+Use your own Python install. Good if you need `-e .` dev installs.
 
 ```json
 {
@@ -98,9 +130,22 @@ Add this to your MCP config file. Define it once and share across tools.
       "command": "python",
       "args": ["-m", "app.mcp_stdio"],
       "cwd": "/absolute/path/to/mem-mesh",
-      "env": {
-        "MCP_LOG_LEVEL": "INFO"
-      }
+      "env": { "MCP_LOG_LEVEL": "INFO" }
+    }
+  }
+}
+```
+
+### SSE (shared running server)
+
+For web clients or when multiple tools share one process. Requires `mem-mesh serve` running.
+
+```json
+{
+  "mcpServers": {
+    "mem-mesh": {
+      "url": "http://localhost:8000/mcp/sse",
+      "type": "http"
     }
   }
 }
@@ -114,15 +159,15 @@ Add this to your MCP config file. Define it once and share across tools.
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` |
 | Kiro | `~/.kiro/settings/mcp.json` |
 
-> For a more stable stdio implementation, switch args to `["-m", "app.mcp_stdio_pure"]` (pure MCP protocol, no FastMCP dependency).
+### Mode comparison
 
-### Stdio vs SSE
-
-| | Stdio | SSE |
-|---|---|---|
-| Best for | Cursor, Claude Desktop, Kiro, any local AI tool | Web-based AI clients, custom integrations |
-| Run | `python -m app.mcp_stdio` | `python -m app.web` → `http://localhost:8000/mcp/sse` |
-| Protocol | stdio JSON-RPC | Streamable HTTP (MCP 2025-03-26) |
+| | uvx | Stdio | SSE |
+|---|---|---|---|
+| Prereq | `uv` only | Python env with `mem-mesh[server]` | Running `mem-mesh serve` |
+| First call | ~15s (cache warm) | Instant | Instant |
+| Server to manage | None | None | Yes |
+| Dashboard | Optional (`uvx … serve`) | Optional | Included |
+| Hooks support | Requires separate server | Yes (local mode) | Yes (api mode) |
 
 ---
 
