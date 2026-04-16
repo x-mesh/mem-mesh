@@ -1,353 +1,189 @@
 # Contributing to mem-mesh
 
-Thank you for your interest in contributing to mem-mesh — a centralized AI memory management server built on SQLite + sqlite-vec.
-
-## Table of Contents
-
-- [Development Environment Setup](#development-environment-setup)
-- [Code Style](#code-style)
-- [Running Tests](#running-tests)
-- [Pull Request Guidelines](#pull-request-guidelines)
-- [Commit Message Format](#commit-message-format)
-- [Issue Reporting](#issue-reporting)
-- [Code of Conduct](#code-of-conduct)
+Thank you for your interest in contributing to mem-mesh! Whether you're fixing a bug, proposing a feature, or improving documentation, your effort makes this project better for everyone. Before getting started, please read through [README.md](./README.md) and [AGENTS.md](./AGENTS.md) to understand the architecture and design goals.
 
 ---
 
-## Development Environment Setup
-
-### Prerequisites
-
-- Python 3.9 or higher
-- `pip` (latest recommended)
-- Git
-
-### Installation
+## Development Setup
 
 ```bash
-git clone https://github.com/your-org/mem-mesh.git
+# 1. Clone the repository
+git clone https://github.com/x-mesh/mem-mesh.git
 cd mem-mesh
 
-# Create and activate a virtual environment
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+# 2. Create and activate a virtual environment
+python -m venv .venv && source .venv/bin/activate
 
-# Install all dependencies (server + dev extras)
-pip install -e ".[server,dev]"
+# 3. Install in editable mode with dev dependencies
+pip install -e ".[dev]"
 
-# Or use the Makefile shortcut
-make install-dev
+# 4. Verify the install
+python -c "from app.web.app import app"
 ```
 
-### Environment Configuration
+If the import check exits cleanly with no output, your environment is ready.
+
+---
+
+## Running the Project
+
+mem-mesh supports three run modes:
 
 ```bash
-cp .env.example .env   # if available, or create .env manually
-```
+# FastAPI web server + dashboard (port 8000, hot-reload)
+python -m app.web --reload
 
-Key environment variables:
+# FastMCP stdio server (for Cursor, Claude Desktop, Kiro)
+python -m app.mcp_stdio
 
-| Variable | Description | Default |
-|---|---|---|
-| `MEM_MESH_DB_PATH` | SQLite database file path | `./data/memories.db` |
-| `MEM_MESH_CLIENT` | Client identifier (stdio mode) | — |
-| `MCP_LOG_FORMAT` | Log format (`text` or `json`) | `text` |
+# Pure MCP stdio server (spec-compliant, no FastMCP dependency)
+python -m app.mcp_stdio_pure
 
-### Running the Development Server
-
-```bash
-# FastAPI web server + dashboard (hot reload)
-make run-api
-# -> http://localhost:8000
-# -> API docs: http://localhost:8000/docs
-
-# MCP stdio server (FastMCP)
-make run-mcp
-
-# Pure MCP stdio server
-make run-mcp-pure
-```
-
-If port 8000 is already in use, the server is already running — do not restart it.
-
-### Pre-commit Hooks (optional but recommended)
-
-```bash
-pre-commit install
+# Production web server
+uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 ```
 
 ---
 
-## Code Style
+## Tests
 
-mem-mesh enforces consistent style across all Python source files.
-
-### Formatter: Black
-
-Line length is 88 characters. Format all code before committing:
+Run the full test suite with verbose output:
 
 ```bash
-make format
-# equivalent: black app/ tests/ scripts/
+python -m pytest tests/ -v
 ```
 
-### Linter: Ruff
-
-```bash
-make lint          # check only
-make lint-fix      # check and auto-fix
-```
-
-### Import Order: isort (Black-compatible profile)
-
-Maintain the following import order in every file:
-
-```python
-# 1. Standard library
-import os
-import asyncio
-
-# 2. Third-party
-from fastapi import FastAPI
-from pydantic import BaseModel
-
-# 3. Local (absolute imports only)
-from app.core.errors import NotFoundError
-from app.core.version import get_version
-```
-
-Never use relative imports (`from .module import ...`).
-
-### Type Hints
-
-All public functions and methods must have complete type annotations. The `Any` type is prohibited.
-
-```python
-# correct
-async def search(query: str, limit: int = 10) -> list[SearchResult]:
-    ...
-
-# wrong — missing return type, uses Any
-def search(query, limit=10):
-    ...
-```
-
-### Async/Await
-
-All database and vector operations must be `async`. Never perform database work from synchronous functions or directly from route handlers.
-
-```python
-# correct
-async def get_memory(memory_id: str) -> Memory:
-    return await db.fetch_one(memory_id)
-
-# wrong — synchronous DB call
-def get_memory(memory_id: str) -> Memory:
-    return db.fetch_one_sync(memory_id)
-```
-
-### Input Validation
-
-All external input must pass through a Pydantic schema before reaching service or storage layers.
-
-### Error Handling
-
-Import error classes exclusively from `app.core.errors`. Do not define inline exception classes inside services.
-
-```python
-# correct
-from app.core.errors import NotFoundError, ValidationError
-
-# wrong
-class MyServiceError(Exception): ...
-```
-
-### sqlite-vec Constraint
-
-Never use `INSERT OR REPLACE` with sqlite-vec virtual tables. Use `DELETE` followed by `INSERT`.
-
-```python
-# correct
-await db.execute("DELETE FROM vec_items WHERE id = ?", [id])
-await db.execute("INSERT INTO vec_items VALUES (?, ?)", [id, embedding])
-
-# wrong
-await db.execute("INSERT OR REPLACE INTO vec_items VALUES (?, ?)", [id, embedding])
-```
-
-### Centralized Metadata
-
-- Version information: `app.core.version` only
-- Error classes: `app.core.errors` only
-
----
-
-## Running Tests
-
-### Unit Tests (no server required)
-
-```bash
-make test
-# equivalent: pytest tests/ --ignore=tests/integration -v
-```
-
-### Integration Tests (requires running server at localhost:8000)
-
-```bash
-make test-live
-# or target specific suites:
-make test-live-api
-make test-live-mcp
-```
-
-### All Tests
-
-```bash
-make test-all
-```
-
-### Coverage Report
-
-```bash
-make test-cov
-# HTML report generated at htmlcov/index.html
-```
-
-### Test Markers
-
-Use pytest markers to categorize tests:
-
-```python
-@pytest.mark.unit
-async def test_search_returns_results(): ...
-
-@pytest.mark.integration
-async def test_api_add_and_retrieve(): ...
-
-@pytest.mark.property
-def test_embedding_roundtrip(hypothesis_input): ...
-```
-
-Run evaluation tests (Tier 3) with:
-
-```bash
-RUN_EVALS=1 pytest tests/evals/ -v
-```
-
-### Import Check
-
-After any structural change, verify the application still imports cleanly:
+Run a quick import smoke check before committing:
 
 ```bash
 python -c "from app.web.app import app"
 ```
 
----
+### Adding new tests
 
-## Pull Request Guidelines
-
-### Before Opening a PR
-
-1. Fork the repository and create a feature branch from `main`.
-2. Run `make format` and `make lint` — CI will reject unformatted code.
-3. Add or update tests to cover your change.
-4. Run `make test` and confirm all unit tests pass.
-5. Verify the import check: `python -c "from app.web.app import app"`.
-
-### Branch Naming
-
-```
-feat/short-description
-fix/issue-number-description
-refactor/module-name
-docs/what-was-updated
-```
-
-### PR Description
-
-Include the following in your PR body:
-
-- **What** changed and **why**
-- Which modules are affected (refer to [AGENTS.md](./AGENTS.md) Context Map for routing)
-- How to test the change manually (if applicable)
-- Any migration steps required
-
-### Review Process
-
-- At least one maintainer approval is required before merge.
-- Address all review comments or explicitly explain why a suggestion is declined.
-- Squash commits on merge to keep history clean.
-
-### Architecture Changes
-
-For changes that affect the MCP protocol layer, database schema, or embedding pipeline, open a discussion issue first before writing code. Consult the [AGENTS.md Golden Rules](./AGENTS.md#golden-rules) to ensure constraints are respected.
+- Place test files under the `tests/` directory.
+- Name files `test_<module>.py` so pytest auto-collects them.
+- Mirror the source structure where possible (e.g., `app/services/foo.py` → `tests/test_foo.py`).
+- Use `pytest.mark.asyncio` for async test functions.
+- Keep tests isolated — avoid shared mutable state across test functions.
 
 ---
 
-## Commit Message Format
+## Code Style
 
-Follow the `type: description` convention (Conventional Commits):
+mem-mesh enforces consistent formatting and typing. The CI pipeline (`.github/workflows/ci.yml`) runs these checks on every PR.
 
+| Tool | Purpose |
+|------|---------|
+| **Black** | Code formatting — no manual style decisions |
+| **Ruff** | Fast linting — catches common errors and style issues |
+| **isort** | Import sorting |
+| **mypy** | Static type checking |
+
+### Import order
+
+Follow the stdlib → third-party → local (absolute paths) convention:
+
+```python
+# stdlib
+import asyncio
+from pathlib import Path
+
+# third-party
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+# local
+from app.core.errors import NotFoundError
+from app.services.memory import MemoryService
 ```
-type: short imperative description
-```
+
+Never use relative imports (`from .module import ...`).
+
+### Type hints
+
+- Type hints are **required** on all function signatures.
+- Do **not** use `any` as a type — use specific types or `object` where truly generic.
+- All DB and vector operations must be `async`/`await`.
+
+### Error handling and centralized metadata
+
+- Import error classes from `app.core.errors` — never define inline errors inside service modules.
+- Version constants live in `app.core.version` — do not hardcode version strings elsewhere.
+- For sqlite-vec tables, use `DELETE` followed by `INSERT` — `INSERT OR REPLACE` is prohibited.
+
+---
+
+## Commit Messages
+
+Use the format `type: description` with a concise, imperative description.
 
 | Type | When to use |
-|---|---|
+|------|-------------|
 | `feat` | New feature or capability |
 | `fix` | Bug fix |
-| `refactor` | Code restructuring without behavior change |
+| `refactor` | Code restructure without behavior change |
 | `docs` | Documentation only |
 | `test` | Adding or updating tests |
-| `chore` | Build, tooling, dependency updates |
+| `chore` | Build, CI, dependency updates |
 
 **Examples:**
 
 ```
-feat: add recency_weight parameter to search
+feat: add batch_operations endpoint for multi-op round-trips
 fix: use DELETE+INSERT for sqlite-vec updates
-refactor: move error classes to app.core.errors
-docs: add batch_operations usage example
-test: add property tests for embedding roundtrip
-chore: bump version to 1.3.0
+refactor: extract NLI pipeline into standalone module
+docs: update MCP setup instructions for Kiro
+test: add async tests for session_resume expand modes
+chore: bump sqlite-vec to 0.1.6
 ```
 
-Rules:
-- Use the imperative mood: "add", not "added" or "adds"
-- Keep the subject line under 72 characters
-- Do not end the subject line with a period
-- Separate subject from body with a blank line when additional context is needed
+Rules: use imperative mood ("add" not "added"), keep subject under 72 characters, no trailing period.
 
 ---
 
-## Issue Reporting
+## Pull Requests
 
-### Bug Reports
+- **Feature branches** → base branch: `develop`
+- **Release merges** → base branch: `main`
 
-When filing a bug, include:
+Before opening a PR, confirm the following:
 
-- mem-mesh version (`make version`)
-- Python version and OS
-- Minimal reproduction steps
-- Actual vs. expected behavior
-- Relevant log output (with sensitive values redacted)
+- [ ] All existing tests pass (`python -m pytest tests/ -v`)
+- [ ] New behavior is covered by tests
+- [ ] Import smoke check passes (`python -c "from app.web.app import app"`)
+- [ ] CHANGELOG.md is updated under the `[Unreleased]` section
+- [ ] README.md or AGENTS.md updated if public behavior changed
+- [ ] No secrets, API keys, or `.env` content is included
 
-### Feature Requests
+Include a clear description of **what** changed and **why** in the PR body. For changes that affect the MCP protocol layer, database schema, or embedding pipeline, open a discussion issue before writing code.
 
-Describe:
+---
 
-- The problem you are trying to solve
-- Your proposed solution or API shape
-- Alternatives you considered
+## Release Process
 
-### Security Vulnerabilities
+1. **Bump the version** in `pyproject.toml` (`app.core.version` reads from it — single source of truth).
+2. **Update CHANGELOG.md** — move items from `[Unreleased]` to the new version heading with today's date.
+3. **Merge** the release branch into `main` via PR.
+4. **Tag the release** on `main`:
 
-Do not file public issues for security vulnerabilities. Contact the maintainers directly with a description and reproduction steps.
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+
+5. Pushing the tag triggers `.github/workflows/release.yml`, which builds the package and publishes it to PyPI automatically.
+
+---
+
+## Security
+
+- **Never** commit API keys, tokens, passwords, `.env` file contents, or personally identifiable information (PII).
+- Sensitive values in code snippets must be replaced with `<REDACTED>`.
+- Do not open public issues for security vulnerabilities. Report them via **GitHub private security advisory** (Security tab → "Report a vulnerability").
 
 ---
 
 ## Code of Conduct
 
-This project follows the [Contributor Covenant Code of Conduct](https://www.contributor-covenant.org/version/2/1/code_of_conduct/). By participating, you agree to uphold a respectful and inclusive environment for all contributors.
-
-Report unacceptable behavior to the project maintainers.
+Be respectful, constructive, and kind. We welcome contributors of all backgrounds and experience levels. Harassment, dismissiveness, or personal attacks will not be tolerated.

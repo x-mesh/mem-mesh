@@ -62,3 +62,9 @@ src__DEPRECATED/
 docs/internal/
 PLAN.md
 API_DESIGN_ANALYSIS.md
+
+# Build artifacts
+dist/
+*.whl
+*.tar.gz
+*.egg-info/
