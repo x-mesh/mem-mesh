@@ -1,4 +1,4 @@
-.PHONY: help install test test-live test-live-api test-live-mcp test-live-realdata test-all clean run-api run-mcp run-dashboard docker-build docker-up docker-down docker-logs format lint version bump
+.PHONY: help install test test-live test-live-api test-live-mcp test-live-realdata test-all clean run-api run-mcp run-dashboard docker-build docker-up docker-down docker-logs format lint version bump uvx-install uvx-serve uvx-hooks release release-tag docker-buildx-push
 
 # Default target
 .DEFAULT_GOAL := help
@@ -8,11 +8,14 @@ PYTHON := python
 PIP := pip
 PYTEST := pytest
 VERSION := $(shell grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-DOCKER_REGISTRY ?= mem-mesh
+DOCKER_REGISTRY ?= docker.io/xmesh
 DOCKER_IMAGE := $(DOCKER_REGISTRY)/mem-mesh
 DOCKER_TAG_VERSION := $(DOCKER_IMAGE):$(VERSION)
 DOCKER_TAG_LATEST := $(DOCKER_IMAGE):latest
 DOCKER_COMPOSE := docker compose -f docker/docker-compose.yml
+DOCKER_PLATFORMS := linux/amd64,linux/arm64
+UVX := uvx
+UV_PKG := mem-mesh[server]
 
 help: ## Show this help message
 	@echo "mem-mesh - AI Memory Management System"
@@ -110,10 +113,22 @@ docker-build-dashboard: ## Build dashboard Docker image
 	$(DOCKER_COMPOSE) build dashboard
 	@echo "✓ Dashboard image built"
 
-docker-push: ## Push Docker image to registry
+docker-push: ## Push Docker image to registry (amd64 only)
 	docker push $(DOCKER_TAG_VERSION)
 	docker push $(DOCKER_TAG_LATEST)
 	@echo "✓ Pushed $(DOCKER_TAG_VERSION) and $(DOCKER_TAG_LATEST)"
+
+docker-buildx-push: ## Manual multi-arch build + push (amd64 + arm64) to Docker Hub
+	@echo "→ Multi-arch build: $(DOCKER_PLATFORMS)"
+	@echo "→ Requires: docker login  (to Docker Hub, with write access to xmesh/*)"
+	docker buildx create --name mem-mesh-builder --use 2>/dev/null || docker buildx use mem-mesh-builder
+	docker buildx build \
+		--platform $(DOCKER_PLATFORMS) \
+		--tag $(DOCKER_TAG_VERSION) \
+		--tag $(DOCKER_TAG_LATEST) \
+		--push \
+		.
+	@echo "✓ Pushed $(DOCKER_TAG_VERSION) + $(DOCKER_TAG_LATEST) (linux/amd64, linux/arm64)"
 
 docker-up: ## Start Docker containers (dashboard only)
 	$(DOCKER_COMPOSE) up -d dashboard
@@ -194,3 +209,38 @@ endif
 	@echo "✓ Bumped version to $(V)"
 	@echo "  pyproject.toml updated (single source of truth)"
 	@echo "  app/core/version.py reads from pyproject.toml at runtime"
+
+# ── uvx ────────────────────────────────────────────────────────────
+
+uvx-install: ## Run `mem-mesh install` wizard via uvx (no local install)
+	$(UVX) --from "$(UV_PKG)" mem-mesh install
+
+uvx-serve: ## Run the web server via uvx (foreground)
+	$(UVX) --from "$(UV_PKG)" mem-mesh serve
+
+uvx-hooks: ## Install hooks only via uvx (lightweight, no torch)
+	$(UVX) mem-mesh hooks install --target all --url http://localhost:8000
+
+uvx-refresh: ## Rebuild uvx cache for local source (after code changes)
+	uv cache clean mem-mesh 2>/dev/null || true
+	$(UVX) --refresh --from ".[server]" mem-mesh --help
+	@echo "✓ uvx cache refreshed from local source"
+
+# ── Release ────────────────────────────────────────────────────────
+
+release-tag: ## Create and push release tag (uses current VERSION)
+	@git diff --quiet || (echo "✗ Working tree dirty. Commit first."; exit 1)
+	@git tag v$(VERSION)
+	@git push origin main
+	@git push origin v$(VERSION)
+	@echo "✓ Tag v$(VERSION) pushed. Actions workflow will publish to PyPI."
+
+release: ## Full release flow (usage: make release V=1.4.1)
+ifndef V
+	$(error Usage: make release V=x.y.z)
+endif
+	$(MAKE) bump V=$(V)
+	$(MAKE) test
+	@git add pyproject.toml CHANGELOG.md
+	@git commit -m "release: mem-mesh@$(V)" || true
+	$(MAKE) release-tag
