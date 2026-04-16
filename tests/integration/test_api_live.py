@@ -12,6 +12,7 @@ Scenarios:
     9. Monitoring dashboard
 """
 
+import asyncio
 from typing import List
 
 import httpx
@@ -142,7 +143,11 @@ class TestSearch:
     ):
         """Create a memory then search for it."""
         keyword = f"xyzzy_{unique_content()[-8:]}"
-        content = f"This is a searchable memory about {keyword} for testing"
+        content = (
+            f"This is a searchable memory about {keyword} for integration testing. "
+            "The fixture content is intentionally long enough to pass the content-length "
+            "validator enforced by the memory service (minimum 100 characters)."
+        )
 
         # Create
         r = await http.post(
@@ -158,15 +163,20 @@ class TestSearch:
         memory_id = r.json()["id"]
         cleanup_memories.append(memory_id)
 
-        # Search via POST
-        r = await http.post(
-            "/api/memories/search",
-            json={"query": keyword, "limit": 10},
-        )
-        assert r.status_code == 200
-        data = r.json()
-        assert "results" in data
-        found_ids = [m["id"] for m in data["results"]]
+        # Search via POST — allow indexing to catch up (vector + FTS5 async), retry
+        found_ids: List[str] = []
+        for _ in range(6):
+            await asyncio.sleep(0.5)
+            r = await http.post(
+                "/api/memories/search",
+                json={"query": keyword, "limit": 10},
+            )
+            assert r.status_code == 200
+            data = r.json()
+            assert "results" in data
+            found_ids = [m["id"] for m in data["results"]]
+            if memory_id in found_ids:
+                break
         assert memory_id in found_ids, f"Memory {memory_id} not found in search results"
 
     async def test_search_with_project_filter(self, http: httpx.AsyncClient):

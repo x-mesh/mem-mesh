@@ -37,7 +37,7 @@ class TestCrossProtocol:
         r = await http.post(
             "/api/memories",
             json={
-                "content": f"Cross-protocol test memory with {keyword} created via REST",
+                "content": f"Cross-protocol test memory with {keyword} created via REST API for integration testing (fixture padded to satisfy minimum content length of 100 characters).",
                 "project_id": TEST_PROJECT_ID,
                 "category": "decision",
                 "tags": ["cross-protocol"],
@@ -246,19 +246,23 @@ class TestRealWorldWorkflow:
                 session_id=mcp_session,
             )
 
-        # 7. Verify via REST search using unique keyword
-        await asyncio.sleep(0.5)
-        r = await http.post(
-            "/api/memories/search",
-            json={
-                "query": workflow_keyword,
-                "project_id": TEST_PROJECT_ID,
-                "limit": 10,
-            },
-        )
-        assert r.status_code == 200
-        results = r.json()["results"]
-        found_ids = [m["id"] for m in results]
+        # 7. Verify via REST search using unique keyword — retry for index lag
+        found_ids: List[str] = []
+        for _ in range(6):
+            await asyncio.sleep(0.5)
+            r = await http.post(
+                "/api/memories/search",
+                json={
+                    "query": workflow_keyword,
+                    "project_id": TEST_PROJECT_ID,
+                    "limit": 10,
+                },
+            )
+            assert r.status_code == 200
+            results = r.json()["results"]
+            found_ids = [m["id"] for m in results]
+            if decision_id in found_ids:
+                break
         assert (
             decision_id in found_ids
         ), f"Decision memory {decision_id} not found searching for '{workflow_keyword}'"
@@ -306,33 +310,34 @@ class TestSearchAccuracy:
 
         marker = uuid.uuid4().hex[:6]
 
+        _pad = " [fixture padding to satisfy 100-char minimum content length validator]"
         topics = [
             {
-                "content": f"[{marker}-dbschema] Database schema design: normalized tables with foreign keys for user-order-product relationships",
+                "content": f"[{marker}-dbschema] Database schema design: normalized tables with foreign keys for user-order-product relationships{_pad}",
                 "category": "decision",
                 "tags": ["database", "schema"],
                 "search_query": f"{marker}-dbschema",
             },
             {
-                "content": f"[{marker}-restapi] REST API design pattern: use resource-based URLs with proper HTTP verbs and cursor pagination",
+                "content": f"[{marker}-restapi] REST API design pattern: use resource-based URLs with proper HTTP verbs and cursor pagination{_pad}",
                 "category": "decision",
                 "tags": ["api", "rest"],
                 "search_query": f"{marker}-restapi",
             },
             {
-                "content": f"[{marker}-ratelim] Security policy: implement rate limiting at 100 req/min per user with Redis sliding window",
+                "content": f"[{marker}-ratelim] Security policy: implement rate limiting at 100 req/min per user with Redis sliding window{_pad}",
                 "category": "decision",
                 "tags": ["security", "rate-limit"],
                 "search_query": f"{marker}-ratelim",
             },
             {
-                "content": f"[{marker}-caching] Performance optimization: add Redis caching layer for product catalog with 5-minute TTL",
+                "content": f"[{marker}-caching] Performance optimization: add Redis caching layer for product catalog with 5-minute TTL{_pad}",
                 "category": "idea",
                 "tags": ["performance", "caching"],
                 "search_query": f"{marker}-caching",
             },
             {
-                "content": f"[{marker}-testing] Testing strategy: pytest with factory_boy for fixtures and 80% coverage target",
+                "content": f"[{marker}-testing] Testing strategy: pytest with factory_boy for fixtures and 80% coverage target{_pad}",
                 "category": "decision",
                 "tags": ["testing", "pytest"],
                 "search_query": f"{marker}-testing",

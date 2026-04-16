@@ -207,5 +207,14 @@ async def cleanup_pins(http: httpx.AsyncClient) -> AsyncGenerator[List[str], Non
 
 
 def unique_content(prefix: str = "Integration test") -> str:
-    """Generate unique content string (min 10 chars for API validation)."""
-    return f"{prefix} - {uuid.uuid4().hex[:12]}"
+    """Generate unique content (≥100 chars to satisfy memory content validator).
+
+    The unique uuid hex is placed at the END so callers that slice ``[-N:]``
+    get a stable, searchable unique token (not a trailing punctuation suffix).
+    """
+    body = (
+        "This is fixture content for automated integration testing. "
+        "It is intentionally long enough to pass the minimum-length validator "
+        "(100 chars) enforced by the memory service. Marker:"
+    )
+    return f"{prefix} — {body} {uuid.uuid4().hex[:12]}"

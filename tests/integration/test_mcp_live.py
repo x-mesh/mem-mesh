@@ -194,7 +194,7 @@ class TestMCPMemoryTools:
             http,
             "add",
             {
-                "content": f"MCP search test memory containing {keyword} for retrieval",
+                "content": f"MCP search test memory containing {keyword} for retrieval (fixture padded to satisfy the 100-character minimum content length validator).",
                 "project_id": TEST_PROJECT_ID,
                 "category": "decision",
             },
