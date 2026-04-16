@@ -4,7 +4,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: mem-mesh:latest
+    image: xmesh/mem-mesh:latest
     command: ["uvicorn", "app.web.app:app", "--host", "0.0.0.0", "--port", "8000"]
     container_name: mem-mesh-prod
     network_mode: host
@@ -13,12 +13,16 @@ services:
       - ./logs:/app/logs
       - model-cache:/home/memmesh/.cache/huggingface
     environment:
-      - DATABASE_PATH=/app/data/memories.db
-      - LOG_LEVEL=INFO
-      - MCP_LOG_FORMAT=text
+      - MEM_MESH_DATABASE_PATH=/app/data/memories.db
+      - MEM_MESH_LOG_LEVEL=INFO
+      - MEM_MESH_LOG_FORMAT=text
       - MEM_MESH_SERVER_HOST=0.0.0.0
       - MEM_MESH_SERVER_PORT=8000
       - MEM_MESH_SERVER_WORKERS=2
+      # Embedding model: defaults to nlpai-lab/KURE-v1 (Korean-tuned, 1024-dim)
+      # Override by uncommenting and setting MEM_MESH_EMBEDDING_MODEL below.
+      # - MEM_MESH_EMBEDDING_MODEL=intfloat/multilingual-e5-large
+      # - MEM_MESH_EMBEDDING_DIM=1024
 
     restart: unless-stopped
     healthcheck:

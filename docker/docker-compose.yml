@@ -13,17 +13,17 @@ services:
     volumes:
       - mem-mesh-data:/app/data
       - ../app:/app/app:ro  # Mount source for development (read-only)
-      - ../static:/app/static:ro
-      - ../templates:/app/templates:ro
+      # templates/ and static/ moved under app/web/ in v1.4.0 — covered by /app/app mount
     environment:
-      - DATABASE_PATH=/app/data/memories.db
-      - STORAGE_MODE=direct
-      - HOST=0.0.0.0
-      - PORT=8000
-      - LOG_LEVEL=info
-      - EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
-      - EMBEDDING_DEVICE=cpu
-      - BUSY_TIMEOUT=30000
+      - MEM_MESH_DATABASE_PATH=/app/data/memories.db
+      - MEM_MESH_STORAGE_MODE=direct
+      - MEM_MESH_SERVER_HOST=0.0.0.0
+      - MEM_MESH_SERVER_PORT=8000
+      - MEM_MESH_LOG_LEVEL=info
+      # Embedding: defaults to nlpai-lab/KURE-v1. Uncomment to override.
+      # - MEM_MESH_EMBEDDING_MODEL=intfloat/multilingual-e5-large
+      # - MEM_MESH_EMBEDDING_DIM=1024
+      - MEM_MESH_BUSY_TIMEOUT=30000
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -44,12 +44,12 @@ services:
       - mem-mesh-data:/app/data
       - ../app:/app/app:ro  # Mount source for development (read-only)
     environment:
-      - DATABASE_PATH=/app/data/memories.db
-      - STORAGE_MODE=direct
-      - MCP_LOG_FORMAT=text
-      - EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
-      - EMBEDDING_DEVICE=cpu
-      - BUSY_TIMEOUT=30000
+      - MEM_MESH_DATABASE_PATH=/app/data/memories.db
+      - MEM_MESH_STORAGE_MODE=direct
+      - MEM_MESH_LOG_FORMAT=text
+      # Embedding: defaults to nlpai-lab/KURE-v1.
+      # - MEM_MESH_EMBEDDING_MODEL=intfloat/multilingual-e5-large
+      - MEM_MESH_BUSY_TIMEOUT=30000
     stdin_open: true
     tty: true
     restart: unless-stopped
