@@ -64,6 +64,7 @@ PLAN.md
 API_DESIGN_ANALYSIS.md
 
 # Build artifacts
+build/
 dist/
 *.whl
 *.tar.gz
