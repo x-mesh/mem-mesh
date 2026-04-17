@@ -205,7 +205,7 @@ bump: ## Bump version (usage: make bump V=1.1.0)
 ifndef V
 	$(error Usage: make bump V=x.y.z)
 endif
-	@sed -i '' 's/^version = ".*"/version = "$(V)"/' pyproject.toml
+	@sed -i.bak 's/^version = ".*"/version = "$(V)"/' pyproject.toml && rm -f pyproject.toml.bak
 	@echo "✓ Bumped version to $(V)"
 	@echo "  pyproject.toml updated (single source of truth)"
 	@echo "  app/core/version.py reads from pyproject.toml at runtime"

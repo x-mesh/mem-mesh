@@ -199,7 +199,7 @@ For web clients or when multiple tools share one process. Requires `mem-mesh ser
 
 mem-mesh runs two retrieval engines in parallel and merges results with Reciprocal Rank Fusion:
 
-- **Vector** — `sentence-transformers/all-MiniLM-L6-v2` (384-dim) by default; E5 models supported
+- **Vector** — `nlpai-lab/KURE-v1` (1024-dim, Korean-tuned BGE-M3) by default; E5 and MiniLM models supported
 - **FTS5** — SQLite full-text search with n-gram tokenization for CJK languages
 - **RRF fusion** — balances semantic similarity and keyword precision
 - **Quality filters** — noise removal, intent analysis, vector pre-filter overfetch to improve recall
@@ -275,15 +275,15 @@ Seven relation types: `related` | `parent` | `child` | `supersedes` | `reference
 
 | Variable | Description | Default |
 |---|---|---|
-| `MEM_MESH_DATABASE_PATH` | SQLite database path | `./data/memories.db` |
-| `MEM_MESH_EMBEDDING_MODEL` | Embedding model name | `all-MiniLM-L6-v2` |
-| `MEM_MESH_EMBEDDING_DIM` | Vector dimensions | `384` |
+| `MEM_MESH_DATABASE_PATH` | SQLite database path | XDG per-user path (see `app/core/config.py` `_default_db_path`) |
+| `MEM_MESH_EMBEDDING_MODEL` | Embedding model name | `nlpai-lab/KURE-v1` |
+| `MEM_MESH_EMBEDDING_DIM` | Vector dimensions | `1024` |
 | `MEM_MESH_SERVER_PORT` | Web server port | `8000` |
 | `MEM_MESH_SEARCH_THRESHOLD` | Minimum similarity score | `0.5` |
 | `MEM_MESH_USE_UNIFIED_SEARCH` | Enable hybrid search | `true` |
 | `MEM_MESH_ENABLE_KOREAN_OPTIMIZATION` | Korean n-gram FTS | `true` |
-| `MCP_LOG_LEVEL` | MCP server log level | `INFO` |
-| `MCP_LOG_FILE` | MCP log output file | (none) |
+| `MEM_MESH_LOG_LEVEL` | Server log level | `INFO` |
+| `MEM_MESH_LOG_FILE` | Log output file | (none) |
 
 See `.env.example` for the full list.
 

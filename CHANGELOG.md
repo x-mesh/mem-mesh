@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-04-17
+
+### Fixed
+- **`setup_access_log` XDG handling** (`app/web/common/server.py`): three defects fixed — (1) eager evaluation of `_default_data_dir()` on every call produced spurious legacy-DB stderr warnings, (2) empty-string `XDG_STATE_HOME=''` fell through to CWD-relative logs, (3) missing `mem-mesh` app namespace under `$XDG_STATE_HOME` violated the XDG Base Directory spec. Now uses `os.environ.get("XDG_STATE_HOME") or str(_default_data_dir())` short-circuit with explicit `/ "mem-mesh"` suffix.
+- **`make release` broken on Linux** (`Makefile`): `bump` target used BSD-only `sed -i ''` syntax that fails on GNU sed. Switched to portable `sed -i.bak ... && rm -f *.bak`.
+- **docker-compose ignored `MEM_MESH_SERVER_WORKERS`** (`docker-compose.yml`): top-level `command: ["uvicorn", ...]` bypassed the Dockerfile CMD `python -m app.web`, so uvicorn launched with 1 worker regardless of env. Dropped the override; container now honors `Settings.server_workers`.
+- **Onboarding-generated compose: unprefixed env vars + unpublished image** (`app/cli/onboarding.py`): `_generate_compose_file()` wrote `DATABASE_PATH` / `EMBEDDING_MODEL` / `EMBEDDING_DIM` / `LOG_LEVEL` without the `MEM_MESH_` prefix (the same class of bug 1.4.1 fixed in committed compose files) and referenced the unpublished `mem-mesh:latest` tag. Now emits `MEM_MESH_*` prefixes and `xmesh/mem-mesh:latest`.
+- **`.env.example` overrides XDG default** (`.env.example`): uncommented `MEM_MESH_DATABASE_PATH=./data/memories.db` defeated the new 1.4.0 XDG default when users `cp .env.example .env`. Commented out with a note referencing `_default_db_path`. Also removed duplicate `MEM_MESH_LOG_LEVEL=DEBUG` at line 61 that shadowed the earlier `INFO` assignment.
+
+### Docs
+- README `Search` section and `Configuration` table now reflect the 1.4.0 defaults (`nlpai-lab/KURE-v1`, 1024-dim, XDG per-user DB path). Legacy `MCP_LOG_LEVEL` / `MCP_LOG_FILE` rows renamed to `MEM_MESH_LOG_LEVEL` / `MEM_MESH_LOG_FILE`.
+
 ## [1.4.1] - 2026-04-16
 
 ### Added

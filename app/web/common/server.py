@@ -118,7 +118,8 @@ def setup_access_log(settings: Settings, prefix: str = "") -> Optional[str]:
 
         from app.core.config import _default_data_dir
 
-        log_dir = Path(os.environ.get("XDG_STATE_HOME", _default_data_dir()))
+        xdg_state = os.environ.get("XDG_STATE_HOME") or str(_default_data_dir())
+        log_dir = Path(xdg_state) / "mem-mesh"
         access_log_file = str(log_dir / "logs" / f"{prefix}access.log")
 
     os.makedirs(os.path.dirname(access_log_file), exist_ok=True)

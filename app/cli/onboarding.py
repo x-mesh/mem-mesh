@@ -198,17 +198,17 @@ def _generate_compose_file(
 # mem-mesh API server (Docker)
 services:
   mem-mesh:
-    image: mem-mesh:latest
+    image: xmesh/mem-mesh:latest
     container_name: mem-mesh
     ports:
       - "{port}:8000"
     volumes:
 {volume_line}
     environment:
-      - DATABASE_PATH=/app/data/memories.db
-      - EMBEDDING_MODEL={model_name}
-      - EMBEDDING_DIM={embedding_dim}
-      - LOG_LEVEL=INFO
+      - MEM_MESH_DATABASE_PATH=/app/data/memories.db
+      - MEM_MESH_EMBEDDING_MODEL={model_name}
+      - MEM_MESH_EMBEDDING_DIM={embedding_dim}
+      - MEM_MESH_LOG_LEVEL=INFO
       - MEM_MESH_SERVER_HOST=0.0.0.0
       - MEM_MESH_SERVER_PORT=8000
     restart: unless-stopped

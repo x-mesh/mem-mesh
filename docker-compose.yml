@@ -5,7 +5,6 @@ services:
       context: .
       dockerfile: Dockerfile
     image: xmesh/mem-mesh:latest
-    command: ["uvicorn", "app.web.app:app", "--host", "0.0.0.0", "--port", "8000"]
     container_name: mem-mesh-prod
     network_mode: host
     volumes:
