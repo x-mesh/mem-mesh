@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-04-28
+
+### Fixed
+- **`MemoryNotFoundError` double-prefix message** (`app/core/errors.py`, `app/core/services/memory.py`, `app/core/services/relation.py`): callers passed pre-formatted strings like `f"Memory not found: {id}"` while the constructor wrapped them again, producing `"Memory not found: Memory not found: <id>"`. Constructor now accepts a raw `memory_id` plus an optional `role` kwarg (`"Source memory"` / `"Target memory"`); all call sites pass the raw id.
+
+### Improved
+- **MCP `memory_id` discoverability** (`app/mcp_common/schemas.py`): `context` / `update` / `delete` / `get_links` schema descriptions now state `"full 36-char UUID from add/search response"` and explicitly note that truncated/short ids are NOT accepted. Reduces a class of LLM-client errors (e.g., Cursor) where the short display id was reused as a tool argument.
+- **`MemoryNotFoundError` self-correction hint** (`app/core/errors.py`): when the supplied id is shorter than 36 chars, the error message appends `(got N chars; ids are 36-char UUIDs — pass the complete id from the add/search response)` so calling LLMs can self-correct without a round-trip to docs.
+
 ## [1.4.2] - 2026-04-17
 
 ### Fixed

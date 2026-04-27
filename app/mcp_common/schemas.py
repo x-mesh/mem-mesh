@@ -159,7 +159,7 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                 "properties": {
                     "memory_id": {
                         "type": "string",
-                        "description": "Memory ID to get context for",
+                        "description": "Memory ID (full 36-char UUID from add/search response). Truncated/short ids are NOT accepted.",
                         "pattern": "^[a-zA-Z0-9_-]+$",
                         "maxLength": 100,
                     },
@@ -195,7 +195,7 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                 "properties": {
                     "memory_id": {
                         "type": "string",
-                        "description": "Memory ID to update",
+                        "description": "Memory ID to update (full 36-char UUID from add/search response). Truncated/short ids are NOT accepted.",
                         "pattern": "^[a-zA-Z0-9_-]+$",
                         "maxLength": 100,
                     },
@@ -229,7 +229,7 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                 "properties": {
                     "memory_id": {
                         "type": "string",
-                        "description": "Memory ID to delete",
+                        "description": "Memory ID to delete (full 36-char UUID from add/search response). Truncated/short ids are NOT accepted.",
                         "pattern": "^[a-zA-Z0-9_-]+$",
                         "maxLength": 100,
                     },
@@ -619,7 +619,7 @@ def get_relation_tool_schemas() -> List[Dict[str, Any]]:
                 "properties": {
                     "memory_id": {
                         "type": "string",
-                        "description": "Memory ID to get relations for",
+                        "description": "Memory ID to get relations for (full 36-char UUID from add/search response). Truncated/short ids are NOT accepted.",
                         "pattern": "^[a-zA-Z0-9_-]+$",
                         "maxLength": 100,
                     },

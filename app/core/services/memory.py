@@ -333,7 +333,7 @@ class MemoryService:
         # 1. Fetch existing memory
         existing_memory = await self.get(memory_id)
         if existing_memory is None:
-            raise MemoryNotFoundError(f"Memory not found: {memory_id}")
+            raise MemoryNotFoundError(memory_id)
 
         # 2. Quality gate (when content changes)
         if content is not None:
@@ -431,7 +431,7 @@ class MemoryService:
         # 1. Verify memory exists
         existing_memory = await self.get(memory_id)
         if existing_memory is None:
-            raise MemoryNotFoundError(f"Memory not found: {memory_id}")
+            raise MemoryNotFoundError(memory_id)
 
         try:
             async with self.db.transaction():

@@ -38,9 +38,9 @@ class RelationService:
         """관계 생성"""
         # 메모리 존재 확인
         if not await self._memory_exists(data.source_id):
-            raise MemoryNotFoundError(f"Source memory not found: {data.source_id}")
+            raise MemoryNotFoundError(data.source_id, role="Source memory")
         if not await self._memory_exists(data.target_id):
-            raise MemoryNotFoundError(f"Target memory not found: {data.target_id}")
+            raise MemoryNotFoundError(data.target_id, role="Target memory")
 
         # 자기 참조 방지
         if data.source_id == data.target_id:
@@ -260,7 +260,7 @@ class RelationService:
             limit: 생성할 최대 관계 수
         """
         if not await self._memory_exists(memory_id):
-            raise MemoryNotFoundError(f"Memory not found: {memory_id}")
+            raise MemoryNotFoundError(memory_id)
 
         row = await self.db.fetchone(
             "SELECT embedding FROM memories WHERE id = ?", (memory_id,)

@@ -116,8 +116,19 @@ class MemMeshError(Exception):
 class MemoryNotFoundError(MemMeshError):
     error_code = ErrorCode.MEMORY_NOT_FOUND
 
-    def __init__(self, memory_id: str):
-        super().__init__(f"Memory not found: {memory_id}", memory_id=memory_id)
+    UUID_LENGTH = 36
+
+    def __init__(self, memory_id: str, role: str = "Memory"):
+        hint = ""
+        if memory_id and len(memory_id) < self.UUID_LENGTH:
+            hint = (
+                f" (got {len(memory_id)} chars; ids are 36-char UUIDs — "
+                "pass the complete `id` from the add/search response)"
+            )
+        super().__init__(
+            f"{role} not found: {memory_id}{hint}",
+            memory_id=memory_id,
+        )
 
 
 class PinNotFoundError(MemMeshError):
