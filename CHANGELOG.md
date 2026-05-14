@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-05-14
+
+### Added
+- Claude Code HTTP hook support (requires Claude Code >= v2.1.105) — `bash + curl` hooks can be replaced with native `{"type":"http"}` hooks
+- `hook_events` table + `HookService` — reconstructs per-session state (continuation detection, Q&A pairing, save-reminder turn counter) from the hook event stream instead of the client-side transcript file, which is unreachable when mem-mesh runs remotely or in Docker
+- `/api/hooks/claude/{session-start,user-prompt-submit,stop,subagent-stop,task-completed}` endpoints — always return HTTP 200, degrade gracefully when the embedding model is not ready (a hook must never stall the user's session). "do nothing" replies use an empty body; context injection emits only `{"hookSpecificOutput": {...}}` to satisfy Claude Code's strict hook-output schema
+- `keywords.match_category()` — pure function mirroring `KEYWORD_MATCHER_BLOCK`, lets the server classify messages without spawning `python3` client-side
+- `install_hooks` gains `mode="http"` (`--mode http`, default in the interactive wizard) — emits HTTP hooks for events with a server endpoint, keeps command hooks for `SubagentStart`/`SessionEnd`/`PreCompact`
+- `tests/test_hook_service.py` + HTTP-mode coverage in `tests/test_install_hooks_idempotency.py`
+
+### Changed
+- `_is_mem_mesh_hook` recognises url-based HTTP hooks so settings.json merges stay idempotent; switching `api` → `http` removes the now-replaced shell scripts
+- bash hooks remain the fallback for Cursor / Kiro / local / remote deployments
+
 ## [1.4.3] - 2026-04-28
 
 ### Fixed
