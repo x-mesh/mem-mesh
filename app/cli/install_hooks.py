@@ -111,158 +111,169 @@ HOOK_PROFILES = {
 # ---------------------------------------------------------------------------
 
 
-def _build_claude_hooks_settings(profile: str = "standard") -> Dict[str, Any]:
-    """Build Claude Code hooks settings dynamically based on profile.
+# Claude Code hook events that have a server-side HTTP endpoint
+# (app/web/dashboard/route_modules/hooks.py). In mode="http" these become
+# `{"type": "http"}` entries; events absent here have no endpoint yet and
+# stay command hooks even in http mode.
+_HTTP_HOOK_ENDPOINTS = {
+    "SessionStart": "session-start",
+    "Stop": "stop",
+    "UserPromptSubmit": "user-prompt-submit",
+    "SubagentStop": "subagent-stop",
+    "TaskCompleted": "task-completed",
+}
+
+
+def _claude_hook_entry(
+    event: str,
+    command: str,
+    timeout: int,
+    *,
+    mode: str,
+    url: str,
+    is_async: bool = False,
+) -> Dict[str, Any]:
+    """Build one Claude Code hook entry.
+
+    Returns an ``http``-type entry when ``mode == "http"`` and the event has a
+    server endpoint; otherwise a ``command``-type entry. HTTP hooks are
+    non-blocking by nature, so the ``async`` flag is only meaningful for
+    command hooks.
+    """
+    if mode == "http" and event in _HTTP_HOOK_ENDPOINTS:
+        endpoint = _HTTP_HOOK_ENDPOINTS[event]
+        hook: Dict[str, Any] = {
+            "type": "http",
+            "url": f"{url.rstrip('/')}/api/hooks/claude/{endpoint}",
+            "timeout": timeout,
+        }
+    else:
+        hook = {"type": "command", "command": command, "timeout": timeout}
+        if is_async:
+            hook["async"] = True
+    return {"hooks": [hook]}
+
+
+def _build_claude_hooks_settings(
+    profile: str = "standard",
+    mode: str = "api",
+    url: str = DEFAULT_URL,
+) -> Dict[str, Any]:
+    """Build Claude Code hooks settings dynamically based on profile and mode.
 
     Profiles:
       - minimal: command-based stop hook (no LLM cost, simple truncation)
       - standard: native prompt-based stop hook (hybrid summarization via Haiku)
       - enhanced: prompt stop + async reflect command (structured analysis)
+
+    Modes:
+      - api/local: every hook is a `bash + curl` command script
+      - http: events with a server endpoint (see ``_HTTP_HOOK_ENDPOINTS``)
+        become native HTTP hooks pointing at ``{url}/api/hooks/claude/*``;
+        the rest stay command hooks. The keyword/profile logic for the Stop
+        hook runs server-side, so all profiles share the same ``/stop``
+        endpoint in http mode.
     """
     settings: Dict[str, Any] = {"hooks": {}}
 
     # SessionStart: inject session context (all profiles)
     settings["hooks"]["SessionStart"] = [
-        {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "~/.claude/hooks/mem-mesh-session-start.sh",
-                    "timeout": 15,
-                }
-            ]
-        }
+        _claude_hook_entry(
+            "SessionStart",
+            "~/.claude/hooks/mem-mesh-session-start.sh",
+            15,
+            mode=mode,
+            url=url,
+        )
     ]
 
-    stop_entries: List[Dict[str, Any]] = []
-
-    if profile == "standard":
-        # Keyword matching command hook (no LLM, no API key)
-        stop_entries.append(
-            {
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "~/.claude/hooks/mem-mesh-stop-decide.sh",
-                        "timeout": 10,
-                        "async": True,
-                    }
-                ]
-            }
+    # Stop: profile picks the command script; http mode collapses all
+    # profiles onto the single server-side /stop endpoint.
+    stop_command = {
+        "standard": ("~/.claude/hooks/mem-mesh-stop-decide.sh", 10),
+        "enhanced": ("~/.claude/hooks/mem-mesh-stop-enhanced.sh", 20),
+        "minimal": ("~/.claude/hooks/mem-mesh-stop.sh", 10),
+    }
+    stop_cmd, stop_timeout = stop_command.get(profile, stop_command["minimal"])
+    settings["hooks"]["Stop"] = [
+        _claude_hook_entry(
+            "Stop", stop_cmd, stop_timeout, mode=mode, url=url, is_async=True
         )
-    elif profile == "enhanced":
-        # Async command hook: Haiku API decides save/skip, saves directly
-        stop_entries.append(
-            {
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "~/.claude/hooks/mem-mesh-stop-enhanced.sh",
-                        "timeout": 20,
-                        "async": True,
-                    }
-                ]
-            }
-        )
-    else:
-        # minimal: old-style command hook (truncate + save via API/local)
-        stop_entries.append(
-            {
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "~/.claude/hooks/mem-mesh-stop.sh",
-                        "timeout": 10,
-                        "async": True,
-                    }
-                ]
-            }
-        )
-
-    settings["hooks"]["Stop"] = stop_entries
+    ]
 
     # UserPromptSubmit: keyword-filtered context search (standard/enhanced only)
     if profile != "minimal":
         settings["hooks"]["UserPromptSubmit"] = [
-            {
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "~/.claude/hooks/mem-mesh-user-prompt-submit.sh",
-                        "timeout": 5,
-                    }
-                ]
-            }
+            _claude_hook_entry(
+                "UserPromptSubmit",
+                "~/.claude/hooks/mem-mesh-user-prompt-submit.sh",
+                5,
+                mode=mode,
+                url=url,
+            )
         ]
 
-    # SubagentStart: inject project context (standard/enhanced only)
+    # SubagentStart: inject project context (standard/enhanced only).
+    # No HTTP endpoint yet — stays a command hook even in http mode.
     if profile != "minimal":
         settings["hooks"]["SubagentStart"] = [
-            {
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "~/.claude/hooks/mem-mesh-subagent-start.sh",
-                        "timeout": 5,
-                    }
-                ]
-            }
+            _claude_hook_entry(
+                "SubagentStart",
+                "~/.claude/hooks/mem-mesh-subagent-start.sh",
+                5,
+                mode=mode,
+                url=url,
+            )
         ]
 
     # SubagentStop: auto-save important results (standard/enhanced only)
     if profile != "minimal":
         settings["hooks"]["SubagentStop"] = [
-            {
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "~/.claude/hooks/mem-mesh-subagent-stop.sh",
-                        "timeout": 10,
-                        "async": True,
-                    }
-                ]
-            }
+            _claude_hook_entry(
+                "SubagentStop",
+                "~/.claude/hooks/mem-mesh-subagent-stop.sh",
+                10,
+                mode=mode,
+                url=url,
+                is_async=True,
+            )
         ]
 
     # TaskCompleted: auto-save completed tasks (standard/enhanced only)
     if profile != "minimal":
         settings["hooks"]["TaskCompleted"] = [
-            {
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "~/.claude/hooks/mem-mesh-task-completed.sh",
-                        "timeout": 10,
-                        "async": True,
-                    }
-                ]
-            }
+            _claude_hook_entry(
+                "TaskCompleted",
+                "~/.claude/hooks/mem-mesh-task-completed.sh",
+                10,
+                mode=mode,
+                url=url,
+                is_async=True,
+            )
         ]
 
-    # SessionEnd: auto-end session on exit (all profiles)
+    # SessionEnd: auto-end session on exit (all profiles).
+    # No HTTP endpoint yet — stays a command hook even in http mode.
     settings["hooks"]["SessionEnd"] = [
-        {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "~/.claude/hooks/mem-mesh-session-end.sh",
-                    "timeout": 10,
-                }
-            ]
-        }
+        _claude_hook_entry(
+            "SessionEnd",
+            "~/.claude/hooks/mem-mesh-session-end.sh",
+            10,
+            mode=mode,
+            url=url,
+        )
     ]
 
-    # PreCompact: auto-end session before context compaction (all profiles)
+    # PreCompact: auto-end session before context compaction (all profiles).
+    # No HTTP endpoint yet — stays a command hook even in http mode.
     settings["hooks"]["PreCompact"] = [
-        {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "~/.claude/hooks/mem-mesh-precompact.sh",
-                    "timeout": 10,
-                }
-            ]
-        }
+        _claude_hook_entry(
+            "PreCompact",
+            "~/.claude/hooks/mem-mesh-precompact.sh",
+            10,
+            mode=mode,
+            url=url,
+        )
     ]
 
     return settings
@@ -345,7 +356,11 @@ def _is_mem_mesh_hook(hook: Dict[str, Any]) -> bool:
     hook_type = str(hook.get("type", ""))
     command = str(hook.get("command", ""))
     prompt = str(hook.get("prompt", ""))
+    url = str(hook.get("url", ""))
     if "mem-mesh-" in command:
+        return True
+    # http mode: native HTTP hooks point at the mem-mesh hook endpoints.
+    if hook_type == "http" and "/api/hooks/claude/" in url:
         return True
     if hook_type == "prompt" and "mcp__mem-mesh__add" in prompt:
         return True
@@ -404,7 +419,9 @@ def _merge_json_settings(path: Path, patch: Dict[str, Any]) -> None:
             merged_hooks = dict(existing_hooks)
             for event_name, patch_entries in patch_hooks.items():
                 current_entries = existing_hooks.get(event_name, [])
-                if isinstance(current_entries, list) and isinstance(patch_entries, list):
+                if isinstance(current_entries, list) and isinstance(
+                    patch_entries, list
+                ):
                     merged_hooks[event_name] = _merge_hook_entries(
                         current_entries, patch_entries
                     )
@@ -544,6 +561,7 @@ KIRO_SETTINGS = HOME / ".kiro" / "settings" / "hooks.json"
 CURSOR_HOOKS_DIR = HOME / ".cursor" / "hooks"
 CURSOR_SETTINGS = HOME / ".cursor" / "hooks.json"
 
+
 def _build_cursor_hooks_settings(
     hooks_dir: Path,
     scope: str = "global",
@@ -622,91 +640,100 @@ def _install_claude(
 ) -> None:
     """Install mem-mesh hooks for Claude Code."""
     profile_info = HOOK_PROFILES[profile]
-    print(f"[claude] Installing hook scripts (profile: {profile})...")
+    # http mode: events with a server endpoint are configured as native HTTP
+    # hooks in settings.json — no shell script is written for them. Events
+    # without an endpoint yet (SubagentStart/SessionEnd/PreCompact) still get
+    # a command script, rendered exactly like api mode.
+    _http = mode == "http"
+    mode_label = "http" if _http else mode
+    print(
+        f"[claude] Installing hook scripts (profile: {profile}, mode: {mode_label})..."
+    )
 
     session_start_script = CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh"
     track_script = CLAUDE_HOOKS_DIR / "mem-mesh-track.sh"
     stop_script = CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh"
     enhanced_stop_script = CLAUDE_HOOKS_DIR / "mem-mesh-stop-enhanced.sh"
     reflect_script = CLAUDE_HOOKS_DIR / "mem-mesh-reflect.sh"
+    decide_script = CLAUDE_HOOKS_DIR / "mem-mesh-stop-decide.sh"
+    ups_script = CLAUDE_HOOKS_DIR / "mem-mesh-user-prompt-submit.sh"
 
     # SessionStart hook (all profiles)
-    if mode == "local":
-        _write_script(
-            session_start_script,
-            _render_local_template(LOCAL_SESSION_START_HOOK_TEMPLATE, path),
-        )
-    else:
-        _write_script(
-            session_start_script,
-            _render_template(
-                SESSION_START_HOOK_TEMPLATE,
-                url,
-                source_tag="claude-code-hook",
-                ide_tag="claude",
-            ),
-        )
-    print(f"  -> {session_start_script}")
+    if not _http:
+        if mode == "local":
+            _write_script(
+                session_start_script,
+                _render_local_template(LOCAL_SESSION_START_HOOK_TEMPLATE, path),
+            )
+        else:
+            _write_script(
+                session_start_script,
+                _render_template(
+                    SESSION_START_HOOK_TEMPLATE,
+                    url,
+                    source_tag="claude-code-hook",
+                    ide_tag="claude",
+                ),
+            )
+        print(f"  -> {session_start_script}")
 
     # Remove legacy track script if present
     if track_script.exists():
         track_script.unlink()
         print(f"  removed {track_script} (track hook deprecated)")
 
-    decide_script = CLAUDE_HOOKS_DIR / "mem-mesh-stop-decide.sh"
-
     # Stop hook
-    if "stop-decide" in profile_info["hooks"]:
-        # Keyword matching command hook (no LLM, no API key)
-        _write_script(
-            decide_script,
-            _render_template(
-                STOP_DECIDE_HOOK_TEMPLATE,
-                url,
-                source_tag="claude-code-hook",
-                ide_tag="claude",
-            ),
-        )
-        print(f"  -> {decide_script}")
-    elif "stop-enhanced" in profile_info["hooks"]:
-        # Enhanced: async command hook with Haiku API
-        if mode == "local":
+    if not _http:
+        if "stop-decide" in profile_info["hooks"]:
+            # Keyword matching command hook (no LLM, no API key)
             _write_script(
-                enhanced_stop_script,
-                _render_local_template(LOCAL_ENHANCED_STOP_HOOK_TEMPLATE, path),
-            )
-        else:
-            _write_script(
-                enhanced_stop_script,
+                decide_script,
                 _render_template(
-                    ENHANCED_STOP_HOOK_TEMPLATE,
+                    STOP_DECIDE_HOOK_TEMPLATE,
                     url,
                     source_tag="claude-code-hook",
                     ide_tag="claude",
                 ),
             )
-        print(f"  -> {enhanced_stop_script}")
-    elif "stop" in profile_info["hooks"]:
-        # Command-based stop: write shell script (minimal profile)
-        if mode == "local":
-            _write_script(
-                stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path)
-            )
-        else:
-            _write_script(
-                stop_script,
-                _render_template(
-                    STOP_HOOK_TEMPLATE,
-                    url,
-                    source_tag="claude-code-hook",
-                    ide_tag="claude",
-                ),
-            )
-        print(f"  -> {stop_script}")
+            print(f"  -> {decide_script}")
+        elif "stop-enhanced" in profile_info["hooks"]:
+            # Enhanced: async command hook with Haiku API
+            if mode == "local":
+                _write_script(
+                    enhanced_stop_script,
+                    _render_local_template(LOCAL_ENHANCED_STOP_HOOK_TEMPLATE, path),
+                )
+            else:
+                _write_script(
+                    enhanced_stop_script,
+                    _render_template(
+                        ENHANCED_STOP_HOOK_TEMPLATE,
+                        url,
+                        source_tag="claude-code-hook",
+                        ide_tag="claude",
+                    ),
+                )
+            print(f"  -> {enhanced_stop_script}")
+        elif "stop" in profile_info["hooks"]:
+            # Command-based stop: write shell script (minimal profile)
+            if mode == "local":
+                _write_script(
+                    stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path)
+                )
+            else:
+                _write_script(
+                    stop_script,
+                    _render_template(
+                        STOP_HOOK_TEMPLATE,
+                        url,
+                        source_tag="claude-code-hook",
+                        ide_tag="claude",
+                    ),
+                )
+            print(f"  -> {stop_script}")
 
     # UserPromptSubmit hook (standard/enhanced only)
-    if "user-prompt-submit" in profile_info["hooks"]:
-        ups_script = CLAUDE_HOOKS_DIR / "mem-mesh-user-prompt-submit.sh"
+    if not _http and "user-prompt-submit" in profile_info["hooks"]:
         if mode == "local":
             _write_script(
                 ups_script,
@@ -745,7 +772,7 @@ def _install_claude(
         print(f"  -> {sa_start_script}")
 
     # SubagentStop hook (standard/enhanced only)
-    if "subagent-stop" in profile_info["hooks"]:
+    if not _http and "subagent-stop" in profile_info["hooks"]:
         sa_stop_script = CLAUDE_HOOKS_DIR / "mem-mesh-subagent-stop.sh"
         if mode == "local":
             _write_script(
@@ -765,7 +792,7 @@ def _install_claude(
         print(f"  -> {sa_stop_script}")
 
     # TaskCompleted hook (standard/enhanced only)
-    if "task-completed" in profile_info["hooks"]:
+    if not _http and "task-completed" in profile_info["hooks"]:
         tc_script = CLAUDE_HOOKS_DIR / "mem-mesh-task-completed.sh"
         if mode == "local":
             _write_script(
@@ -833,8 +860,23 @@ def _install_claude(
             script.unlink()
             print(f"  removed {script} (not in {profile} profile)")
 
+    # http mode: drop the shell scripts whose work moved to a server endpoint.
+    if _http:
+        for script in (
+            session_start_script,
+            decide_script,
+            enhanced_stop_script,
+            stop_script,
+            ups_script,
+            CLAUDE_HOOKS_DIR / "mem-mesh-subagent-stop.sh",
+            CLAUDE_HOOKS_DIR / "mem-mesh-task-completed.sh",
+        ):
+            if script.exists():
+                script.unlink()
+                print(f"  removed {script} (replaced by HTTP hook)")
+
     print("[claude] Updating settings.json...")
-    hooks_settings = _build_claude_hooks_settings(profile)
+    hooks_settings = _build_claude_hooks_settings(profile, mode, url)
     _merge_json_settings(CLAUDE_SETTINGS, hooks_settings)
     # Remove legacy PostToolUse (track hook) from settings
     _remove_hook_event(CLAUDE_SETTINGS, "PostToolUse")
@@ -1220,9 +1262,7 @@ def _detect_profile(hooks_dir: Path, settings_path: Optional[Path] = None) -> st
     has_stop_decide = (hooks_dir / "mem-mesh-stop-decide.sh").exists()
     has_reflect = (hooks_dir / "mem-mesh-reflect.sh").exists()
     has_stop = (hooks_dir / "mem-mesh-stop.sh").exists()
-    has_prompt_stop = (
-        _has_prompt_stop_hook(settings_path) if settings_path else False
-    )
+    has_prompt_stop = _has_prompt_stop_hook(settings_path) if settings_path else False
 
     if has_enhanced_stop:
         return "enhanced"
@@ -1444,7 +1484,9 @@ except Exception:
     ).replace("__PROJECT_ID__", project_id)
 
     before_submit_prompt_content = adapt_cursor_before_submit_prompt(
-        _render_local_template(LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE, str(project_root))
+        _render_local_template(
+            LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE, str(project_root)
+        )
     )
     precompact_content = adapt_cursor_precompact(
         _render_local_template(LOCAL_PRECOMPACT_HOOK_TEMPLATE, str(project_root))
@@ -1503,8 +1545,10 @@ def cmd_install(
         resolved = path or str(Path(__file__).resolve().parent.parent.parent)
         print(f"Installing mem-mesh hooks (mode: local, path: {resolved})")
     else:
+        # http mode shares api's url-based config; Claude Code gets native
+        # HTTP hooks while Kiro/Cursor fall back to command hooks.
         resolved = ""
-        print(f"Installing mem-mesh hooks (mode: api, url: {url})")
+        print(f"Installing mem-mesh hooks (mode: {mode}, url: {url})")
 
     print(f"Prompt version: {PROMPT_VERSION} | Profile: {profile}\n")
 
@@ -1597,17 +1641,19 @@ def cmd_interactive() -> None:
     # Step 3: storage mode
     print("[3/4] Select storage mode:")
     modes = [
-        f"API  — Send to remote server ({DEFAULT_URL})",
+        f"HTTP — Claude Code native HTTP hooks ({DEFAULT_URL})",
+        f"API  — Remote server via bash+curl hooks ({DEFAULT_URL})",
         "Local — Save directly to local SQLite",
     ]
+    mode_keys = ["http", "api", "local"]
     mode_idx = _prompt_choice("", modes, default=0)
-    mode = "api" if mode_idx == 0 else "local"
+    mode = mode_keys[mode_idx]
     print()
 
     # Step 4: mode-specific config
     url = DEFAULT_URL
     mem_path = ""
-    if mode == "api":
+    if mode in ("api", "http"):
         print(f"[4/4] API URL [{DEFAULT_URL}]:")
         raw = input("  > ").strip()
         if raw:
@@ -1652,9 +1698,12 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
     install_parser.add_argument(
         "--mode",
-        choices=["api", "local"],
+        choices=["api", "local", "http"],
         default="api",
-        help="Storage mode: api (remote server) or local (SQLite direct)",
+        help=(
+            "Storage mode: api (remote server, bash+curl hooks), "
+            "local (SQLite direct), or http (Claude Code native HTTP hooks)"
+        ),
     )
     install_parser.add_argument(
         "--path",
