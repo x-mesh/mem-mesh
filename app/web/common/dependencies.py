@@ -10,6 +10,7 @@ from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.context import ContextService
 from app.core.services.embedding_manager import EmbeddingManagerService
+from app.core.services.hook import HookService
 from app.core.services.memory import MemoryService
 from app.core.services.pin import PinService
 from app.core.services.project import ProjectService
@@ -130,3 +131,11 @@ def get_relation_service() -> RelationService:
     if services.get("relation_service") is None:
         raise HTTPException(status_code=500, detail="Relation service not initialized")
     return services["relation_service"]
+
+
+def get_hook_service() -> HookService:
+    """Hook 이벤트 서비스 의존성 (Claude Code HTTP hook 용)"""
+    services = get_services()
+    if services.get("hook_service") is None:
+        raise HTTPException(status_code=500, detail="Hook service not initialized")
+    return services["hook_service"]

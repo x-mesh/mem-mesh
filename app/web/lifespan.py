@@ -17,6 +17,7 @@ from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService, is_model_cached
 from app.core.services.context import ContextService
 from app.core.services.embedding_manager import EmbeddingManagerService
+from app.core.services.hook import HookService
 from app.core.services.memory import MemoryService
 from app.core.services.metrics_collector import MetricsCollector
 from app.core.services.pin import PinService
@@ -46,6 +47,7 @@ session_service: Optional[SessionService] = None
 pin_service: Optional[PinService] = None
 metrics_collector: Optional[MetricsCollector] = None
 relation_service: Optional[RelationService] = None
+hook_service: Optional[HookService] = None
 mcp_storage: Optional[DirectStorageBackend] = None
 oauth_service: Optional[OAuthService] = None
 
@@ -53,7 +55,7 @@ oauth_service: Optional[OAuthService] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """애플리케이션 생명주기 관리"""
-    global db, embedding_service, memory_service, search_service, context_service, stats_service, embedding_manager, project_service, session_service, pin_service, metrics_collector, relation_service, mcp_storage, oauth_service, logger
+    global db, embedding_service, memory_service, search_service, context_service, stats_service, embedding_manager, project_service, session_service, pin_service, metrics_collector, relation_service, hook_service, mcp_storage, oauth_service, logger
 
     # Load .env file (highest priority)
     load_dotenv()
@@ -227,6 +229,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         session_service = SessionService(db, embedding_service=embedding_service)
         pin_service = PinService(db, embedding_service)
         relation_service = RelationService(db)
+        hook_service = HookService(db)
 
         # Initialize OAuth service
         logger.info("Initializing OAuth service")
@@ -333,6 +336,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         pin_service = None
         metrics_collector = None
         relation_service = None
+        hook_service = None
         mcp_storage = None
         oauth_service = None
 
@@ -354,6 +358,7 @@ def get_services() -> Dict[str, Any]:
         "pin_service": pin_service,
         "metrics_collector": metrics_collector,
         "relation_service": relation_service,
+        "hook_service": hook_service,
         "mcp_storage": mcp_storage,
         "oauth_service": oauth_service,
     }

@@ -34,6 +34,7 @@ class DatabaseInitializer:
             await self._create_relation_tables()
             await self._create_monitoring_tables()
             await self._create_oauth_tables()
+            await self._create_hook_tables()
 
             # Step 2: Run schema migrations to add missing columns
             from .schema_migrator import SchemaMigrator
@@ -251,6 +252,32 @@ class DatabaseInitializer:
             )
         """)
 
+    async def _create_hook_tables(self) -> None:
+        """Create the hook event stream table.
+
+        Records every Claude Code HTTP hook event keyed by the IDE session id.
+        The server reconstructs per-session state (continuation detection,
+        Q&A pairing, turn counting) from this stream instead of reading the
+        client-side transcript file — which is unreachable when mem-mesh runs
+        remotely or inside Docker.
+        """
+        conn = self.connection.connection
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS hook_events (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                ide_session_id TEXT NOT NULL,
+                client_type TEXT,
+                event_name TEXT NOT NULL,
+                turn_index INTEGER NOT NULL DEFAULT 0,
+                prompt TEXT,
+                assistant_message TEXT,
+                saved_memory INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+        """)
+
     async def _create_monitoring_tables(self) -> None:
         """Create monitoring system tables."""
         conn = self.connection.connection
@@ -373,6 +400,12 @@ class DatabaseInitializer:
             "CREATE INDEX IF NOT EXISTS idx_oauth_codes_client ON oauth_authorization_codes(client_id)",
         ]
 
+        # Hook event stream indexes
+        hook_indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_hook_events_session ON hook_events(ide_session_id, turn_index)",
+            "CREATE INDEX IF NOT EXISTS idx_hook_events_created ON hook_events(created_at)",
+        ]
+
         all_indexes = (
             core_indexes
             + work_tracking_indexes
@@ -380,6 +413,7 @@ class DatabaseInitializer:
             + relation_indexes
             + oauth_indexes
             + token_optimization_indexes
+            + hook_indexes
         )
         for index_sql in all_indexes:
             try:

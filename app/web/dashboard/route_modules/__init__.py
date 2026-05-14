@@ -6,6 +6,7 @@ Combines all route modules into a single router for the dashboard API.
 
 from fastapi import APIRouter
 
+from .hooks import router as hooks_router
 from .memories import router as memories_router
 from .oauth import router as oauth_router
 from .relations import router as relations_router
@@ -19,6 +20,7 @@ router.include_router(search_router)
 router.include_router(memories_router)
 router.include_router(oauth_router)
 router.include_router(relations_router)
+router.include_router(hooks_router)
 
 __all__ = [
     "router",
@@ -27,4 +29,5 @@ __all__ = [
     "stats_router",
     "oauth_router",
     "relations_router",
+    "hooks_router",
 ]
