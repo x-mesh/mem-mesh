@@ -9,10 +9,14 @@ file — which is unreachable when mem-mesh runs remotely or in Docker.
 
 Design rules:
 * **Never break the caller.** Every handler returns HTTP 200; failures degrade
-  to an empty/partial response. A hook must not stall the user's session.
+  to an empty response. A hook must not stall the user's session.
+* **Strict output schema.** Claude Code validates the response body against
+  the command-hook stdout schema and rejects unknown root keys or a ``null``
+  ``hookSpecificOutput``. So a "do nothing" reply is an *empty body* (the
+  status is logged, never sent), and context injection emits *only*
+  ``hookSpecificOutput``.
 * Embedding-dependent services (memory/search) are fetched lazily so a
   loading model yields graceful degradation instead of a 503.
-* Responses use the same ``hookSpecificOutput`` schema as command-hook stdout.
 """
 
 import logging
@@ -20,12 +24,11 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
+from fastapi.responses import JSONResponse
 
 from app.cli.hooks.keywords import match_category
 from app.core.schemas.hooks import (
-    HookResponse,
-    HookSpecificOutput,
     SessionStartPayload,
     StopPayload,
     SubagentStopPayload,
@@ -66,6 +69,28 @@ _SEARCH_KEYWORDS = (
     "last time",
     "before",
 )
+
+
+def _ok(status: str) -> Response:
+    """An empty 200 — the valid "do nothing" reply for a hook.
+
+    Claude Code rejects unknown root keys in hook output JSON, so the status
+    string is logged for observability and never put on the wire.
+    """
+    logger.debug("claude hook: %s", status)
+    return Response(status_code=200)
+
+
+def _context(event_name: str, additional_context: str) -> JSONResponse:
+    """A 200 carrying only ``hookSpecificOutput`` for context injection."""
+    return JSONResponse(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": event_name,
+                "additionalContext": additional_context,
+            }
+        }
+    )
 
 
 def _project_id(cwd: Optional[str], explicit: Optional[str]) -> str:
@@ -146,12 +171,12 @@ async def _save_memory(
 # ───────────────────────── SessionStart ──────────────────────────
 
 
-@router.post("/session-start", response_model=HookResponse)
+@router.post("/session-start")
 async def session_start(
     payload: SessionStartPayload,
     hook_service: HookService = Depends(get_hook_service),
     session_service: SessionService = Depends(get_session_service),
-) -> HookResponse:
+) -> Response:
     """Inject mem-mesh session context, transcript-file-free.
 
     Continuation (post-compaction) is detected from the event stream: a
@@ -228,23 +253,18 @@ async def session_start(
         + (f"\n\n### Rules\n{rules_text}" if rules_text else "")
     )
 
-    return HookResponse(
-        hookSpecificOutput=HookSpecificOutput(
-            hookEventName="SessionStart", additionalContext=context_str
-        ),
-        status="continuation" if is_continuation else "ok",
-    )
+    return _context("SessionStart", context_str)
 
 
 # ─────────────────────── UserPromptSubmit ────────────────────────
 
 
-@router.post("/user-prompt-submit", response_model=HookResponse)
+@router.post("/user-prompt-submit")
 async def user_prompt_submit(
     payload: UserPromptSubmitPayload,
     hook_service: HookService = Depends(get_hook_service),
     pin_service: PinService = Depends(get_pin_service),
-) -> HookResponse:
+) -> Response:
     """Keyword-matched memory search + save/pin reminders.
 
     The "N turns since save" reminder is derived from the event stream's
@@ -335,25 +355,19 @@ async def user_prompt_submit(
             logger.warning(f"pin reminder check failed: {e}")
 
     if not parts:
-        return HookResponse(status="noop")
+        return _ok("user-prompt-submit: noop")
 
-    return HookResponse(
-        hookSpecificOutput=HookSpecificOutput(
-            hookEventName="UserPromptSubmit",
-            additionalContext="\n\n".join(parts),
-        ),
-        status="ok",
-    )
+    return _context("UserPromptSubmit", "\n\n".join(parts))
 
 
 # ───────────────────────────── Stop ──────────────────────────────
 
 
-@router.post("/stop", response_model=HookResponse)
+@router.post("/stop")
 async def stop(
     payload: StopPayload,
     hook_service: HookService = Depends(get_hook_service),
-) -> HookResponse:
+) -> Response:
     """Keyword-matched structured save of the finished turn.
 
     The Q is paired from the event stream (the last recorded prompt for this
@@ -361,7 +375,7 @@ async def stop(
     the transcript file.
     """
     if payload.stop_hook_active:
-        return HookResponse(status="skip: stop_hook_active")
+        return _ok("stop: skip (stop_hook_active)")
 
     message = payload.last_assistant_message or ""
     project_id = _project_id(payload.cwd, payload.project_id)
@@ -377,13 +391,13 @@ async def stop(
     )
 
     if len(message) < 50:
-        return HookResponse(status="skip: message too short")
+        return _ok("stop: skip (message too short)")
     if _save_marker_present(message):
-        return HookResponse(status="skip: already saved via MCP")
+        return _ok("stop: skip (already saved via MCP)")
 
     category = match_category(message, os.getenv("MEM_MESH_HOOK_EXTRA_KEYWORDS", ""))
     if category not in _SAVE_CATEGORIES:
-        return HookResponse(status=f"skip: no keyword match ({category})")
+        return _ok(f"stop: skip (no keyword match: {category})")
 
     # Pair the question from the event stream.
     content = message
@@ -401,26 +415,24 @@ async def stop(
         category,
         tags=["auto-save", "keyword", category],
     )
-    return HookResponse(
-        status=(
-            f"saved memory as {category} (project={project_id})"
-            if saved
-            else f"save skipped (category={category})"
-        )
+    return _ok(
+        f"stop: saved memory as {category} (project={project_id})"
+        if saved
+        else f"stop: save skipped (category={category})"
     )
 
 
 # ───────────────────────── SubagentStop ──────────────────────────
 
 
-@router.post("/subagent-stop", response_model=HookResponse)
+@router.post("/subagent-stop")
 async def subagent_stop(
     payload: SubagentStopPayload,
     hook_service: HookService = Depends(get_hook_service),
-) -> HookResponse:
+) -> Response:
     """Keyword-matched save of a notable subagent result."""
     if payload.stop_hook_active:
-        return HookResponse(status="skip: stop_hook_active")
+        return _ok("subagent-stop: skip (stop_hook_active)")
 
     message = payload.last_assistant_message or ""
     project_id = _project_id(payload.cwd, payload.project_id)
@@ -435,11 +447,11 @@ async def subagent_stop(
     )
 
     if len(message) < 100 or _save_marker_present(message):
-        return HookResponse(status="skip")
+        return _ok("subagent-stop: skip")
 
     category = match_category(message, os.getenv("MEM_MESH_HOOK_EXTRA_KEYWORDS", ""))
     if category not in _SAVE_CATEGORIES:
-        return HookResponse(status=f"skip: no keyword match ({category})")
+        return _ok(f"subagent-stop: skip (no keyword match: {category})")
 
     agent_type = payload.agent_type or "unknown"
     saved = await _save_memory(
@@ -448,20 +460,20 @@ async def subagent_stop(
         category,
         tags=["auto-save", "subagent", category],
     )
-    return HookResponse(status="saved" if saved else "save skipped")
+    return _ok("subagent-stop: saved" if saved else "subagent-stop: save skipped")
 
 
 # ───────────────────────── TaskCompleted ─────────────────────────
 
 
-@router.post("/task-completed", response_model=HookResponse)
+@router.post("/task-completed")
 async def task_completed(
     payload: TaskCompletedPayload,
     hook_service: HookService = Depends(get_hook_service),
-) -> HookResponse:
+) -> Response:
     """Save a completed team task to mem-mesh."""
     if not payload.task_subject:
-        return HookResponse(status="skip: no task subject")
+        return _ok("task-completed: skip (no task subject)")
 
     project_id = _project_id(payload.cwd, payload.project_id)
 
@@ -485,4 +497,4 @@ async def task_completed(
         "task",
         tags=["auto-save", "task-completed"],
     )
-    return HookResponse(status="saved" if saved else "save skipped")
+    return _ok("task-completed: saved" if saved else "task-completed: save skipped")
