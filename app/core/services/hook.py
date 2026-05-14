@@ -1,0 +1,167 @@
+"""Hook event stream service.
+
+Claude Code HTTP hooks POST every lifecycle event to mem-mesh. This service
+persists those events keyed by the IDE session id and reconstructs the
+per-session state the legacy shell hooks used to derive by parsing the
+client-side transcript file:
+
+* **continuation detection** — has this session been seen before? (post-compaction)
+* **Q&A pairing** — the prompt that preceded a given Stop event
+* **turn counting** — assistant turns since the last memory save
+
+Reconstructing from the event stream is both transcript-file-free (works for
+remote / Docker deployments) and more reliable than re-parsing JSONL.
+"""
+
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+from uuid import uuid4
+
+from app.core.database.base import Database
+
+logger = logging.getLogger(__name__)
+
+# Substrings that mark a turn as having saved something to mem-mesh.
+_SAVE_MARKERS = ("mcp__mem-mesh__add", "mcp__mem-mesh__pin_add")
+
+# Events that count as an "assistant turn" for the turns-since-save counter.
+_TURN_EVENTS = ("UserPromptSubmit", "Stop")
+
+
+class HookService:
+    """Records Claude Code hook events and derives per-session state."""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    @staticmethod
+    def _detect_save(*texts: Optional[str]) -> bool:
+        """True if any text references a mem-mesh save tool call."""
+        for text in texts:
+            if text and any(marker in text for marker in _SAVE_MARKERS):
+                return True
+        return False
+
+    async def record_event(
+        self,
+        *,
+        project_id: str,
+        ide_session_id: str,
+        event_name: str,
+        client_type: Optional[str] = None,
+        prompt: Optional[str] = None,
+        assistant_message: Optional[str] = None,
+        saved_memory: Optional[bool] = None,
+    ) -> int:
+        """Append an event to the session stream and return its turn index.
+
+        ``saved_memory`` is auto-detected from the prompt/assistant text when
+        not supplied explicitly.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+
+        row = await self.db.fetchone(
+            "SELECT MAX(turn_index) AS m FROM hook_events WHERE ide_session_id = ?",
+            (ide_session_id,),
+        )
+        next_turn = ((row["m"] if row and row["m"] is not None else -1)) + 1
+
+        if saved_memory is None:
+            saved_memory = self._detect_save(prompt, assistant_message)
+
+        await self.db.execute(
+            """
+            INSERT INTO hook_events (
+                id, project_id, ide_session_id, client_type, event_name,
+                turn_index, prompt, assistant_message, saved_memory, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid4()),
+                project_id,
+                ide_session_id,
+                client_type,
+                event_name,
+                next_turn,
+                prompt,
+                assistant_message,
+                1 if saved_memory else 0,
+                now,
+            ),
+        )
+        self.db.connection.commit()
+        return next_turn
+
+    async def is_continuation(self, ide_session_id: str) -> bool:
+        """True if this session id already has recorded events.
+
+        Claude Code preserves ``session_id`` across context compaction, so a
+        SessionStart for a session we have already seen means the context was
+        compacted and resumed rather than freshly started.
+        """
+        if not ide_session_id:
+            return False
+        row = await self.db.fetchone(
+            "SELECT COUNT(*) AS c FROM hook_events WHERE ide_session_id = ?",
+            (ide_session_id,),
+        )
+        return bool(row and row["c"])
+
+    async def get_last_prompt(self, ide_session_id: str) -> Optional[str]:
+        """The most recent user prompt recorded for this session, if any."""
+        if not ide_session_id:
+            return None
+        row = await self.db.fetchone(
+            """
+            SELECT prompt FROM hook_events
+            WHERE ide_session_id = ? AND prompt IS NOT NULL AND prompt != ''
+            ORDER BY turn_index DESC
+            LIMIT 1
+            """,
+            (ide_session_id,),
+        )
+        return row["prompt"] if row else None
+
+    async def turns_since_save(self, ide_session_id: str) -> int:
+        """Count assistant turns since the last memory save in this session.
+
+        Returns the total turn count when nothing has been saved yet.
+        """
+        if not ide_session_id:
+            return 0
+
+        placeholders = ", ".join("?" for _ in _TURN_EVENTS)
+
+        last_save = await self.db.fetchone(
+            f"""
+            SELECT MAX(turn_index) AS m FROM hook_events
+            WHERE ide_session_id = ? AND saved_memory = 1
+              AND event_name IN ({placeholders})
+            """,
+            (ide_session_id, *_TURN_EVENTS),
+        )
+        last_save_turn = (
+            last_save["m"] if last_save and last_save["m"] is not None else -1
+        )
+
+        row = await self.db.fetchone(
+            f"""
+            SELECT COUNT(*) AS c FROM hook_events
+            WHERE ide_session_id = ? AND turn_index > ?
+              AND event_name IN ({placeholders})
+            """,
+            (ide_session_id, last_save_turn, *_TURN_EVENTS),
+        )
+        return int(row["c"]) if row else 0
+
+    async def prune_old_events(self, retention_days: int = 14) -> int:
+        """Delete events older than ``retention_days``. Returns rows removed."""
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=retention_days)
+        ).isoformat()
+        cursor = await self.db.execute(
+            "DELETE FROM hook_events WHERE created_at < ?", (cutoff,)
+        )
+        self.db.connection.commit()
+        return cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
