@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `~/.mem-mesh/api_url` config file as a third source for the API URL — lets one installed hook bundle target different remote servers per machine without editing `settings.json` or exporting an environment variable into the Claude Code session
+- `status._read_config_file_url()` helper and `doctor` now report `~/.mem-mesh/api_url` alongside env vars
+
+### Changed
+- Bash hook templates (`app/cli/hooks/shell/*.sh`) — URL resolution chain widened to `${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo <baked>)}`. Behaviour for users who only export `MEM_MESH_API_URL` is unchanged; the new fallback only activates when neither env var is present
+- `resolve_api_url()` priority is now: `MEM_MESH_API_URL` env > `API_URL` env > `~/.mem-mesh/api_url` > baked URL > `DEFAULT_URL`
+- `_extract_url_from_script()` recognises both the legacy single-fallback and the new config-file fallback patterns
+
+### Fixed
+- Stop / Session / SubagentStop hooks silently failing with `HTTP 000` when the Claude Code session was started before `MEM_MESH_API_URL` was added to `settings.json.env`. Claude Code does not export `settings.json.env` retroactively to already-running sessions; the config file gives users an out-of-band way to point hooks at a remote server without re-running the installer.
+
 ## [1.5.0] - 2026-05-14
 
 ### Added

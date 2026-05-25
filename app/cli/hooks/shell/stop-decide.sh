@@ -7,7 +7,7 @@ __VERSION_MARKER__
 set -uo pipefail  # no -e: prevent silent failures in async hook
 command -v jq >/dev/null 2>&1 || exit 0
 
-API_URL="${MEM_MESH_API_URL:-__DEFAULT_URL__}"
+API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)}"
 LOG_FILE="${HOME}/.claude/hooks/stop-hook-debug.log"
 
 log() {

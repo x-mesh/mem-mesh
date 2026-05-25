@@ -207,11 +207,21 @@ def cmd_doctor() -> None:
     mem_mesh_url = os.environ.get("MEM_MESH_API_URL")
     api_url_env = os.environ.get("API_URL")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    config_file = Path.home() / ".mem-mesh" / "api_url"
+    config_file_url = None
+    if config_file.is_file():
+        try:
+            config_file_url = config_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
 
     print(
         f"  MEM_MESH_API_URL:  {ok(mem_mesh_url) if mem_mesh_url else dim('not set')}"
     )
     print(f"  API_URL:           {ok(api_url_env) if api_url_env else dim('not set')}")
+    print(
+        f"  ~/.mem-mesh/api_url: {ok(config_file_url) if config_file_url else dim('not set')}"
+    )
     print(f"  ANTHROPIC_API_KEY: {ok('set') if anthropic_key else warn('not set')}")
     print(f"  Detected profile:  {bold(profile)}")
 
