@@ -66,17 +66,44 @@ def _check_script_version(path: Path) -> str:
 
 
 def _extract_url_from_script(path: Path) -> Optional[str]:
-    """Extract the default URL from an installed script."""
+    """Extract the baked default URL from an installed script.
+
+    Supports both legacy and config-file-fallback patterns:
+      - Legacy: ${MEM_MESH_API_URL:-https://example.com}
+      - New:    ${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://example.com)}
+    """
     if not path.exists():
         return None
     content = path.read_text(encoding="utf-8")
     for line in content.splitlines():
-        if "MEM_MESH_API_URL:-" in line:
-            start = line.find(":-") + 2
-            end = line.find("}", start)
-            if start > 1 and end > start:
-                url = line[start:end].strip('"').strip("'")
-                return url
+        if "MEM_MESH_API_URL:-" not in line:
+            continue
+        # New pattern: extract URL after `echo `
+        echo_idx = line.find("|| echo ")
+        if echo_idx >= 0:
+            after = line[echo_idx + len("|| echo "):]
+            for delim in (")", "}", " ", '"'):
+                idx = after.find(delim)
+                if idx >= 0:
+                    return after[:idx].strip()
+            return after.strip()
+        # Legacy pattern
+        start = line.find(":-") + 2
+        end = line.find("}", start)
+        if start > 1 and end > start:
+            return line[start:end].strip('"').strip("'")
+    return None
+
+
+def _read_config_file_url() -> Optional[str]:
+    """Read API URL from ~/.mem-mesh/api_url config file."""
+    try:
+        path = Path.home() / ".mem-mesh" / "api_url"
+        if path.is_file():
+            url = path.read_text(encoding="utf-8").strip()
+            return url or None
+    except OSError:
+        pass
     return None
 
 
@@ -152,10 +179,10 @@ def _detect_profile(hooks_dir: Path, settings_path: Optional[Path] = None) -> st
 
 
 def resolve_api_url(baked_url: Optional[str] = None) -> Tuple[str, str]:
-    """Resolve the API URL from environment or baked value.
+    """Resolve the API URL from environment, config file, or baked value.
 
     Returns (url, source) where source describes where the URL came from.
-    Priority: MEM_MESH_API_URL env > API_URL env > baked URL > DEFAULT_URL.
+    Priority: MEM_MESH_API_URL env > API_URL env > ~/.mem-mesh/api_url > baked URL > DEFAULT_URL.
     """
     env_url = os.environ.get("MEM_MESH_API_URL")
     if env_url:
@@ -164,6 +191,10 @@ def resolve_api_url(baked_url: Optional[str] = None) -> Tuple[str, str]:
     env_url = os.environ.get("API_URL")
     if env_url:
         return env_url.rstrip("/"), "API_URL env"
+
+    file_url = _read_config_file_url()
+    if file_url:
+        return file_url.rstrip("/"), "~/.mem-mesh/api_url"
 
     if baked_url:
         return baked_url.rstrip("/"), "installed script"

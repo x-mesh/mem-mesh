@@ -287,6 +287,26 @@ Seven relation types: `related` | `parent` | `child` | `supersedes` | `reference
 
 See `.env.example` for the full list.
 
+### Pointing hooks at a remote mem-mesh server
+
+Bash hooks (Stop, SessionStart, SubagentStop, …) resolve the API URL in this order:
+
+1. `MEM_MESH_API_URL` environment variable
+2. `API_URL` environment variable
+3. **`~/.mem-mesh/api_url`** — single-line file with the server URL
+4. The URL baked into the hook at install time
+5. `http://localhost:8000`
+
+Use the config file when you want one installed hook bundle to talk to a remote server (e.g. `https://mem.example.com`) without editing `settings.json` and without relying on env-var inheritance — Claude Code does not export `settings.json.env` retroactively to already-running sessions, so an env var added mid-session won't reach hooks until you restart.
+
+```bash
+mkdir -p ~/.mem-mesh
+echo 'https://mem.example.com' > ~/.mem-mesh/api_url
+mem-mesh doctor   # confirms the resolved URL and its source
+```
+
+Per machine — the file is not synced. Delete it (or set `MEM_MESH_API_URL`) to fall back to the baked default.
+
 ---
 
 ## Web Dashboard
