@@ -1651,10 +1651,12 @@ def cmd_interactive() -> None:
             print()
 
     # Step 3: storage mode
+    from app.cli.hooks.status import resolve_api_url
+    suggested_url, url_source = resolve_api_url()
     print("[3/4] Select storage mode:")
     modes = [
-        f"HTTP — Claude Code native HTTP hooks ({DEFAULT_URL})",
-        f"API  — Remote server via bash+curl hooks ({DEFAULT_URL})",
+        f"HTTP — Claude Code native HTTP hooks ({suggested_url})",
+        f"API  — Remote server via bash+curl hooks ({suggested_url})",
         "Local — Save directly to local SQLite",
     ]
     mode_keys = ["http", "api", "local"]
@@ -1663,10 +1665,11 @@ def cmd_interactive() -> None:
     print()
 
     # Step 4: mode-specific config
-    url = DEFAULT_URL
+    url = suggested_url
     mem_path = ""
     if mode in ("api", "http"):
-        print(f"[4/4] API URL [{DEFAULT_URL}]:")
+        source_hint = f" (from {url_source})" if url_source != "default" else ""
+        print(f"[4/4] API URL [{suggested_url}]{source_hint}:")
         raw = input("  > ").strip()
         if raw:
             url = raw
