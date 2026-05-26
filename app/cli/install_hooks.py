@@ -59,6 +59,7 @@ from app.cli.hooks.templates import (
     USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
 )
 from app.cli.hooks.keywords import KEYWORD_MATCHER_BLOCK
+from app.cli.hooks.netcheck import check_http_hook_url
 from app.cli.hooks.cursor_adapters import (
     adapt_cursor_before_submit_prompt,
     adapt_cursor_precompact,
@@ -1541,6 +1542,17 @@ def cmd_install(
     profile: str = "standard",
 ) -> None:
     """Install hooks for the specified target."""
+    # http mode produces native HTTP hooks, which Claude Code refuses to call
+    # when the URL resolves to a private/link-local/CGNAT address (e.g. a
+    # Tailscale/VPN/LAN server). Detect that up front and downgrade to api
+    # (command + curl hooks), which has no such restriction.
+    if mode == "http":
+        block_reason = check_http_hook_url(url)
+        if block_reason:
+            print(f"WARNING: http mode unavailable for this URL — {block_reason}")
+            print("  Falling back to 'api' mode (command + curl hooks).\n")
+            mode = "api"
+
     if mode == "local":
         resolved = path or str(Path(__file__).resolve().parent.parent.parent)
         print(f"Installing mem-mesh hooks (mode: local, path: {resolved})")
@@ -1639,10 +1651,12 @@ def cmd_interactive() -> None:
             print()
 
     # Step 3: storage mode
+    from app.cli.hooks.status import resolve_api_url
+    suggested_url, url_source = resolve_api_url()
     print("[3/4] Select storage mode:")
     modes = [
-        f"HTTP — Claude Code native HTTP hooks ({DEFAULT_URL})",
-        f"API  — Remote server via bash+curl hooks ({DEFAULT_URL})",
+        f"HTTP — Claude Code native HTTP hooks ({suggested_url})",
+        f"API  — Remote server via bash+curl hooks ({suggested_url})",
         "Local — Save directly to local SQLite",
     ]
     mode_keys = ["http", "api", "local"]
@@ -1651,10 +1665,11 @@ def cmd_interactive() -> None:
     print()
 
     # Step 4: mode-specific config
-    url = DEFAULT_URL
+    url = suggested_url
     mem_path = ""
     if mode in ("api", "http"):
-        print(f"[4/4] API URL [{DEFAULT_URL}]:")
+        source_hint = f" (from {url_source})" if url_source != "default" else ""
+        print(f"[4/4] API URL [{suggested_url}]{source_hint}:")
         raw = input("  > ").strip()
         if raw:
             url = raw

@@ -22,6 +22,7 @@ from app.cli.hooks.status import (
     resolve_api_url,
 )
 from app.cli.hooks.json_ops import _is_mem_mesh_entry
+from app.cli.hooks.netcheck import check_http_hook_url
 
 
 def _check_permissions(hooks_dir: Path) -> List[str]:
@@ -96,6 +97,50 @@ def _check_settings_json(settings_path: Path, label: str) -> List[str]:
     return issues
 
 
+def _check_http_hook_urls(settings_path: Path, label: str) -> List[str]:
+    """Flag mem-mesh http-type hooks whose URL Claude Code will refuse to call.
+
+    Native HTTP hooks pointed at a Tailscale/VPN/LAN server (private or CGNAT
+    address) are silently blocked at runtime; re-installing with ``--mode api``
+    is the fix.
+    """
+    issues: List[str] = []
+    if not settings_path.exists():
+        return issues
+    try:
+        data = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return issues
+
+    hooks = data.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return issues
+
+    seen: set = set()
+    for _event, entries in hooks.items():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            for hook in entry.get("hooks", []):
+                if not isinstance(hook, dict):
+                    continue
+                if hook.get("type") != "http":
+                    continue
+                url = str(hook.get("url", ""))
+                if "/api/hooks/claude/" not in url or url in seen:
+                    continue
+                seen.add(url)
+                reason = check_http_hook_url(url)
+                if reason:
+                    issues.append(
+                        f"{label}: HTTP hook will be blocked by Claude Code — "
+                        f"{reason} (re-install with --mode api)"
+                    )
+    return issues
+
+
 def _check_env_vars(profile: str) -> List[str]:
     """Check required environment variables."""
     issues: List[str] = []
@@ -144,6 +189,7 @@ def cmd_doctor() -> None:
         ("Cursor", CURSOR_SETTINGS),
     ]:
         json_issues = _check_settings_json(settings_path, label)
+        json_issues.extend(_check_http_hook_urls(settings_path, label))
         if not settings_path.exists():
             print(f"  {label}: {dim('settings file not found')}")
         elif json_issues:
@@ -161,9 +207,21 @@ def cmd_doctor() -> None:
     mem_mesh_url = os.environ.get("MEM_MESH_API_URL")
     api_url_env = os.environ.get("API_URL")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    config_file = Path.home() / ".mem-mesh" / "api_url"
+    config_file_url = None
+    if config_file.is_file():
+        try:
+            config_file_url = config_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
 
-    print(f"  MEM_MESH_API_URL:  {ok(mem_mesh_url) if mem_mesh_url else dim('not set')}")
+    print(
+        f"  MEM_MESH_API_URL:  {ok(mem_mesh_url) if mem_mesh_url else dim('not set')}"
+    )
     print(f"  API_URL:           {ok(api_url_env) if api_url_env else dim('not set')}")
+    print(
+        f"  ~/.mem-mesh/api_url: {ok(config_file_url) if config_file_url else dim('not set')}"
+    )
     print(f"  ANTHROPIC_API_KEY: {ok('set') if anthropic_key else warn('not set')}")
     print(f"  Detected profile:  {bold(profile)}")
 
@@ -175,10 +233,9 @@ def cmd_doctor() -> None:
 
     # 4. Connectivity (already shown in status, but repeat for doctor summary)
     print(header("[Connectivity Detail]"))
-    baked_url = (
-        _extract_url_from_script(CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh")
-        or _extract_url_from_script(CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh")
-    )
+    baked_url = _extract_url_from_script(
+        CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh"
+    ) or _extract_url_from_script(CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh")
     url, source = resolve_api_url(baked_url)
     print(f"  Resolved URL: {bold(url)} {dim(f'(from {source})')}")
     reachable, message = check_connectivity(url)

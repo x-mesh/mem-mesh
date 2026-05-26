@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List
 
 from app.cli.hooks.constants import DEFAULT_URL, HOOK_PROFILES
+from app.cli.hooks.status import resolve_api_url
 
 
 def _prompt_choice(prompt: str, options: List[str], default: int = 0) -> int:
@@ -62,9 +63,10 @@ def cmd_interactive() -> None:
             print()
 
     # Step 3: storage mode
+    suggested_url, url_source = resolve_api_url()
     print("[3/4] Select storage mode:")
     modes = [
-        f"API  — Send to remote server ({DEFAULT_URL})",
+        f"API  — Send to remote server ({suggested_url})",
         "Local — Save directly to local SQLite",
     ]
     mode_idx = _prompt_choice("", modes, default=0)
@@ -72,10 +74,11 @@ def cmd_interactive() -> None:
     print()
 
     # Step 4: mode-specific config
-    url = DEFAULT_URL
+    url = suggested_url
     mem_path = ""
     if mode == "api":
-        print(f"[4/4] API URL [{DEFAULT_URL}]:")
+        source_hint = f" (from {url_source})" if url_source != "default" else ""
+        print(f"[4/4] API URL [{suggested_url}]{source_hint}:")
         raw = input("  > ").strip()
         if raw:
             url = raw
