@@ -21,6 +21,7 @@ Design rules:
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -70,6 +71,22 @@ _SEARCH_KEYWORDS = (
     "before",
 )
 
+# Non-substantive system artifacts that pollute memory if saved verbatim:
+# task-notification envelopes, tool-use ids, injected reminders. A turn whose
+# text is dominated by these is skipped; when only the *question* is noise we
+# drop the Q and keep the answer.
+_NOISE_MARKERS = (
+    "<task-notification>",
+    "</task-notification>",
+    "<task-id>",
+    "<tool-use-id>",
+    "<system-reminder>",
+)
+
+# Git-worktree dirs are checked out as ``<repo>-wt-<hex>``; the suffix would
+# otherwise fragment one repo into many project ids. See _normalize_project_id.
+_WT_SUFFIX_RE = re.compile(r"-wt-[0-9a-f]{6,}$", re.IGNORECASE)
+
 
 def _ok(status: str) -> Response:
     """An empty 200 — the valid "do nothing" reply for a hook.
@@ -93,24 +110,53 @@ def _context(event_name: str, additional_context: str) -> JSONResponse:
     )
 
 
+def _normalize_project_id(name: str) -> str:
+    """Canonicalize a project id so one repo doesn't fragment into many ids.
+
+    Strips git-worktree suffixes, lowercases, and unifies ``_`` → ``-`` so
+    casing / separator / worktree variants collapse to a single id:
+
+        ``term-mesh-wt-170638b5`` → ``term-mesh``
+        ``oci_tools`` / ``OCI-Tools`` → ``oci-tools``
+        ``VLM`` → ``vlm``
+
+    Result stays within the project-id schema (``^[a-zA-Z0-9_-]+$``).
+    """
+    name = (name or "").strip().lower()
+    name = _WT_SUFFIX_RE.sub("", name)
+    name = name.replace("_", "-")
+    name = re.sub(r"-{2,}", "-", name).strip("-")
+    return name or "unknown"
+
+
 def _project_id(cwd: Optional[str], explicit: Optional[str]) -> str:
     """Resolve the project id from an explicit value or the cwd basename.
 
     HTTP hooks cannot run ``git rev-parse`` client-side, so the cwd basename
     is the fallback. For repos checked out at their own directory name (the
-    common case) this matches the shell hooks' ``git toplevel`` basename.
+    common case) this matches the shell hooks' ``git toplevel`` basename. The
+    result is normalized so worktree / casing / separator variants of the same
+    repo share one id.
     """
     if explicit:
-        return explicit
+        return _normalize_project_id(explicit)
     if cwd:
         name = Path(cwd).name
         if name:
-            return name
+            return _normalize_project_id(name)
     return "unknown"
 
 
 def _save_marker_present(text: str) -> bool:
     return "mcp__mem-mesh__add" in text or "mcp__mem-mesh__pin_add" in text
+
+
+def _is_noise(text: Optional[str]) -> bool:
+    """True if the text is a system artifact (task notifications, tool-use
+    envelopes, injected reminders) rather than substantive content."""
+    if not text:
+        return False
+    return any(marker in text for marker in _NOISE_MARKERS)
 
 
 async def _record(
@@ -394,17 +440,21 @@ async def stop(
         return _ok("stop: skip (message too short)")
     if _save_marker_present(message):
         return _ok("stop: skip (already saved via MCP)")
+    if _is_noise(message):
+        return _ok("stop: skip (noise artifact)")
 
     category = match_category(message, os.getenv("MEM_MESH_HOOK_EXTRA_KEYWORDS", ""))
     if category not in _SAVE_CATEGORIES:
         return _ok(f"stop: skip (no keyword match: {category})")
 
-    # Pair the question from the event stream.
+    # Pair the question from the event stream. A noise-only question (task
+    # notification / tool-use envelope) is dropped so it doesn't pollute the
+    # saved memory; the answer is still kept on its own.
     content = message
     if ide_session_id:
         try:
             question = await hook_service.get_last_prompt(ide_session_id)
-            if question:
+            if question and not _is_noise(question):
                 content = f"Q: {question[:500]}\n\nA: {message[:_MAX_CONTENT]}"
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Q&A pairing failed: {e}")
@@ -446,7 +496,7 @@ async def subagent_stop(
         assistant_message=message,
     )
 
-    if len(message) < 100 or _save_marker_present(message):
+    if len(message) < 100 or _save_marker_present(message) or _is_noise(message):
         return _ok("subagent-stop: skip")
 
     category = match_category(message, os.getenv("MEM_MESH_HOOK_EXTRA_KEYWORDS", ""))

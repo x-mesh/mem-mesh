@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.5.2] - 2026-06-05
+
+### Changed
+- Hook auto-save classification (`app/cli/hooks/keywords.py`) — the `bug` category no longer matches a bare fix verb (`수정`/`fix`/`해결`/`patch`/`debug`); a symptom word (`버그`/`error`/`exception`/`crash`/…) must co-occur. Rule order is now `incident → decision → code_snippet → bug → idea` so `bug` is no longer the default winner on score ties. `match_category()` and `KEYWORD_MATCHER_BLOCK` updated in lockstep
+- HTTP hook `_project_id` (`app/web/dashboard/route_modules/hooks.py`) normalizes ids via `_normalize_project_id()` — strips git-worktree suffixes (`-wt-<hex>`), lowercases, and unifies `_`→`-` so worktree / casing / separator variants of one repo collapse to a single project id
+
+### Added
+- `_is_noise()` guard in the stop / subagent-stop hooks — skips `<task-notification>` / `<tool-use-id>` / `<system-reminder>` artifacts; a noise-only question is dropped from the saved Q&A pair
+- `scripts/migrate_project_id_normalization.py` — dry-run (default) / `--apply` backfill that normalizes existing `project_id`s across `memories`, `projects` (PK merge), `sessions`, `pins`, `token_usage`, `hook_events`, `search_metrics`. The FTS index syncs via triggers; sqlite-vec tables key on `memory_id` only, so they need no changes
+
+## [1.5.1] - 2026-05-26
 
 ### Added
 - `~/.mem-mesh/api_url` config file as a third source for the API URL — lets one installed hook bundle target different remote servers per machine without editing `settings.json` or exporting an environment variable into the Claude Code session
