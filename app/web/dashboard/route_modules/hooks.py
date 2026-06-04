@@ -83,9 +83,10 @@ _NOISE_MARKERS = (
     "<system-reminder>",
 )
 
-# Git-worktree dirs are checked out as ``<repo>-wt-<hex>``; the suffix would
-# otherwise fragment one repo into many project ids. See _normalize_project_id.
-_WT_SUFFIX_RE = re.compile(r"-wt-[0-9a-f]{6,}$", re.IGNORECASE)
+# Git-worktree dirs are checked out as ``<repo>-wt-<hex>`` (or ``_wt_`` after a
+# separator pass); the suffix would otherwise fragment one repo into many
+# project ids. Matches either separator. See _normalize_project_id.
+_WT_SUFFIX_RE = re.compile(r"[-_]wt[-_][0-9a-f]{6,}$", re.IGNORECASE)
 
 
 def _ok(status: str) -> Response:
@@ -113,18 +114,23 @@ def _context(event_name: str, additional_context: str) -> JSONResponse:
 def _normalize_project_id(name: str) -> str:
     """Canonicalize a project id so one repo doesn't fragment into many ids.
 
-    Strips git-worktree suffixes, lowercases, and unifies ``_`` → ``-`` so
-    casing / separator / worktree variants collapse to a single id:
+    Reduces a path to its last segment, strips git-worktree suffixes,
+    lowercases, and unifies ``_`` / ``.`` → ``-`` so path / casing / separator
+    / worktree variants collapse to a single id:
 
-        ``term-mesh-wt-170638b5`` → ``term-mesh``
+        ``term-mesh-wt-170638b5`` / ``term-mesh_wt_170638b5`` → ``term-mesh``
+        ``/Users/me/work/oci-terraform`` → ``oci-terraform``
         ``oci_tools`` / ``OCI-Tools`` → ``oci-tools``
         ``VLM`` → ``vlm``
 
     Result stays within the project-id schema (``^[a-zA-Z0-9_-]+$``).
     """
-    name = (name or "").strip().lower()
+    name = (name or "").strip()
+    if "/" in name:  # an absolute/relative path leaked in as the id
+        name = name.rstrip("/").split("/")[-1]
+    name = name.lower()
     name = _WT_SUFFIX_RE.sub("", name)
-    name = name.replace("_", "-")
+    name = re.sub(r"[_.]", "-", name)  # unify separators
     name = re.sub(r"-{2,}", "-", name).strip("-")
     return name or "unknown"
 

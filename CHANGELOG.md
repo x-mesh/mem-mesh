@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-06-05
+
+### Fixed
+- `_normalize_project_id` (hooks + migration script) missed underscore worktree suffixes — only the hyphen form `-wt-<hex>` was stripped, so ~94 `term-mesh_wt_<hex>` ids never collapsed to `term-mesh`. The worktree regex now matches both separators: `[-_]wt[-_][0-9a-f]{6,}$`
+- `_normalize_project_id` left path-shaped ids (`/Users/.../oci-terraform`) intact — now reduced to the last path segment before normalization, and `_` / `.` are unified to `-`. `hooks.py` and `scripts/migrate_project_id_normalization.py` updated in lockstep (dry-run against the live server: 263 → 155 projects)
+
 ## [1.5.2] - 2026-06-05
 
 ### Changed

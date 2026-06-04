@@ -34,7 +34,7 @@ from app.core.config import Settings  # noqa: E402
 from app.core.database.base import Database  # noqa: E402
 
 # Keep in sync with hooks._normalize_project_id / hooks._WT_SUFFIX_RE.
-_WT_SUFFIX_RE = re.compile(r"-wt-[0-9a-f]{6,}$", re.IGNORECASE)
+_WT_SUFFIX_RE = re.compile(r"[-_]wt[-_][0-9a-f]{6,}$", re.IGNORECASE)
 
 # Tables carrying a project_id column (``projects.id`` is handled separately
 # because it is a primary key that sessions/pins reference).
@@ -49,9 +49,12 @@ _CHILD_TABLES = (
 
 
 def normalize_project_id(name: str) -> str:
-    name = (name or "").strip().lower()
+    name = (name or "").strip()
+    if "/" in name:  # an absolute/relative path leaked in as the id
+        name = name.rstrip("/").split("/")[-1]
+    name = name.lower()
     name = _WT_SUFFIX_RE.sub("", name)
-    name = name.replace("_", "-")
+    name = re.sub(r"[_.]", "-", name)  # unify separators
     name = re.sub(r"-{2,}", "-", name).strip("-")
     return name or "unknown"
 
