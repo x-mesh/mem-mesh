@@ -15,6 +15,18 @@ Two consumers share the same patterns:
 
 Both paths MUST stay behaviourally identical; edit the patterns in
 ``_COMPLETION_PATTERNS`` / ``_CATEGORY_RULES`` and keep the shell block in sync.
+
+Classification notes
+--------------------
+* Rule **order is the tie-break**: when two categories match the same number of
+  patterns, the one listed earlier wins (the score loop uses ``>``). The list is
+  ordered most-specific → least, with ``bug`` deliberately late. bug symptom
+  words (error/exception/crash) are high-signal enough to win on score alone, so
+  demoting bug in ties stops generic "수정했습니다" turns from defaulting to bug.
+* bug has **no standalone fix-verb pattern**. A bare "수정/fix/해결" is not a bug
+  signal — it must co-occur with a symptom word. The old standalone pattern
+  matched nearly every coding turn and was the root cause of the bug-category
+  over-classification (52% of all memories).
 """
 
 import re
@@ -27,19 +39,16 @@ _COMPLETION_PATTERNS = [
     r"(커밋|commit|push|merge|PR|pull request)",
 ]
 
+# NOTE: order = tie-break priority (earlier wins on equal score). Keep in sync
+# with ``category_rules`` inside KEYWORD_MATCHER_BLOCK below.
 _CATEGORY_RULES = [
     (
-        "bug",
+        "incident",
         [
-            r"(버그|bug|에러|error|오류|exception|crash|TypeError|ValueError|KeyError)",
-            r"(수정|fix|해결|resolved|patch|디버그|debug)",
-            r"\b(hotfix|핫픽스)\b",
-            r"\bfix:\s",
-            r"(문제|issue|problem).{0,40}(해결|수정|fix)",
-            r"(실패|fail).{0,40}(수정|fix|해결)",
-            r"(root\s*cause|원인).{0,40}(was|은|는|확인|파악)",
-            r"(regression|리그레션)",
-            r"(보안|security).{0,40}(취약|vulnerab|fix|수정|패치|patch)",
+            r"(장애|incident|outage|다운타임|downtime)",
+            r"(서버|server|서비스|service).{0,30}(죽|down|중단|stop)",
+            r"\b(rollback|롤백)\b",
+            r"(production|프로덕션|운영).{0,40}(issue|error|장애|문제)",
         ],
     ),
     (
@@ -76,12 +85,23 @@ _CATEGORY_RULES = [
         ],
     ),
     (
-        "incident",
+        "bug",
         [
-            r"(장애|incident|outage|다운타임|downtime)",
-            r"(서버|server|서비스|service).{0,30}(죽|down|중단|stop)",
-            r"\b(rollback|롤백)\b",
-            r"(production|프로덕션|운영).{0,40}(issue|error|장애|문제)",
+            # Symptom words: the primary, high-signal bug indicator (standalone).
+            r"(버그|bug|에러|error|오류|exception|crash|stack\s*trace|traceback|"
+            r"TypeError|ValueError|KeyError|NullPointer|segfault|panic)",
+            # A fix verb only counts as a bug when it co-occurs with a symptom —
+            # replaces the old over-broad standalone (수정|fix|해결|patch|debug).
+            r"(버그|bug|에러|error|오류|exception|crash|문제|issue|실패|fail)"
+            r".{0,40}(수정|fix|해결|resolved|patch|고침|고쳤|패치)",
+            r"\b(hotfix|핫픽스)\b",
+            r"\bfix:\s",
+            r"(문제|issue|problem).{0,40}(해결|수정|fix)",
+            r"(실패|fail).{0,40}(수정|fix|해결)",
+            r"(root\s*cause|원인).{0,40}(was|은|는|확인|파악)",
+            r"(regression|리그레션)",
+            r"(보안|security).{0,40}(취약|vulnerab|fix|수정|패치|patch)",
+            r"(디버그|debug).{0,40}(결과|원인|찾|발견|해결)",
         ],
     ),
     (
@@ -102,6 +122,10 @@ def match_category(message: str, extra_kw: str = "") -> str:
     Mirrors the logic embedded in ``KEYWORD_MATCHER_BLOCK``: a two-pass scan
     (completion detection, then category scoring). Returns ``"SKIP"`` when the
     message shows no completion signal or no category pattern matches.
+
+    Tie-break: the highest-scoring category wins; on a tie the earlier rule in
+    ``_CATEGORY_RULES`` wins (the ``>`` comparison never overwrites an equal
+    score). ``bug`` sits late in the list on purpose — see module docstring.
 
     Args:
         message: The assistant message to classify.
@@ -159,19 +183,16 @@ if not has_completion:
     print('SKIP')
     sys.exit(0)
 
-# Pass 2: categorize (each pattern is a vote; highest score wins)
+# Pass 2: categorize (each pattern is a vote; highest score wins).
+# Order = tie-break priority (earlier wins on equal score); bug sits late so a
+# bare fix verb does not default a turn to bug.
 category_rules = [
-    # bug: error/fix related
-    ('bug', [
-        r'(버그|bug|에러|error|오류|exception|crash|TypeError|ValueError|KeyError)',
-        r'(수정|fix|해결|resolved|patch|디버그|debug)',
-        r'\b(hotfix|핫픽스)\b',
-        r'\bfix:\s',
-        r'(문제|issue|problem).{0,40}(해결|수정|fix)',
-        r'(실패|fail).{0,40}(수정|fix|해결)',
-        r'(root\s*cause|원인).{0,40}(was|은|는|확인|파악)',
-        r'(regression|리그레션)',
-        r'(보안|security).{0,40}(취약|vulnerab|fix|수정|패치|patch)',
+    # incident: outage/incident (most severe — wins ties)
+    ('incident', [
+        r'(장애|incident|outage|다운타임|downtime)',
+        r'(서버|server|서비스|service).{0,30}(죽|down|중단|stop)',
+        r'\b(rollback|롤백)\b',
+        r'(production|프로덕션|운영).{0,40}(issue|error|장애|문제)',
     ]),
     # decision: architecture/design choices
     ('decision', [
@@ -202,12 +223,18 @@ category_rules = [
         r'\d+\s+passed',
         r'(성능|performance).{0,40}(개선|improve|최적화|optimiz)',
     ]),
-    # incident: outage/incident
-    ('incident', [
-        r'(장애|incident|outage|다운타임|downtime)',
-        r'(서버|server|서비스|service).{0,30}(죽|down|중단|stop)',
-        r'\b(rollback|롤백)\b',
-        r'(production|프로덕션|운영).{0,40}(issue|error|장애|문제)',
+    # bug: error/fix related (symptom required; no standalone fix verb)
+    ('bug', [
+        r'(버그|bug|에러|error|오류|exception|crash|stack\s*trace|traceback|TypeError|ValueError|KeyError|NullPointer|segfault|panic)',
+        r'(버그|bug|에러|error|오류|exception|crash|문제|issue|실패|fail).{0,40}(수정|fix|해결|resolved|patch|고침|고쳤|패치)',
+        r'\b(hotfix|핫픽스)\b',
+        r'\bfix:\s',
+        r'(문제|issue|problem).{0,40}(해결|수정|fix)',
+        r'(실패|fail).{0,40}(수정|fix|해결)',
+        r'(root\s*cause|원인).{0,40}(was|은|는|확인|파악)',
+        r'(regression|리그레션)',
+        r'(보안|security).{0,40}(취약|vulnerab|fix|수정|패치|patch)',
+        r'(디버그|debug).{0,40}(결과|원인|찾|발견|해결)',
     ]),
     # idea: suggestions
     ('idea', [
