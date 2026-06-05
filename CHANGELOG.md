@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2026-06-05
+
+### Fixed
+- MCP quick-start doc (`app/web/rules/modules/quick-start.md`) was missing the `type` field in the `mem-mesh` entry — clients infer legacy `type:"sse"` from the `/mcp/sse` URL, which hangs after a server restart. Now specifies `"type": "http"`
+
+### Changed
+- `mcp_config.py`: `generate_mcp_entry` accepts `mode="http"` (backward-compatible alias of `"sse"`; both emit `type:"http"`). Interactive/CLI labels and `verify_tool_config` messages renamed SSE → "HTTP (streamable)" to match the actual transport (the entry was already `type:"http"`; only the naming was misleading)
+- README MCP section retitled SSE → "HTTP (streamable)" with a legacy `type:"sse"` warning
+
 ## [1.5.3] - 2026-06-05
 
 ### Fixed
