@@ -136,9 +136,9 @@ Use your own Python install. Good if you need `-e .` dev installs.
 }
 ```
 
-### SSE (shared running server)
+### HTTP (streamable, shared running server)
 
-For web clients or when multiple tools share one process. Requires `mem-mesh serve` running.
+For web clients or when multiple tools share one process. Requires `mem-mesh serve` running. Use `"type": "http"` — `type: "sse"` is legacy and hangs after a server restart.
 
 ```json
 {
@@ -161,7 +161,7 @@ For web clients or when multiple tools share one process. Requires `mem-mesh ser
 
 ### Mode comparison
 
-| | uvx | Stdio | SSE |
+| | uvx | Stdio | HTTP |
 |---|---|---|---|
 | Prereq | `uv` only | Python env with `mem-mesh[server]` | Running `mem-mesh serve` |
 | First call | ~15s (cache warm) | Instant | Instant |

@@ -12,7 +12,8 @@ MCP 설정부터 첫 검색/저장까지.
 {
   "mcpServers": {
     "mem-mesh": {
-      "url": "http://your-server/mcp/sse"
+      "url": "http://your-server/mcp/sse",
+      "type": "http"
     }
   }
 }

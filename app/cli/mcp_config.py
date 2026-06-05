@@ -116,8 +116,8 @@ def generate_mcp_entry(
     """Generate a mem-mesh MCP server entry.
 
     Args:
-        mode: 'uvx', 'stdio', or 'sse'
-        url: API server URL (used for SSE mode)
+        mode: 'uvx', 'stdio', or 'http' (alias 'sse' — both emit type:"http")
+        url: API server URL (used for http mode)
         auto_approve: Whether to add autoApprove list for common tools
         tool_key: Tool registry key (e.g. 'claude-code', 'cursor') for MEM_MESH_CLIENT env
     """
@@ -129,7 +129,11 @@ def generate_mcp_entry(
         "batch_operations", "weekly_review",
     ]
 
-    if mode == "sse":
+    if mode in ("sse", "http"):
+        # Streamable HTTP transport. "sse" is a backward-compatible alias; the
+        # entry type is always "http" so the connection survives a server
+        # restart — legacy type:"sse" connections hang after a restart because
+        # their server-side SSE stream and session queue are gone.
         entry: dict = {
             "url": f"{url.rstrip('/')}/mcp/sse",
             "type": "http",
@@ -255,7 +259,7 @@ def verify_tool_config(tool: dict, url: str = "http://localhost:8000") -> tuple[
 
     Checks:
     1. Config file has mcpServers.mem-mesh entry
-    2. For SSE mode, tests URL reachability (health check)
+    2. For http mode, tests URL reachability (health check)
     3. For Claude Code, checks project-specific overrides that shadow global config
 
     Returns (success, message).
@@ -276,7 +280,7 @@ def verify_tool_config(tool: dict, url: str = "http://localhost:8000") -> tuple[
     if tool["key"] == "claude-code":
         warnings.extend(_check_claude_project_overrides(data, entry))
 
-    # SSE mode — check URL reachability
+    # http mode — check URL reachability
     if "url" in entry:
         # Check transport type key
         entry_type = entry.get("type") or entry.get("transport")
@@ -288,9 +292,9 @@ def verify_tool_config(tool: dict, url: str = "http://localhost:8000") -> tuple[
         try:
             with urlopen(health_url, timeout=3) as resp:
                 if resp.status == 200:
-                    status = "configured (SSE, server reachable)"
+                    status = "configured (HTTP, server reachable)"
         except (URLError, OSError):
-            status = "configured (SSE, server not reachable — start with `python -m app.web`)"
+            status = "configured (HTTP, server not reachable — start with `python -m app.web`)"
 
         if warnings:
             return False, f"{status} — WARN: {'; '.join(warnings)}"
@@ -365,9 +369,9 @@ def run_mcp_setup(
     """Interactive MCP configuration step for onboarding.
 
     Args:
-        url: API URL for SSE mode
+        url: API URL for http mode
         yes: Non-interactive (auto-pick best mode)
-        preferred_mode: If set ('uvx'|'stdio'|'sse'), skip mode prompt
+        preferred_mode: If set ('uvx'|'stdio'|'http'|'sse'), skip mode prompt
     """
     print(bold("[3/3] MCP Configuration"))
     print()
@@ -408,14 +412,14 @@ def run_mcp_setup(
 
     uvx_available = has_uvx()
 
-    if preferred_mode in ("uvx", "stdio", "sse"):
+    if preferred_mode in ("uvx", "stdio", "http", "sse"):
         mode = preferred_mode
         targets = installed_tools
         print(f"  {bold('Connection mode:')} {info(mode)} {dim('(pre-selected)')}")
         print()
     elif yes:
-        # Non-interactive: prefer uvx if available, else SSE
-        mode = "uvx" if uvx_available else "sse"
+        # Non-interactive: prefer uvx if available, else streamable HTTP
+        mode = "uvx" if uvx_available else "http"
         targets = installed_tools
     else:
         # Choose connection mode — uvx first if available (recommended)
@@ -428,9 +432,9 @@ def run_mcp_setup(
             )
             mode_keys.append("uvx")
         mode_options.append(
-            f"SSE {dim('(uses a running API server at ' + url + ')')}"
+            f"HTTP {dim('(streamable HTTP — uses a running API server at ' + url + ')')}"
         )
-        mode_keys.append("sse")
+        mode_keys.append("http")
         mode_options.append(
             f"Stdio {dim('(local Python — runs MCP process per tool)')}"
         )
