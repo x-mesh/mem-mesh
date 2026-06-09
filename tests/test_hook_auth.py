@@ -1,12 +1,15 @@
-"""Unit tests for hook endpoint authentication (P1 #1 server-side fix).
+"""Unit tests for hook endpoint authentication (P1 server-side).
 
 Covers:
 * ``is_loopback_host`` classification
 * ``resolve_hook_token`` env-first / file-fallback / none
-* ``verify_hook_token`` dependency: token match, fail-closed on non-loopback,
-  loopback backward-compat
+* effective bind-host capture (``set/get_effective_bind_host``)
+* ``verify_hook_token`` dependency policy: token match (any host); no-token
+  loopback allow; no-token non-loopback **allow + one-time WARNING** (the
+  intentional reversal of the earlier 401 fail-closed — see task a0b90505)
 """
 
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -25,8 +28,11 @@ def _request(authorization=None):
 
 
 def _configure(monkeypatch, *, token, host):
+    # verify_hook_token judges loopback against the *effective* bind host now,
+    # not settings.server_host. Reset the one-time warning guard per test.
     monkeypatch.setattr(mw, "resolve_hook_token", lambda: token)
-    monkeypatch.setattr(mw, "get_settings", lambda: SimpleNamespace(server_host=host))
+    monkeypatch.setattr(mw, "get_effective_bind_host", lambda: host)
+    monkeypatch.setattr(mw, "_exposure_warned", False)
 
 
 # ───────────────────────── is_loopback_host ─────────────────────────
@@ -105,18 +111,50 @@ def test_token_set_missing_header_rejected(monkeypatch):
     assert exc.value.status_code == 401
 
 
-def test_no_token_loopback_passes(monkeypatch):
-    # Backward-compat: local dev with no token configured still works.
+def test_no_token_loopback_allows_no_warning(monkeypatch, caplog):
+    # Backward-compat: local dev with no token configured still works, silently.
     _configure(monkeypatch, token=None, host="127.0.0.1")
-    assert mw.verify_hook_token(_request(None)) is None
+    with caplog.at_level(logging.WARNING, logger="app.web.oauth.middleware"):
+        assert mw.verify_hook_token(_request(None)) is None
+    assert "WITHOUT a hook token" not in caplog.text
 
 
-def test_no_token_non_loopback_fails_closed(monkeypatch):
-    # The core P1 fix: an exposed server with no token rejects anonymous writes.
+def test_no_token_non_loopback_allows_with_warning(monkeypatch, caplog):
+    # Policy reversal (task a0b90505): an exposed server with no token now
+    # ALLOWS the write (not 401) but logs a one-time prominent WARNING.
     _configure(monkeypatch, token=None, host="0.0.0.0")
-    with pytest.raises(HTTPException) as exc:
+    with caplog.at_level(logging.WARNING, logger="app.web.oauth.middleware"):
+        assert mw.verify_hook_token(_request(None)) is None  # allowed, no raise
+    assert "WITHOUT a hook token" in caplog.text
+    assert "0.0.0.0" in caplog.text
+
+
+def test_exposure_warning_is_one_time(monkeypatch, caplog):
+    _configure(monkeypatch, token=None, host="0.0.0.0")
+    with caplog.at_level(logging.WARNING, logger="app.web.oauth.middleware"):
         mw.verify_hook_token(_request(None))
-    assert exc.value.status_code == 401
+        mw.verify_hook_token(_request(None))
+        mw.verify_hook_token(_request(None))
+    assert caplog.text.count("WITHOUT a hook token") == 1
+
+
+def test_effective_host_override_not_static_setting(monkeypatch):
+    # The effective bind host reflects a --host / MEM_MESH_SERVER_HOST override;
+    # the static settings.server_host is never mutated.
+    monkeypatch.setattr(
+        cfg, "get_settings", lambda: SimpleNamespace(server_host="127.0.0.1")
+    )
+    monkeypatch.setattr(cfg, "_effective_bind_host", None)
+    monkeypatch.delenv(cfg._EFFECTIVE_BIND_HOST_ENV, raising=False)
+
+    # No override recorded → falls back to the static setting.
+    assert cfg.get_effective_bind_host() == "127.0.0.1"
+
+    # Server start records the real bind host.
+    cfg.set_effective_bind_host("0.0.0.0")
+    assert cfg.get_effective_bind_host() == "0.0.0.0"
+    # Static setting is untouched.
+    assert cfg.get_settings().server_host == "127.0.0.1"
 
 
 def test_oauth_middleware_exempts_hook_paths(monkeypatch):

@@ -39,9 +39,21 @@ _TOKEN_PATTERNS = (
     re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),
 )
 
-# Authorization headers / Bearer tokens — keep the scheme word, mask the token.
+# Authorization headers / Bearer tokens.
+#
+# _AUTH_HEADER masks the WHOLE header value (scheme + credential), not just the
+# first token. The old ``\S+`` consumed only the scheme word, so
+# ``Authorization: Basic dXNlcjpwYXNz`` left the base64 credential exposed
+# (same for ApiKey/Digest). Anchored to line start (``^`` + MULTILINE, leading
+# whitespace allowed) so it consumes the rest of the header LINE — covering
+# multi-token Digest — while NOT swallowing trailing prose when "Authorization:"
+# merely appears mid-sentence (which would over-redact and could even drop a
+# memory under the length gate). A mid-prose ``Bearer`` is still caught by
+# _BEARER; group(1) preserves the indentation/key for readable header blocks.
 _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
-_AUTH_HEADER = re.compile(r"(?i)\bAuthorization\s*:\s*\S+")
+_AUTH_HEADER = re.compile(
+    r"(?im)^([ \t]*Authorization\s*:\s*)" r"(?:[A-Za-z][A-Za-z0-9+.-]*\s+)?[^\r\n]+"
+)
 
 # .env / inline KEY=value where the key name is *exactly* a secret key.
 #
@@ -82,8 +94,12 @@ def redact_secrets(text: str) -> str:
     out = _PRIVATE_KEY_BLOCK.sub(REDACTED, text)
     for pattern in _TOKEN_PATTERNS:
         out = pattern.sub(REDACTED, out)
+    # Mask the whole Authorization header value first (keep the indentation +
+    # "Authorization:" prefix via group 1); then any standalone Bearer token
+    # outside a header. A line-start ``Authorization: Bearer …`` is fully
+    # consumed here, so _BEARER no longer double-masks it.
+    out = _AUTH_HEADER.sub(lambda m: f"{m.group(1)}{REDACTED}", out)
     out = _BEARER.sub(f"Bearer {REDACTED}", out)
-    out = _AUTH_HEADER.sub(f"Authorization: {REDACTED}", out)
     # Keep the key name + original separator, mask only the value, so the
     # redaction stays readable (``KEY=…`` / ``KEY: …`` are both preserved).
     out = _KV_SECRET.sub(lambda m: f"{m.group(1)}{m.group(2)}{REDACTED}", out)

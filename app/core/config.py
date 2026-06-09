@@ -239,10 +239,12 @@ class Settings(BaseSettings):
     hook_token: Optional[str] = Field(
         default=None,
         description=(
-            "Shared secret required as 'Authorization: Bearer <token>' on hook "
-            "write endpoints. If unset, falls back to ~/.mem-mesh/hook_token. "
-            "When unset AND the server is bound to a non-loopback address, hook "
-            "writes are rejected (fail-closed)."
+            "Shared secret for hook endpoints. If unset, falls back to "
+            "~/.mem-mesh/hook_token. When set, a matching "
+            "'Authorization: Bearer <token>' is required on any bind host. When "
+            "unset, hook writes are allowed; a non-loopback bind additionally "
+            "logs a one-time warning (the firewall is the trust boundary — set "
+            "this token to require authentication)."
         ),
     )
 
@@ -452,6 +454,41 @@ def resolve_hook_token() -> Optional[str]:
             return file_token or None
     except OSError:
         # Unreadable token file degrades to "no token configured"; the
-        # loopback/fail-closed logic in verify_hook_token then applies.
+        # loopback/warning logic in verify_hook_token then applies.
         pass
     return None
+
+
+# The host uvicorn actually binds to. ``settings.server_host`` is the *static*
+# default (127.0.0.1) and does NOT reflect a ``--host`` / ``MEM_MESH_SERVER_HOST``
+# override passed at launch, so hook-token loopback judgment must use this
+# runtime value instead. Recorded once by the server start path
+# (``create_uvicorn_config``); mirrored to an env var so uvicorn reload/worker
+# subprocesses (which re-import the app instead of calling that function) still
+# see it.
+_EFFECTIVE_BIND_HOST_ENV = "MEM_MESH_EFFECTIVE_BIND_HOST"
+_effective_bind_host: Optional[str] = None
+
+
+def set_effective_bind_host(host: Optional[str]) -> None:
+    """Record the host uvicorn is actually binding to (server start path)."""
+    global _effective_bind_host
+    _effective_bind_host = host
+    if host:
+        os.environ[_EFFECTIVE_BIND_HOST_ENV] = host
+
+
+def get_effective_bind_host() -> str:
+    """Effective uvicorn bind host: ``--host`` > ``MEM_MESH_SERVER_HOST`` > setting.
+
+    Resolution order: the value recorded by :func:`set_effective_bind_host`
+    (same process), then the ``MEM_MESH_EFFECTIVE_BIND_HOST`` env var (reload /
+    worker subprocesses), then the static ``settings.server_host`` fallback for
+    embedded / import-only / test usage where no server start path ran.
+    """
+    if _effective_bind_host:
+        return _effective_bind_host
+    env_host = os.environ.get(_EFFECTIVE_BIND_HOST_ENV)
+    if env_host:
+        return env_host
+    return get_settings().server_host

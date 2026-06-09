@@ -32,10 +32,24 @@ from app.web.dashboard.route_modules import hooks as http_hooks
         ("oci_tools", "oci-tools"),
         ("OCI-Tools", "oci-tools"),
         ("already-kebab", "already-kebab"),
+        # Windows cwd reaching a POSIX server: backslash paths must split to the
+        # last segment, not collapse every repo to "unknown".
+        ("C:\\Users\\dev\\work\\MyProject", "my-project"),
+        ("D:\\repos\\OtherRepo", "other-repo"),
+        ("C:\\Users\\dev\\work\\MyProject\\", "my-project"),  # trailing sep
     ],
 )
 def test_normalize_project_id_canonical(raw, expected):
     assert normalize_project_id(raw, strict=False) == expected
+
+
+def test_http_project_id_from_windows_path():
+    """HTTP-hook _project_id (Path(cwd).name on POSIX keeps the backslash
+    string) must still resolve a Windows client cwd to the repo id."""
+    assert (
+        http_hooks._project_id(cwd="C:\\Users\\dev\\work\\MyProject", explicit=None)
+        == "my-project"
+    )
 
 
 def test_normalize_project_id_is_idempotent():
@@ -103,6 +117,37 @@ def test_redacts_private_key_block_aws_jwt_and_kv():
     assert "eyJhbGciOi.eyJzdWIiOi.SflKxwRJSM" not in out
     assert "supersecretvalue123" not in out
     assert "API_KEY=<REDACTED>" in out  # key name kept, value masked
+
+
+@pytest.mark.parametrize(
+    "header,credential",
+    [
+        ("Authorization: Basic dXNlcjpwYXNz", "dXNlcjpwYXNz"),
+        ("Authorization: ApiKey abc123secretvalue", "abc123secretvalue"),
+        (
+            'Authorization: Digest username="u", response="deadbeefcafe"',
+            "deadbeefcafe",
+        ),
+        ("Authorization: Bearer abc.def.ghijklmnop", "abc.def.ghijklmnop"),
+    ],
+)
+def test_authorization_header_masks_whole_value_not_just_scheme(header, credential):
+    """Regression: the old ``\\S+`` consumed only the scheme word, leaking the
+    credential after it (e.g. Basic/ApiKey/Digest). The full value must go."""
+    out = redact_secrets(header)
+    assert credential not in out
+    assert out.strip() == "Authorization: <REDACTED>"
+
+
+def test_standalone_bearer_still_masked_without_authorization_header():
+    out = redact_secrets("sent Bearer xoxb-abcdefghijklmnop in the call")
+    assert "xoxb-abcdefghijklmnop" not in out
+    assert "Bearer <REDACTED>" in out
+
+
+def test_authorization_header_redaction_is_idempotent():
+    once = redact_secrets("Authorization: Basic dXNlcjpwYXNz")
+    assert redact_secrets(once) == once
 
 
 def test_redaction_is_idempotent():

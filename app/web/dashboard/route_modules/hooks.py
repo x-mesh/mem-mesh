@@ -28,7 +28,6 @@ from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 
 from app.cli.hooks.keywords import match_category
-from app.core.config import get_settings, resolve_hook_token
 from app.core.redaction import redact_secrets
 from app.core.schemas.requests import normalize_project_id
 from app.core.schemas.hooks import (
@@ -48,42 +47,27 @@ from ...common.dependencies import (
     get_session_service,
 )
 from ...lifespan import get_services
-from ...oauth.middleware import is_loopback_host, verify_hook_token
+from ...oauth.middleware import verify_hook_token
 
 logger = logging.getLogger(__name__)
 
 # Every hook endpoint is guarded by the shared-secret hook token. The
-# dependency is a no-op for local-dev (no token + loopback bind) and
-# fail-closed for network-exposed servers without a token. Applied at router
-# level so reads and writes are covered uniformly (the original report flagged
-# only writes, but context-injection reads share the same exposure surface).
+# dependency is a no-op for local-dev (no token + loopback bind) and warns once
+# (without rejecting) for a network-exposed server without a token. Applied at
+# router level so reads and writes are covered uniformly (the original report
+# flagged only writes, but context-injection reads share the same surface).
+#
+# The "exposed without a token" warning is owned by a single source on the
+# actual (effective) bind host — middleware.warn_if_hook_exposed_without_token,
+# called at server start (common/server.py) and on the first unauthenticated
+# hook request (verify_hook_token). This module deliberately keeps no import-time
+# warning of its own, so the allow-and-warn policy has a single source of truth
+# on the effective bind host.
 router = APIRouter(
     prefix="/hooks/claude",
     tags=["Claude Code Hooks"],
     dependencies=[Depends(verify_hook_token)],
 )
-
-
-def _warn_if_hook_endpoints_exposed() -> None:
-    """Log a startup warning when hooks are reachable but will fail closed.
-
-    Emitted at import (app construction) so operators see it before the first
-    rejected hook call. Best-effort: never break import on a diagnostic.
-    """
-    try:
-        settings = get_settings()
-        if resolve_hook_token() is None and not is_loopback_host(settings.server_host):
-            logger.warning(
-                "Hook endpoints are exposed on non-loopback host %s without a "
-                "hook token; hook write requests will be rejected with 401. "
-                "Set MEM_MESH_HOOK_TOKEN or write ~/.mem-mesh/hook_token.",
-                settings.server_host,
-            )
-    except Exception:  # noqa: BLE001 - diagnostic must not block startup
-        pass
-
-
-_warn_if_hook_endpoints_exposed()
 
 # Memory categories the keyword matcher is allowed to auto-save (mirrors the
 # CLAUDE.md M3 rule). ``task`` / ``git-history`` stay system-only.

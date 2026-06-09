@@ -177,6 +177,16 @@ def create_uvicorn_config(
         "timeout_graceful_shutdown": 5,
     }
 
+    # Record the host uvicorn actually binds to (--host > MEM_MESH_SERVER_HOST >
+    # settings.server_host) so hook-token loopback judgment uses the real bind,
+    # not the static setting. Then emit a one-time exposure warning if the hook
+    # write endpoints are reachable on a non-loopback bind without a token.
+    from app.core.config import set_effective_bind_host
+    from app.web.oauth.middleware import warn_if_hook_exposed_without_token
+
+    set_effective_bind_host(config["host"])
+    warn_if_hook_exposed_without_token(config["host"])
+
     if reload:
         config.update(
             {

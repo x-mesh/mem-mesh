@@ -45,8 +45,14 @@ def normalize_project_id(v: Optional[str], *, strict: bool = True) -> Optional[s
         return "unknown"
 
     name = v.strip()
-    if "/" in name:  # a filesystem path leaked in as the id
-        name = name.rstrip("/").split("/")[-1]
+    # A filesystem path may leak in as the id. Split on BOTH separators: a
+    # Windows client (cwd="C:\\Users\\dev\\work\\MyProject") reaching a POSIX
+    # server would otherwise keep the whole backslash string — Path(cwd).name
+    # on POSIX does not treat "\\" as a separator — and collapse every repo to
+    # "unknown". Handling it here (the single normalize chokepoint) also fixes
+    # the HTTP-hook _project_id path without a PureWindowsPath.
+    if "/" in name or "\\" in name:
+        name = re.split(r"[\\/]+", name.rstrip("/\\"))[-1]
     name = _WT_SUFFIX_RE.sub("", name)  # drop worktree suffix before casing
 
     # camelCase/PascalCase → kebab-case: insert hyphen before uppercase letters
