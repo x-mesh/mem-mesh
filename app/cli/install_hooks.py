@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import re
+import secrets
 import stat
 import sys
 from pathlib import Path
@@ -60,12 +61,23 @@ from app.cli.hooks.templates import (
 )
 from app.cli.hooks.keywords import KEYWORD_MATCHER_BLOCK
 from app.cli.hooks.netcheck import check_http_hook_url
+from app.cli.hooks.json_ops import (
+    MalformedSettingsError,
+    _atomic_write_text,
+    _load_settings_or_raise,
+)
+from app.cli.hooks.renderer import (
+    _safe_project_id,
+    _shell_safe_local_path,
+    _shell_safe_url,
+)
 from app.cli.hooks.cursor_adapters import (
     adapt_cursor_before_submit_prompt,
     adapt_cursor_precompact,
     adapt_cursor_subagent_start,
     adapt_cursor_subagent_stop,
 )
+from app.core.config import HOOK_TOKEN_FILE
 
 DEFAULT_URL = "http://localhost:8000"
 
@@ -125,6 +137,34 @@ _HTTP_HOOK_ENDPOINTS = {
 }
 
 
+# Env var Claude Code interpolates into the HTTP hook Authorization header.
+# Resolution mirrors app.core.config.resolve_hook_token (env first, then file).
+HOOK_TOKEN_ENV_VAR = "MEM_MESH_HOOK_TOKEN"
+
+
+def _ensure_hook_token() -> str:
+    """Return the hook auth token, generating ~/.mem-mesh/hook_token if absent.
+
+    The server (app.core.config.resolve_hook_token) reads MEM_MESH_HOOK_TOKEN
+    first and falls back to this file; the installer owns creating it. The file
+    is written 0600 via an atomic swap. An existing token is reused so repeated
+    installs stay idempotent.
+    """
+    env_token = (os.environ.get(HOOK_TOKEN_ENV_VAR) or "").strip()
+    if env_token:
+        return env_token
+    try:
+        if HOOK_TOKEN_FILE.exists():
+            existing = HOOK_TOKEN_FILE.read_text(encoding="utf-8").strip()
+            if existing:
+                return existing
+    except OSError:
+        pass
+    token = secrets.token_urlsafe(32)
+    _atomic_write_text(HOOK_TOKEN_FILE, token + "\n", mode=0o600)
+    return token
+
+
 def _claude_hook_entry(
     event: str,
     command: str,
@@ -143,10 +183,17 @@ def _claude_hook_entry(
     """
     if mode == "http" and event in _HTTP_HOOK_ENDPOINTS:
         endpoint = _HTTP_HOOK_ENDPOINTS[event]
+        # Authenticate the native HTTP hook with a bearer token. The value is
+        # interpolated by Claude Code from the MEM_MESH_HOOK_TOKEN env var at
+        # call time (declared in allowedEnvVars) — the secret is never written
+        # into settings.json, so the entry stays constant and idempotent. The
+        # installer generates ~/.mem-mesh/hook_token (see _ensure_hook_token).
         hook: Dict[str, Any] = {
             "type": "http",
             "url": f"{url.rstrip('/')}/api/hooks/claude/{endpoint}",
             "timeout": timeout,
+            "headers": {"Authorization": f"Bearer ${HOOK_TOKEN_ENV_VAR}"},
+            "allowedEnvVars": [HOOK_TOKEN_ENV_VAR],
         }
     else:
         hook = {"type": "command", "command": command, "timeout": timeout}
@@ -298,7 +345,8 @@ def _render_template(
     project_id: str = "mem-mesh",
 ) -> str:
     """Replace all placeholders in a template string."""
-    result = template.replace("__DEFAULT_URL__", url)
+    project_id = _safe_project_id(project_id)
+    result = template.replace("__DEFAULT_URL__", _shell_safe_url(url))
     result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
     result = result.replace("__SOURCE_TAG__", source_tag)
     result = result.replace("__IDE_TAG__", ide_tag)
@@ -325,7 +373,10 @@ def _render_local_template(
     project_id: str = "mem-mesh",
 ) -> str:
     """Replace placeholders for local mode templates."""
-    result = template.replace("__MEM_MESH_PATH__", mem_mesh_path)
+    project_id = _safe_project_id(project_id)
+    result = template.replace(
+        "__MEM_MESH_PATH__", _shell_safe_local_path(mem_mesh_path)
+    )
     result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
     result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
     result = result.replace("__FOLLOWUP_MSG__", render_cursor_followup(project_id))
@@ -342,14 +393,16 @@ def _render_local_template(
 
 
 def _write_script(path: Path, content: str) -> None:
-    """Write a shell script and make it executable."""
+    """Write a shell script and make it executable (atomically)."""
     unresolved = re.findall(r"__[A-Z0-9_]+__", content)
     if unresolved:
         tokens = ", ".join(sorted(set(unresolved)))
         raise ValueError(f"Unresolved template tokens in {path}: {tokens}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    _atomic_write_text(
+        path,
+        content,
+        mode=stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH,
+    )
 
 
 def _is_mem_mesh_hook(hook: Dict[str, Any]) -> bool:
@@ -401,14 +454,16 @@ def _merge_hook_entries(
     return preserved + passthrough + managed
 
 
-def _merge_json_settings(path: Path, patch: Dict[str, Any]) -> None:
-    """Merge patch into an existing JSON file, preserving other keys."""
-    existing: Dict[str, Any] = {}
-    if path.exists():
-        try:
-            existing = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            existing = {}
+def _merge_json_settings(
+    path: Path, patch: Dict[str, Any], *, force: bool = False
+) -> None:
+    """Merge patch into an existing JSON file, preserving other keys.
+
+    If the existing file is malformed it is backed up to ``<path>.bak`` and a
+    :class:`MalformedSettingsError` is raised (unless ``force=True``), instead
+    of silently discarding the user's settings. The write itself is atomic.
+    """
+    existing: Dict[str, Any] = _load_settings_or_raise(path, force=force)
 
     # Deep-merge hooks section only; preserve everything else.
     # For each hook event, keep existing non mem-mesh entries and upsert only
@@ -432,10 +487,9 @@ def _merge_json_settings(path: Path, patch: Dict[str, Any]) -> None:
         else:
             existing[key] = value
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    _atomic_write_text(
+        path,
         json.dumps(existing, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-        encoding="utf-8",
     )
 
 
@@ -449,9 +503,7 @@ def _remove_json_key(path: Path, key: str) -> None:
         return
     if key in data:
         del data[key]
-        path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
+        _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
 def _remove_hook_event(path: Path, event_name: str) -> None:
@@ -465,9 +517,9 @@ def _remove_hook_event(path: Path, event_name: str) -> None:
     hooks = data.get("hooks", {})
     if event_name in hooks:
         del hooks[event_name]
-        path.write_text(
+        _atomic_write_text(
+            path,
             json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-            encoding="utf-8",
         )
 
 
@@ -503,9 +555,9 @@ def _remove_mem_mesh_hooks_from_json(path: Path) -> None:
     if changed:
         if not hooks:
             data.pop("hooks", None)
-        path.write_text(
+        _atomic_write_text(
+            path,
             json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-            encoding="utf-8",
         )
 
 
@@ -542,9 +594,7 @@ def _remove_kiro_mem_mesh_hooks(path: Path) -> None:
         return
     hooks: List[Dict[str, Any]] = data.get("hooks", [])
     data["hooks"] = [h for h in hooks if not h.get("name", "").startswith("mem-mesh:")]
-    path.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -637,7 +687,12 @@ def _build_cursor_hooks_settings(
 
 
 def _install_claude(
-    url: str, mode: str = "api", path: str = "", profile: str = "standard"
+    url: str,
+    mode: str = "api",
+    path: str = "",
+    profile: str = "standard",
+    *,
+    force: bool = False,
 ) -> None:
     """Install mem-mesh hooks for Claude Code."""
     profile_info = HOOK_PROFILES[profile]
@@ -876,9 +931,20 @@ def _install_claude(
                 script.unlink()
                 print(f"  removed {script} (replaced by HTTP hook)")
 
+    # http hooks authenticate with a bearer token; ensure it exists on disk so
+    # the user can export MEM_MESH_HOOK_TOKEN (the value is never stored in
+    # settings.json — only the $VAR reference is).
+    if _http:
+        _ensure_hook_token()
+        print(
+            f"  hook auth: token at {HOOK_TOKEN_FILE} — export "
+            f"{HOOK_TOKEN_ENV_VAR} in your shell so HTTP hooks authenticate "
+            f"(e.g. export {HOOK_TOKEN_ENV_VAR}=$(cat {HOOK_TOKEN_FILE}))"
+        )
+
     print("[claude] Updating settings.json...")
     hooks_settings = _build_claude_hooks_settings(profile, mode, url)
-    _merge_json_settings(CLAUDE_SETTINGS, hooks_settings)
+    _merge_json_settings(CLAUDE_SETTINGS, hooks_settings, force=force)
     # Remove legacy PostToolUse (track hook) from settings
     _remove_hook_event(CLAUDE_SETTINGS, "PostToolUse")
     print(f"  -> {CLAUDE_SETTINGS}")
@@ -952,7 +1018,12 @@ def _install_kiro(url: str, mode: str = "api", path: str = "") -> None:
 
 
 def _install_cursor(
-    url: str, mode: str = "api", path: str = "", profile: str = "standard"
+    url: str,
+    mode: str = "api",
+    path: str = "",
+    profile: str = "standard",
+    *,
+    force: bool = False,
 ) -> None:
     """Install mem-mesh hooks for Cursor."""
     print(f"[cursor] Installing hook scripts (profile: {profile})...")
@@ -1096,7 +1167,9 @@ def _install_cursor(
 
     print("[cursor] Updating hooks.json...")
     _merge_json_settings(
-        CURSOR_SETTINGS, _build_cursor_hooks_settings(CURSOR_HOOKS_DIR, scope="global")
+        CURSOR_SETTINGS,
+        _build_cursor_hooks_settings(CURSOR_HOOKS_DIR, scope="global"),
+        force=force,
     )
     # Remove legacy postToolUse (track hook) from hooks.json
     _remove_hook_event(CURSOR_SETTINGS, "postToolUse")
@@ -1127,8 +1200,8 @@ def _uninstall_claude() -> None:
             script.unlink()
             print(f"  removed {script}")
 
-    print("[claude] Removing hooks from settings.json...")
-    _remove_json_key(CLAUDE_SETTINGS, "hooks")
+    print("[claude] Removing mem-mesh hooks from settings.json...")
+    _remove_mem_mesh_hooks_from_json(CLAUDE_SETTINGS)
 
     print("[claude] Done.")
 
@@ -1165,8 +1238,8 @@ def _uninstall_cursor() -> None:
             script.unlink()
             print(f"  removed {script}")
 
-    print("[cursor] Removing hooks from hooks.json...")
-    _remove_json_key(CURSOR_SETTINGS, "hooks")
+    print("[cursor] Removing mem-mesh hooks from hooks.json...")
+    _remove_mem_mesh_hooks_from_json(CURSOR_SETTINGS)
 
     print("[cursor] Done.")
 
@@ -1540,8 +1613,21 @@ def cmd_install(
     mode: str = "api",
     path: str = "",
     profile: str = "standard",
+    *,
+    force: bool = False,
 ) -> None:
     """Install hooks for the specified target."""
+    # Validate the API URL up front (local mode renders a path, not a URL).
+    # An invalid/malicious URL would otherwise be interpolated into the hook
+    # shell scripts; reject it here with a clear message instead of failing
+    # deep inside template rendering.
+    if mode != "local":
+        try:
+            _shell_safe_url(url)
+        except ValueError as exc:
+            print(f"ERROR: invalid --url: {exc}", file=sys.stderr)
+            raise SystemExit(2)
+
     # http mode produces native HTTP hooks, which Claude Code refuses to call
     # when the URL resolves to a private/link-local/CGNAT address (e.g. a
     # Tailscale/VPN/LAN server). Detect that up front and downgrade to api
@@ -1564,15 +1650,19 @@ def cmd_install(
 
     print(f"Prompt version: {PROMPT_VERSION} | Profile: {profile}\n")
 
-    if target in ("claude", "all"):
-        _install_claude(url, mode, resolved, profile)
-        print()
-    if target in ("kiro", "all"):
-        _install_kiro(url, mode, resolved)
-        print()
-    if target in ("cursor", "all"):
-        _install_cursor(url, mode, resolved, profile)
-        print()
+    try:
+        if target in ("claude", "all"):
+            _install_claude(url, mode, resolved, profile, force=force)
+            print()
+        if target in ("kiro", "all"):
+            _install_kiro(url, mode, resolved)
+            print()
+        if target in ("cursor", "all"):
+            _install_cursor(url, mode, resolved, profile, force=force)
+            print()
+    except MalformedSettingsError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1)
     print("Installation complete. Run 'mem-mesh-hooks status' to verify.")
 
 
@@ -1652,6 +1742,7 @@ def cmd_interactive() -> None:
 
     # Step 3: storage mode
     from app.cli.hooks.status import resolve_api_url
+
     suggested_url, url_source = resolve_api_url()
     print("[3/4] Select storage mode:")
     modes = [
@@ -1737,6 +1828,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         action="store_true",
         help="Run interactive installer wizard",
     )
+    install_parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Overwrite a malformed settings file instead of aborting "
+            "(the original is still backed up to <path>.bak)"
+        ),
+    )
 
     # uninstall
     uninstall_parser = subparsers.add_parser("uninstall", help="Uninstall hooks")
@@ -1780,7 +1879,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         return
 
     if args.command == "install":
-        cmd_install(args.target, args.url, args.mode, args.path, args.profile)
+        cmd_install(
+            args.target,
+            args.url,
+            args.mode,
+            args.path,
+            args.profile,
+            force=args.force,
+        )
     elif args.command == "uninstall":
         cmd_uninstall(args.target)
     elif args.command == "status":

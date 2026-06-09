@@ -1,12 +1,12 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 13
+# mem-mesh-hooks prompt-version: 14
 # TaskCompleted hook: auto-save completed tasks to mem-mesh
 # stdin: {task_id, task_subject, task_description, teammate_name, team_name, ...}
 
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
 
-API_URL="${MEM_MESH_API_URL:-https://meme.24x365.online}"
+API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://meme.24x365.online)}"
 
 INPUT=$(cat)
 TASK_SUBJECT=$(echo "$INPUT" | jq -r '.task_subject // empty')

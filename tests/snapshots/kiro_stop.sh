@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 13
+# mem-mesh-hooks prompt-version: 14
 # Kiro agentResponse hook: save response to mem-mesh
 # Kiro has LLM access for categorization — no keyword matching needed here.
 # Category is set to code_snippet by default; Kiro's LLM handles filtering.
@@ -7,7 +7,7 @@
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
 
-API_URL="${MEM_MESH_API_URL:-https://meme.24x365.online}"
+API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://meme.24x365.online)}"
 
 RESPONSE="${KIRO_RESULT:-}"
 [ ${#RESPONSE} -lt 50 ] && exit 0

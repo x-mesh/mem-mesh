@@ -8,7 +8,7 @@ set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
 
-MEM_MESH_PATH="__MEM_MESH_PATH__"
+MEM_MESH_PATH=__MEM_MESH_PATH__
 
 INPUT=$(cat)
 PROMPT=$(echo "$INPUT" | jq -r '.prompt // empty')
@@ -29,13 +29,14 @@ if [ ${#PROMPT} -ge 30 ]; then
 
   if echo "$PROMPT" | grep -qiE "$KEYWORDS"; then
     PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
-    QUERY=$(echo "$PROMPT" | head -c 200)
+    QUERY=$(printf '%s' "$PROMPT" | python3 -c 'import sys; print(sys.stdin.read()[:200], end="")')
     THRESHOLD="${MEM_MESH_SEARCH_THRESHOLD:-0.75}"
     LIMIT="${MEM_MESH_SEARCH_LIMIT:-3}"
 
-    SEARCH_CTX=$(python3 -c "
+    SEARCH_CTX=$(python3 - "$MEM_MESH_PATH" "$QUERY" "$PROJECT_DIR" "$THRESHOLD" "$LIMIT" 2>/dev/null <<'PY'
 import sys, asyncio, json
-sys.path.insert(0, '$MEM_MESH_PATH')
+mem_mesh_path, query, project_dir, threshold_raw, limit_raw = sys.argv[1:6]
+sys.path.insert(0, mem_mesh_path)
 try:
     from app.core.storage.direct import DirectStorageManager
 
@@ -43,18 +44,18 @@ try:
         s = DirectStorageManager()
         await s.initialize()
         results = await s.search_memories(
-            query=sys.argv[1],
-            project_id=sys.argv[2],
-            limit=int(sys.argv[4]),
+            query=query,
+            project_id=project_dir,
+            limit=int(limit_raw),
         )
         if not results:
             sys.exit(0)
-        threshold = float(sys.argv[3])
+        threshold = float(threshold_raw)
         relevant = [r for r in results if r.get('similarity_score', 0) > threshold]
         if not relevant:
             sys.exit(0)
         lines = ['## Related Memories (auto-retrieved)', '']
-        for r in relevant[:int(sys.argv[4])]:
+        for r in relevant[:int(limit_raw)]:
             cat = r.get('category', 'unknown')
             content = r.get('content', '')[:300]
             created = str(r.get('created_at', ''))[:10]
@@ -64,7 +65,8 @@ try:
     asyncio.run(search())
 except Exception:
     sys.exit(0)
-" "$QUERY" "$PROJECT_DIR" "$THRESHOLD" "$LIMIT" 2>/dev/null) || SEARCH_CTX=""
+PY
+) || SEARCH_CTX=""
     [ -n "$SEARCH_CTX" ] && PARTS+=("$SEARCH_CTX")
   fi
 fi

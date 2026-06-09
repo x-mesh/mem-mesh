@@ -1,6 +1,7 @@
 """OAuth Bearer Token Authentication Middleware."""
 
 import logging
+import secrets
 from typing import Callable, Optional
 
 from fastapi import HTTPException, Request
@@ -8,9 +9,70 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.auth.utils import parse_bearer_token
-from app.core.config import get_settings
+from app.core.config import get_settings, resolve_hook_token
 
 logger = logging.getLogger(__name__)
+
+
+# Hook endpoints carry their own shared-secret scheme (verify_hook_token) that
+# is independent of the OAuth web_auth flag, so the OAuth middleware must not
+# also gate them — otherwise a valid hook token would be rejected as a
+# non-OAuth bearer when web_auth_enabled is on.
+HOOK_PATH_PREFIX = "/api/hooks/claude"
+
+
+def is_loopback_host(host: Optional[str]) -> bool:
+    """True if ``host`` only accepts connections from the local machine.
+
+    Treats ``127.0.0.0/8``, ``::1`` and ``localhost`` as loopback. ``0.0.0.0``,
+    ``::`` and any concrete address/hostname are non-loopback (network-exposed).
+    An empty/unknown host is treated as non-loopback (fail-safe).
+    """
+    if not host:
+        return False
+    h = host.strip().lower()
+    if h in ("localhost", "::1", "::ffff:127.0.0.1"):
+        return True
+    return h.startswith("127.")
+
+
+def verify_hook_token(request: Request) -> None:
+    """FastAPI dependency guarding hook write endpoints.
+
+    Independent of ``auth_enabled`` / ``web_auth_enabled`` — runs even when all
+    OAuth flags are off. Rules:
+
+    * Token configured (env or ~/.mem-mesh/hook_token) → require a matching
+      ``Authorization: Bearer <token>`` (constant-time compare).
+    * No token configured + server bound to loopback → allow (local dev
+      backward-compat; the port is unreachable from the network).
+    * No token configured + server bound to a non-loopback address →
+      reject 401 (fail-closed): an exposed server must not accept anonymous
+      memory writes.
+    """
+    configured = resolve_hook_token()
+    provided = parse_bearer_token(request.headers.get("Authorization"))
+
+    if configured:
+        if not provided or not secrets.compare_digest(provided, configured):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid or missing hook token",
+                headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
+            )
+        return
+
+    if is_loopback_host(get_settings().server_host):
+        return
+
+    raise HTTPException(
+        status_code=401,
+        detail=(
+            "Hook token required: server is bound to a non-loopback address. "
+            "Set MEM_MESH_HOOK_TOKEN or write ~/.mem-mesh/hook_token."
+        ),
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 OAUTH_PATHS = [
@@ -92,6 +154,12 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         """
         # Global auth disabled = no auth anywhere
         if not settings.auth_enabled:
+            return False
+
+        # Hook endpoints use their own token scheme (verify_hook_token), which
+        # runs as a route dependency regardless of OAuth flags. Exempt them here
+        # so a hook bearer token is not rejected by the OAuth validator.
+        if path.startswith(HOOK_PATH_PREFIX):
             return False
 
         # Public paths are always exempt

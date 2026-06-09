@@ -8,7 +8,7 @@ set -euo pipefail
 command -v python3 >/dev/null 2>&1 || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 
-MEM_MESH_PATH="__MEM_MESH_PATH__"
+MEM_MESH_PATH=__MEM_MESH_PATH__
 
 INPUT=$(cat)
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
@@ -84,9 +84,10 @@ except Exception:
 fi
 
 # ── End session locally ──
-python3 -c "
+python3 - "$MEM_MESH_PATH" "$PROJECT_DIR" <<'PY' 2>/dev/null || true
 import sys, asyncio, json
-sys.path.insert(0, '$MEM_MESH_PATH')
+mem_mesh_path, project_dir = sys.argv[1:3]
+sys.path.insert(0, mem_mesh_path)
 try:
     from app.core.services.session import SessionService
     from app.core.database.base import Database
@@ -95,12 +96,12 @@ try:
         db = Database()
         await db.initialize()
         svc = SessionService(db)
-        await svc.end_session_by_project('$PROJECT_DIR', summary='Auto-ended by PreCompact hook')
+        await svc.end_session_by_project(project_dir, summary='Auto-ended by PreCompact hook')
 
     asyncio.run(end_session())
 except Exception:
     pass
-" 2>/dev/null || true
+PY
 
 # ── Return save reminder as hookSpecificOutput ──
 if [ -n "$SAVE_HINT" ]; then
@@ -115,9 +116,10 @@ fi
 
 # ── Query open pins locally ──
 OPEN_PINS=""
-OPEN_PINS=$(python3 -c "
+OPEN_PINS=$(python3 - "$MEM_MESH_PATH" "$PROJECT_DIR" 2>/dev/null <<'PY'
 import sys, json, asyncio
-sys.path.insert(0, '$MEM_MESH_PATH')
+mem_mesh_path, project_dir = sys.argv[1:3]
+sys.path.insert(0, mem_mesh_path)
 try:
     from app.core.services.session import SessionService
     from app.core.database.base import Database
@@ -126,7 +128,7 @@ try:
         db = Database()
         await db.initialize()
         svc = SessionService(db)
-        ctx = await svc.resume_last_session('$PROJECT_DIR', expand=False)
+        ctx = await svc.resume_last_session(project_dir, expand=False)
         if ctx is None:
             return
         pins = ctx.pins
@@ -154,7 +156,8 @@ try:
     asyncio.run(get_open_pins())
 except Exception:
     pass
-" 2>/dev/null) || OPEN_PINS=""
+PY
+) || OPEN_PINS=""
 
 # ── Combine and output ──
 PARTS=()

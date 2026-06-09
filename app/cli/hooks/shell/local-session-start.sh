@@ -12,7 +12,7 @@ set -euo pipefail
 command -v python3 >/dev/null 2>&1 || { echo '{}'; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo '{}'; exit 0; }
 
-MEM_MESH_PATH="__MEM_MESH_PATH__"
+MEM_MESH_PATH=__MEM_MESH_PATH__
 
 INPUT=$(cat)
 
@@ -49,9 +49,10 @@ except Exception:
   IS_CONTINUATION="$HAS_ASSISTANT"
 fi
 
-RESUME_DATA=$(python3 -c "
+RESUME_DATA=$(python3 - "$MEM_MESH_PATH" "$PROJECT_DIR" "$IDE_SESSION_ID" 2>/dev/null <<'PY'
 import sys, json
-sys.path.insert(0, '$MEM_MESH_PATH')
+mem_mesh_path, project_dir, ide_session_id = sys.argv[1:4]
+sys.path.insert(0, mem_mesh_path)
 try:
     from app.core.services.session import SessionService
     from app.core.database.base import Database
@@ -63,13 +64,13 @@ try:
         svc = SessionService(db)
 
         # IDE session_id가 있으면 세션에 연결
-        ide_sid = '$IDE_SESSION_ID' or None
+        ide_sid = ide_session_id or None
         if ide_sid:
             await svc.get_or_create_active_session(
-                '$PROJECT_DIR', ide_session_id=ide_sid, client_type='claude-ai'
+                project_dir, ide_session_id=ide_sid, client_type='claude-ai'
             )
 
-        ctx = await svc.resume_last_session('$PROJECT_DIR', expand='smart')
+        ctx = await svc.resume_last_session(project_dir, expand='smart')
         if ctx is None:
             return json.dumps({'status': 'no_session'})
         return json.dumps(ctx.model_dump(), ensure_ascii=False, default=str)
@@ -77,7 +78,8 @@ try:
     print(asyncio.run(get_resume()))
 except Exception as e:
     print(json.dumps({'error': str(e)}))
-" 2>/dev/null) || RESUME_DATA='{"error": "mem-mesh not available"}'
+PY
+) || RESUME_DATA='{"error": "mem-mesh not available"}'
 
 RULES_TEXT="__RULES_TEXT__"
 

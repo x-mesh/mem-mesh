@@ -233,6 +233,19 @@ class Settings(BaseSettings):
         description="Enable OAuth authentication for Dashboard/Web API endpoints",
     )
 
+    # Hook endpoint authentication (independent of OAuth auth_enabled flags).
+    # Guards POST /api/hooks/claude/* against unauthenticated remote memory
+    # injection. Env: MEM_MESH_HOOK_TOKEN. File fallback: ~/.mem-mesh/hook_token.
+    hook_token: Optional[str] = Field(
+        default=None,
+        description=(
+            "Shared secret required as 'Authorization: Bearer <token>' on hook "
+            "write endpoints. If unset, falls back to ~/.mem-mesh/hook_token. "
+            "When unset AND the server is bound to a non-loopback address, hook "
+            "writes are rejected (fail-closed)."
+        ),
+    )
+
     # Basic Auth for Web Dashboard (simpler alternative to OAuth for browser access)
     web_basic_auth_enabled: bool = Field(
         default=False,
@@ -413,3 +426,32 @@ def create_settings(**kwargs) -> Settings:
         Settings: New settings instance with provided values
     """
     return Settings(**kwargs)
+
+
+# Path of the on-disk hook-token fallback (written 0600 by the installer).
+HOOK_TOKEN_FILE = Path.home() / ".mem-mesh" / "hook_token"
+
+
+def resolve_hook_token() -> Optional[str]:
+    """Resolve the hook auth token: MEM_MESH_HOOK_TOKEN env first, file fallback.
+
+    Resolution order (matches the installer contract):
+    1. ``settings.hook_token`` (from MEM_MESH_HOOK_TOKEN / .env)
+    2. ``~/.mem-mesh/hook_token`` file contents (trimmed)
+
+    Returns None when neither is configured. Read every call (no caching) so a
+    token written after startup is picked up without a restart.
+    """
+    token = (get_settings().hook_token or "").strip()
+    if token:
+        return token
+
+    try:
+        if HOOK_TOKEN_FILE.exists():
+            file_token = HOOK_TOKEN_FILE.read_text(encoding="utf-8").strip()
+            return file_token or None
+    except OSError:
+        # Unreadable token file degrades to "no token configured"; the
+        # loopback/fail-closed logic in verify_hook_token then applies.
+        pass
+    return None
