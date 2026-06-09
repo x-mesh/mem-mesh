@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---- Hook templates ----------------------------------------------------------
 
 
@@ -83,9 +82,9 @@ def test_web_static_packaged():
 
 def test_dashboard_paths_resolve_to_package():
     """Both dashboard modules must point templates at the same package-relative dir."""
+    from app.web.app import _WEB_ROOT as web_root
     from app.web.dashboard.app import _WEB_ROOT as dash_root
     from app.web.dashboard.pages import _WEB_ROOT as pages_root
-    from app.web.app import _WEB_ROOT as web_root
 
     assert dash_root == web_root == pages_root, (
         f"Template roots disagree: dashboard.app={dash_root}, "
@@ -105,7 +104,6 @@ def test_rules_index_packaged():
 
 def test_all_referenced_rule_files_exist():
     """Every rule entry in index.json must resolve to a file that exists."""
-    import json
 
     from app.web.dashboard.routes import (
         _load_rules_index,
@@ -135,9 +133,9 @@ def test_default_db_path_is_absolute_and_outside_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # simulate running from a random directory
     path = Path(_default_db_path())
     assert path.is_absolute(), f"Default DB path must be absolute: {path}"
-    assert tmp_path not in path.parents, (
-        f"Default DB path {path} leaks into CWD {tmp_path}"
-    )
+    assert (
+        tmp_path not in path.parents
+    ), f"Default DB path {path} leaks into CWD {tmp_path}"
 
 
 # ---- Optional: full import surface ------------------------------------------

@@ -330,7 +330,14 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
                     "category": {
                         "type": "string",
                         "description": "Memory category when promoting",
-                        "enum": ["task", "decision", "bug", "incident", "idea", "code_snippet"],
+                        "enum": [
+                            "task",
+                            "decision",
+                            "bug",
+                            "incident",
+                            "idea",
+                            "code_snippet",
+                        ],
                         "default": "task",
                     },
                 },

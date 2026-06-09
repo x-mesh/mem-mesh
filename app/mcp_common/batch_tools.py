@@ -7,9 +7,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ..core.database.base import Database
 from ..core.embeddings.service import EmbeddingService
@@ -82,8 +80,12 @@ class BatchOperationHandler:
             # Save each memory
             for i, content in enumerate(contents):
                 try:
-                    item_category = (categories[i] if categories and i < len(categories) else None) or category
-                    item_tags = (tags_list[i] if tags_list and i < len(tags_list) else None) or tags
+                    item_category = (
+                        categories[i] if categories and i < len(categories) else None
+                    ) or category
+                    item_tags = (
+                        tags_list[i] if tags_list and i < len(tags_list) else None
+                    ) or tags
                     # Add memory with embedding
                     memory = await self.memory_service.add_with_embedding(
                         content=content,
@@ -119,7 +121,9 @@ class BatchOperationHandler:
                             }
                             await self._notifier.notify_memory_created(memory_data)
                         except Exception as e:
-                            logger.warning(f"Failed to send batch realtime notification: {e}")
+                            logger.warning(
+                                f"Failed to send batch realtime notification: {e}"
+                            )
                 except Exception as e:
                     logger.error(f"Failed to add memory {i}: {e}")
                     errors.append(
@@ -144,7 +148,9 @@ class BatchOperationHandler:
         elapsed_time = (datetime.now() - start_time).total_seconds()
 
         # Calculate token savings (estimated savings from batch processing)
-        tokens_saved = len(contents) * 10  # ~10 tokens saved per individual embedding request
+        tokens_saved = (
+            len(contents) * 10
+        )  # ~10 tokens saved per individual embedding request
 
         return {
             "status": "success",
@@ -481,7 +487,9 @@ class BatchOperationHandler:
 
                     if promote:
                         try:
-                            promote_result = await pin_service.promote_to_memory(pin_id, category=category)
+                            promote_result = await pin_service.promote_to_memory(
+                                pin_id, category=category
+                            )
                             entry["promoted"] = True
                             entry["memory_id"] = promote_result["memory_id"]
                         except Exception as e:

@@ -121,7 +121,9 @@ class ConnectionManager:
             await websocket.send_text(json.dumps(message))
             return True
         except Exception as e:
-            logger.debug(f"Failed to send message to client {client_id}, disconnecting: {e}")
+            logger.debug(
+                f"Failed to send message to client {client_id}, disconnecting: {e}"
+            )
             self.disconnect(client_id)
             return False
 

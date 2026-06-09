@@ -72,8 +72,7 @@ KIRO_HOOKS_NAME_PREFIX = EvalScenario(
     id="kiro_hooks_03",
     name="Kiro hook name uses mem-mesh: prefix",
     description=(
-        "Kiro hooks.json에 등록된 hook name이 "
-        "'mem-mesh:' prefix를 사용하는지 검증"
+        "Kiro hooks.json에 등록된 hook name이 " "'mem-mesh:' prefix를 사용하는지 검증"
     ),
     tier=EvalTier.DETERMINISTIC,
     tags=["kiro", "hook", "naming"],

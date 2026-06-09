@@ -10,7 +10,6 @@ from app.cli.hooks.status import (
     resolve_api_url,
 )
 
-
 # ---------------------------------------------------------------------------
 # _extract_url_from_script
 # ---------------------------------------------------------------------------
@@ -26,7 +25,7 @@ def test_extract_url_config_file_pattern(tmp_path: Path) -> None:
     script = tmp_path / "hook.sh"
     script.write_text(
         'API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null '
-        "|| echo https://baked.example.com)}\"\n"
+        '|| echo https://baked.example.com)}"\n'
     )
     assert _extract_url_from_script(script) == "https://baked.example.com"
 

@@ -16,6 +16,11 @@ import urllib3
 if TYPE_CHECKING:
     from ..services.metrics_collector import MetricsCollector
 
+# Defined here (not after the import-time try/except blocks below) because the
+# MEM_MESH_IGNORE_SSL setup block uses ``logger`` at module import — a later
+# definition raised NameError when that backend configuration failed.
+logger = logging.getLogger(__name__)
+
 
 def _model_embedding_dim(model) -> int:
     """Return the embedding dimension across sentence-transformers versions.
@@ -27,6 +32,7 @@ def _model_embedding_dim(model) -> int:
         model, "get_sentence_embedding_dimension"
     )
     return getter()
+
 
 # Disable SSL verification if MEM_MESH_IGNORE_SSL env var is set
 _ignore_ssl = os.getenv("MEM_MESH_IGNORE_SSL", "").lower() in ("1", "true", "yes")
@@ -76,8 +82,6 @@ try:
 except ImportError:
     SENTENCE_TRANSFORMERS_AVAILABLE = False
     SentenceTransformer = None  # type: ignore
-
-logger = logging.getLogger(__name__)
 
 
 # Embedding dimension mapping per model
@@ -325,7 +329,9 @@ class EmbeddingService:
         self.metrics_collector = metrics_collector
 
         # Track download/loading status
-        self._status: str = "not_loaded"  # not_loaded | downloading | loading | ready | error
+        self._status: str = (
+            "not_loaded"  # not_loaded | downloading | loading | ready | error
+        )
         self._download_progress: float = 0.0
         self._error_message: Optional[str] = None
         self._load_lock = threading.Lock()
@@ -484,9 +490,7 @@ class EmbeddingService:
                         self.dimension = actual_dim
 
                     # Validate
-                    test_embedding = self.model.encode(
-                        "test", convert_to_tensor=False
-                    )
+                    test_embedding = self.model.encode("test", convert_to_tensor=False)
                     if len(test_embedding) != self.dimension:
                         raise ValueError(
                             f"Model dimension mismatch: expected {self.dimension}, "
@@ -521,15 +525,13 @@ class EmbeddingService:
         진행률은 0.0~0.80 범위로 매핑 (0.80 이후는 모델 로딩 단계).
         """
         try:
-            from huggingface_hub import snapshot_download
             import tqdm as tqdm_mod
+            from huggingface_hub import snapshot_download
 
             # Track download bytes per file
             _file_totals: dict = {}  # id -> total
             _file_downloaded: dict = {}  # id -> downloaded
             _last_reported: list = [0.0]  # Last reported progress (debounce)
-
-            svc = self
 
             class _ProgressTqdm(tqdm_mod.tqdm):
                 """snapshot_download의 tqdm을 오버라이드하여 진행률 캡처"""
@@ -606,7 +608,11 @@ class EmbeddingService:
             is_query: True면 검색 쿼리용 임베딩 (E5 모델에서 "query:" prefix 적용)
         """
         if self.model is None:
-            if self._defer_loading and self._status in ("not_loaded", "downloading", "loading"):
+            if self._defer_loading and self._status in (
+                "not_loaded",
+                "downloading",
+                "loading",
+            ):
                 raise RuntimeError(
                     f"Embedding model not ready (status: {self._status}). "
                     "Please select a model via onboarding first."
@@ -648,7 +654,11 @@ class EmbeddingService:
             is_query: True면 검색 쿼리용 임베딩 (E5 모델에서 "query:" prefix 적용)
         """
         if self.model is None:
-            if self._defer_loading and self._status in ("not_loaded", "downloading", "loading"):
+            if self._defer_loading and self._status in (
+                "not_loaded",
+                "downloading",
+                "loading",
+            ):
                 raise RuntimeError(
                     f"Embedding model not ready (status: {self._status}). "
                     "Please select a model via onboarding first."

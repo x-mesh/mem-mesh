@@ -73,8 +73,7 @@ CURSOR_SESSION_END_API = EvalScenario(
     id="cursor_hooks_03",
     name="Cursor sessionEnd calls session_end API",
     description=(
-        "Cursor sessionEnd 스크립트가 end-by-project API를 "
-        "호출하는지 검증"
+        "Cursor sessionEnd 스크립트가 end-by-project API를 " "호출하는지 검증"
     ),
     tier=EvalTier.DETERMINISTIC,
     tags=["cursor", "hook", "session-end", "api"],

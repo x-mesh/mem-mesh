@@ -7,7 +7,7 @@ These are used in Tier 1 (deterministic) and Tier 2 (simulated) tests.
 from __future__ import annotations
 
 import re
-from typing import List, Set
+from typing import List
 
 from .models import (
     CheckResult,
@@ -27,7 +27,9 @@ _SENSITIVE_PATTERNS: List[re.Pattern[str]] = [
     re.compile(r"(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}"),
     re.compile(r"xox[bpas]-\w{10,}"),  # Slack tokens
     re.compile(r"-----BEGIN (?:RSA )?PRIVATE KEY-----"),
-    re.compile(r"(?:password|passwd|secret)\s*[:=]\s*['\"][^'\"]{8,}['\"]", re.IGNORECASE),
+    re.compile(
+        r"(?:password|passwd|secret)\s*[:=]\s*['\"][^'\"]{8,}['\"]", re.IGNORECASE
+    ),
     re.compile(r"Bearer\s+[A-Za-z0-9\-._~+/]+=*", re.IGNORECASE),
     re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key
 ]
@@ -60,10 +62,12 @@ def grade_tool_call_order(
             # Check position if specified
             if expected.position != ToolCallPosition.ANY:
                 matching_calls = [
-                    tc for tc in result.tool_calls
-                    if tc.tool_name == expected.tool_name
+                    tc for tc in result.tool_calls if tc.tool_name == expected.tool_name
                 ]
-                if matching_calls and expected.position == ToolCallPosition.BEFORE_RESPONSE:
+                if (
+                    matching_calls
+                    and expected.position == ToolCallPosition.BEFORE_RESPONSE
+                ):
                     # In a save scenario, the tool should be called early
                     first_call = matching_calls[0]
                     if first_call.position_index > 0:

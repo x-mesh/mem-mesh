@@ -61,7 +61,9 @@ def test_is_loopback_host(host, expected):
 
 
 def test_resolve_token_env_first(monkeypatch, tmp_path):
-    monkeypatch.setattr(cfg, "get_settings", lambda: SimpleNamespace(hook_token="env-tok"))
+    monkeypatch.setattr(
+        cfg, "get_settings", lambda: SimpleNamespace(hook_token="env-tok")
+    )
     monkeypatch.setattr(cfg, "HOOK_TOKEN_FILE", tmp_path / "hook_token")
     assert cfg.resolve_hook_token() == "env-tok"
 

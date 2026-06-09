@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.core.errors import MemoryNotFoundError, RelationNotFoundError
 from app.core.schemas.relations import (
     Relation,
     RelationCreate,
@@ -15,7 +16,6 @@ from app.core.schemas.relations import (
     RelationUpdate,
     RelationWithMemory,
 )
-from app.core.errors import MemoryNotFoundError, RelationNotFoundError
 from app.core.services.relation import RelationService
 from app.web.common.dependencies import get_relation_service
 

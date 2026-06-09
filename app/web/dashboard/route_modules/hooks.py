@@ -29,7 +29,6 @@ from fastapi.responses import JSONResponse
 
 from app.cli.hooks.keywords import match_category
 from app.core.redaction import redact_secrets
-from app.core.schemas.requests import normalize_project_id
 from app.core.schemas.hooks import (
     SessionStartPayload,
     StopPayload,
@@ -37,6 +36,7 @@ from app.core.schemas.hooks import (
     TaskCompletedPayload,
     UserPromptSubmitPayload,
 )
+from app.core.schemas.requests import normalize_project_id
 from app.core.services.hook import HookService
 from app.core.services.pin import PinService
 from app.core.services.session import SessionService

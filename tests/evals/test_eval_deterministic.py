@@ -11,11 +11,9 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
-from app.cli.prompts.behaviors import SAVE_CRITERIA, STOP_PROMPT_CONFIG
+from app.cli.prompts.behaviors import SAVE_CRITERIA
 from app.cli.prompts.renderers import render_claude_stop_prompt
-from tests.evals.conftest import collect_scenarios, simulate_hook_analyze
+from tests.evals.conftest import collect_scenarios
 from tests.evals.graders import (
     grade_action_correct,
     grade_category_correct,
@@ -34,7 +32,6 @@ from tests.evals.models import (
     GradeResult,
     ToolCall,
 )
-
 
 # ---------------------------------------------------------------------------
 # Grader unit tests
@@ -379,12 +376,15 @@ class TestScenarioIntegrity:
 
     def test_save_scenarios_have_expected_tools(self) -> None:
         for s in collect_scenarios():
-            if s.expected_action == ExpectedAction.SAVE and s.tier != EvalTier.DETERMINISTIC:
+            if (
+                s.expected_action == ExpectedAction.SAVE
+                and s.tier != EvalTier.DETERMINISTIC
+            ):
                 # WS scenarios are special (tested differently)
                 if "websocket" not in s.tags:
-                    assert len(s.expected_tools) > 0, (
-                        f"{s.id}: SAVE scenario should have expected_tools"
-                    )
+                    assert (
+                        len(s.expected_tools) > 0
+                    ), f"{s.id}: SAVE scenario should have expected_tools"
 
     def test_scenario_ids_follow_convention(self) -> None:
         pattern = re.compile(r"^[a-z_]+_\d{2}$")

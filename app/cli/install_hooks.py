@@ -20,17 +20,23 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.cli.prompts.behaviors import PROMPT_VERSION, REFLECT_CONFIG
-from app.cli.prompts.renderers import (
-    VERSION_MARKER,
-    extract_prompt_version,
-    render_cursor_followup,
-    render_enhanced_stop_prompt,
-    render_kiro_auto_create_pin,
-    render_kiro_auto_save,
-    render_kiro_load_context,
-    render_reflect_prompt,
-    render_rules_text,
+from app.cli.hooks.cursor_adapters import (
+    adapt_cursor_before_submit_prompt,
+    adapt_cursor_precompact,
+    adapt_cursor_subagent_start,
+    adapt_cursor_subagent_stop,
+)
+from app.cli.hooks.json_ops import (
+    MalformedSettingsError,
+    _atomic_write_text,
+    _load_settings_or_raise,
+)
+from app.cli.hooks.keywords import KEYWORD_MATCHER_BLOCK
+from app.cli.hooks.netcheck import check_http_hook_url
+from app.cli.hooks.renderer import (
+    _safe_project_id,
+    _shell_safe_local_path,
+    _shell_safe_url,
 )
 from app.cli.hooks.templates import (
     CURSOR_PROJECT_AUTO_SAVE_TEMPLATE,
@@ -59,23 +65,17 @@ from app.cli.hooks.templates import (
     TASK_COMPLETED_HOOK_TEMPLATE,
     USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
 )
-from app.cli.hooks.keywords import KEYWORD_MATCHER_BLOCK
-from app.cli.hooks.netcheck import check_http_hook_url
-from app.cli.hooks.json_ops import (
-    MalformedSettingsError,
-    _atomic_write_text,
-    _load_settings_or_raise,
-)
-from app.cli.hooks.renderer import (
-    _safe_project_id,
-    _shell_safe_local_path,
-    _shell_safe_url,
-)
-from app.cli.hooks.cursor_adapters import (
-    adapt_cursor_before_submit_prompt,
-    adapt_cursor_precompact,
-    adapt_cursor_subagent_start,
-    adapt_cursor_subagent_stop,
+from app.cli.prompts.behaviors import PROMPT_VERSION, REFLECT_CONFIG
+from app.cli.prompts.renderers import (
+    VERSION_MARKER,
+    extract_prompt_version,
+    render_cursor_followup,
+    render_enhanced_stop_prompt,
+    render_kiro_auto_create_pin,
+    render_kiro_auto_save,
+    render_kiro_load_context,
+    render_reflect_prompt,
+    render_rules_text,
 )
 from app.core.config import HOOK_TOKEN_FILE
 

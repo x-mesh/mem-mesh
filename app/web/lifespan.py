@@ -122,7 +122,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         target_model = None
         db_model = None
         try:
-            target_model = await db._migrator.get_embedding_metadata("target_embedding_model")
+            target_model = await db._migrator.get_embedding_metadata(
+                "target_embedding_model"
+            )
             db_model = await db._migrator.get_embedding_metadata("embedding_model")
             if target_model:
                 if target_model != embedding_model:
@@ -171,8 +173,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             _last_reported_bucket = {"value": -1}
 
             def _on_model_progress(progress: float, status: str) -> None:
-                from .websocket.realtime import notifier
                 import asyncio
+
+                from .websocket.realtime import notifier
 
                 # Terminal log at 25%-increments so users see progress.
                 bucket = int(progress * 4)
@@ -189,7 +192,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         asyncio.ensure_future,
                         notifier.broadcast(
                             "model_download",
-                            {"progress": progress, "status": status, "model": _bg_model_name},
+                            {
+                                "progress": progress,
+                                "status": status,
+                                "model": _bg_model_name,
+                            },
                         ),
                     )
                 except Exception as e:
@@ -197,7 +204,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
             embedding_service.load_model_background(on_progress=_on_model_progress)
         else:
-            logger.info("No model configured, waiting for user selection via onboarding")
+            logger.info(
+                "No model configured, waiting for user selection via onboarding"
+            )
 
         # Initialize business services
         logger.info("Initializing business services")

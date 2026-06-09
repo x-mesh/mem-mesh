@@ -20,6 +20,12 @@ from app.cli.hooks.cursor_adapters import (
     adapt_cursor_subagent_start,
     adapt_cursor_subagent_stop,
 )
+from app.cli.hooks.json_ops import _merge_json_settings, _remove_hook_event
+from app.cli.hooks.renderer import (
+    _render_local_template,
+    _render_template,
+    _write_script,
+)
 from app.cli.hooks.templates import (
     CURSOR_SESSION_START_TEMPLATE,
     CURSOR_STOP_TEMPLATE,
@@ -44,8 +50,6 @@ from app.cli.hooks.templates import (
     TASK_COMPLETED_HOOK_TEMPLATE,
     USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
 )
-from app.cli.hooks.renderer import _render_template, _render_local_template, _write_script
-from app.cli.hooks.json_ops import _merge_json_settings, _remove_hook_event
 
 
 def _build_claude_hooks_settings(profile: str = "standard") -> Dict[str, Any]:

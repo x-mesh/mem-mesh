@@ -4,7 +4,6 @@ Property-based tests for mem-mesh system
 
 import asyncio
 import os
-import re
 import tempfile
 
 import pytest
@@ -72,7 +71,6 @@ async def temp_db_path():
         path = db_path + ext
         if os.path.exists(path):
             os.unlink(path)
-
 
 
 # mock_embedding_service is inherited from conftest.py (Settings-based dimension)

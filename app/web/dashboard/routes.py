@@ -11,14 +11,17 @@ from typing import Union
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.core.errors import (
+    InvalidStatusTransitionError,
+    NoActiveSessionError,
+    PinNotFoundError,
+)
 from app.core.schemas.pins import PinCreate, PinUpdate
 from app.core.schemas.projects import ProjectUpdate
 from app.core.schemas.requests import RuleUpdateParams, normalize_project_id
 from app.core.services.embedding_manager import EmbeddingManagerService
-from app.core.errors import InvalidStatusTransitionError, PinNotFoundError
 from app.core.services.pin import PinService
 from app.core.services.project import ProjectService
-from app.core.errors import NoActiveSessionError
 from app.core.services.session import SessionService
 from app.core.services.stats import StatsService
 
@@ -352,8 +355,9 @@ async def select_embedding_model(
 
     def _on_progress(progress: float, status: str) -> None:
         try:
-            from ..websocket.realtime import notifier
             import asyncio
+
+            from ..websocket.realtime import notifier
 
             loop = asyncio.get_running_loop()
             loop.call_soon_threadsafe(

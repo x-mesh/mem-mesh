@@ -47,8 +47,6 @@ def _parse_tags(raw: object) -> List[str]:
     return []
 
 
-
-
 # Valid state transitions (all transitions allowed for Kanban drag-and-drop)
 VALID_TRANSITIONS = {
     "open": {"open", "in_progress", "completed"},
@@ -110,7 +108,8 @@ class PinService:
 
         # Get active session (auto-create if none)
         session = await self.session_service.get_or_create_active_session(
-            project_id, effective_user_id,
+            project_id,
+            effective_user_id,
             ide_session_id=ide_session_id,
             client_type=client_type,
         )
@@ -208,7 +207,9 @@ class PinService:
             updates.append("completed_at = ?")
             params.append(now_ts)
         # completed→other state: clear completed_at
-        elif update.status and update.status != "completed" and pin.status == "completed":
+        elif (
+            update.status and update.status != "completed" and pin.status == "completed"
+        ):
             updates.append("completed_at = ?")
             params.append(None)
 

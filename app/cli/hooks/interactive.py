@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import List
 
-from app.cli.hooks.constants import DEFAULT_URL, HOOK_PROFILES
+from app.cli.hooks.constants import HOOK_PROFILES
 from app.cli.hooks.status import resolve_api_url
 
 
@@ -90,4 +90,5 @@ def cmd_interactive() -> None:
     print()
 
     from app.cli.install_hooks import cmd_install
+
     cmd_install(target, url, mode, mem_path, profile)

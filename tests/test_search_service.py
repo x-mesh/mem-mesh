@@ -5,6 +5,7 @@ Search Service 테스트
 import os
 import tempfile
 from datetime import datetime, timezone
+
 import pytest
 
 from app.core.database.base import Database

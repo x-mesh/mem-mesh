@@ -6,15 +6,13 @@ Shows all relevant environment variables and their current values.
 import os
 
 from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
-from app.cli.hooks.constants import DEFAULT_URL
+from app.cli.hooks.constants import CLAUDE_HOOKS_DIR, DEFAULT_URL
 from app.cli.hooks.status import (
     _extract_url_from_script,
     check_connectivity,
     resolve_api_url,
 )
-from app.cli.hooks.constants import CLAUDE_HOOKS_DIR
 from app.core.version import __VERSION__
-
 
 # All env vars that mem-mesh recognizes
 ENV_VARS = [
@@ -43,13 +41,12 @@ def cmd_config() -> None:
 
     # Resolved API URL
     print(header("[API URL Resolution]"))
-    baked_url = (
-        _extract_url_from_script(CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh")
-        or _extract_url_from_script(CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh")
-    )
+    baked_url = _extract_url_from_script(
+        CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh"
+    ) or _extract_url_from_script(CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh")
     url, source = resolve_api_url(baked_url)
     print(f"  Effective URL: {bold(url)} {dim(f'(from {source})')}")
-    print(f"  Priority: MEM_MESH_API_URL > API_URL > installed hook URL > default")
+    print("  Priority: MEM_MESH_API_URL > API_URL > installed hook URL > default")
     print()
 
     # Environment variables
@@ -59,7 +56,9 @@ def cmd_config() -> None:
         if value:
             # Mask sensitive values
             if "KEY" in var_name or "SECRET" in var_name or "TOKEN" in var_name:
-                display = ok(value[:8] + "..." + value[-4:]) if len(value) > 12 else ok("***")
+                display = (
+                    ok(value[:8] + "..." + value[-4:]) if len(value) > 12 else ok("***")
+                )
             else:
                 display = ok(value)
         elif default:
@@ -98,7 +97,14 @@ def cmd_config() -> None:
         import subprocess
 
         result = subprocess.run(
-            ["docker", "ps", "--filter", "name=mem-mesh", "--format", "{{.Names}}\t{{.Status}}"],
+            [
+                "docker",
+                "ps",
+                "--filter",
+                "name=mem-mesh",
+                "--format",
+                "{{.Names}}\t{{.Status}}",
+            ],
             capture_output=True,
             text=True,
         )

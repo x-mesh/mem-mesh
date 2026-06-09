@@ -252,9 +252,7 @@ class SchemaMigrator:
             await self._add_column_if_missing(
                 "sessions", "ide_session_id", "TEXT", "NULL"
             )
-            await self._add_column_if_missing(
-                "sessions", "client_type", "TEXT", "NULL"
-            )
+            await self._add_column_if_missing("sessions", "client_type", "TEXT", "NULL")
             logger.info(
                 "Added ide_session_id, client_type columns to sessions table "
                 "via migration v6"
@@ -266,7 +264,9 @@ class SchemaMigrator:
             await self._add_column_if_missing("pins", "client", "TEXT", "NULL")
             logger.info("Added client column to pins table via migration v7")
 
-    async def _migration_v8_pin_staging_column(self, migrator: "SchemaMigrator") -> None:
+    async def _migration_v8_pin_staging_column(
+        self, migrator: "SchemaMigrator"
+    ) -> None:
         """Add is_staging column to pins table for staging pin support."""
         if await self._table_exists("pins"):
             await self._add_column_if_missing("pins", "is_staging", "INTEGER", "0")

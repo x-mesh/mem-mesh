@@ -49,7 +49,9 @@ def create_app() -> FastAPI:
     setup_exception_handlers(app)
 
     # Configure static file serving (register before routers)
-    app.mount("/static", StaticFiles(directory=str(_WEB_ROOT / "static")), name="static")
+    app.mount(
+        "/static", StaticFiles(directory=str(_WEB_ROOT / "static")), name="static"
+    )
 
     # Register routers (order matters!)
     app.include_router(oauth_router)  # OAuth endpoints

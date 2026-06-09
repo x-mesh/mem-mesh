@@ -23,7 +23,9 @@ try:
     NLI_MODEL_AVAILABLE = True
 except ImportError:
     NLI_MODEL_AVAILABLE = False
-    logger.info("sentence_transformers not available — conflict detection (NLI) disabled")
+    logger.info(
+        "sentence_transformers not available — conflict detection (NLI) disabled"
+    )
 
 DEFAULT_NLI_MODEL = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
 
@@ -124,7 +126,9 @@ class ConflictDetectorService:
 
         # If model loading previously failed, skip NLI entirely
         if self._model_load_failed:
-            logger.debug("NLI model load previously failed — using vector-only fallback")
+            logger.debug(
+                "NLI model load previously failed — using vector-only fallback"
+            )
             filtered = [
                 c
                 for c in candidates
@@ -136,7 +140,9 @@ class ConflictDetectorService:
 
         # Filter by similarity threshold (Stage 1 guard)
         filtered = [
-            c for c in candidates if c.get("similarity_score", 0) >= self.similarity_threshold
+            c
+            for c in candidates
+            if c.get("similarity_score", 0) >= self.similarity_threshold
         ]
 
         if not filtered:

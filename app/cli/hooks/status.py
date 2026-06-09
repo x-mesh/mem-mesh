@@ -8,8 +8,6 @@ import urllib.request
 from pathlib import Path
 from typing import Optional, Tuple
 
-from app.cli.prompts.behaviors import PROMPT_VERSION
-from app.cli.prompts.renderers import extract_prompt_version
 from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
 from app.cli.hooks.constants import (
     CLAUDE_HOOKS_DIR,
@@ -21,6 +19,8 @@ from app.cli.hooks.constants import (
     KIRO_SETTINGS,
 )
 from app.cli.hooks.json_ops import _count_mem_mesh_hook_entries
+from app.cli.prompts.behaviors import PROMPT_VERSION
+from app.cli.prompts.renderers import extract_prompt_version
 
 
 def _colorize_status(status: str) -> str:
@@ -81,7 +81,7 @@ def _extract_url_from_script(path: Path) -> Optional[str]:
         # New pattern: extract URL after `echo `
         echo_idx = line.find("|| echo ")
         if echo_idx >= 0:
-            after = line[echo_idx + len("|| echo "):]
+            after = line[echo_idx + len("|| echo ") :]
             for delim in (")", "}", " ", '"'):
                 idx = after.find(delim)
                 if idx >= 0:
@@ -159,9 +159,7 @@ def _detect_profile(hooks_dir: Path, settings_path: Optional[Path] = None) -> st
     has_stop_decide = (hooks_dir / "mem-mesh-stop-decide.sh").exists()
     has_reflect = (hooks_dir / "mem-mesh-reflect.sh").exists()
     has_stop = (hooks_dir / "mem-mesh-stop.sh").exists()
-    has_prompt_stop = (
-        _has_prompt_stop_hook(settings_path) if settings_path else False
-    )
+    has_prompt_stop = _has_prompt_stop_hook(settings_path) if settings_path else False
 
     if has_enhanced_stop:
         return "enhanced"
@@ -239,9 +237,13 @@ def cmd_status() -> None:
     reflect = CLAUDE_HOOKS_DIR / "mem-mesh-reflect.sh"
     print(f"  session hook:   {_colorize_status(_check_script_version(session_start))}")
     if enhanced_stop.exists():
-        print(f"  stop hook:      {_colorize_status(_check_script_version(enhanced_stop))} {dim('(enhanced)')}")
+        print(
+            f"  stop hook:      {_colorize_status(_check_script_version(enhanced_stop))} {dim('(enhanced)')}"
+        )
     elif stop_decide.exists():
-        print(f"  stop hook:      {_colorize_status(_check_script_version(stop_decide))} {dim('(standard)')}")
+        print(
+            f"  stop hook:      {_colorize_status(_check_script_version(stop_decide))} {dim('(standard)')}"
+        )
     elif _has_prompt_stop_hook(CLAUDE_SETTINGS):
         print(f"  stop hook:      {ok(f'native prompt (v{PROMPT_VERSION})')}")
     else:
@@ -254,18 +256,25 @@ def cmd_status() -> None:
     task_completed = CLAUDE_HOOKS_DIR / "mem-mesh-task-completed.sh"
     print(f"  session-end:    {_colorize_status(_check_script_version(session_end))}")
     print(f"  precompact:     {_colorize_status(_check_script_version(precompact))}")
-    print(f"  prompt-submit:  {_colorize_status(_check_script_version(user_prompt_submit))}")
-    print(f"  subagent-start: {_colorize_status(_check_script_version(subagent_start))}")
+    print(
+        f"  prompt-submit:  {_colorize_status(_check_script_version(user_prompt_submit))}"
+    )
+    print(
+        f"  subagent-start: {_colorize_status(_check_script_version(subagent_start))}"
+    )
     print(f"  subagent-stop:  {_colorize_status(_check_script_version(subagent_stop))}")
-    print(f"  task-completed: {_colorize_status(_check_script_version(task_completed))}")
-    print(f"  reflect hook:   {_colorize_status(_check_script_version(reflect))} {dim('(legacy)')}")
+    print(
+        f"  task-completed: {_colorize_status(_check_script_version(task_completed))}"
+    )
+    print(
+        f"  reflect hook:   {_colorize_status(_check_script_version(reflect))} {dim('(legacy)')}"
+    )
 
     detected = _detect_profile(CLAUDE_HOOKS_DIR, CLAUDE_SETTINGS)
     print(f"  profile:        {bold(detected)}")
 
-    baked_url = (
-        _extract_url_from_script(session_start)
-        or _extract_url_from_script(stop)
+    baked_url = _extract_url_from_script(session_start) or _extract_url_from_script(
+        stop
     )
     if baked_url:
         print(f"  target URL:     {info(baked_url)}")
@@ -303,7 +312,9 @@ def cmd_status() -> None:
                 for h in data.get("hooks", [])
                 if h.get("name", "").startswith("mem-mesh:")
             ]
-            print(f"  hooks.json:  {ok(f'{len(mem_hooks)} mem-mesh hook(s) registered')}")
+            print(
+                f"  hooks.json:  {ok(f'{len(mem_hooks)} mem-mesh hook(s) registered')}"
+            )
         except (json.JSONDecodeError, OSError):
             print(f"  hooks.json: {err('parse error')}")
     else:
@@ -322,11 +333,21 @@ def cmd_status() -> None:
     cursor_subagent_stop = CURSOR_HOOKS_DIR / "mem-mesh-subagent-stop.sh"
     print(f"  session hook: {_colorize_status(_check_script_version(cursor_session))}")
     print(f"  stop hook:    {_colorize_status(_check_script_version(cursor_stop))}")
-    print(f"  session-end:  {_colorize_status(_check_script_version(cursor_session_end))}")
-    print(f"  beforeSubmit: {_colorize_status(_check_script_version(cursor_before_submit))}")
-    print(f"  precompact:   {_colorize_status(_check_script_version(cursor_precompact))}")
-    print(f"  subagentStart:{_colorize_status(_check_script_version(cursor_subagent_start))}")
-    print(f"  subagentStop: {_colorize_status(_check_script_version(cursor_subagent_stop))}")
+    print(
+        f"  session-end:  {_colorize_status(_check_script_version(cursor_session_end))}"
+    )
+    print(
+        f"  beforeSubmit: {_colorize_status(_check_script_version(cursor_before_submit))}"
+    )
+    print(
+        f"  precompact:   {_colorize_status(_check_script_version(cursor_precompact))}"
+    )
+    print(
+        f"  subagentStart:{_colorize_status(_check_script_version(cursor_subagent_start))}"
+    )
+    print(
+        f"  subagentStop: {_colorize_status(_check_script_version(cursor_subagent_stop))}"
+    )
 
     cursor_url = _extract_url_from_script(cursor_session) or _extract_url_from_script(
         cursor_stop
@@ -375,13 +396,20 @@ def cmd_status() -> None:
             claude_scripts = sorted(claude_local_dir.glob("mem-mesh-*.sh"))
             for script in claude_scripts:
                 status_str = _check_script_version(script)
-                inactive = "" if claude_local_registered else dim(" (inactive — not in .claude/settings.json)")
+                inactive = (
+                    ""
+                    if claude_local_registered
+                    else dim(" (inactive — not in .claude/settings.json)")
+                )
                 print(f"  {script.name}: {_colorize_status(status_str)}{inactive}")
 
         # Cursor project-local hooks
         cursor_dir = project_root / ".cursor" / "hooks"
         cursor_settings = project_root / ".cursor" / "hooks.json"
-        cursor_registered = cursor_settings.exists() and _count_mem_mesh_hook_entries(cursor_settings) > 0
+        cursor_registered = (
+            cursor_settings.exists()
+            and _count_mem_mesh_hook_entries(cursor_settings) > 0
+        )
         for name in (
             "mem-mesh-session-start.sh",
             "mem-mesh-session-end.sh",
@@ -394,7 +422,9 @@ def cmd_status() -> None:
             script = cursor_dir / name
             status_str = _check_script_version(script)
             if script.exists() and not cursor_registered:
-                print(f"  {name}: {_colorize_status(status_str)}{dim(' (inactive — not in hooks.json)')}")
+                print(
+                    f"  {name}: {_colorize_status(status_str)}{dim(' (inactive — not in hooks.json)')}"
+                )
             else:
                 print(f"  {name}: {_colorize_status(status_str)}")
         cursor_template = project_root / ".cursor" / "hooks.mem-mesh.example.json"

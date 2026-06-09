@@ -107,7 +107,10 @@ class TestPinCRUD:
 
         # Then
         assert updated_pin is not None
-        assert updated_pin.content == "Updated pin content for testing — modified content verifying that pin service correctly applies updates and returns new version"
+        assert (
+            updated_pin.content
+            == "Updated pin content for testing — modified content verifying that pin service correctly applies updates and returns new version"
+        )
         assert updated_pin.importance == 5
         assert updated_pin.tags == ["updated", "test"]
 
@@ -371,7 +374,9 @@ class TestPinEdgeCases:
         """존재하지 않는 Pin 업데이트 테스트"""
         # Given
         non_existent_id = "non-existent-pin-id"
-        update_data = PinUpdate(content="Updated content for testing — modified description with additional context about the implementation approach and expected outcomes of the change")
+        update_data = PinUpdate(
+            content="Updated content for testing — modified description with additional context about the implementation approach and expected outcomes of the change"
+        )
 
         # When
         result = await pin_service.update_pin(non_existent_id, update_data)

@@ -194,7 +194,9 @@ class SearchService:
                                 project_id=row["project_id"],
                                 category=row["category"],
                                 source=row["source"],
-                                client=row["client"] if "client" in row.keys() else None,
+                                client=(
+                                    row["client"] if "client" in row.keys() else None
+                                ),
                                 tags=_parse_tags(row),
                             )
                             search_results.append(search_result)

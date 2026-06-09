@@ -47,7 +47,9 @@ def create_dashboard_app() -> FastAPI:
     setup_exception_handlers(app)
 
     # Serve static files
-    app.mount("/static", StaticFiles(directory=str(_WEB_ROOT / "static")), name="static")
+    app.mount(
+        "/static", StaticFiles(directory=str(_WEB_ROOT / "static")), name="static"
+    )
 
     # Register routers (excluding MCP)
     app.include_router(websocket_router)

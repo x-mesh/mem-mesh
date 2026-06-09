@@ -60,7 +60,9 @@ def _run_hook(
 
 def test_stop_decide_no_keyword_match_exits_zero(tmp_path: Path) -> None:
     """A long message with no save-triggering keywords should exit 0 without saving."""
-    script = _render_and_write(tmp_path, STOP_DECIDE_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, STOP_DECIDE_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(
         script,
         {
@@ -76,7 +78,9 @@ def test_stop_decide_no_keyword_match_exits_zero(tmp_path: Path) -> None:
 
 def test_stop_decide_bug_keyword_triggers_save(tmp_path: Path) -> None:
     """A message containing bug/fix/error keywords should attempt a save and exit 0."""
-    script = _render_and_write(tmp_path, STOP_DECIDE_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, STOP_DECIDE_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(
         script,
         {
@@ -90,7 +94,9 @@ def test_stop_decide_bug_keyword_triggers_save(tmp_path: Path) -> None:
 
 def test_stop_decide_idea_keyword_triggers_save(tmp_path: Path) -> None:
     """A message containing idea/제안 keywords should attempt a save and exit 0."""
-    script = _render_and_write(tmp_path, STOP_DECIDE_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, STOP_DECIDE_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(
         script,
         {
@@ -103,7 +109,9 @@ def test_stop_decide_idea_keyword_triggers_save(tmp_path: Path) -> None:
 
 def test_stop_decide_loop_guard_exits_immediately(tmp_path: Path) -> None:
     """When stop_hook_active is true the script must exit 0 immediately (loop guard)."""
-    script = _render_and_write(tmp_path, STOP_DECIDE_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, STOP_DECIDE_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(
         script,
         {
@@ -119,7 +127,9 @@ def test_stop_decide_loop_guard_exits_immediately(tmp_path: Path) -> None:
 
 def test_stop_decide_short_message_exits(tmp_path: Path) -> None:
     """A message shorter than 50 characters should be skipped (exit 0)."""
-    script = _render_and_write(tmp_path, STOP_DECIDE_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, STOP_DECIDE_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(
         script,
         {
@@ -132,7 +142,9 @@ def test_stop_decide_short_message_exits(tmp_path: Path) -> None:
 
 def test_stop_decide_already_saved_via_mcp_exits(tmp_path: Path) -> None:
     """If the message contains 'mcp__mem-mesh__add' the hook should skip and exit 0."""
-    script = _render_and_write(tmp_path, STOP_DECIDE_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, STOP_DECIDE_HOOK_TEMPLATE, project_id="test-project"
+    )
     # The message must be >50 chars AND contain the MCP marker
     long_msg = (
         "이 메시지는 mcp__mem-mesh__add 도구를 통해 이미 저장되었으므로 "
@@ -192,7 +204,9 @@ def test_session_start_includes_rules_text(tmp_path: Path) -> None:
 
 def test_kiro_stop_no_keyword_exits_zero(tmp_path: Path) -> None:
     """A KIRO_RESULT with no save-triggering keywords should exit 0 without saving."""
-    script = _render_and_write(tmp_path, KIRO_STOP_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, KIRO_STOP_HOOK_TEMPLATE, project_id="test-project"
+    )
     message = (
         "This is a regular response with no special keywords at all, "
         "just describing some general information about the system."
@@ -203,7 +217,9 @@ def test_kiro_stop_no_keyword_exits_zero(tmp_path: Path) -> None:
 
 def test_kiro_stop_decision_keyword_triggers_save(tmp_path: Path) -> None:
     """A KIRO_RESULT containing architecture/decision keywords should attempt save and exit 0."""
-    script = _render_and_write(tmp_path, KIRO_STOP_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, KIRO_STOP_HOOK_TEMPLATE, project_id="test-project"
+    )
     message = "아키텍처 결정을 변경했습니다. 새로운 설계를 선택하였습니다."
     result = _run_hook(script, {}, env={"KIRO_RESULT": message})
     # curl fails gracefully; script must still exit 0
@@ -217,7 +233,9 @@ def test_kiro_stop_decision_keyword_triggers_save(tmp_path: Path) -> None:
 
 def test_user_prompt_submit_short_prompt_exits(tmp_path: Path) -> None:
     """A prompt shorter than 30 chars should be skipped (exit 0, no output)."""
-    script = _render_and_write(tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(script, {"prompt": "hello"})
     assert result.returncode == 0
     assert result.stdout.strip() == ""
@@ -225,10 +243,14 @@ def test_user_prompt_submit_short_prompt_exits(tmp_path: Path) -> None:
 
 def test_user_prompt_submit_no_keyword_exits(tmp_path: Path) -> None:
     """A long prompt without matching keywords should exit 0 with no output."""
-    script = _render_and_write(tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(
         script,
-        {"prompt": "Please write a function that checks if a number is prime and returns boolean"},
+        {
+            "prompt": "Please write a function that checks if a number is prime and returns boolean"
+        },
     )
     assert result.returncode == 0
     assert result.stdout.strip() == ""
@@ -236,7 +258,9 @@ def test_user_prompt_submit_no_keyword_exits(tmp_path: Path) -> None:
 
 def test_user_prompt_submit_keyword_match_exits_zero(tmp_path: Path) -> None:
     """A prompt with keyword match should exit 0 (curl fails but script handles gracefully)."""
-    script = _render_and_write(tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(
         script,
         {"prompt": "이전에 결정한 아키텍처는 무엇이었나요? 변경 이유를 알고 싶습니다."},
@@ -246,7 +270,9 @@ def test_user_prompt_submit_keyword_match_exits_zero(tmp_path: Path) -> None:
 
 def test_user_prompt_submit_empty_prompt_exits(tmp_path: Path) -> None:
     """An empty prompt should exit 0 with no output."""
-    script = _render_and_write(tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(script, {})
     assert result.returncode == 0
     assert result.stdout.strip() == ""
@@ -259,7 +285,9 @@ def test_user_prompt_submit_empty_prompt_exits(tmp_path: Path) -> None:
 
 def test_subagent_start_lightweight_agent_exits(tmp_path: Path) -> None:
     """Lightweight agent types (Explore, Glob, etc.) should exit 0 immediately."""
-    script = _render_and_write(tmp_path, SUBAGENT_START_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, SUBAGENT_START_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(script, {"agent_type": "Explore", "agent_id": "test-123"})
     assert result.returncode == 0
     assert result.stdout.strip() == ""
@@ -267,7 +295,9 @@ def test_subagent_start_lightweight_agent_exits(tmp_path: Path) -> None:
 
 def test_subagent_start_plan_agent_exits_zero(tmp_path: Path) -> None:
     """A Plan agent should attempt context injection and exit 0 (curl fails gracefully)."""
-    script = _render_and_write(tmp_path, SUBAGENT_START_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, SUBAGENT_START_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(script, {"agent_type": "Plan", "agent_id": "test-456"})
     assert result.returncode == 0
 
@@ -279,7 +309,9 @@ def test_subagent_start_plan_agent_exits_zero(tmp_path: Path) -> None:
 
 def test_subagent_stop_loop_guard_exits(tmp_path: Path) -> None:
     """When stop_hook_active is true, subagent-stop must exit 0 immediately."""
-    script = _render_and_write(tmp_path, SUBAGENT_STOP_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, SUBAGENT_STOP_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(
         script,
         {
@@ -293,7 +325,9 @@ def test_subagent_stop_loop_guard_exits(tmp_path: Path) -> None:
 
 def test_subagent_stop_short_message_exits(tmp_path: Path) -> None:
     """A message shorter than 100 chars should be skipped."""
-    script = _render_and_write(tmp_path, SUBAGENT_STOP_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, SUBAGENT_STOP_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(
         script,
         {
@@ -307,7 +341,9 @@ def test_subagent_stop_short_message_exits(tmp_path: Path) -> None:
 
 def test_subagent_stop_bug_keyword_triggers_save(tmp_path: Path) -> None:
     """A subagent message with bug/fix keywords should attempt save and exit 0."""
-    script = _render_and_write(tmp_path, SUBAGENT_STOP_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, SUBAGENT_STOP_HOOK_TEMPLATE, project_id="test-project"
+    )
     long_msg = "버그를 수정했습니다. error를 해결한 fix 입니다. " * 5
     result = _run_hook(
         script,
@@ -322,7 +358,9 @@ def test_subagent_stop_bug_keyword_triggers_save(tmp_path: Path) -> None:
 
 def test_subagent_stop_no_keyword_exits(tmp_path: Path) -> None:
     """A long message without keywords should be skipped."""
-    script = _render_and_write(tmp_path, SUBAGENT_STOP_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, SUBAGENT_STOP_HOOK_TEMPLATE, project_id="test-project"
+    )
     long_msg = "This is a regular message about general system information. " * 5
     result = _run_hook(
         script,
@@ -342,7 +380,9 @@ def test_subagent_stop_no_keyword_exits(tmp_path: Path) -> None:
 
 def test_task_completed_saves_task(tmp_path: Path) -> None:
     """A task with subject should attempt save and exit 0."""
-    script = _render_and_write(tmp_path, TASK_COMPLETED_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, TASK_COMPLETED_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(
         script,
         {
@@ -357,6 +397,8 @@ def test_task_completed_saves_task(tmp_path: Path) -> None:
 
 def test_task_completed_empty_subject_exits(tmp_path: Path) -> None:
     """An empty task_subject should exit 0 with no output."""
-    script = _render_and_write(tmp_path, TASK_COMPLETED_HOOK_TEMPLATE, project_id="test-project")
+    script = _render_and_write(
+        tmp_path, TASK_COMPLETED_HOOK_TEMPLATE, project_id="test-project"
+    )
     result = _run_hook(script, {})
     assert result.returncode == 0

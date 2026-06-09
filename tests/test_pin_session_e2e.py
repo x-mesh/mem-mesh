@@ -10,10 +10,6 @@
 7. 새 세션 resume (빈 세션 + cross-session 병합)
 """
 
-import asyncio
-import os
-import tempfile
-
 import pytest
 
 from app.core.database.base import Database
@@ -114,9 +110,7 @@ async def test_full_pin_session_flow(services):
     assert completed.completed_at is not None
 
     # resume 후 completed_pins 증가 확인
-    ctx_after = await session_svc.resume_last_session(
-        PROJECT_ID, USER_ID, expand=True
-    )
+    ctx_after = await session_svc.resume_last_session(PROJECT_ID, USER_ID, expand=True)
     assert ctx_after.completed_pins >= 1
     assert ctx_after.open_pins >= 1  # pin2는 아직 open
 
@@ -245,10 +239,8 @@ async def test_cross_session_excludes_current(services):
     # 첫 번째 세션 종료
     await session_svc.end_session(first_session_id, summary="First session done")
 
-    # 두 번째 세션 생성 (빈 세션)
-    new_session = await session_svc.get_or_create_active_session(
-        project_id=proj, user_id=USER_ID
-    )
+    # 두 번째 세션 생성 (빈 세션) — side effect만 필요(아래 cross-session fallback 검증용)
+    await session_svc.get_or_create_active_session(project_id=proj, user_id=USER_ID)
 
     # resume → 빈 세션이므로 cross-session fallback
     ctx = await session_svc.resume_last_session(proj, USER_ID, expand=True)

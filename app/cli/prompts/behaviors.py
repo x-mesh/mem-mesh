@@ -182,6 +182,7 @@ class StopPromptConfig:
     max_reason_chars: int
     valid_categories: tuple
 
+
 STOP_PROMPT_CONFIG = StopPromptConfig(
     max_reason_chars=80,
     valid_categories=("bug", "decision", "code_snippet", "idea", "incident"),

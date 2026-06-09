@@ -15,7 +15,10 @@ class TestContentQualityGate:
 
     def test_valid_content_passes(self):
         """충분히 긴 정상 콘텐츠는 통과한다"""
-        content = "SQLite WAL 모드로 변경 결정. 동시 읽기 성능이 크게 개선되었으며 write lock 경합이 줄었다. " * 2
+        content = (
+            "SQLite WAL 모드로 변경 결정. 동시 읽기 성능이 크게 개선되었으며 write lock 경합이 줄었다. "
+            * 2
+        )
         result = content_quality_gate(content)
         assert result == content.strip()
 
@@ -47,14 +50,17 @@ class TestContentQualityGate:
 
     # ── 저품질 접두사 ─────────────────────────────────────────────────────────
 
-    @pytest.mark.parametrize("prefix", [
-        "좋습니다",
-        "네.",
-        "네!",
-        "네,",
-        "알겠습니다",
-        "안녕하세요",
-    ])
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "좋습니다",
+            "네.",
+            "네!",
+            "네,",
+            "알겠습니다",
+            "안녕하세요",
+        ],
+    )
     def test_rejects_low_quality_prefixes(self, prefix):
         """저품질 접두사로 시작하면 MemoryLowQualityError"""
         content = prefix + " " + "추가 내용입니다. " * 20
@@ -62,16 +68,19 @@ class TestContentQualityGate:
             content_quality_gate(content)
         assert exc_info.value.details["prefix"] == prefix
 
-    @pytest.mark.parametrize("prefix", [
-        "OK",
-        "Sure",
-        "Got it",
-        "I understand",
-        "Yes,",
-        "Yes.",
-        "Alright",
-        "Okay",
-    ])
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "OK",
+            "Sure",
+            "Got it",
+            "I understand",
+            "Yes,",
+            "Yes.",
+            "Alright",
+            "Okay",
+        ],
+    )
     def test_rejects_english_low_quality_prefixes(self, prefix):
         """영어 저품질 접두사로 시작하면 MemoryLowQualityError"""
         content = prefix + " " + "This is additional filler content for testing. " * 10
@@ -108,7 +117,10 @@ class TestContentQualityGate:
     def test_strips_spec_tag(self):
         """<SPEC> 태그 내용을 제거한다"""
         xml_block = "<SPEC>\n기술 명세서 내용\n</SPEC>"
-        real_content = "API 설계 결정 사항. REST 방식으로 통일하기로 함. 이유는 클라이언트 호환성. " * 3
+        real_content = (
+            "API 설계 결정 사항. REST 방식으로 통일하기로 함. 이유는 클라이언트 호환성. "
+            * 3
+        )
         content = xml_block + "\n" + real_content
         result = content_quality_gate(content)
         assert "<SPEC>" not in result
@@ -141,7 +153,8 @@ class TestContentQualityGate:
             "  Python: 3.11.5\n"
             "  Shell: zsh\n"
             "</EnvironmentContext>\n"
-            "데이터베이스 인덱스 최적화 결정. B-tree 인덱스를 복합 인덱스로 교체하여 쿼리 성능 3배 향상. " * 2
+            "데이터베이스 인덱스 최적화 결정. B-tree 인덱스를 복합 인덱스로 교체하여 쿼리 성능 3배 향상. "
+            * 2
         )
         result = content_quality_gate(content)
         assert "OS: macOS" not in result

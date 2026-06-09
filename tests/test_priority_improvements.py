@@ -27,7 +27,9 @@ from app.core.services.cache_manager import (  # noqa: E402
 from app.core.services.unified_search import UnifiedSearchService  # noqa: E402
 
 
-@pytest.mark.skip(reason="Integration test: requires real database and embedding service")
+@pytest.mark.skip(
+    reason="Integration test: requires real database and embedding service"
+)
 async def test_project_name_boosting():
     """작업 1: 프로젝트명 검색 부스팅 테스트"""
     print("\n=== 작업 1: 프로젝트명 검색 부스팅 테스트 ===")
@@ -175,7 +177,9 @@ async def test_unified_search_enabled_by_default():
     print("\n✅ 작업 3 테스트 완료: UnifiedSearch가 기본값으로 활성화됨")
 
 
-@pytest.mark.skip(reason="Integration test: requires real database and embedding service")
+@pytest.mark.skip(
+    reason="Integration test: requires real database and embedding service"
+)
 async def test_integrated_improvements():
     """통합 테스트: 모든 개선사항이 함께 작동하는지 확인"""
     print("\n=== 통합 테스트: 모든 개선사항 ===")

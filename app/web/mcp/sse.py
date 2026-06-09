@@ -82,7 +82,21 @@ def _detect_client_from_request(request: Request) -> str:
         (["zed.dev", "zed/"], "zed"),
         (["neovim", "nvim"], "neovim"),
         (["emacs"], "emacs"),
-        (["jetbrains", "intellij", "pycharm", "webstorm", "goland", "rider", "phpstorm", "rubymine", "clion", "datagrip"], "jetbrains"),
+        (
+            [
+                "jetbrains",
+                "intellij",
+                "pycharm",
+                "webstorm",
+                "goland",
+                "rider",
+                "phpstorm",
+                "rubymine",
+                "clion",
+                "datagrip",
+            ],
+            "jetbrains",
+        ),
         (["vscode", "visual studio code", "vs code"], "vscode"),
         (["visual studio"], "visual_studio"),
         (["sublime"], "sublime"),
@@ -187,7 +201,9 @@ async def process_jsonrpc_request(
             new_session_id = str(uuid.uuid4())
             client_info = params.get("clientInfo", {}) if params else {}
             _create_session(new_session_id, client_info)
-            logger.info(f"New session created: {new_session_id}, client: {client_info.get('name', 'unknown')}")
+            logger.info(
+                f"New session created: {new_session_id}, client: {client_info.get('name', 'unknown')}"
+            )
             return format_jsonrpc_response(result, req_id), new_session_id
 
         elif method == "tools/list":
@@ -419,7 +435,9 @@ async def legacy_message_endpoint(
         raise HTTPException(status_code=400, detail="Invalid JSON")
     except Exception as e:
         if "Disconnect" in type(e).__name__:
-            logger.debug(f"Client disconnected during legacy request: {type(e).__name__}")
+            logger.debug(
+                f"Client disconnected during legacy request: {type(e).__name__}"
+            )
             return Response(status_code=499)
         raise
 

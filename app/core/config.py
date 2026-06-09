@@ -28,6 +28,7 @@ def _default_data_dir() -> Path:
     legacy = Path.cwd() / "data" / "memories.db"
     if legacy.exists():
         import sys
+
         print(
             f"[mem-mesh] Using legacy database at {legacy} (found in CWD). "
             f"To use the standard per-user location instead, remove this file "

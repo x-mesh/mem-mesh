@@ -60,7 +60,9 @@ class EmbeddingManagerService:
 
         # Query target model (goal model selected during onboarding)
         target_model = await self.db.get_embedding_metadata("target_embedding_model")
-        target_dim_str = await self.db.get_embedding_metadata("target_embedding_dimension")
+        target_dim_str = await self.db.get_embedding_metadata(
+            "target_embedding_dimension"
+        )
         target_dim = int(target_dim_str) if target_dim_str else None
 
         # Check match: if target exists, compare target vs stored; otherwise stored vs current
