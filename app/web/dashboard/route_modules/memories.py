@@ -9,6 +9,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.core.errors import ContextNotFoundError, MemoryNotFoundError
 from app.core.schemas.requests import AddParams, UpdateParams
 from app.core.schemas.responses import (
     AddResponse,
@@ -16,9 +17,7 @@ from app.core.schemas.responses import (
     DeleteResponse,
     UpdateResponse,
 )
-from app.core.errors import ContextNotFoundError
 from app.core.services.context import ContextService
-from app.core.errors import MemoryNotFoundError
 from app.core.services.memory import MemoryService
 
 from ...common.dependencies import (

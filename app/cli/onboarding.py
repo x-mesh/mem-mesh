@@ -36,7 +36,6 @@ def _detect_target() -> str:
     return "all"
 
 
-
 def _has_docker() -> bool:
     """Check if docker and docker-compose are available."""
     return shutil.which("docker") is not None
@@ -52,7 +51,9 @@ def _warm_uvx_cache() -> bool:
 
     Returns True if warm-up succeeded.
     """
-    print(f"  {dim('Warming uv cache (downloads mem-mesh[server] — can take a minute on first run)...')}")
+    print(
+        f"  {dim('Warming uv cache (downloads mem-mesh[server] — can take a minute on first run)...')}"
+    )
     try:
         result = subprocess.run(
             ["uvx", "--from", "mem-mesh[server]", "mem-mesh", "--help"],
@@ -61,9 +62,13 @@ def _warm_uvx_cache() -> bool:
             timeout=600,
         )
         if result.returncode == 0:
-            print(f"  {ok('uv cache warmed — MCP tools will spawn mem-mesh instantly.')}")
+            print(
+                f"  {ok('uv cache warmed — MCP tools will spawn mem-mesh instantly.')}"
+            )
             return True
-        print(f"  {warn('uv cache warm-up returned non-zero; first MCP call may be slow.')}")
+        print(
+            f"  {warn('uv cache warm-up returned non-zero; first MCP call may be slow.')}"
+        )
         for line in result.stderr.strip().splitlines()[-3:]:
             print(f"    {dim(line)}")
         return False
@@ -154,7 +159,9 @@ def _prompt_docker_options() -> dict:
     model_options = []
     for name, dim_size, desc in EMBEDDING_MODELS:
         model_options.append(f"{name} {dim(f'({desc}, dim={dim_size})')}")
-    chosen_model_opt = _prompt_choice("Choose [1]: ", model_options, default=model_options[0])
+    chosen_model_opt = _prompt_choice(
+        "Choose [1]: ", model_options, default=model_options[0]
+    )
     model_idx = model_options.index(chosen_model_opt)
     model_name, embedding_dim, _ = EMBEDDING_MODELS[model_idx]
     print()
@@ -165,9 +172,11 @@ def _prompt_docker_options() -> dict:
     print()
     volume_options = [
         f"Docker volume {dim('(managed by Docker, portable)')}",
-        f"Local directory {dim(f'(./mem-mesh-data in current dir)')}"
+        f"Local directory {dim('(./mem-mesh-data in current dir)')}",
     ]
-    chosen_volume = _prompt_choice("Choose [1]: ", volume_options, default=volume_options[0])
+    chosen_volume = _prompt_choice(
+        "Choose [1]: ", volume_options, default=volume_options[0]
+    )
     use_local_volume = volume_options.index(chosen_volume) == 1
     print()
 
@@ -341,7 +350,9 @@ def cmd_onboarding(
             print(dim("  (--yes: skipping server setup)"))
         else:
             # Ask how to set up the server
-            print(f"  {warn('No running server detected. How would you like to set it up?')}")
+            print(
+                f"  {warn('No running server detected. How would you like to set it up?')}"
+            )
             print()
 
             has_uvx = _has_uvx()
@@ -405,15 +416,17 @@ def cmd_onboarding(
 
     hook_default = "n" if preferred_mcp_mode == "uvx" else "Y"
     if preferred_mcp_mode == "uvx":
-        print(
-            f"  {dim('Hooks require a running API server (hook scripts use curl).')}"
-        )
+        print(f"  {dim('Hooks require a running API server (hook scripts use curl).')}")
         print(
             f"  {dim('With uvx, MCP works without a server but hooks do not. Skip unless you will run the server separately.')}"
         )
 
     if not yes:
-        prompt_label = f"  Install hooks for {target}? [{hook_default}/n] " if hook_default == "Y" else f"  Install hooks for {target}? [y/{hook_default}] "
+        prompt_label = (
+            f"  Install hooks for {target}? [{hook_default}/n] "
+            if hook_default == "Y"
+            else f"  Install hooks for {target}? [y/{hook_default}] "
+        )
         raw = input(prompt_label).strip().lower()
         if hook_default == "Y":
             skip_hooks = raw in ("n", "no")
@@ -450,7 +463,6 @@ def cmd_onboarding(
     _print_summary(resolved_url, reachable, hooks_installed, target, preferred_mcp_mode)
 
 
-
 def _print_summary(
     url: str,
     server_ok: bool,
@@ -464,9 +476,15 @@ def _print_summary(
 
     if mcp_mode == "uvx":
         print(f"  MCP:         {ok('uvx (auto-spawned by each tool)')}")
-        print(f"  Dashboard:   {dim('run `uvx --from \"mem-mesh[server]\" mem-mesh serve` to enable')}")
+        # Built outside the f-string: the command contains double quotes, which
+        # cannot be backslash-escaped inside an f-string expression on Python 3.9.
+        serve_cmd = 'uvx --from "mem-mesh[server]" mem-mesh serve'
+        serve_hint = f"run `{serve_cmd}` to enable"
+        print(f"  Dashboard:   {dim(serve_hint)}")
     else:
-        print(f"  API server:  {ok(url) if server_ok else warn(url + ' (not running)')}")
+        print(
+            f"  API server:  {ok(url) if server_ok else warn(url + ' (not running)')}"
+        )
         print(
             f"  Dashboard:   {info(url + '/dashboard') if server_ok else dim('unavailable')}"
         )
@@ -475,7 +493,9 @@ def _print_summary(
     )
     print()
     if mcp_mode == "uvx":
-        print(f"  {bold('Next step:')} restart your MCP client (Cursor / Claude Desktop / Kiro).")
+        print(
+            f"  {bold('Next step:')} restart your MCP client (Cursor / Claude Desktop / Kiro)."
+        )
         print(dim("             First MCP call spawns mem-mesh from the uv cache."))
     elif not server_ok:
         print(f"  {bold('Next step:')} Start the server with {info('mem-mesh serve')}")

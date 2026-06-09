@@ -14,11 +14,10 @@ import asyncio
 import json
 import logging
 import math
+import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
-
-import sqlite3
 
 if TYPE_CHECKING:
     from .search_quality import SearchIntent
@@ -146,7 +145,9 @@ class UnifiedSearchService:
             self._rrf_vector_weight = _settings.rrf_vector_weight
             self._rrf_text_weight = _settings.rrf_text_weight
         except Exception as e:
-            logger.debug(f"Failed to load RRF weights from settings, using defaults: {e}")
+            logger.debug(
+                f"Failed to load RRF weights from settings, using defaults: {e}"
+            )
             self._rrf_vector_weight = 1.0
             self._rrf_text_weight = 1.2
 
@@ -460,7 +461,11 @@ class UnifiedSearchService:
         return query
 
     def _auto_adjust_params(
-        self, intent: "SearchIntent", search_mode: str, limit: int, category: Optional[str]
+        self,
+        intent: "SearchIntent",
+        search_mode: str,
+        limit: int,
+        category: Optional[str],
     ) -> tuple:
         """의도 기반 파라미터 자동 조정"""
         # Adjust search mode
@@ -1167,7 +1172,10 @@ class UnifiedSearchService:
             return None
 
     def _calculate_recency_score(
-        self, created_at: Union[str, datetime], oldest: Union[str, datetime], newest: Union[str, datetime]
+        self,
+        created_at: Union[str, datetime],
+        oldest: Union[str, datetime],
+        newest: Union[str, datetime],
     ) -> float:
         """최신성 점수 계산"""
         try:

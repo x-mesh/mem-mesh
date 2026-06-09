@@ -5,9 +5,57 @@ UnifiedSearchService vs Legacy SearchService 실제 비교
 
 import asyncio
 
+import pytest
+import torch.nn as _nn
+
 from app.core.config import create_settings
 from app.core.schemas.requests import AddParams, SearchParams
 from app.core.storage.direct import DirectStorageBackend
+
+# Captured at import time (test collection) while torch.nn is pristine — before
+# any test runs. Used to undo a leaked accelerate ``init_empty_weights()`` patch.
+_ORIG_REGISTER_PARAMETER = _nn.Module.register_parameter
+_ORIG_REGISTER_BUFFER = _nn.Module.register_buffer
+
+
+@pytest.fixture(autouse=True)
+def _isolate_real_model_and_settings():
+    """이 테스트를 full-suite 순서로부터 격리(deterministic).
+
+    근본원인(실측 확인): 앞선 어떤 테스트가 torch 전역 default device를 'meta'로
+    남긴다(accelerate/transformers의 meta-init 경로가 복원되지 않는 케이스). 그러면
+    여기서 SentenceTransformer를 새로 로드할 때 "Cannot copy out of meta tensor"로
+    실패한다(단독 실행 시엔 default device가 cpu라 통과 → flaky). 모델 로드 전에
+    default device를 cpu로 되돌려 결정적으로 만든다.
+
+    또한 이 테스트는 전역 ``config._settings``를 직접 교체하므로(legacy→unified),
+    저장/복원해 다른 테스트로의 누수와 다른 테스트로부터의 상속을 모두 막는다.
+    """
+    import torch
+    import torch.nn as nn
+
+    from app.core import config as _config
+
+    saved_settings = _config._settings
+
+    # 복구: 앞선 어떤 테스트/라이브러리가 accelerate ``init_empty_weights()``를
+    # 누출하면 ``nn.Module.register_parameter``가 패치된 채 남아 모든 신규 모델
+    # 파라미터가 meta 장치에 생성된다(실측 확인: register_parameter_patched=True,
+    # linear_weight_is_meta=True). 그 상태에서 여기서 SentenceTransformer를 새로
+    # 로드하면 "Cannot copy out of meta tensor"로 실패한다(단독 실행은 통과 →
+    # full-suite 순서 의존 flaky). import 시점에 캡처한 pristine 메서드로 되돌려
+    # 결정적으로 만든다. (default device도 방어적으로 cpu로 리셋.)
+    nn.Module.register_parameter = _ORIG_REGISTER_PARAMETER
+    nn.Module.register_buffer = _ORIG_REGISTER_BUFFER
+    try:
+        torch.set_default_device("cpu")
+    except Exception:
+        pass
+
+    try:
+        yield
+    finally:
+        _config._settings = saved_settings
 
 
 async def test_search_quality():

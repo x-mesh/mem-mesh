@@ -32,8 +32,8 @@ HOOK_SAVE_BASIC = EvalScenario(
         ConversationMessage(
             role="system-reminder",
             content=(
-                'Stop hook feedback: Prompt hook condition was met: '
-                'mem-mesh에 저장하세요. mcp__mem-mesh__add('
+                "Stop hook feedback: Prompt hook condition was met: "
+                "mem-mesh에 저장하세요. mcp__mem-mesh__add("
                 'category="bug", project_id="mem-mesh"): '
                 "## 맥락\nZeroDivisionError 버그를 수정했습니다.\n\n"
                 "## 상세\ntests/test_real_data_search.py에서 빈 DB일 때 "
@@ -74,7 +74,7 @@ HOOK_SAVE_ALREADY_SAVED = EvalScenario(
         ConversationMessage(
             role="system-reminder",
             content=(
-                'Stop hook feedback: mem-mesh에 저장하세요. '
+                "Stop hook feedback: mem-mesh에 저장하세요. "
                 'mcp__mem-mesh__add(category="decision", project_id="mem-mesh"): '
                 "## 맥락\n하이브리드 저장 방식 채택"
             ),

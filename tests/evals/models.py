@@ -85,7 +85,9 @@ class EvalScenario(BaseModel):
 
     # IDE / hook event metadata (optional)
     ide: Optional[str] = None  # "claude" | "kiro" | "cursor"
-    hook_event: Optional[str] = None  # "SessionStart" | "Stop" | "SessionEnd" | "PreCompact"
+    hook_event: Optional[str] = (
+        None  # "SessionStart" | "Stop" | "SessionEnd" | "PreCompact"
+    )
 
 
 # ---------------------------------------------------------------------------

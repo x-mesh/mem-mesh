@@ -5,13 +5,6 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from app.cli.prompts.behaviors import PROMPT_VERSION
-from app.cli.prompts.renderers import (
-    render_kiro_auto_create_pin,
-    render_kiro_auto_save,
-    render_kiro_load_context,
-)
-from app.cli.hooks.renderer import _write_script
 from app.cli.hooks.cursor_adapters import (
     adapt_cursor_before_submit_prompt,
     adapt_cursor_precompact,
@@ -19,6 +12,8 @@ from app.cli.hooks.cursor_adapters import (
     adapt_cursor_subagent_stop,
 )
 from app.cli.hooks.installer import _build_cursor_hooks_settings
+from app.cli.hooks.json_ops import _remove_mem_mesh_hooks_from_json
+from app.cli.hooks.renderer import _render_local_template, _write_script
 from app.cli.hooks.templates import (
     CURSOR_PROJECT_AUTO_SAVE_TEMPLATE,
     CURSOR_PROJECT_SESSION_END_TEMPLATE,
@@ -28,8 +23,12 @@ from app.cli.hooks.templates import (
     LOCAL_SUBAGENT_STOP_HOOK_TEMPLATE,
     LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
 )
-from app.cli.hooks.renderer import _render_local_template
-from app.cli.hooks.json_ops import _remove_mem_mesh_hooks_from_json
+from app.cli.prompts.behaviors import PROMPT_VERSION
+from app.cli.prompts.renderers import (
+    render_kiro_auto_create_pin,
+    render_kiro_auto_save,
+    render_kiro_load_context,
+)
 
 
 def _find_project_root() -> Optional[Path]:
@@ -102,7 +101,9 @@ def _sync_cursor_hooks(project_root: Path, project_id: str) -> None:
     ).replace("__PROJECT_ID__", project_id)
 
     before_submit_prompt_content = adapt_cursor_before_submit_prompt(
-        _render_local_template(LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE, str(project_root))
+        _render_local_template(
+            LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE, str(project_root)
+        )
     )
     precompact_content = adapt_cursor_precompact(
         _render_local_template(LOCAL_PRECOMPACT_HOOK_TEMPLATE, str(project_root))

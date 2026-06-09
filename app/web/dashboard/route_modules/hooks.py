@@ -21,7 +21,6 @@ Design rules:
 
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Optional
 
@@ -29,6 +28,7 @@ from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 
 from app.cli.hooks.keywords import match_category
+from app.core.redaction import redact_secrets
 from app.core.schemas.hooks import (
     SessionStartPayload,
     StopPayload,
@@ -36,6 +36,7 @@ from app.core.schemas.hooks import (
     TaskCompletedPayload,
     UserPromptSubmitPayload,
 )
+from app.core.schemas.requests import normalize_project_id
 from app.core.services.hook import HookService
 from app.core.services.pin import PinService
 from app.core.services.session import SessionService
@@ -46,10 +47,27 @@ from ...common.dependencies import (
     get_session_service,
 )
 from ...lifespan import get_services
+from ...oauth.middleware import verify_hook_token
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/hooks/claude", tags=["Claude Code Hooks"])
+# Every hook endpoint is guarded by the shared-secret hook token. The
+# dependency is a no-op for local-dev (no token + loopback bind) and warns once
+# (without rejecting) for a network-exposed server without a token. Applied at
+# router level so reads and writes are covered uniformly (the original report
+# flagged only writes, but context-injection reads share the same surface).
+#
+# The "exposed without a token" warning is owned by a single source on the
+# actual (effective) bind host — middleware.warn_if_hook_exposed_without_token,
+# called at server start (common/server.py) and on the first unauthenticated
+# hook request (verify_hook_token). This module deliberately keeps no import-time
+# warning of its own, so the allow-and-warn policy has a single source of truth
+# on the effective bind host.
+router = APIRouter(
+    prefix="/hooks/claude",
+    tags=["Claude Code Hooks"],
+    dependencies=[Depends(verify_hook_token)],
+)
 
 # Memory categories the keyword matcher is allowed to auto-save (mirrors the
 # CLAUDE.md M3 rule). ``task`` / ``git-history`` stay system-only.
@@ -83,11 +101,6 @@ _NOISE_MARKERS = (
     "<system-reminder>",
 )
 
-# Git-worktree dirs are checked out as ``<repo>-wt-<hex>`` (or ``_wt_`` after a
-# separator pass); the suffix would otherwise fragment one repo into many
-# project ids. Matches either separator. See _normalize_project_id.
-_WT_SUFFIX_RE = re.compile(r"[-_]wt[-_][0-9a-f]{6,}$", re.IGNORECASE)
-
 
 def _ok(status: str) -> Response:
     """An empty 200 — the valid "do nothing" reply for a hook.
@@ -112,27 +125,19 @@ def _context(event_name: str, additional_context: str) -> JSONResponse:
 
 
 def _normalize_project_id(name: str) -> str:
-    """Canonicalize a project id so one repo doesn't fragment into many ids.
+    """Canonicalize a project id via the server-wide single source of truth.
 
-    Reduces a path to its last segment, strips git-worktree suffixes,
-    lowercases, and unifies ``_`` / ``.`` → ``-`` so path / casing / separator
-    / worktree variants collapse to a single id:
+    Delegates to :func:`app.core.schemas.requests.normalize_project_id` so the
+    HTTP-hook path, the Pydantic-validated API/MCP path, and the work/search
+    endpoints all converge on one id for the same repo. ``strict=False`` because
+    a hook must never raise into the caller — an un-normalizable value degrades
+    to ``"unknown"`` instead of a 422.
 
         ``term-mesh-wt-170638b5`` / ``term-mesh_wt_170638b5`` → ``term-mesh``
         ``/Users/me/work/oci-terraform`` → ``oci-terraform``
         ``oci_tools`` / ``OCI-Tools`` → ``oci-tools``
-        ``VLM`` → ``vlm``
-
-    Result stays within the project-id schema (``^[a-zA-Z0-9_-]+$``).
     """
-    name = (name or "").strip()
-    if "/" in name:  # an absolute/relative path leaked in as the id
-        name = name.rstrip("/").split("/")[-1]
-    name = name.lower()
-    name = _WT_SUFFIX_RE.sub("", name)
-    name = re.sub(r"[_.]", "-", name)  # unify separators
-    name = re.sub(r"-{2,}", "-", name).strip("-")
-    return name or "unknown"
+    return normalize_project_id((name or "").strip() or None, strict=False) or "unknown"
 
 
 def _project_id(cwd: Optional[str], explicit: Optional[str]) -> str:
@@ -206,8 +211,14 @@ async def _save_memory(
         logger.info("hook save skipped: memory service / embedding model not ready")
         return False
     try:
+        # Redact secrets/PII before persisting. Hook saves capture whole
+        # assistant turns, so a leaked key/token/email could otherwise land in
+        # long-term memory. Redact first, then truncate, so a secret near the
+        # length boundary cannot survive as a partial. Both Q and A are covered
+        # because the caller passes the combined "Q: …\n\nA: …" string here.
+        safe_content = redact_secrets(content)[:_MAX_CONTENT]
         await memory_service.create(
-            content=content[:_MAX_CONTENT],
+            content=safe_content,
             project_id=project_id,
             category=category,
             source="claude-code-http-hook",

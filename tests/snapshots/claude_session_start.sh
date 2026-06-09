@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 13
+# mem-mesh-hooks prompt-version: 14
 # Claude Code SessionStart hook: inject mem-mesh session context
 # Fires on session start AND after compaction (context re-injection)
 # Returns hookSpecificOutput JSON via /api/work/sessions/resume/{project_id}
@@ -12,7 +12,7 @@ set -euo pipefail
 command -v jq >/dev/null 2>&1 || { echo '{}'; exit 0; }
 command -v curl >/dev/null 2>&1 || { echo '{}'; exit 0; }
 
-API_URL="${MEM_MESH_API_URL:-https://meme.24x365.online}"
+API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://meme.24x365.online)}"
 
 INPUT=$(cat)
 

@@ -111,6 +111,6 @@ class TestErrorCentralization:
             for base in node.bases:
                 if isinstance(base, ast.Name):
                     base_names.append(base.id)
-            assert "MemMeshError" in base_names, (
-                f"{node.name} (line {node.lineno}) must inherit from MemMeshError"
-            )
+            assert (
+                "MemMeshError" in base_names
+            ), f"{node.name} (line {node.lineno}) must inherit from MemMeshError"

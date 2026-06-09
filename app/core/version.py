@@ -5,7 +5,8 @@ mem-mesh 버전 및 서버 정보 중앙 관리 모듈.
 버전의 단일 소스는 pyproject.toml — 여기서는 읽기만 한다.
 """
 
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 

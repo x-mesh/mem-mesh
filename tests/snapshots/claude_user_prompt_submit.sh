@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 13
+# mem-mesh-hooks prompt-version: 14
 # UserPromptSubmit hook: keyword-filtered context search + save reminder + pin tracking
 # stdin: {prompt, session_id, transcript_path, cwd, ...}
 # Output: {hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: "..."}} or exit 0
@@ -13,7 +13,7 @@ set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
 command -v curl >/dev/null 2>&1 || exit 0
 
-API_URL="${MEM_MESH_API_URL:-https://meme.24x365.online}"
+API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://meme.24x365.online)}"
 
 INPUT=$(cat)
 PROMPT=$(echo "$INPUT" | jq -r '.prompt // empty')
@@ -34,7 +34,7 @@ if [ ${#PROMPT} -ge 30 ]; then
 
   if echo "$PROMPT" | grep -qiE "$KEYWORDS"; then
     PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
-    QUERY=$(echo "$PROMPT" | head -c 200)
+    QUERY=$(printf '%s' "$PROMPT" | jq -Rrs '.[0:200]')
     THRESHOLD="${MEM_MESH_SEARCH_THRESHOLD:-0.75}"
     LIMIT="${MEM_MESH_SEARCH_LIMIT:-3}"
 
@@ -84,9 +84,11 @@ transcript_path = sys.argv[1]
 interval = int(sys.argv[2])
 
 try:
-    assistant_turns = 0
-    last_save_turn = 0
-    turn = 0
+    # Canonical counter (parity with server): number of *user-prompt* turns
+    # since the last memory save. The save marker appears in an assistant turn,
+    # so we snapshot the running user-turn count whenever a save is seen.
+    user_turns = 0
+    user_turns_at_last_save = 0
 
     with open(transcript_path, 'r') as f:
         for line in f:
@@ -98,8 +100,9 @@ try:
             except json.JSONDecodeError:
                 continue
             entry_type = entry.get('type', '')
-            if entry_type == 'assistant':
-                turn += 1
+            if entry_type == 'user':
+                user_turns += 1
+            elif entry_type == 'assistant':
                 msg = entry.get('message', {})
                 content = msg.get('content', '')
                 if isinstance(content, list):
@@ -110,16 +113,11 @@ try:
                     )
                 content_str = str(content)
                 if 'mcp__mem-mesh__add' in content_str or 'mcp__mem-mesh__pin_add' in content_str:
-                    last_save_turn = turn
-                assistant_turns = turn
+                    user_turns_at_last_save = user_turns
 
-    parts = []
-    turns_since_save = assistant_turns - last_save_turn
-    if turns_since_save >= interval and assistant_turns >= interval:
-        parts.append(f'mem-mesh에 {turns_since_save}턴 동안 저장하지 않았습니다. 중요한 결정/버그 수정/설계 변경이 있었다면 mcp__mem-mesh__add로 저장하세요.')
-
-    if parts:
-        print('\n'.join(parts))
+    turns_since_save = user_turns - user_turns_at_last_save
+    if turns_since_save >= interval:
+        print(f'mem-mesh에 {turns_since_save}턴 동안 저장하지 않았습니다. 중요한 결정/버그 수정/설계 변경이 있었다면 mcp__mem-mesh__add로 저장하세요.')
 except Exception:
     pass
 " "$TRANSCRIPT_PATH" "$SAVE_REMINDER_INTERVAL" 2>/dev/null) || REMINDER=""

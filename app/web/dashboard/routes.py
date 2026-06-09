@@ -11,14 +11,17 @@ from typing import Union
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.core.errors import (
+    InvalidStatusTransitionError,
+    NoActiveSessionError,
+    PinNotFoundError,
+)
 from app.core.schemas.pins import PinCreate, PinUpdate
 from app.core.schemas.projects import ProjectUpdate
-from app.core.schemas.requests import RuleUpdateParams
+from app.core.schemas.requests import RuleUpdateParams, normalize_project_id
 from app.core.services.embedding_manager import EmbeddingManagerService
-from app.core.errors import InvalidStatusTransitionError, PinNotFoundError
 from app.core.services.pin import PinService
 from app.core.services.project import ProjectService
-from app.core.errors import NoActiveSessionError
 from app.core.services.session import SessionService
 from app.core.services.stats import StatsService
 
@@ -72,7 +75,7 @@ def _resolve_rule_path(rule_entry: dict) -> Path:
         raise ValueError("Invalid rule entry: missing path")
     # Accept legacy "docs/rules/<file>" entries by stripping the prefix.
     if rule_path.startswith("docs/rules/"):
-        rule_path = rule_path[len("docs/rules/"):]
+        rule_path = rule_path[len("docs/rules/") :]
     base = _rules_root().resolve()
     candidate = (base / rule_path).resolve()
     if not str(candidate).startswith(str(base)):
@@ -322,30 +325,39 @@ async def select_embedding_model(
     # target_embedding_model: user-selected target model (for auto-load on restart)
     # embedding_model: model for actual data (updated after migration completes)
     from ..lifespan import get_services
+
     services = get_services()
     db = services.get("db")
     if db:
         try:
             from app.core.embeddings.service import MODEL_DIMENSIONS
+
             dim = MODEL_DIMENSIONS.get(resolved, 384)
 
             # Always save target (load this model on restart)
-            await db._migrator.set_embedding_metadata("target_embedding_model", resolved)
-            await db._migrator.set_embedding_metadata("target_embedding_dimension", str(dim))
+            await db._migrator.set_embedding_metadata(
+                "target_embedding_model", resolved
+            )
+            await db._migrator.set_embedding_metadata(
+                "target_embedding_dimension", str(dim)
+            )
 
             # If no existing memories, update embedding_model immediately (fresh DB)
             cursor = await db.execute("SELECT COUNT(*) as count FROM memories")
             memory_count = cursor.fetchone()["count"]
             if memory_count == 0:
                 await db._migrator.set_embedding_metadata("embedding_model", resolved)
-                await db._migrator.set_embedding_metadata("embedding_dimension", str(dim))
+                await db._migrator.set_embedding_metadata(
+                    "embedding_dimension", str(dim)
+                )
         except Exception as e:
             logger.warning(f"Failed to persist model selection: {e}")
 
     def _on_progress(progress: float, status: str) -> None:
         try:
-            from ..websocket.realtime import notifier
             import asyncio
+
+            from ..websocket.realtime import notifier
 
             loop = asyncio.get_running_loop()
             loop.call_soon_threadsafe(
@@ -534,6 +546,9 @@ async def resume_session(
         ide_session_id: IDE native session ID (optional, for session correlation)
         client_type: IDE/tool type (optional, e.g. "claude-ai", "Cursor")
     """
+    # Normalize so this read path resolves the same canonical id the hook/memory
+    # write paths use (server is the single source of truth for project ids).
+    project_id = normalize_project_id(project_id, strict=False)
     try:
         # 1. Load existing context via resume (including cross-session)
         context = await session_service.resume_last_session(
@@ -587,6 +602,9 @@ async def end_session_by_project(
 
     Used by PreCompact/SessionEnd hooks which only know project_id.
     """
+    # Hook callers send a RAW basename; normalize to the canonical id so the
+    # session opened under it (via resume/hooks) is the one ended here.
+    project_id = normalize_project_id(project_id, strict=False)
     try:
         session = await session_service.end_session_by_project(project_id, summary)
         if not session:
@@ -663,6 +681,9 @@ async def list_pins(
     pin_service: PinService = Depends(get_pin_service),
 ):
     """List pins"""
+    # Normalize the filter so the hook pin-reminder (RAW basename) and the
+    # dashboard converge on the same canonical id.
+    project_id = normalize_project_id(project_id, strict=False)
     try:
         pins = await pin_service.get_pins(
             project_id=project_id,

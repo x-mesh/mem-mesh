@@ -14,6 +14,8 @@ from app.cli.hooks.constants import (
     KIRO_HOOKS_DIR,
     KIRO_SETTINGS,
 )
+from app.cli.hooks.json_ops import _is_mem_mesh_entry
+from app.cli.hooks.netcheck import check_http_hook_url
 from app.cli.hooks.status import (
     _detect_profile,
     _extract_url_from_script,
@@ -21,8 +23,6 @@ from app.cli.hooks.status import (
     cmd_status,
     resolve_api_url,
 )
-from app.cli.hooks.json_ops import _is_mem_mesh_entry
-from app.cli.hooks.netcheck import check_http_hook_url
 
 
 def _check_permissions(hooks_dir: Path) -> List[str]:

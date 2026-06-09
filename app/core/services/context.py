@@ -9,9 +9,8 @@ from typing import List, Optional
 
 from ..database.base import Database
 from ..embeddings.service import EmbeddingService
-from ..schemas.responses import ContextResponse, RelatedMemory, SearchResult
-
 from ..errors import ContextNotFoundError
+from ..schemas.responses import ContextResponse, RelatedMemory, SearchResult
 
 logger = logging.getLogger(__name__)
 

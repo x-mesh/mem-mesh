@@ -1,13 +1,15 @@
 """Tests for SessionEnd and PreCompact hook templates and installation."""
 
-import json
 import re
 
 import pytest
 
-from app.cli.hooks.renderer import _load_template, _render_template
-from app.cli.hooks.installer import _build_claude_hooks_settings, _build_cursor_hooks_settings
 from app.cli.hooks.constants import HOOK_PROFILES
+from app.cli.hooks.installer import (
+    _build_claude_hooks_settings,
+    _build_cursor_hooks_settings,
+)
+from app.cli.hooks.renderer import _load_template, _render_template
 
 
 class TestSessionEndTemplate:

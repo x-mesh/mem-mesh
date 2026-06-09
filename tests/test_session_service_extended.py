@@ -161,19 +161,27 @@ class TestEndWithAutoPromotion:
         """importance >= 4인 완료된 핀만 자동 승격"""
         # 다양한 중요도의 핀 생성
         pin_low = await pin_service.create_pin(
-            project_id="promo-test", content="Low importance pin — routine code cleanup task removing unused imports and fixing minor linting warnings across the service layer modules", importance=2
+            project_id="promo-test",
+            content="Low importance pin — routine code cleanup task removing unused imports and fixing minor linting warnings across the service layer modules",
+            importance=2,
         )
 
         pin_medium = await pin_service.create_pin(
-            project_id="promo-test", content="Medium importance pin — refactoring the data access layer to use repository pattern for better testability and separation of concerns", importance=3
+            project_id="promo-test",
+            content="Medium importance pin — refactoring the data access layer to use repository pattern for better testability and separation of concerns",
+            importance=3,
         )
 
         pin_high = await pin_service.create_pin(
-            project_id="promo-test", content="High importance pin — migrating authentication from session-based to JWT tokens with refresh token rotation and secure cookie storage", importance=4
+            project_id="promo-test",
+            content="High importance pin — migrating authentication from session-based to JWT tokens with refresh token rotation and secure cookie storage",
+            importance=4,
         )
 
         pin_critical = await pin_service.create_pin(
-            project_id="promo-test", content="Critical importance pin — production database schema migration adding composite indexes for the most frequently queried columns", importance=5
+            project_id="promo-test",
+            content="Critical importance pin — production database schema migration adding composite indexes for the most frequently queried columns",
+            importance=5,
         )
 
         # 핀 완료
@@ -199,11 +207,15 @@ class TestEndWithAutoPromotion:
     async def test_auto_promotion_custom_threshold(self, session_service, pin_service):
         """커스텀 임계값 적용 테스트"""
         pin1 = await pin_service.create_pin(
-            project_id="custom-threshold", content="Pin with importance 3 — implementing caching layer with Redis for frequently accessed user profile data and session management", importance=3
+            project_id="custom-threshold",
+            content="Pin with importance 3 — implementing caching layer with Redis for frequently accessed user profile data and session management",
+            importance=3,
         )
 
         pin2 = await pin_service.create_pin(
-            project_id="custom-threshold", content="Pin with importance 5 — critical security patch fixing SQL injection vulnerability in the search endpoint with parameterized queries", importance=5
+            project_id="custom-threshold",
+            content="Pin with importance 5 — critical security patch fixing SQL injection vulnerability in the search endpoint with parameterized queries",
+            importance=5,
         )
 
         await pin_service.complete_pin(pin1.id)
@@ -293,17 +305,23 @@ class TestGetSessionStatistics:
         """여러 세션의 통계 계산"""
         # 첫 번째 세션
         pin1 = await pin_service.create_pin(
-            project_id="stats-project", content="Pin 1 — implementing the initial database connection pool with configurable max connections and idle timeout for production workloads", importance=3
+            project_id="stats-project",
+            content="Pin 1 — implementing the initial database connection pool with configurable max connections and idle timeout for production workloads",
+            importance=3,
         )
         await pin_service.create_pin(
-            project_id="stats-project", content="Pin 2 — adding comprehensive integration tests for the REST API endpoints including error handling edge cases and rate limiting", importance=4
+            project_id="stats-project",
+            content="Pin 2 — adding comprehensive integration tests for the REST API endpoints including error handling edge cases and rate limiting",
+            importance=4,
         )
         await session_service.end_session(pin1.session_id)
 
         # 두 번째 세션 (새로운 세션 강제 생성)
         await asyncio.sleep(0.1)  # 시간 차이 확보
         await pin_service.create_pin(
-            project_id="stats-project", content="Pin 3 — critical production hotfix for memory leak in the background job processor caused by unclosed database connections", importance=5
+            project_id="stats-project",
+            content="Pin 3 — critical production hotfix for memory leak in the background job processor caused by unclosed database connections",
+            importance=5,
         )
 
         stats = await session_service.get_session_statistics(project_id="stats-project")
@@ -316,16 +334,24 @@ class TestGetSessionStatistics:
         """중요도별 분포 계산"""
         # 다양한 중요도의 핀 생성
         await pin_service.create_pin(
-            project_id="dist-project", content="Pin importance 1 — minor typo fix in the API documentation README file updating the example request payload format", importance=1
+            project_id="dist-project",
+            content="Pin importance 1 — minor typo fix in the API documentation README file updating the example request payload format",
+            importance=1,
         )
         await pin_service.create_pin(
-            project_id="dist-project", content="Pin importance 3 — implementing webhook delivery retry logic with exponential backoff and dead letter queue for failed deliveries", importance=3
+            project_id="dist-project",
+            content="Pin importance 3 — implementing webhook delivery retry logic with exponential backoff and dead letter queue for failed deliveries",
+            importance=3,
         )
         await pin_service.create_pin(
-            project_id="dist-project", content="Another pin importance 3 — adding structured logging with correlation IDs for distributed tracing across microservice boundaries", importance=3
+            project_id="dist-project",
+            content="Another pin importance 3 — adding structured logging with correlation IDs for distributed tracing across microservice boundaries",
+            importance=3,
         )
         await pin_service.create_pin(
-            project_id="dist-project", content="Pin importance 5 — emergency security patch disabling compromised API key and rotating all service credentials across environments", importance=5
+            project_id="dist-project",
+            content="Pin importance 5 — emergency security patch disabling compromised API key and rotating all service credentials across environments",
+            importance=5,
         )
 
         stats = await session_service.get_session_statistics(project_id="dist-project")
@@ -338,7 +364,9 @@ class TestGetSessionStatistics:
         """날짜 필터링 테스트"""
         # 핀 생성
         await pin_service.create_pin(
-            project_id="date-filter-project", content="Test pin — general purpose test pin for verifying date-based filtering and session lifecycle management across multiple time ranges", importance=3
+            project_id="date-filter-project",
+            content="Test pin — general purpose test pin for verifying date-based filtering and session lifecycle management across multiple time ranges",
+            importance=3,
         )
 
         # 현재 날짜 기준으로 필터링
@@ -397,7 +425,9 @@ class TestIntegration:
         )
 
         pin2 = await pin_service.create_pin(
-            project_id=project_id, content="Minor documentation update — fixing typos and adding examples to the API reference guide for the new search endpoint parameters", importance=2
+            project_id=project_id,
+            content="Minor documentation update — fixing typos and adding examples to the API reference guide for the new search endpoint parameters",
+            importance=2,
         )
 
         # 3. 세션 재개 (핀이 있는 상태)

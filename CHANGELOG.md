@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2026-06-09
+
+### Security
+- Hook HTTP write endpoints (`/api/hooks/claude/*`) require a shared secret (`MEM_MESH_HOOK_TOKEN`, stored at `~/.mem-mesh/hook_token`, mode `0600`) when set. The loopback exception is now judged by the **effective bind host** captured at server start (`app/web/common/server.py`), not the static `settings.server_host`, so `--host 0.0.0.0` no longer silently bypasses auth. With a token set, a matching `Authorization: Bearer` is required on any host; no token + non-loopback bind is allowed with a one-time warning (the firewall is the trust boundary). `docker-compose.yml` binds `127.0.0.1` and requires the token (`app/web/oauth/middleware.py`, `app/core/config.py`)
+- Local shell hooks (`app/cli/hooks/shell/local-*.sh`) pass stdin/CWD via argv/stdin instead of interpolating into `python -c` source — closes code injection via crafted repo directory name or transcript content
+- Installer rejects shell metacharacters in `--path`/URL and drops the outer quotes around `path`/`url`/`project_id` template placeholders (`app/cli/hooks/renderer.py`) — closes command injection in local-mode install and `RULES_TEXT`
+- Secret redaction applied at the `MemoryService.create` chokepoint (`app/core/redaction.py`) masks PEM/JWT/`sk-ant-`/AWS/GitHub/Slack/`Authorization` (all schemes)/`KEY=value`/email across every save path (HTTP hook, command hook, explicit add). An exact secret-key allowlist avoids redacting `max_tokens`-style config keys (which previously caused false dedup)
+
+### Fixed
+- `_merge_json_settings` backs up a malformed `settings.json` to `.bak` and raises instead of overwriting; all settings writes are atomic (`tempfile` + `os.replace`). Added the `--force` flag that the error message references (`app/cli/install_hooks.py`, `app/cli/hooks/json_ops.py`)
+- `uninstall` removes only mem-mesh-managed hook entries instead of the entire top-level `hooks` key — preserves user-registered Claude/Cursor hooks (`app/cli/install_hooks.py`, `app/cli/hooks/uninstaller.py`)
+- `normalize_project_id` splits on both `/` and `\` (`app/core/schemas/requests.py`) — a Windows client `cwd` sent over HTTP hooks no longer collapses every repo to `unknown` on a POSIX server
+- Hook byte truncation (`head -c`) replaced with codepoint slicing (`jq -Rrs`) across all shell hooks — no more broken UTF-8 at multibyte boundaries
+- Latent `NameError`s surfaced by linting: `logger` was used before its definition in `app/core/embeddings/service.py` (raised at import time when `MEM_MESH_IGNORE_SSL` is set), and `cutoff` was undefined in `app/core/services/session.py` cross-session resume when no prior session exists
+- `app/cli/onboarding.py` used a Python 3.12+ f-string quoting form that failed to compile on the supported Python 3.9/3.10 target
+
+### Changed
+- `project_id` normalization unified across all hook-facing endpoints (resume / search / pins / memories / end-by-project / `/api/hooks/claude/*`) — shell sends the raw basename, the server normalizes (`app/core/schemas/requests.py`)
+- `turns_since_save` (the "N turns without a save" reminder) counts `UserPromptSubmit` events only, not `UserPromptSubmit` + `Stop` (`app/core/services/hook.py`)
+- Noise filter (`<task-notification>` / `<system-reminder>` / `<tool-use-id>` skip) added to shell `stop-decide` / `subagent-stop` / `stop` / `kiro-stop`, mirroring the server `_is_noise()`
+- Shell auto-save length filter raised to `>= 100` to match the server `content` min-length; the stop-hook debug log is gated behind `MEM_MESH_HOOK_DEBUG`
+
 ## [1.5.4] - 2026-06-05
 
 ### Fixed

@@ -51,7 +51,9 @@ class Database:
 
                 embedding_dim = Settings().embedding_dim
             except Exception as e:
-                logger.debug(f"Failed to load settings for embedding_dim, using default 384: {e}")
+                logger.debug(
+                    f"Failed to load settings for embedding_dim, using default 384: {e}"
+                )
                 embedding_dim = 384
 
         self.db_path = db_path
@@ -319,4 +321,3 @@ class Database:
     async def transaction(self):
         async with self._connection.transaction():
             yield
-

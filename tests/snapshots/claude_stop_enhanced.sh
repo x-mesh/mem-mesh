@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 13
+# mem-mesh-hooks prompt-version: 14
 # Stop hook (enhanced): Haiku API decides save/skip, then saves via mem-mesh API
 # Requires ANTHROPIC_API_KEY env var
 # stdin: {"stop_hook_active":bool,"last_assistant_message":"..."} JSON
@@ -9,7 +9,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 [ -z "${ANTHROPIC_API_KEY:-}" ] && exit 0
 
-API_URL="${MEM_MESH_API_URL:-https://meme.24x365.online}"
+API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://meme.24x365.online)}"
 
 INPUT=$(cat)
 
@@ -25,7 +25,8 @@ MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
 echo "$MESSAGE" | grep -q 'mcp__mem-mesh__add' && exit 0
 
 # Truncate to fit within API limits
-CONVERSATION=$(echo "$MESSAGE" | head -c 6000)
+# Char-safe truncation: jq slices by Unicode codepoint (no UTF-8 byte corruption)
+CONVERSATION=$(printf '%s' "$MESSAGE" | jq -Rrs '.[0:6000]')
 
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 

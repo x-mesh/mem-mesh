@@ -7,15 +7,16 @@ __VERSION_MARKER__
 set -euo pipefail
 command -v python3 >/dev/null 2>&1 || exit 0
 
-MEM_MESH_PATH="__MEM_MESH_PATH__"
+MEM_MESH_PATH=__MEM_MESH_PATH__
 
 # Detect project from CWD
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 [ -z "$PROJECT_DIR" ] && exit 0
 
-python3 -c "
+python3 - "$MEM_MESH_PATH" "$PROJECT_DIR" <<'PY' 2>/dev/null || true
 import sys, asyncio, json
-sys.path.insert(0, '$MEM_MESH_PATH')
+mem_mesh_path, project_dir = sys.argv[1:3]
+sys.path.insert(0, mem_mesh_path)
 try:
     from app.core.services.session import SessionService
     from app.core.database.base import Database
@@ -24,11 +25,11 @@ try:
         db = Database()
         await db.initialize()
         svc = SessionService(db)
-        await svc.end_session_by_project('$PROJECT_DIR')
+        await svc.end_session_by_project(project_dir)
 
     asyncio.run(end_session())
 except Exception:
     pass
-" 2>/dev/null || true
+PY
 
 exit 0

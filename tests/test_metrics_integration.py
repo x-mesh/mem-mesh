@@ -236,6 +236,11 @@ class TestEmbeddingServiceMetricsIntegration:
             mock_model = MagicMock()
             # numpy array를 반환하도록 설정
             mock_model.encode.return_value = np.array([0.1] * 384)
+            # _model_embedding_dim()는 새 메서드명 get_embedding_dimension을 우선
+            # 시도한다. MagicMock에선 이 속성이 자동 생성되어 truthy이므로, 구
+            # get_sentence_embedding_dimension만 설정하면 dim이 MagicMock으로 잡혀
+            # encode 길이(384)와 불일치 → ValueError. 새/구 이름 모두 384로 고정.
+            mock_model.get_embedding_dimension.return_value = 384
             mock_model.get_sentence_embedding_dimension.return_value = 384
             mock_st.return_value = mock_model
 

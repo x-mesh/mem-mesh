@@ -65,10 +65,9 @@ def cmd_system_status() -> None:
 
     # --- Server ---
     print(header("[Server]"))
-    baked_url = (
-        _extract_url_from_script(CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh")
-        or _extract_url_from_script(CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh")
-    )
+    baked_url = _extract_url_from_script(
+        CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh"
+    ) or _extract_url_from_script(CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh")
     url, source = resolve_api_url(baked_url)
     print(f"  URL:        {info(url)} {dim(f'(from {source})')}")
 

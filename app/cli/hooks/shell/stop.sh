@@ -14,11 +14,18 @@ INPUT=$(cat)
 ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 [ "$ACTIVE" = "true" ] && exit 0
 
-# Extract message + minimum length filter
+# Extract message + minimum length filter (>=100 to match server min_content_length)
 MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
-[ ${#MESSAGE} -lt 50 ] && exit 0
+[ ${#MESSAGE} -lt 100 ] && exit 0
 
-SUMMARY=$(echo "$MESSAGE" | head -c 9500)
+# Noise guard: even the unconditional-save minimal profile must skip system
+# artifacts (parity with keywords.is_noise / server _is_noise).
+if printf '%s' "$MESSAGE" | grep -qF -e '<task-notification>' -e '</task-notification>' -e '<task-id>' -e '<tool-use-id>' -e '<system-reminder>'; then
+  exit 0
+fi
+
+# Char-safe truncation: jq slices by Unicode codepoint (no UTF-8 byte corruption)
+SUMMARY=$(printf '%s' "$MESSAGE" | jq -Rrs '.[0:9500]')
 
 # Extract project ID from CWD
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")

@@ -16,7 +16,13 @@ from ..errors import (
     EmbeddingError,
     MemoryNotFoundError,
 )
-from ..schemas.responses import AddResponse, ConflictInfo, DeleteResponse, UpdateResponse
+from ..redaction import redact_secrets
+from ..schemas.responses import (
+    AddResponse,
+    ConflictInfo,
+    DeleteResponse,
+    UpdateResponse,
+)
 from .quality_gate import content_quality_gate
 
 logger = logging.getLogger(__name__)
@@ -137,7 +143,16 @@ class MemoryService:
         """
         logger.info("Creating memory with content length: %d", len(content))
 
-        # 0. Quality gate (stripping + validation)
+        # 0. Redact secrets/PII at the single save chokepoint (CLAUDE.md M4).
+        # Every save path — HTTP hook, command hook (POST /api/memories),
+        # explicit MCP add, direct storage, pin promotion — flows through
+        # create(), so redacting here guarantees no credential reaches
+        # long-term memory regardless of hook mode. Idempotent, so an upstream
+        # caller that already redacted (e.g. the HTTP hook) is harmless. Done
+        # before hashing/embedding so dedup and vectors reflect the safe text.
+        content = redact_secrets(content)
+
+        # 0.5 Quality gate (stripping + validation)
         if not skip_quality_gate:
             content = content_quality_gate(content)
 
@@ -229,6 +244,12 @@ class MemoryService:
             "Creating memory with pre-computed embedding, content length: %d",
             len(content),
         )
+
+        # 0. Redact secrets/PII before persisting (CLAUDE.md M4). The caller's
+        # pre-computed embedding reflects the original text, but the *stored*
+        # content must never contain a credential — this is a batch/migration
+        # path so the minor embedding/content drift is acceptable.
+        content = redact_secrets(content)
 
         # 1. Calculate content_hash
         content_hash = Memory.compute_hash(content)
@@ -335,8 +356,10 @@ class MemoryService:
         if existing_memory is None:
             raise MemoryNotFoundError(memory_id)
 
-        # 2. Quality gate (when content changes)
+        # 2. Redact + quality gate (when content changes). Updates persist
+        # content too, so they must redact at the same chokepoint (M4).
         if content is not None:
+            content = redact_secrets(content)
             content = content_quality_gate(content)
 
         # 3. Determine fields to update
@@ -495,9 +518,7 @@ class MemoryService:
                     delay = 0.1 * (2**attempt)
                     await asyncio.sleep(min(delay, 1.0))
 
-        logger.error(
-            "Embedding generation failed after %d attempts", self.max_retries
-        )
+        logger.error("Embedding generation failed after %d attempts", self.max_retries)
         raise EmbeddingError(
             f"Failed to generate embedding after {self.max_retries} attempts: {last_error}"
         )
@@ -578,11 +599,13 @@ class MemoryService:
             for row in rows:
                 # Convert distance -> similarity
                 similarity = max(0.0, min(1.0, 1.0 - (row[2] / 2.0)))
-                candidates.append({
-                    "id": row[0],
-                    "content": row[1],
-                    "similarity_score": similarity,
-                })
+                candidates.append(
+                    {
+                        "id": row[0],
+                        "content": row[1],
+                        "similarity_score": similarity,
+                    }
+                )
 
             # Stage 2: Detect conflicts via ConflictDetectorService (blocking call -> thread)
             import asyncio

@@ -11,16 +11,13 @@ from __future__ import annotations
 
 from typing import List
 
-import pytest
-
 from tests.evals.conftest import (
     collect_scenarios,
     save_grade_results,
     simulate_hook_analyze,
 )
 from tests.evals.graders import grade_scenario
-from tests.evals.models import EvalScenario, EvalTier, GradeResult
-
+from tests.evals.models import EvalTier, GradeResult
 
 # ---------------------------------------------------------------------------
 # Scenario 1: Stop hook → save execution

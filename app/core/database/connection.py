@@ -148,9 +148,7 @@ class DatabaseConnection:
                     logger.info("sqlite-vec loaded via Python package")
                     vec_loaded = True
                 except Exception as e:
-                    logger.warning(
-                        f"Failed to load sqlite-vec via Python package: {e}"
-                    )
+                    logger.warning(f"Failed to load sqlite-vec via Python package: {e}")
 
             # 방법 2: sqlite_vec.loadable_path() 경로로 직접 로드
             if not vec_loaded and hasattr(self.connection, "load_extension"):
@@ -258,4 +256,3 @@ class DatabaseConnection:
             except Exception:
                 self.connection.execute("ROLLBACK")
                 raise
-

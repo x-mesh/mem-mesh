@@ -75,7 +75,9 @@ def content_quality_gate(content: str) -> str:
             len(cleaned),
             _MIN_CONTENT_LENGTH,
         )
-        raise MemoryContentTooShortError(length=len(cleaned), minimum=_MIN_CONTENT_LENGTH)
+        raise MemoryContentTooShortError(
+            length=len(cleaned), minimum=_MIN_CONTENT_LENGTH
+        )
 
     # 3. Check for low-quality prefixes
     for prefix in _LOW_QUALITY_PREFIXES:

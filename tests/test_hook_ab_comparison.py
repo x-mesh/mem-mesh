@@ -22,7 +22,6 @@ from app.cli.prompts.behaviors import SAVE_CRITERIA, STOP_PROMPT_CONFIG
 from app.cli.prompts.renderers import (
     render_claude_stop_prompt,
     render_enhanced_stop_prompt,
-    render_rules_text,
 )
 
 # ---------------------------------------------------------------------------
@@ -208,7 +207,12 @@ def new_hook_analyze(scenario: Dict[str, Any]) -> Dict[str, Any]:
     save_keywords = {
         "버그 진단/해결": ["버그", "bug", "fix", "ZeroDivision", "Error", "수정"],
         "아키텍처 또는 설계 결정": ["아키텍처", "설계", "결정", "채택"],
-        "중요 설정 변경 또는 마이그레이션": ["설정", "마이그레이션", "config", "settings"],
+        "중요 설정 변경 또는 마이그레이션": [
+            "설정",
+            "마이그레이션",
+            "config",
+            "settings",
+        ],
     }
     for criterion in SAVE_CRITERIA.save_when:
         for kw in save_keywords.get(criterion, []):
@@ -258,7 +262,7 @@ def test_session_start_comparison() -> None:
     print("  Context:   (none)")
 
     # NEW (B): hook output
-    print(f"\n  [B] NEW — SessionStart hook")
+    print("\n  [B] NEW — SessionStart hook")
     print(f"  {'─' * 36}")
 
     if SESSION_START_HOOK.exists():
@@ -277,12 +281,14 @@ def test_session_start_comparison() -> None:
                 print(f"  Context:   {len(ctx)} chars, {len(ctx_lines)} lines")
                 sections = [line for line in ctx_lines if line.startswith("###")]
                 print(f"  Sections:  {[s.strip('# ') for s in sections]}")
-                memory_lines = [line for line in ctx_lines if line.strip().startswith("- [")]
+                memory_lines = [
+                    line for line in ctx_lines if line.strip().startswith("- [")
+                ]
                 print(f"  Memories:  {len(memory_lines)} recent entries")
                 has_rules = "코딩 응답 우선" in ctx
                 print(f"  Rules:     {'injected' if has_rules else 'missing'}")
-                print(f"  Compaction: context RE-INJECTED automatically")
-                print(f"\n  Preview:")
+                print("  Compaction: context RE-INJECTED automatically")
+                print("\n  Preview:")
                 for line in ctx_lines[:8]:
                     print(f"    {line}")
                 if len(ctx_lines) > 8:
@@ -336,19 +342,19 @@ class TestStopHookAB:
             result = new_hook_analyze(scenario)
             if result["action"] == "save":
                 reason = result["reason"]
-                assert reason.startswith("mcp__mem-mesh__add(category="), (
-                    f"Reason must start with mcp__mem-mesh__add(category=, got: {reason}"
-                )
-                assert "요약+원본 저장" in reason, (
-                    f"Reason must include '요약+원본 저장', got: {reason}"
-                )
+                assert reason.startswith(
+                    "mcp__mem-mesh__add(category="
+                ), f"Reason must start with mcp__mem-mesh__add(category=, got: {reason}"
+                assert (
+                    "요약+원본 저장" in reason
+                ), f"Reason must include '요약+원본 저장', got: {reason}"
                 # Extract category from reason
                 match = re.match(r"mcp__mem-mesh__add\(category=(\w+)\)", reason)
                 assert match, f"Reason format invalid: {reason}"
                 cat = match.group(1)
-                assert cat in STOP_PROMPT_CONFIG.valid_categories, (
-                    f"Category {cat} not in valid categories"
-                )
+                assert (
+                    cat in STOP_PROMPT_CONFIG.valid_categories
+                ), f"Category {cat} not in valid categories"
 
     def test_keyword_reason_json_safe(self) -> None:
         """Keyword reason always produces valid JSON."""
@@ -443,10 +449,12 @@ class TestEnhancedProfile:
             "한글 요약: 버그 수정",
         ]
         for summary in test_summaries:
-            payload = json.dumps({
-                "content": summary,
-                "category": "bug",
-            })
+            payload = json.dumps(
+                {
+                    "content": summary,
+                    "category": "bug",
+                }
+            )
             parsed = json.loads(payload)
             assert parsed["content"] == summary
 
@@ -475,17 +483,24 @@ class TestProfileDetection:
         (hooks_dir / "mem-mesh-session-start.sh").touch()
 
         settings_path = tmp_path / "settings.json"
-        settings_path.write_text(json.dumps({
-            "hooks": {
-                "Stop": [
-                    {
-                        "hooks": [
-                            {"type": "prompt", "prompt": "mcp__mem-mesh__add test"}
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "hooks": [
+                                    {
+                                        "type": "prompt",
+                                        "prompt": "mcp__mem-mesh__add test",
+                                    }
+                                ]
+                            }
                         ]
                     }
-                ]
-            }
-        }))
+                }
+            )
+        )
 
         result = _detect_profile(hooks_dir, settings_path)
         assert result == "standard (prompt)"

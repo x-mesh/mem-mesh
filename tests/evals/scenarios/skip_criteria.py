@@ -59,8 +59,8 @@ SKIP_FILE_READ = EvalScenario(
         ConversationMessage(
             role="assistant",
             content=(
-                "```toml\n[project]\nname = \"mem-mesh\"\nversion = \"1.1.0\"\n"
-                "description = \"Centralized memory system for AI development tools\"\n"
+                '```toml\n[project]\nname = "mem-mesh"\nversion = "1.1.0"\n'
+                'description = "Centralized memory system for AI development tools"\n'
                 "```\n\n위 내용이 현재 pyproject.toml의 주요 설정입니다."
             ),
         ),
@@ -77,8 +77,7 @@ SKIP_META_TALK = EvalScenario(
     id="skip_criteria_03",
     name="Hook/설정 메타 대화 → 스킵",
     description=(
-        "hook 동작 확인, settings.json 수정 같은 메타 대화는 "
-        "저장하지 않는지 검증"
+        "hook 동작 확인, settings.json 수정 같은 메타 대화는 " "저장하지 않는지 검증"
     ),
     tier=EvalTier.SIMULATED,
     tags=["skip", "meta", "hook"],
@@ -91,8 +90,8 @@ SKIP_META_TALK = EvalScenario(
             role="assistant",
             content=(
                 "settings.json의 hooks 설정을 확인했습니다.\n\n"
-                "```json\n\"hooks\": {\n  \"Stop\": [{\n    \"type\": \"prompt\",\n"
-                "    \"prompt\": \"...\"\n  }]\n}\n```\n\n"
+                '```json\n"hooks": {\n  "Stop": [{\n    "type": "prompt",\n'
+                '    "prompt": "..."\n  }]\n}\n```\n\n'
                 "Stop hook이 prompt 타입으로 올바르게 설정되어 있습니다."
             ),
         ),

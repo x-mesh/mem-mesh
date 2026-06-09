@@ -11,8 +11,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from urllib.request import urlopen
 from urllib.error import URLError
+from urllib.request import urlopen
 
 from app.cli.hooks.colors import bold, dim, err, info, ok, warn
 
@@ -20,6 +20,7 @@ from app.cli.hooks.colors import bold, dim, err, info, ok, warn
 def has_uvx() -> bool:
     """Return True if `uvx` is available on PATH."""
     return shutil.which("uvx") is not None
+
 
 # ── Tool Registry ──
 
@@ -84,11 +85,13 @@ def detect_tools() -> list[dict]:
     for tool in MCP_TOOLS:
         installed = tool["detect"]()
         has_config = tool["config_path"].exists()
-        detected.append({
-            **tool,
-            "installed": installed,
-            "has_config": has_config,
-        })
+        detected.append(
+            {
+                **tool,
+                "installed": installed,
+                "has_config": has_config,
+            }
+        )
     return detected
 
 
@@ -122,11 +125,22 @@ def generate_mcp_entry(
         tool_key: Tool registry key (e.g. 'claude-code', 'cursor') for MEM_MESH_CLIENT env
     """
     approve_list = [
-        "add", "search", "context", "update", "delete", "stats",
-        "pin_add", "pin_complete", "pin_promote",
-        "session_resume", "session_end",
-        "link", "unlink", "get_links",
-        "batch_operations", "weekly_review",
+        "add",
+        "search",
+        "context",
+        "update",
+        "delete",
+        "stats",
+        "pin_add",
+        "pin_complete",
+        "pin_promote",
+        "session_resume",
+        "session_end",
+        "link",
+        "unlink",
+        "get_links",
+        "batch_operations",
+        "weekly_review",
     ]
 
     if mode in ("sse", "http"):
@@ -254,7 +268,9 @@ def remove_tool_config(tool: dict) -> tuple[bool, str]:
     return True, "removed"
 
 
-def verify_tool_config(tool: dict, url: str = "http://localhost:8000") -> tuple[bool, str]:
+def verify_tool_config(
+    tool: dict, url: str = "http://localhost:8000"
+) -> tuple[bool, str]:
     """Verify that mem-mesh MCP is correctly configured for a tool.
 
     Checks:
@@ -283,7 +299,6 @@ def verify_tool_config(tool: dict, url: str = "http://localhost:8000") -> tuple[
     # http mode — check URL reachability
     if "url" in entry:
         # Check transport type key
-        entry_type = entry.get("type") or entry.get("transport")
         if entry.get("transport") and not entry.get("type"):
             warnings.append("uses 'transport' key (should be 'type' for Claude Code)")
 
@@ -391,7 +406,11 @@ def run_mcp_setup(
 
     if not installed_tools:
         print(f"  {warn('No supported dev tools detected.')}")
-        print(dim("  Supported: Cursor, Kiro, Claude Desktop, VS Code, Windsurf, LM Studio"))
+        print(
+            dim(
+                "  Supported: Cursor, Kiro, Claude Desktop, VS Code, Windsurf, LM Studio"
+            )
+        )
         print()
         return
 
@@ -399,13 +418,17 @@ def run_mcp_setup(
     print(f"  {bold('Detected tools:')}")
     for t in tools:
         if t["installed"]:
-            config_status = ok("config exists") if t["has_config"] else dim("no config yet")
+            config_status = (
+                ok("config exists") if t["has_config"] else dim("no config yet")
+            )
             # Check if mem-mesh already configured
             if t["has_config"]:
                 data = read_config(t["config_path"])
                 if MCP_SERVER_KEY in data.get("mcpServers", {}):
                     config_status = ok("mem-mesh configured")
-            print(f"    {ok('✓')} {t['name']:<16} {dim(str(t['config_path']))}  [{config_status}]")
+            print(
+                f"    {ok('✓')} {t['name']:<16} {dim(str(t['config_path']))}  [{config_status}]"
+            )
         else:
             print(f"    {dim('✗')} {t['name']:<16} {dim('not installed')}")
     print()
@@ -442,7 +465,9 @@ def run_mcp_setup(
         mode_options.append(f"Skip {dim('(configure later)')}")
         mode_keys.append("skip")
 
-        chosen_mode = _prompt_choice("Choose [1]: ", mode_options, default=mode_options[0])
+        chosen_mode = _prompt_choice(
+            "Choose [1]: ", mode_options, default=mode_options[0]
+        )
         mode = mode_keys[mode_options.index(chosen_mode)]
         if mode == "skip":
             print(f"  {dim('Skipping MCP configuration.')}")
@@ -477,9 +502,11 @@ def run_mcp_setup(
                 # Individual selection
                 targets = []
                 for t in installed_tools:
-                    answer = input(
-                        f"    Configure {bold(t['name'])}? [Y/n] "
-                    ).strip().lower()
+                    answer = (
+                        input(f"    Configure {bold(t['name'])}? [Y/n] ")
+                        .strip()
+                        .lower()
+                    )
                     if answer not in ("n", "no"):
                         targets.append(t)
         print()

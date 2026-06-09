@@ -3,7 +3,12 @@
 This module provides business logic services.
 """
 
-from ..errors import ContextNotFoundError, DatabaseError, EmbeddingError, MemoryNotFoundError
+from ..errors import (
+    ContextNotFoundError,
+    DatabaseError,
+    EmbeddingError,
+    MemoryNotFoundError,
+)
 from .context import ContextService
 from .context_optimizer import ContextLoadingParams, ContextOptimizer
 from .importance_analyzer import ImportanceAnalyzer

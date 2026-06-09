@@ -7,7 +7,7 @@ set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
 
-MEM_MESH_PATH="__MEM_MESH_PATH__"
+MEM_MESH_PATH=__MEM_MESH_PATH__
 
 INPUT=$(cat)
 TASK_SUBJECT=$(echo "$INPUT" | jq -r '.task_subject // empty')
@@ -20,13 +20,14 @@ TEAMMATE=$(echo "$INPUT" | jq -r '.teammate_name // empty')
 CONTENT="## Task Completed: ${TASK_SUBJECT}"
 [ -n "$TASK_DESC" ] && CONTENT="${CONTENT}\n\n${TASK_DESC}"
 [ -n "$TEAMMATE" ] && CONTENT="${CONTENT}\n\nCompleted by: ${TEAMMATE}"
-CONTENT=$(printf '%b' "$CONTENT" | head -c 5000)
+CONTENT=$(printf '%b' "$CONTENT" | python3 -c 'import sys; print(sys.stdin.read()[:5000], end="")')
 
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
-python3 -c "
+python3 - "$MEM_MESH_PATH" "$CONTENT" "$PROJECT_DIR" <<'PY' 2>/dev/null || true
 import sys, asyncio, json
-sys.path.insert(0, '$MEM_MESH_PATH')
+mem_mesh_path, content, project_dir = sys.argv[1:4]
+sys.path.insert(0, mem_mesh_path)
 try:
     from app.core.storage.direct import DirectStorageManager
 
@@ -34,8 +35,8 @@ try:
         s = DirectStorageManager()
         await s.initialize()
         await s.add_memory(
-            content=sys.argv[1],
-            project_id=sys.argv[2],
+            content=content,
+            project_id=project_dir,
             category='task',
             source='hook-local',
             tags=['auto-save', 'task-completed'],
@@ -44,6 +45,6 @@ try:
     asyncio.run(save())
 except Exception:
     pass
-" "$CONTENT" "$PROJECT_DIR" 2>/dev/null || true
+PY
 
 exit 0

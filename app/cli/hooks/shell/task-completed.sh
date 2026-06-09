@@ -19,7 +19,8 @@ TEAMMATE=$(echo "$INPUT" | jq -r '.teammate_name // empty')
 CONTENT="## Task Completed: ${TASK_SUBJECT}"
 [ -n "$TASK_DESC" ] && CONTENT="${CONTENT}\n\n${TASK_DESC}"
 [ -n "$TEAMMATE" ] && CONTENT="${CONTENT}\n\nCompleted by: ${TEAMMATE}"
-CONTENT=$(printf '%b' "$CONTENT" | head -c 5000)
+# Char-safe truncation: jq slices by Unicode codepoint (no UTF-8 byte corruption)
+CONTENT=$(printf '%b' "$CONTENT" | jq -Rrs '.[0:5000]')
 
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 

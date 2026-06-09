@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict, List
 
 import pytest
 
@@ -41,9 +41,12 @@ def save_grade_results(results: List[GradeResult], filename: str) -> Path:
 
 def collect_scenarios(*tiers: EvalTier) -> List[EvalScenario]:
     """Collect all scenarios from scenario modules, optionally filtered by tier."""
+    from tests.evals.scenarios.cursor_hooks import ALL_SCENARIOS as CURSOR_SCENARIOS
+    from tests.evals.scenarios.hook_events import ALL_SCENARIOS as HOOK_EVENT_SCENARIOS
     from tests.evals.scenarios.hook_save_execution import (
         ALL_SCENARIOS as HOOK_SCENARIOS,
     )
+    from tests.evals.scenarios.kiro_hooks import ALL_SCENARIOS as KIRO_SCENARIOS
     from tests.evals.scenarios.save_content_quality import (
         ALL_SCENARIOS as CONTENT_SCENARIOS,
     )
@@ -54,10 +57,6 @@ def collect_scenarios(*tiers: EvalTier) -> List[EvalScenario]:
     from tests.evals.scenarios.websocket_notification import (
         ALL_SCENARIOS as WS_SCENARIOS,
     )
-
-    from tests.evals.scenarios.kiro_hooks import ALL_SCENARIOS as KIRO_SCENARIOS
-    from tests.evals.scenarios.cursor_hooks import ALL_SCENARIOS as CURSOR_SCENARIOS
-    from tests.evals.scenarios.hook_events import ALL_SCENARIOS as HOOK_EVENT_SCENARIOS
 
     all_scenarios = (
         HOOK_SCENARIOS
@@ -154,8 +153,12 @@ def simulate_hook_analyze(scenario: EvalScenario) -> EvalResult:
 
     front_lines = front.strip().split("\n")
     max_lines = STOP_PROMPT_CONFIG.max_summary_lines
-    summary_lines = front_lines[:max_lines] if len(front_lines) > max_lines else front_lines
-    front_summary = "\n".join(f"  {line.strip()}" for line in summary_lines if line.strip())
+    summary_lines = (
+        front_lines[:max_lines] if len(front_lines) > max_lines else front_lines
+    )
+    front_summary = "\n".join(
+        f"  {line.strip()}" for line in summary_lines if line.strip()
+    )
     back_raw = back[: STOP_PROMPT_CONFIG.back_max_chars]
     hybrid_content = f"## 맥락\n{front_summary}\n\n## 상세\n{back_raw}"
 
@@ -212,11 +215,18 @@ def _detect_skip_signals(text: str) -> List[str]:
     """Detect skip signals using SAVE_CRITERIA keywords."""
     signals: List[str] = []
     keyword_map: Dict[str, List[str]] = {
-        '단순 질문/답변 ("뭐야?", "보여줘")': ["뭐야", "보여줘", "이 파일은", "이 파일 뭐"],
+        '단순 질문/답변 ("뭐야?", "보여줘")': [
+            "뭐야",
+            "보여줘",
+            "이 파일은",
+            "이 파일 뭐",
+        ],
         "파일 읽기만 한 경우": ["현재 버전은", "위 내용이 현재"],
         "이미 저장된 내용의 반복": ["이미 저장", "Memory ID:"],
         "hook/설정 자체의 점검·수정·메타 대화 (hook 동작 확인, settings.json 수정 포함)": [
-            "hook", "settings.json", "설정을 확인",
+            "hook",
+            "settings.json",
+            "설정을 확인",
         ],
     }
     for criterion in SAVE_CRITERIA.skip_when:

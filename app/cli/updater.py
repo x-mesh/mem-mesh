@@ -14,7 +14,6 @@ from typing import Optional, Tuple
 from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
 from app.core.version import __VERSION__
 
-
 PYPI_URL = "https://pypi.org/pypi/mem-mesh/json"
 
 
@@ -80,7 +79,7 @@ def cmd_update(
     print()
 
     if check_only:
-        print(dim(f"  Run 'mem-mesh update' to upgrade."))
+        print(dim("  Run 'mem-mesh update' to upgrade."))
         print()
         return
 
@@ -122,14 +121,13 @@ def cmd_update(
         return
 
     try:
-        from app.cli.hooks.status import resolve_api_url, _extract_url_from_script
         from app.cli.hooks.constants import CLAUDE_HOOKS_DIR
+        from app.cli.hooks.status import _extract_url_from_script, resolve_api_url
         from app.cli.install_hooks import cmd_install
 
-        baked_url = (
-            _extract_url_from_script(CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh")
-            or _extract_url_from_script(CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh")
-        )
+        baked_url = _extract_url_from_script(
+            CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh"
+        ) or _extract_url_from_script(CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh")
         url, _source = resolve_api_url(baked_url)
 
         cmd_install("all", url, "api", "", "standard")

@@ -9,8 +9,8 @@ from datetime import datetime
 import pytest
 
 from app.core.database.base import Database
-from app.core.schemas.responses import ContextResponse
 from app.core.errors import ContextNotFoundError
+from app.core.schemas.responses import ContextResponse
 from app.core.services.context import ContextService
 from app.core.services.memory import MemoryService
 

@@ -71,10 +71,7 @@ PRECOMPACT_AUTO_ENDED = EvalScenario(
 PRECOMPACT_NON_BLOCKING = EvalScenario(
     id="hook_events_03",
     name="PreCompact hook non-blocking on failure",
-    description=(
-        "PreCompact 훅이 API 실패 시 exit 0으로 "
-        "비차단 종료하는지 검증"
-    ),
+    description=("PreCompact 훅이 API 실패 시 exit 0으로 " "비차단 종료하는지 검증"),
     tier=EvalTier.DETERMINISTIC,
     tags=["hook", "precompact", "non-blocking"],
     hook_event="PreCompact",

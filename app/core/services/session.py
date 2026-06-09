@@ -8,15 +8,13 @@ from uuid import uuid4
 
 from app.core.database.base import Database
 from app.core.schemas.pins import PinResponse
-from app.core.services.pin import _parse_tags
 from app.core.schemas.sessions import (
     SessionContext,
     SessionResponse,
 )
+from app.core.services.pin import _parse_tags
 from app.core.services.project import ProjectService
 from app.core.utils.user import get_current_user
-
-from app.core.errors import NoActiveSessionError
 
 logger = logging.getLogger(__name__)
 
@@ -98,9 +96,14 @@ class SessionService:
             VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
             """,
             (
-                session_id, project_id, effective_user_id,
-                ide_session_id, client_type,
-                now, now, now,
+                session_id,
+                project_id,
+                effective_user_id,
+                ide_session_id,
+                client_type,
+                now,
+                now,
+                now,
             ),
         )
         self.db.connection.commit()
@@ -145,9 +148,7 @@ class SessionService:
         in_progress_cutoff = (
             datetime.now(timezone.utc) - timedelta(days=7)
         ).isoformat()
-        open_cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=30)
-        ).isoformat()
+        open_cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
 
         cursor = await self.db.execute(
             """
@@ -165,9 +166,7 @@ class SessionService:
 
         count = cursor.rowcount
         if count > 0:
-            logger.info(
-                f"Auto-closed {count} stale pins for project={project_id}"
-            )
+            logger.info(f"Auto-closed {count} stale pins for project={project_id}")
         return count
 
     async def resume_last_session(
@@ -230,9 +229,7 @@ class SessionService:
 
             if current_pins["total"] > 0:
                 # Case 1: 활성 세션 + 핀 있음 → 해당 세션 핀 반환
-                return self._build_session_context(
-                    session, current_pins, expand
-                )
+                return self._build_session_context(session, current_pins, expand)
 
             # Case 2: 활성 세션 + 핀 없음 → cross-session 핀 병합
             cross_pins = await self._get_cross_session_pins(
@@ -242,8 +239,7 @@ class SessionService:
             if cross_pins:
                 pins = self._expand_pin_rows(cross_pins, expand)
                 open_count = sum(
-                    1 for r in cross_pins
-                    if r["status"] in ("open", "in_progress")
+                    1 for r in cross_pins if r["status"] in ("open", "in_progress")
                 )
                 completed_count = sum(
                     1 for r in cross_pins if r["status"] == "completed"
@@ -251,7 +247,8 @@ class SessionService:
 
                 # 요약 생성
                 open_contents = [
-                    r["content"][:50] for r in cross_pins
+                    r["content"][:50]
+                    for r in cross_pins
                     if r["status"] in ("open", "in_progress")
                 ][:3]
                 summary = (
@@ -292,9 +289,7 @@ class SessionService:
             project_id, effective_user_id, expand, limit
         )
 
-    async def _get_session_pins(
-        self, session_id: str, limit: int
-    ) -> Dict[str, Any]:
+    async def _get_session_pins(self, session_id: str, limit: int) -> Dict[str, Any]:
         """세션의 핀 통계 및 목록 조회."""
         stats_row = await self.db.fetchone(
             """
@@ -383,8 +378,7 @@ class SessionService:
         summary = session.summary
         if not summary and pins_data["open_count"] > 0:
             open_rows = [
-                r for r in regular_rows
-                if r["status"] in ("open", "in_progress")
+                r for r in regular_rows if r["status"] in ("open", "in_progress")
             ][:3]
             if open_rows:
                 open_tasks = [r["content"][:50] for r in open_rows]
@@ -416,9 +410,7 @@ class SessionService:
         활성 세션이 없을 때 호출된다. 최근 종료된 세션들의 핀 중
         미완료(open/in_progress) 또는 중요도 높은 핀을 반환한다.
         """
-        pin_rows = await self._get_cross_session_pins(
-            project_id, user_id, limit=limit
-        )
+        pin_rows = await self._get_cross_session_pins(project_id, user_id, limit=limit)
 
         if not pin_rows:
             return None
@@ -426,9 +418,7 @@ class SessionService:
         pins = self._expand_pin_rows(pin_rows, expand)
 
         # 통계 계산
-        open_count = sum(
-            1 for r in pin_rows if r["status"] in ("open", "in_progress")
-        )
+        open_count = sum(1 for r in pin_rows if r["status"] in ("open", "in_progress"))
         completed_count = sum(1 for r in pin_rows if r["status"] == "completed")
 
         # 요약 생성
@@ -455,6 +445,10 @@ class SessionService:
         )
 
         session_id = last_session["id"] if last_session else "cross-session"
+        # Match the 7-day cross-session window used by _get_cross_session_pins:
+        # if the originating session row is gone, anchor started_at to the
+        # window start instead of raising NameError on an undefined `cutoff`.
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
         started_at = last_session["started_at"] if last_session else cutoff
 
         logger.info(
@@ -475,9 +469,7 @@ class SessionService:
             pins=pins,
         )
 
-    def _expand_pin_rows(
-        self, pin_rows: list, expand: Union[bool, str]
-    ) -> list:
+    def _expand_pin_rows(self, pin_rows: list, expand: Union[bool, str]) -> list:
         """Pin rows를 expand 모드에 따라 변환."""
         if expand == "smart":
             return [self._pin_row_to_smart(r) for r in pin_rows]
@@ -625,7 +617,9 @@ class SessionService:
             id=row["id"],
             project_id=row["project_id"],
             user_id=row["user_id"],
-            ide_session_id=row["ide_session_id"] if "ide_session_id" in row.keys() else None,
+            ide_session_id=(
+                row["ide_session_id"] if "ide_session_id" in row.keys() else None
+            ),
             client_type=row["client_type"] if "client_type" in row.keys() else None,
             started_at=row["started_at"],
             ended_at=row["ended_at"],

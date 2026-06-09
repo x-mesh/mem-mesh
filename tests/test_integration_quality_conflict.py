@@ -10,7 +10,7 @@ Lane D: 통합 테스트 및 Regression 테스트
 import os
 import tempfile
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -22,10 +22,10 @@ from app.core.errors import (
 )
 from app.core.services.memory import MemoryService
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_valid_content(prefix: str = "This is a valid memory") -> str:
     """100자 이상의 유효한 콘텐츠를 생성한다."""
@@ -91,7 +91,10 @@ class TestCreateQualityGateIntegration:
         async with _temp_db() as db:
             svc = MemoryService(db, _make_mock_embedding_service())
             # "알겠습니다"로 시작하되 100자 이상
-            content = "알겠습니다. " + "이 내용은 품질 게이트를 통과하기 위한 패딩 텍스트입니다. " * 5
+            content = (
+                "알겠습니다. "
+                + "이 내용은 품질 게이트를 통과하기 위한 패딩 텍스트입니다. " * 5
+            )
             assert len(content) >= 100
             with pytest.raises(MemoryLowQualityError):
                 await svc.create(

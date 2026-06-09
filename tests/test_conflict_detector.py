@@ -3,9 +3,9 @@
 import pytest
 
 from app.core.services.conflict_detector import (
+    NLI_MODEL_AVAILABLE,
     ConflictDetectorService,
     ConflictResult,
-    NLI_MODEL_AVAILABLE,
 )
 
 
@@ -33,9 +33,7 @@ class TestConflictDetectorService:
 
     def test_detect_conflicts_below_similarity_threshold(self):
         """Candidates below similarity threshold should be filtered out."""
-        service = ConflictDetectorService(
-            preload=False, similarity_threshold=0.7
-        )
+        service = ConflictDetectorService(preload=False, similarity_threshold=0.7)
         candidates = [
             {"id": "1", "content": "some content", "similarity_score": 0.5},
             {"id": "2", "content": "other content", "similarity_score": 0.3},
@@ -145,6 +143,7 @@ class TestModelLoadFailedFlag:
         original_available = NLI_MODEL_AVAILABLE
 
         if original_available:
+
             def _counting_encoder(*args, **kwargs):
                 nonlocal call_count
                 call_count += 1
@@ -278,7 +277,10 @@ class TestConfigConflictDetection:
         from app.core.config import Settings
 
         s = Settings()
-        assert s.conflict_nli_model == "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
+        assert (
+            s.conflict_nli_model
+            == "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
+        )
         assert s.conflict_contradiction_threshold == 0.7
         assert s.conflict_similarity_threshold == 0.7
         assert s.conflict_max_candidates == 10
@@ -343,9 +345,8 @@ class TestMemoryServiceWiring:
         """MemoryService should gracefully handle ConflictDetectorService import failure."""
         from unittest.mock import MagicMock
 
-        from app.core.config import Settings
-
         import app.core.config
+        from app.core.config import Settings
 
         original_settings = app.core.config._settings
         app.core.config._settings = Settings(enable_conflict_detection=True)

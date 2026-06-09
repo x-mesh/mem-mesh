@@ -70,6 +70,4 @@ class HttpNotifier:
         await self._send("pin_completed", {"pin": pin_data})
 
     async def notify_pin_promoted(self, pin_id: str, memory_id: str) -> None:
-        await self._send(
-            "pin_promoted", {"pin_id": pin_id, "memory_id": memory_id}
-        )
+        await self._send("pin_promoted", {"pin_id": pin_id, "memory_id": memory_id})

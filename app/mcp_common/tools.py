@@ -76,7 +76,12 @@ class MCPToolHandlers:
 
         logger.info_with_details(
             "Tool add called",
-            details={"content": content, "tags": tags, "source": source, "client": client},
+            details={
+                "content": content,
+                "tags": tags,
+                "source": source,
+                "client": client,
+            },
             project_id=project_id,
             category=category,
             content_length=len(content),
@@ -568,7 +573,11 @@ class MCPToolHandlers:
                     logger.warning(f"Failed to send pin_add notification: {e}")
 
             # MCP 반환은 compact
-            response = {"id": result.id, "importance": effective_importance, "status": result.status}
+            response = {
+                "id": result.id,
+                "importance": effective_importance,
+                "status": result.status,
+            }
             if auto_importance:
                 response["auto_importance"] = True
             return response
@@ -633,12 +642,18 @@ class MCPToolHandlers:
                     logger.warning(f"Failed to send pin_complete notification: {e}")
 
             # MCP 반환은 compact
-            response = {"id": pin_id, "status": result.status, "suggest_promotion": suggest_promotion}
+            response = {
+                "id": pin_id,
+                "status": result.status,
+                "suggest_promotion": suggest_promotion,
+            }
 
             # promote=True이면 자동 승격
             if promote:
                 try:
-                    promote_result = await pin_service.promote_to_memory(pin_id, category=category)
+                    promote_result = await pin_service.promote_to_memory(
+                        pin_id, category=category
+                    )
                     response["promoted"] = True
                     response["memory_id"] = promote_result["memory_id"]
 
@@ -792,9 +807,7 @@ class MCPToolHandlers:
                     pins = [p for p in pins if p.importance >= min_importance]
                 if tags:
                     pins = [
-                        p
-                        for p in pins
-                        if all(tag in (p.tags or []) for tag in tags)
+                        p for p in pins if all(tag in (p.tags or []) for tag in tags)
                     ]
                 if needs_client_filter:
                     pins = pins[:limit]
@@ -1036,8 +1049,8 @@ class MCPToolHandlers:
         )
 
         try:
-            from ..core.schemas.relations import RelationCreate, RelationType
             from ..core.errors import MemoryNotFoundError
+            from ..core.schemas.relations import RelationCreate, RelationType
             from ..core.services.relation import RelationService
 
             db = self._get_database()

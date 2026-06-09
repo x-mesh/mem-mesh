@@ -10,23 +10,23 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 [ -z "${ANTHROPIC_API_KEY:-}" ] && exit 0
 
-MEM_MESH_PATH="__MEM_MESH_PATH__"
+MEM_MESH_PATH=__MEM_MESH_PATH__
 
 INPUT=$(cat)
 MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
 [ ${#MESSAGE} -lt 100 ] && exit 0
 
-CONVERSATION=$(echo "$MESSAGE" | head -c 6000)
+CONVERSATION=$(printf '%s' "$MESSAGE" | python3 -c 'import sys; print(sys.stdin.read()[:6000], end="")')
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
-python3 -c "
+python3 - "$MEM_MESH_PATH" "$PROJECT_DIR" "$CONVERSATION" <<'PY' 2>/dev/null || true
 import sys, asyncio, json, urllib.request, urllib.error, os
 
+mem_mesh_path, project_dir, conversation = sys.argv[1:4]
 api_key = os.environ.get('ANTHROPIC_API_KEY', '')
 if not api_key:
     sys.exit(0)
 
-conversation = sys.stdin.read()
 prompt = '''__REFLECT_PROMPT__'''
 
 # Call Haiku for analysis
@@ -60,7 +60,7 @@ raw_summary = conversation[:3000]
 content = f'## Raw Context\n{raw_summary}\n\n## LLM Analysis\n{analysis}'
 content = content[:9500]
 
-sys.path.insert(0, '$MEM_MESH_PATH')
+sys.path.insert(0, mem_mesh_path)
 from app.core.storage.direct import DirectStorageManager
 
 async def save():
@@ -68,13 +68,13 @@ async def save():
     await s.initialize()
     await s.add_memory(
         content=content,
-        project_id='$PROJECT_DIR',
+        project_id=project_dir,
         category='decision',
         source='hook-reflect',
         tags=['auto-save', 'llm-reflection', 'enhanced'],
     )
 
 asyncio.run(save())
-" <<< "$CONVERSATION" 2>/dev/null || true
+PY
 
 exit 0

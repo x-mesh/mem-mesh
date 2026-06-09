@@ -6,7 +6,13 @@ services:
       dockerfile: Dockerfile
     image: xmesh/mem-mesh:latest
     container_name: mem-mesh-prod
-    network_mode: host
+    # SECURITY: do NOT use `network_mode: host` — it binds 0.0.0.0 directly on
+    # the host with no token by default, exposing unauthenticated hook write
+    # endpoints (POST /api/hooks/claude/*) to the network. We publish to the
+    # host loopback only. To expose remotely, change the published address to
+    # 0.0.0.0:8000:8000 — a hook token is enforced (see MEM_MESH_HOOK_TOKEN).
+    ports:
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -15,9 +21,18 @@ services:
       - MEM_MESH_DATABASE_PATH=/app/data/memories.db
       - MEM_MESH_LOG_LEVEL=INFO
       - MEM_MESH_LOG_FORMAT=text
+      # Must be 0.0.0.0 so the published port reaches the app inside the
+      # container. Network exposure is controlled by the `ports:` mapping above,
+      # not by this value. Because the app sees a non-loopback bind, it
+      # fails closed without a hook token (below).
       - MEM_MESH_SERVER_HOST=0.0.0.0
       - MEM_MESH_SERVER_PORT=8000
       - MEM_MESH_SERVER_WORKERS=2
+      # REQUIRED: shared secret for hook write endpoints. `docker compose up`
+      # fails until this is set (put a strong random value in your .env, e.g.
+      # `MEM_MESH_HOOK_TOKEN=$(openssl rand -hex 32)`). Hooks must send it as
+      # `Authorization: Bearer <token>`.
+      - MEM_MESH_HOOK_TOKEN=${MEM_MESH_HOOK_TOKEN:?Set MEM_MESH_HOOK_TOKEN in .env to a strong random secret; the server is bound to 0.0.0.0 and fails closed without it}
       # Embedding model: defaults to nlpai-lab/KURE-v1 (Korean-tuned, 1024-dim)
       # Override by uncommenting and setting MEM_MESH_EMBEDDING_MODEL below.
       # - MEM_MESH_EMBEDDING_MODEL=intfloat/multilingual-e5-large

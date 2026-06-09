@@ -117,7 +117,9 @@ async def add(
     tags: Optional[list[str]] = None,
 ) -> dict:
     """Internal handler for add tool."""
-    return await _get_handlers().add(content, project_id, category, source, client, tags)
+    return await _get_handlers().add(
+        content, project_id, category, source, client, tags
+    )
 
 
 @mcp.tool(description=TOOL_DESCRIPTIONS["search"])
@@ -207,9 +209,13 @@ async def pin_add(
 
 
 @mcp.tool(description=TOOL_DESCRIPTIONS["pin_complete"])
-async def pin_complete(pin_id: str, promote: bool = False, category: str = "task") -> dict:
+async def pin_complete(
+    pin_id: str, promote: bool = False, category: str = "task"
+) -> dict:
     """Internal handler for pin_complete tool."""
-    return await _get_handlers().pin_complete(pin_id, promote=promote, category=category)
+    return await _get_handlers().pin_complete(
+        pin_id, promote=promote, category=category
+    )
 
 
 @mcp.tool(description=TOOL_DESCRIPTIONS["pin_promote"])
@@ -235,7 +241,9 @@ async def session_end(
     auto_complete_pins: Union[bool, str] = "none",
 ) -> dict:
     """Internal handler for session_end tool."""
-    return await _get_handlers().session_end(project_id, summary, auto_complete_pins=auto_complete_pins)
+    return await _get_handlers().session_end(
+        project_id, summary, auto_complete_pins=auto_complete_pins
+    )
 
 
 @mcp.tool(description=TOOL_DESCRIPTIONS["link"])

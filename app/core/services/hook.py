@@ -25,8 +25,10 @@ logger = logging.getLogger(__name__)
 # Substrings that mark a turn as having saved something to mem-mesh.
 _SAVE_MARKERS = ("mcp__mem-mesh__add", "mcp__mem-mesh__pin_add")
 
-# Events that count as an "assistant turn" for the turns-since-save counter.
-_TURN_EVENTS = ("UserPromptSubmit", "Stop")
+# Canonical counter unit: one user submission = one turn. The save-reminder
+# counts UserPromptSubmit events only, matching the command-hook's per-turn
+# semantics. Stop is part of the response lifecycle and must not inflate N.
+_COUNT_EVENT = "UserPromptSubmit"
 
 
 class HookService:
@@ -124,34 +126,36 @@ class HookService:
         return row["prompt"] if row else None
 
     async def turns_since_save(self, ide_session_id: str) -> int:
-        """Count assistant turns since the last memory save in this session.
+        """Count user-prompt turns since the last memory save in this session.
 
-        Returns the total turn count when nothing has been saved yet.
+        Canonical meaning: the number of UserPromptSubmit events recorded after
+        the most recent save. A save may be *detected* on any event (an explicit
+        ``add`` usually lands on a Stop turn's assistant message), so the
+        "last save" lookup is not restricted by event type — but only
+        UserPromptSubmit events are *counted*, so Stop/SubagentStop events never
+        inflate the reminder threshold. Returns the total user-prompt count when
+        nothing has been saved yet.
         """
         if not ide_session_id:
             return 0
 
-        placeholders = ", ".join("?" for _ in _TURN_EVENTS)
-
         last_save = await self.db.fetchone(
-            f"""
+            """
             SELECT MAX(turn_index) AS m FROM hook_events
             WHERE ide_session_id = ? AND saved_memory = 1
-              AND event_name IN ({placeholders})
             """,
-            (ide_session_id, *_TURN_EVENTS),
+            (ide_session_id,),
         )
         last_save_turn = (
             last_save["m"] if last_save and last_save["m"] is not None else -1
         )
 
         row = await self.db.fetchone(
-            f"""
+            """
             SELECT COUNT(*) AS c FROM hook_events
-            WHERE ide_session_id = ? AND turn_index > ?
-              AND event_name IN ({placeholders})
+            WHERE ide_session_id = ? AND turn_index > ? AND event_name = ?
             """,
-            (ide_session_id, last_save_turn, *_TURN_EVENTS),
+            (ide_session_id, last_save_turn, _COUNT_EVENT),
         )
         return int(row["c"]) if row else 0
 

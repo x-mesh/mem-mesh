@@ -32,7 +32,7 @@ CONTENT_QUALITY_BUG = EvalScenario(
         ConversationMessage(
             role="system-reminder",
             content=(
-                'mem-mesh에 저장하세요. mcp__mem-mesh__add('
+                "mem-mesh에 저장하세요. mcp__mem-mesh__add("
                 'category="bug", project_id="mem-mesh"): '
                 "## 맥락\nTypeError: 'NoneType' object is not subscriptable 수정\n\n"
                 "## 상세\npin_service.py의 get_pins()에서 None 체크 누락"
@@ -52,7 +52,7 @@ CONTENT_QUALITY_BUG = EvalScenario(
         ),
     ],
     expected_content_patterns=[
-        r"##\s+",          # markdown headers
+        r"##\s+",  # markdown headers
         r"TypeError|NoneType",  # error context preserved
     ],
 )
@@ -74,7 +74,7 @@ CONTENT_QUALITY_DECISION = EvalScenario(
         ConversationMessage(
             role="system-reminder",
             content=(
-                'mem-mesh에 저장하세요. mcp__mem-mesh__add('
+                "mem-mesh에 저장하세요. mcp__mem-mesh__add("
                 'category="decision", project_id="mem-mesh"): '
                 "## 배경 (WHY)\n하이브리드 저장 방식 vs 전체 요약 비교\n\n"
                 "## 내용 (WHAT)\n하이브리드 채택: 앞부분 60% 요약 + 뒷부분 40% 원본\n\n"

@@ -16,7 +16,6 @@ from .models import (
     CheckResult,
     EvalResult,
     EvalScenario,
-    ExpectedAction,
     GradeResult,
 )
 
@@ -77,7 +76,8 @@ def _build_judge_prompt(scenario: EvalScenario, result: EvalResult) -> str:
     return JUDGE_PROMPT_TEMPLATE.format(
         scenario_description=scenario.description,
         expected_action=scenario.expected_action.value,
-        expected_tools=", ".join(t.tool_name for t in scenario.expected_tools) or "none",
+        expected_tools=", ".join(t.tool_name for t in scenario.expected_tools)
+        or "none",
         expected_category=scenario.expected_category or "N/A",
         conversation=_format_conversation(scenario),
         actual_action=result.actual_action,

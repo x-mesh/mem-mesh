@@ -58,9 +58,7 @@ async def _create_pins_and_get_session(session_svc, pin_svc, db):
         user_id=USER_ID,
     )
     # open 상태로 직접 변경
-    await db.execute(
-        "UPDATE pins SET status = 'open' WHERE id = ?", (pin_open.id,)
-    )
+    await db.execute("UPDATE pins SET status = 'open' WHERE id = ?", (pin_open.id,))
 
     # 세션 ID 조회
     sessions = await session_svc.list_sessions(
