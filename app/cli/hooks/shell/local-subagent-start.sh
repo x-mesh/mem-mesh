@@ -8,7 +8,7 @@ set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
 
-MEM_MESH_PATH="__MEM_MESH_PATH__"
+MEM_MESH_PATH=__MEM_MESH_PATH__
 
 INPUT=$(cat)
 AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // empty')
@@ -20,9 +20,10 @@ esac
 
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
-CONTEXT=$(python3 -c "
+CONTEXT=$(python3 - "$MEM_MESH_PATH" "$PROJECT_DIR" 2>/dev/null <<'PY'
 import sys, asyncio, json
-sys.path.insert(0, '$MEM_MESH_PATH')
+mem_mesh_path, project_dir = sys.argv[1:3]
+sys.path.insert(0, mem_mesh_path)
 try:
     from app.core.storage.direct import DirectStorageManager
 
@@ -31,7 +32,7 @@ try:
         await s.initialize()
         results = await s.search_memories(
             query='project rules architecture decision',
-            project_id='$PROJECT_DIR',
+            project_id=project_dir,
             category='decision',
             limit=5,
         )
@@ -46,7 +47,8 @@ try:
     asyncio.run(search())
 except Exception:
     sys.exit(0)
-" 2>/dev/null) || exit 0
+PY
+) || exit 0
 
 [ -z "$CONTEXT" ] && exit 0
 

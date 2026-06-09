@@ -8,7 +8,7 @@ set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
 
-MEM_MESH_PATH="__MEM_MESH_PATH__"
+MEM_MESH_PATH=__MEM_MESH_PATH__
 
 INPUT=$(cat)
 
@@ -32,13 +32,14 @@ __KEYWORD_MATCHER__
 # Build content with agent type prefix
 AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // "unknown"')
 CONTENT="[${AGENT_TYPE} agent] ${MESSAGE}"
-CONTENT=$(echo "$CONTENT" | head -c 9500)
+CONTENT=$(printf '%s' "$CONTENT" | python3 -c 'import sys; print(sys.stdin.read()[:9500], end="")')
 
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
-python3 -c "
+python3 - "$MEM_MESH_PATH" "$CONTENT" "$PROJECT_DIR" "$CATEGORY" <<'PY' 2>/dev/null || true
 import sys, asyncio, json
-sys.path.insert(0, '$MEM_MESH_PATH')
+mem_mesh_path, content, project_dir, category = sys.argv[1:5]
+sys.path.insert(0, mem_mesh_path)
 try:
     from app.core.storage.direct import DirectStorageManager
 
@@ -46,16 +47,16 @@ try:
         s = DirectStorageManager()
         await s.initialize()
         await s.add_memory(
-            content=sys.argv[1],
-            project_id=sys.argv[2],
-            category=sys.argv[3],
+            content=content,
+            project_id=project_dir,
+            category=category,
             source='hook-local',
-            tags=['auto-save', 'subagent', sys.argv[3]],
+            tags=['auto-save', 'subagent', category],
         )
 
     asyncio.run(save())
 except Exception:
     pass
-" "$CONTENT" "$PROJECT_DIR" "$CATEGORY" 2>/dev/null || true
+PY
 
 exit 0

@@ -31,7 +31,8 @@ __KEYWORD_MATCHER__
 # Build content with agent type prefix
 AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // "unknown"')
 CONTENT="[${AGENT_TYPE} agent] ${MESSAGE}"
-CONTENT=$(echo "$CONTENT" | head -c 9500)
+# Char-safe truncation: jq slices by Unicode codepoint (no UTF-8 byte corruption)
+CONTENT=$(printf '%s' "$CONTENT" | jq -Rrs '.[0:9500]')
 
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 

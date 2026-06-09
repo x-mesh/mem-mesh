@@ -9,7 +9,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 [ -z "${ANTHROPIC_API_KEY:-}" ] && exit 0
 
-MEM_MESH_PATH="__MEM_MESH_PATH__"
+MEM_MESH_PATH=__MEM_MESH_PATH__
 
 INPUT=$(cat)
 
@@ -21,17 +21,17 @@ MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
 
 echo "$MESSAGE" | grep -q 'mcp__mem-mesh__add' && exit 0
 
-CONVERSATION=$(echo "$MESSAGE" | head -c 6000)
+CONVERSATION=$(printf '%s' "$MESSAGE" | python3 -c 'import sys; print(sys.stdin.read()[:6000], end="")')
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
-python3 -c "
+python3 - "$MEM_MESH_PATH" "$PROJECT_DIR" "$CONVERSATION" <<'PY' 2>/dev/null || true
 import sys, asyncio, json, urllib.request, urllib.error, os
 
+mem_mesh_path, project_dir, conversation = sys.argv[1:4]
 api_key = os.environ.get('ANTHROPIC_API_KEY', '')
 if not api_key:
     sys.exit(0)
 
-conversation = sys.stdin.read()
 prompt = '''__ENHANCED_PROMPT__'''
 
 payload = json.dumps({
@@ -74,7 +74,7 @@ if category not in valid_categories:
 content = summary + '\n\n---\n\n' + conversation[:3000]
 content = content[:9500]
 
-sys.path.insert(0, '$MEM_MESH_PATH')
+sys.path.insert(0, mem_mesh_path)
 from app.core.storage.direct import DirectStorageManager
 
 async def save():
@@ -82,13 +82,13 @@ async def save():
     await s.initialize()
     await s.add_memory(
         content=content,
-        project_id='$PROJECT_DIR',
+        project_id=project_dir,
         category=category,
         source='hook-enhanced',
         tags=['auto-save', 'enhanced', category],
     )
 
 asyncio.run(save())
-" <<< "$CONVERSATION" 2>/dev/null || true
+PY
 
 exit 0

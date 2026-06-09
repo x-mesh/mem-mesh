@@ -233,6 +233,21 @@ class Settings(BaseSettings):
         description="Enable OAuth authentication for Dashboard/Web API endpoints",
     )
 
+    # Hook endpoint authentication (independent of OAuth auth_enabled flags).
+    # Guards POST /api/hooks/claude/* against unauthenticated remote memory
+    # injection. Env: MEM_MESH_HOOK_TOKEN. File fallback: ~/.mem-mesh/hook_token.
+    hook_token: Optional[str] = Field(
+        default=None,
+        description=(
+            "Shared secret for hook endpoints. If unset, falls back to "
+            "~/.mem-mesh/hook_token. When set, a matching "
+            "'Authorization: Bearer <token>' is required on any bind host. When "
+            "unset, hook writes are allowed; a non-loopback bind additionally "
+            "logs a one-time warning (the firewall is the trust boundary — set "
+            "this token to require authentication)."
+        ),
+    )
+
     # Basic Auth for Web Dashboard (simpler alternative to OAuth for browser access)
     web_basic_auth_enabled: bool = Field(
         default=False,
@@ -413,3 +428,67 @@ def create_settings(**kwargs) -> Settings:
         Settings: New settings instance with provided values
     """
     return Settings(**kwargs)
+
+
+# Path of the on-disk hook-token fallback (written 0600 by the installer).
+HOOK_TOKEN_FILE = Path.home() / ".mem-mesh" / "hook_token"
+
+
+def resolve_hook_token() -> Optional[str]:
+    """Resolve the hook auth token: MEM_MESH_HOOK_TOKEN env first, file fallback.
+
+    Resolution order (matches the installer contract):
+    1. ``settings.hook_token`` (from MEM_MESH_HOOK_TOKEN / .env)
+    2. ``~/.mem-mesh/hook_token`` file contents (trimmed)
+
+    Returns None when neither is configured. Read every call (no caching) so a
+    token written after startup is picked up without a restart.
+    """
+    token = (get_settings().hook_token or "").strip()
+    if token:
+        return token
+
+    try:
+        if HOOK_TOKEN_FILE.exists():
+            file_token = HOOK_TOKEN_FILE.read_text(encoding="utf-8").strip()
+            return file_token or None
+    except OSError:
+        # Unreadable token file degrades to "no token configured"; the
+        # loopback/warning logic in verify_hook_token then applies.
+        pass
+    return None
+
+
+# The host uvicorn actually binds to. ``settings.server_host`` is the *static*
+# default (127.0.0.1) and does NOT reflect a ``--host`` / ``MEM_MESH_SERVER_HOST``
+# override passed at launch, so hook-token loopback judgment must use this
+# runtime value instead. Recorded once by the server start path
+# (``create_uvicorn_config``); mirrored to an env var so uvicorn reload/worker
+# subprocesses (which re-import the app instead of calling that function) still
+# see it.
+_EFFECTIVE_BIND_HOST_ENV = "MEM_MESH_EFFECTIVE_BIND_HOST"
+_effective_bind_host: Optional[str] = None
+
+
+def set_effective_bind_host(host: Optional[str]) -> None:
+    """Record the host uvicorn is actually binding to (server start path)."""
+    global _effective_bind_host
+    _effective_bind_host = host
+    if host:
+        os.environ[_EFFECTIVE_BIND_HOST_ENV] = host
+
+
+def get_effective_bind_host() -> str:
+    """Effective uvicorn bind host: ``--host`` > ``MEM_MESH_SERVER_HOST`` > setting.
+
+    Resolution order: the value recorded by :func:`set_effective_bind_host`
+    (same process), then the ``MEM_MESH_EFFECTIVE_BIND_HOST`` env var (reload /
+    worker subprocesses), then the static ``settings.server_host`` fallback for
+    embedded / import-only / test usage where no server start path ran.
+    """
+    if _effective_bind_host:
+        return _effective_bind_host
+    env_host = os.environ.get(_EFFECTIVE_BIND_HOST_ENV)
+    if env_host:
+        return env_host
+    return get_settings().server_host

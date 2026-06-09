@@ -8,7 +8,10 @@ from app.cli.hooks.constants import (
     KIRO_HOOKS_DIR,
     KIRO_SETTINGS,
 )
-from app.cli.hooks.json_ops import _remove_json_key, _remove_kiro_mem_mesh_hooks
+from app.cli.hooks.json_ops import (
+    _remove_kiro_mem_mesh_hooks,
+    _remove_mem_mesh_hooks_from_json,
+)
 
 
 def _uninstall_claude() -> None:
@@ -33,8 +36,8 @@ def _uninstall_claude() -> None:
             script.unlink()
             print(f"  removed {script}")
 
-    print("[claude] Removing hooks from settings.json...")
-    _remove_json_key(CLAUDE_SETTINGS, "hooks")
+    print("[claude] Removing mem-mesh hooks from settings.json...")
+    _remove_mem_mesh_hooks_from_json(CLAUDE_SETTINGS)
 
     print("[claude] Done.")
 
@@ -67,7 +70,7 @@ def _uninstall_cursor() -> None:
             script.unlink()
             print(f"  removed {script}")
 
-    print("[cursor] Removing hooks from hooks.json...")
-    _remove_json_key(CURSOR_SETTINGS, "hooks")
+    print("[cursor] Removing mem-mesh hooks from hooks.json...")
+    _remove_mem_mesh_hooks_from_json(CURSOR_SETTINGS)
 
     print("[cursor] Done.")
