@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.core.schemas.requests import normalize_project_id
 from app.core.schemas.responses import SearchResponse
 from app.core.services.unified_search import UnifiedSearchService
 
@@ -59,6 +60,11 @@ async def _do_search(
     temporal_mode: str = "boost",
 ) -> SearchResponse:
     """Shared search logic for GET and POST endpoints."""
+    # Single chokepoint for both GET (query param) and POST (body) search, so a
+    # lookup for "MyProject" matches memories stored under the canonical
+    # "my-project". strict=False: a malformed filter degrades to "unknown"
+    # (empty result) rather than a 500.
+    project_id = normalize_project_id(project_id, strict=False)
     try:
         return await service.search(
             query=query,

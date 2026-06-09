@@ -5,42 +5,84 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+# Git-worktree checkouts append ``-wt-<hex>`` / ``_wt_<hex>`` to the repo dir;
+# that suffix would otherwise fragment one repo into many project ids.
+_WT_SUFFIX_RE = re.compile(r"[-_]wt[-_][0-9a-f]{6,}$", re.IGNORECASE)
 
-def normalize_project_id(v: Optional[str]) -> Optional[str]:
-    """project_id를 kebab-case로 정규화.
 
-    camelCase/PascalCase → kebab-case 변환 후 소문자화.
-    예: "jmonServerWeb" → "jmon-server-web"
+def normalize_project_id(v: Optional[str], *, strict: bool = True) -> Optional[str]:
+    """project_id를 정규화하는 **단일 진실 공급원(single source of truth)**.
+
+    The server normalizes; clients (HTTP-hook cwd basename, command-hook RAW
+    basename, MCP explicit id) may send any variant of the same repo and they
+    all converge to one id:
+
+        "/Users/dev/work/OCI.Tools-wt-ABCDEF" → "oci-tools"  (path + worktree + dot)
+        "jmonServerWeb" → "jmon-server-web"                  (camelCase)
         "MyProject" → "my-project"
-        "already-kebab" → "already-kebab" (변경 없음)
+        "HTMLParser" → "html-parser"                         (consecutive caps)
+        "oci_tools" / "OCI-Tools" → "oci-tools"
+        "already-kebab" → "already-kebab"                    (idempotent)
+
+    Pipeline: filesystem path → last segment; strip git-worktree suffix;
+    camelCase/PascalCase → kebab; lower-case; ``_`` ``.`` whitespace → ``-``;
+    collapse repeated ``-``.
+
+    ``strict=True`` (API/MCP via Pydantic schema): raise ValueError on an
+    un-normalizable value, surfacing as HTTP 422. ``strict=False`` (hook entry
+    points, which must never break the caller): return ``"unknown"`` instead.
+
+    NOTE (historical data split): this is stricter than the pre-P2 hook
+    normalizer, which only lower-cased (e.g. "MyProject" → "myproject"). Rows
+    saved before this change keep their old id, so a repo may appear split
+    across the old and new ids until/unless backfilled. No migration is done.
     """
     if v is None:
         return v
-    if not isinstance(v, str) or len(v) == 0:
-        raise ValueError("project_id must be a non-empty string")
+    if not isinstance(v, str) or len(v.strip()) == 0:
+        if strict:
+            raise ValueError("project_id must be a non-empty string")
+        return "unknown"
+
+    name = v.strip()
+    if "/" in name:  # a filesystem path leaked in as the id
+        name = name.rstrip("/").split("/")[-1]
+    name = _WT_SUFFIX_RE.sub("", name)  # drop worktree suffix before casing
 
     # camelCase/PascalCase → kebab-case: insert hyphen before uppercase letters
-    normalized = re.sub(r"(?<=[a-z0-9])([A-Z])", r"-\1", v)
+    normalized = re.sub(r"(?<=[a-z0-9])([A-Z])", r"-\1", name)
     # Handle consecutive uppercase: "HTMLParser" → "html-parser"
     normalized = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1-\2", normalized)
     normalized = normalized.lower()
-    # Replace spaces/underscores with hyphens
-    normalized = re.sub(r"[\s_]+", "-", normalized)
-    # Remove consecutive hyphens
+    # Unify separators: spaces/underscores/dots → hyphens
+    normalized = re.sub(r"[\s_.]+", "-", normalized)
+    # Collapse consecutive hyphens
     normalized = re.sub(r"-+", "-", normalized).strip("-")
 
     if not re.match(r"^[a-z0-9][a-z0-9_-]*$", normalized):
-        raise ValueError(
-            f"project_id '{v}' cannot be normalized to a valid format. "
-            "Must contain only letters, numbers, hyphens, and underscores"
-        )
+        if strict:
+            raise ValueError(
+                f"project_id '{v}' cannot be normalized to a valid format. "
+                "Must contain only letters, numbers, hyphens, and underscores"
+            )
+        return "unknown"
     return normalized
 
 
 class AddParams(BaseModel):
     """메모리 추가 요청 파라미터"""
 
-    content: str = Field(min_length=100, max_length=50000)
+    content: str = Field(
+        min_length=100,
+        max_length=50000,
+        description=(
+            "Memory body. Minimum 100 characters: permanent memories must be "
+            "substantive (decision/bug/incident/idea/code_snippet). Shorter "
+            "turns are transient and belong in a pin, not /api/memories. Hook "
+            "auto-save filters apply the same >=100 bar, so a 50-99 char turn "
+            "is dropped by the hook rather than rejected here with a 422."
+        ),
+    )
     project_id: Optional[str] = Field(default=None)
     category: str = Field(default="task")
     source: Optional[str] = Field(default=None)

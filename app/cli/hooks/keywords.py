@@ -31,6 +31,29 @@ Classification notes
 
 import re
 
+# System artifacts that must never be saved as memories. Mirrors the server's
+# ``_NOISE_MARKERS`` in ``route_modules/hooks.py`` so the shell and HTTP paths
+# agree on what counts as non-substantive noise.
+_NOISE_MARKERS = (
+    "<task-notification>",
+    "</task-notification>",
+    "<task-id>",
+    "<tool-use-id>",
+    "<system-reminder>",
+)
+
+
+def is_noise(message: str) -> bool:
+    """True if the message is a system artifact (task/tool/reminder envelope).
+
+    Used by the shell ``KEYWORD_MATCHER_BLOCK`` (which inlines the same markers)
+    and available to Python callers for parity with the server's ``_is_noise``.
+    """
+    if not message:
+        return False
+    return any(marker in message for marker in _NOISE_MARKERS)
+
+
 _COMPLETION_PATTERNS = [
     r"(완료|했습니다|합니다|됩니다|done|finished|completed|resolved|fixed)",
     r"(수정|변경|추가|삭제|생성|구현|적용|배포|설치)",
@@ -168,6 +191,16 @@ KEYWORD_MATCHER_BLOCK = r"""import sys, re, os
 
 msg = sys.stdin.read().lower()
 extra_kw = os.environ.get('EXTRA_KW', '')
+
+# Noise filter (parity with server _is_noise): never classify/save system
+# artifacts — task-notification / tool-use / system-reminder envelopes.
+noise_markers = (
+    '<task-notification>', '</task-notification>', '<task-id>',
+    '<tool-use-id>', '<system-reminder>',
+)
+if any(m in msg for m in noise_markers):
+    print('SKIP')
+    sys.exit(0)
 
 # Pass 1: completion indicators (must match at least one)
 completion = [

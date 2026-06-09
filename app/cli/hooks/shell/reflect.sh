@@ -22,7 +22,8 @@ MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
 [ ${#MESSAGE} -lt 100 ] && exit 0
 
 # Truncate to fit within API limits (leave room for prompt + analysis output)
-CONVERSATION=$(echo "$MESSAGE" | head -c 6000)
+# Char-safe truncation: jq slices by Unicode codepoint (no UTF-8 byte corruption)
+CONVERSATION=$(printf '%s' "$MESSAGE" | jq -Rrs '.[0:6000]')
 
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
@@ -65,15 +66,15 @@ except Exception:
 [ -z "$ANALYSIS" ] && exit 0
 
 # Build combined content: raw context + LLM analysis
-RAW_SUMMARY=$(echo "$CONVERSATION" | head -c 3000)
+RAW_SUMMARY=$(printf '%s' "$CONVERSATION" | jq -Rrs '.[0:3000]')
 CONTENT="## Raw Context
 ${RAW_SUMMARY}
 
 ## LLM Analysis
 ${ANALYSIS}"
 
-# Limit to API max (10000 chars)
-CONTENT=$(echo "$CONTENT" | head -c 9500)
+# Limit to API max (10000 chars); char-safe codepoint slice via jq
+CONTENT=$(printf '%s' "$CONTENT" | jq -Rrs '.[0:9500]')
 
 PAYLOAD=$(jq -n \
   --arg content "$CONTENT" \

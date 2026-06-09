@@ -28,6 +28,16 @@ import sys, re, os
 msg = sys.stdin.read().lower()
 extra_kw = os.environ.get('EXTRA_KW', '')
 
+# Noise filter (parity with server _is_noise): never classify/save system
+# artifacts — task-notification / tool-use / system-reminder envelopes.
+noise_markers = (
+    '<task-notification>', '</task-notification>', '<task-id>',
+    '<tool-use-id>', '<system-reminder>',
+)
+if any(m in msg for m in noise_markers):
+    print('SKIP')
+    sys.exit(0)
+
 # Pass 1: completion indicators (must match at least one)
 completion = [
     r'(완료|했습니다|합니다|됩니다|done|finished|completed|resolved|fixed)',
@@ -136,7 +146,8 @@ print(best_cat)
 # Build content with agent type prefix
 AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // "unknown"')
 CONTENT="[${AGENT_TYPE} agent] ${MESSAGE}"
-CONTENT=$(echo "$CONTENT" | head -c 9500)
+# Char-safe truncation: jq slices by Unicode codepoint (no UTF-8 byte corruption)
+CONTENT=$(printf '%s' "$CONTENT" | jq -Rrs '.[0:9500]')
 
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 

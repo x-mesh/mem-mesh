@@ -97,6 +97,103 @@ class TestMemoryService:
         assert response1.id == response2.id
 
     @pytest.mark.asyncio
+    async def test_create_redacts_secrets_at_chokepoint(self, memory_service):
+        """create() is the single save chokepoint for HTTP hook, command hook
+        (POST /api/memories) and explicit MCP add; secrets/PII must be masked
+        there so every path complies with CLAUDE.md M4 (no secret persisted)."""
+        content = (
+            "Deploying today. The key is sk-ant-abcdefghij1234567890 and the header "
+            "was Authorization: Bearer abc.def.ghijklmnop — ping ops@example.com for "
+            "the rollout. This body is padded comfortably past the hundred character "
+            "quality-gate minimum so the create call is accepted by the service."
+        )
+        response = await memory_service.create(content=content, source="test")
+        assert response.status == "saved"
+
+        saved = await memory_service.get(response.id)
+        assert "<REDACTED>" in saved.content
+        assert "sk-ant-abcdefghij1234567890" not in saved.content
+        assert "abc.def.ghijklmnop" not in saved.content
+        assert "ops@example.com" not in saved.content
+        # Hash must reflect the *stored* (redacted) content so dedup stays sound.
+        assert saved.content_hash == Memory.compute_hash(saved.content)
+
+    @pytest.mark.asyncio
+    async def test_create_redaction_is_idempotent_for_dedup(self, memory_service):
+        """A pre-redacted payload (e.g. from the HTTP hook) and a raw payload
+        with the same secret collapse to one memory — redaction runs once."""
+        raw = (
+            "Rotated credential AKIAIOSFODNN7EXAMPLE today; document the change so "
+            "the team knows. Padding this note beyond one hundred characters so the "
+            "quality gate accepts the create call without raising on length."
+        )
+        from app.core.redaction import redact_secrets
+
+        first = await memory_service.create(
+            content=raw, project_id="redact-dedup", source="test"
+        )
+        second = await memory_service.create(
+            content=redact_secrets(raw), project_id="redact-dedup", source="test"
+        )
+        assert first.status == "saved"
+        assert second.status == "duplicate"
+        assert first.id == second.id
+
+    @pytest.mark.asyncio
+    async def test_create_no_false_dedup_on_non_secret_config_values(
+        self, memory_service
+    ):
+        """Two notes differing only in a non-secret config value (max_tokens)
+        must remain two distinct memories.
+
+        Regression: redaction runs before the dedup hash, so a false-positive on
+        ``max_tokens=`` would mask both 4096 and 8192 to ``<REDACTED>`` and
+        collapse them to one hash — silently dropping the second memory.
+        """
+        base = (
+            "Tuning the generation config for the summarizer. We compared two "
+            "settings to balance latency and completeness, recording the run here "
+            "so the decision is traceable later: max_tokens={} was evaluated."
+        )
+        first = await memory_service.create(
+            content=base.format(4096), project_id="cfg-dedup", source="test"
+        )
+        second = await memory_service.create(
+            content=base.format(8192), project_id="cfg-dedup", source="test"
+        )
+        assert first.status == "saved"
+        assert second.status == "saved"  # NOT "duplicate"
+        assert first.id != second.id
+
+        first_saved = await memory_service.get(first.id)
+        second_saved = await memory_service.get(second.id)
+        # The config values survive redaction and keep the hashes distinct.
+        assert "max_tokens=4096" in first_saved.content
+        assert "max_tokens=8192" in second_saved.content
+        assert first_saved.content_hash != second_saved.content_hash
+
+    @pytest.mark.asyncio
+    async def test_update_redacts_secrets(self, memory_service):
+        """update() also persists content, so it redacts at the same chokepoint."""
+        clean = (
+            "Initial note content padded well beyond the hundred character quality "
+            "gate minimum so the create call is accepted by the service cleanly."
+        )
+        resp = await memory_service.create(content=clean, source="test")
+
+        secret_update = (
+            "Updated note: token ghp_0123456789abcdefghijABCDEFGHIJ0123 leaked and "
+            "must never persist to long-term memory. Padding this line beyond one "
+            "hundred characters so the quality gate accepts the update call fine."
+        )
+        upd = await memory_service.update(resp.id, content=secret_update)
+        assert upd.status == "updated"
+
+        saved = await memory_service.get(resp.id)
+        assert "<REDACTED>" in saved.content
+        assert "ghp_0123456789abcdefghijABCDEFGHIJ0123" not in saved.content
+
+    @pytest.mark.asyncio
     async def test_get_memory_not_found(self, memory_service):
         """존재하지 않는 메모리 조회 테스트"""
         # Given

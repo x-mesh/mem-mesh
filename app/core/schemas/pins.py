@@ -1,9 +1,10 @@
 """Pin 관련 스키마 정의"""
 
-import re
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
+
+from app.core.schemas.requests import normalize_project_id
 
 
 class PinCreate(BaseModel):
@@ -22,11 +23,9 @@ class PinCreate(BaseModel):
     @field_validator("project_id")
     @classmethod
     def validate_project_id(cls, v: str) -> str:
-        if not re.match(r"^[a-zA-Z0-9_-]+$", v):
-            raise ValueError(
-                "project_id must contain only letters, numbers, hyphens, and underscores"
-            )
-        return v
+        # Use the server-wide normalizer so a pin created via /api/work/pins
+        # lands under the same canonical id as the hook/memory paths.
+        return normalize_project_id(v)
 
 
 class PinUpdate(BaseModel):

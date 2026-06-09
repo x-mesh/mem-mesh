@@ -11,6 +11,9 @@ API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https
 LOG_FILE="${HOME}/.claude/hooks/stop-hook-debug.log"
 
 log() {
+  # Opt-in only: set MEM_MESH_HOOK_DEBUG=1 to enable. Off by default so the
+  # raw-message preview (potentially sensitive) is never written to disk.
+  [ -n "${MEM_MESH_HOOK_DEBUG:-}" ] || return 0
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE" 2>/dev/null || true
 }
 
@@ -25,7 +28,7 @@ ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null) || ACTI
 MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null) || MESSAGE=""
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT_PATH=""
 log "MESSAGE length: ${#MESSAGE}, preview: ${MESSAGE:0:150}"
-[ ${#MESSAGE} -lt 50 ] && { log "SKIP: message too short (${#MESSAGE})"; echo "SKIP: message too short"; exit 0; }
+[ ${#MESSAGE} -lt 100 ] && { log "SKIP: message too short (${#MESSAGE})"; echo "SKIP: message too short"; exit 0; }
 
 # Already saved via MCP
 if echo "$MESSAGE" | grep -q 'mcp__mem-mesh__add'; then
@@ -44,6 +47,16 @@ import sys, re, os
 
 msg = sys.stdin.read().lower()
 extra_kw = os.environ.get('EXTRA_KW', '')
+
+# Noise filter (parity with server _is_noise): never classify/save system
+# artifacts — task-notification / tool-use / system-reminder envelopes.
+noise_markers = (
+    '<task-notification>', '</task-notification>', '<task-id>',
+    '<tool-use-id>', '<system-reminder>',
+)
+if any(m in msg for m in noise_markers):
+    print('SKIP')
+    sys.exit(0)
 
 # Pass 1: completion indicators (must match at least one)
 completion = [

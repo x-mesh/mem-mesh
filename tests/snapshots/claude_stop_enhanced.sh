@@ -25,7 +25,8 @@ MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
 echo "$MESSAGE" | grep -q 'mcp__mem-mesh__add' && exit 0
 
 # Truncate to fit within API limits
-CONVERSATION=$(echo "$MESSAGE" | head -c 6000)
+# Char-safe truncation: jq slices by Unicode codepoint (no UTF-8 byte corruption)
+CONVERSATION=$(printf '%s' "$MESSAGE" | jq -Rrs '.[0:6000]')
 
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
