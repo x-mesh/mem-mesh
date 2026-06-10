@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 14
+# mem-mesh-hooks prompt-version: 15
 # Kiro agentResponse hook: save response to mem-mesh
 # Kiro has LLM access for categorization — no keyword matching needed here.
 # Category is set to code_snippet by default; Kiro's LLM handles filtering.

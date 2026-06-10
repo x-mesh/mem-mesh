@@ -405,12 +405,15 @@ async def user_prompt_submit(
             logger.warning(f"turns-since-save check failed: {e}")
 
     # Part 3: pin tracking reminder.
+    # "Tracked" = open OR in_progress (pin_add creates in_progress by default).
     if len(prompt) >= 15:
         try:
-            open_pins = await pin_service.get_pins(
+            tracked_pins = await pin_service.get_pins(
+                project_id=project_id, status="in_progress", limit=1
+            ) or await pin_service.get_pins(
                 project_id=project_id, status="open", limit=1
             )
-            if not open_pins:
+            if not tracked_pins:
                 parts.append(
                     "현재 추적 중인 pin이 없습니다. 작업 요청이라면 pin_add를 호출하세요."
                 )
