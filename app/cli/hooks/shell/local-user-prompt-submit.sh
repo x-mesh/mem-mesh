@@ -126,21 +126,36 @@ except Exception:
 fi
 
 # ── Part 3: Pin tracking reminder (no auto-creation) ──
+# "Tracked" = open OR in_progress (pin_add creates in_progress by default).
+# in_progress first so the common case needs one request; the status filter
+# is exact-match, so each status is its own request.
 LOCAL_API_URL="${MEM_MESH_API_URL:-http://localhost:8000}"
 if [ ${#PROMPT} -ge 15 ]; then
-  PIN_REMINDER=$(curl -s --max-time 2 \
-    "${LOCAL_API_URL}/api/work/pins?project_id=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")&status=open&limit=1" \
-    2>/dev/null | python3 -c "
+  PIN_PROJECT=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+  NO_TRACKED_PINS=1
+  for PIN_STATUS in in_progress open; do
+    PIN_COUNT=$(curl -s --max-time 2 \
+      "${LOCAL_API_URL}/api/work/pins?project_id=${PIN_PROJECT}&status=${PIN_STATUS}&limit=1" \
+      2>/dev/null | python3 -c "
 import sys, json
-try:
-    data = json.load(sys.stdin)
-    pins = data if isinstance(data, list) else data.get('pins', data.get('results', []))
-    if len(pins) == 0:
-        print('현재 추적 중인 pin이 없습니다. 작업 요청이라면 pin_add를 호출하세요.')
-except Exception:
-    pass
-" 2>/dev/null) || PIN_REMINDER=""
-  [ -n "$PIN_REMINDER" ] && PARTS+=("$PIN_REMINDER")
+data = json.load(sys.stdin)
+if isinstance(data, list):
+    pins = data
+elif 'pins' in data or 'results' in data:
+    pins = data.get('pins') or data.get('results') or []
+else:
+    sys.exit(1)
+print(len(pins))
+" 2>/dev/null) || PIN_COUNT=""
+    # Non-zero count = tracked pin found; empty = API error. Both stay quiet.
+    if [ "$PIN_COUNT" != "0" ]; then
+      NO_TRACKED_PINS=0
+      break
+    fi
+  done
+  if [ "$NO_TRACKED_PINS" -eq 1 ]; then
+    PARTS+=('현재 추적 중인 pin이 없습니다. 작업 요청이라면 pin_add를 호출하세요.')
+  fi
 fi
 
 # ── Combine and output ──

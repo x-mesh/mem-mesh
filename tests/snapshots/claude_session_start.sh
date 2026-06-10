@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 14
+# mem-mesh-hooks prompt-version: 15
 # Claude Code SessionStart hook: inject mem-mesh session context
 # Fires on session start AND after compaction (context re-injection)
 # Returns hookSpecificOutput JSON via /api/work/sessions/resume/{project_id}

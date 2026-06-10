@@ -4,7 +4,10 @@ import json
 import os
 import shutil
 import subprocess
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -276,6 +279,105 @@ def test_user_prompt_submit_empty_prompt_exits(tmp_path: Path) -> None:
     result = _run_hook(script, {})
     assert result.returncode == 0
     assert result.stdout.strip() == ""
+
+
+# ---------------------------------------------------------------------------
+# user-prompt-submit pin reminder tests
+# ---------------------------------------------------------------------------
+
+PIN_REMINDER_TEXT = "현재 추적 중인 pin이 없습니다"
+NO_KEYWORD_PROMPT = "please refactor this module for clarity"
+
+
+@pytest.fixture()
+def pin_api_server():
+    """Mock mem-mesh API serving /api/work/pins from a per-status pin map."""
+    state: dict[str, list] = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 — BaseHTTPRequestHandler contract
+            parsed = urlparse(self.path)
+            if parsed.path != "/api/work/pins":
+                self.send_error(404)
+                return
+            status = parse_qs(parsed.query).get("status", [""])[0]
+            pins = state.get(status, [])
+            body = json.dumps({"pins": pins, "total": len(pins)}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # silence request logging
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield state, f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+def test_user_prompt_submit_reminds_when_no_tracked_pins(
+    tmp_path: Path, pin_api_server
+) -> None:
+    """No open/in_progress pins → the pin_add reminder is injected."""
+    state, url = pin_api_server
+    script = _render_and_write(
+        tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
+    )
+    result = _run_hook(
+        script, {"prompt": NO_KEYWORD_PROMPT}, env={"MEM_MESH_API_URL": url}
+    )
+    assert result.returncode == 0
+    assert PIN_REMINDER_TEXT in result.stdout
+
+
+def test_user_prompt_submit_silent_with_in_progress_pin(
+    tmp_path: Path, pin_api_server
+) -> None:
+    """An in_progress pin (pin_add default) counts as tracked — no reminder.
+
+    Regression: the hook used to query status=open only, so it kept asking
+    for pin_add while a pin was actively in progress.
+    """
+    state, url = pin_api_server
+    state["in_progress"] = [{"id": "p1", "status": "in_progress"}]
+    script = _render_and_write(
+        tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
+    )
+    result = _run_hook(
+        script, {"prompt": NO_KEYWORD_PROMPT}, env={"MEM_MESH_API_URL": url}
+    )
+    assert result.returncode == 0
+    assert PIN_REMINDER_TEXT not in result.stdout
+
+
+def test_user_prompt_submit_silent_with_open_pin(
+    tmp_path: Path, pin_api_server
+) -> None:
+    """A pre-planned open pin also counts as tracked — no reminder."""
+    state, url = pin_api_server
+    state["open"] = [{"id": "p1", "status": "open"}]
+    script = _render_and_write(
+        tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
+    )
+    result = _run_hook(
+        script, {"prompt": NO_KEYWORD_PROMPT}, env={"MEM_MESH_API_URL": url}
+    )
+    assert result.returncode == 0
+    assert PIN_REMINDER_TEXT not in result.stdout
+
+
+def test_user_prompt_submit_silent_on_pin_api_error(tmp_path: Path) -> None:
+    """Unreachable API → stay quiet rather than nag with a possibly-wrong reminder."""
+    script = _render_and_write(
+        tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
+    )
+    result = _run_hook(script, {"prompt": NO_KEYWORD_PROMPT})
+    assert result.returncode == 0
+    assert PIN_REMINDER_TEXT not in result.stdout
 
 
 # ---------------------------------------------------------------------------
