@@ -309,7 +309,8 @@ class TestMemoryService:
 
         dim = Settings().embedding_dim
         mock_embedding_service = Mock(spec=EmbeddingService)
-        mock_embedding_service.embed.side_effect = [
+        # create() offloads embedding via the async aembed wrapper now.
+        mock_embedding_service.aembed.side_effect = [
             Exception("First failure"),
             Exception("Second failure"),
             [0.1] * dim,  # 세 번째 시도에서 성공
@@ -326,14 +327,14 @@ class TestMemoryService:
 
         # Then
         assert response.status == "saved"
-        assert mock_embedding_service.embed.call_count == 3
+        assert mock_embedding_service.aembed.call_count == 3
 
     @pytest.mark.asyncio
     async def test_embedding_max_retries_exceeded(self, temp_db):
         """임베딩 생성 최대 재시도 초과 테스트"""
         # Given - 모든 시도가 실패하는 Mock
         mock_embedding_service = Mock(spec=EmbeddingService)
-        mock_embedding_service.embed.side_effect = Exception("Persistent failure")
+        mock_embedding_service.aembed.side_effect = Exception("Persistent failure")
 
         memory_service = MemoryService(temp_db, mock_embedding_service)
 
@@ -344,4 +345,4 @@ class TestMemoryService:
                 source="test",
             )
 
-        assert mock_embedding_service.embed.call_count == 3  # max_retries
+        assert mock_embedding_service.aembed.call_count == 3  # max_retries

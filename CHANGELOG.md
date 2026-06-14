@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-06-15
+
+운영(production) 전환을 위한 적대적 리뷰(red-team)에서 확인된 차단 결함 해소 + 임베딩 성능 개선.
+
+### Security
+- OAuth auth 하위 플래그(`mcp_auth_enabled`/`web_auth_enabled`)가 실제로 `auth_enabled`를 상속 — 이전엔 static `False`라 `auth_enabled=True`로도 `/mcp`·`/api`가 미인증으로 열려 있었음(middleware 독스트링만 상속 주장). `app/core/config.py`, `app/web/oauth/middleware.py`
+- `POST /api/internal/notify`(stdio→web 브리지)를 `verify_hook_token`으로 보호하고 `HttpNotifier`가 토큰을 전송 — 미인증 대시보드 이벤트 위조 차단
+- MCP/Web API가 비-loopback 바인드에서 인증 비활성으로 노출될 때 startup 경고
+
+### Added
+- `/api/ready` readiness probe — 임베딩 모델이 준비될 때까지 503 반환. Docker/compose HEALTHCHECK를 `/api/ready`로 변경(기존 `/health` 프로브는 존재하지 않는 경로였음). `app/web/dashboard/routes.py`
+
+### Fixed
+- DB torn-transaction 방지: 모든 연결 접근을 연결 lock + `_in_transaction` contextvar로 직렬화 — lock 없는 writer가 다른 코루틴의 열린 트랜잭션에 끼어들거나 조기 커밋하지 못함. `app/core/database/connection.py`
+- `(project_id, user_id)`당 active 세션 1개 보장: idempotent dedup + partial unique index + INSERT race 폴백. `app/core/database/initializer.py`, `app/core/services/session.py`
+- `embedding_metadata` 쓰기를 DELETE+INSERT에서 원자적 `ON CONFLICT` upsert로 — 크래시 시 메타데이터 영구 손실/모델 불일치 은폐 차단. `app/core/database/migrator.py`
+- `batch_operations`가 중간 실패 시 `status:"partial"` 보고(기존엔 부분 쓰기에도 `success`)
+
+### Performance
+- 임베딩 추론(`model.encode()`)을 이벤트 루프에서 워커 스레드로 오프로드(`aembed`/`aembed_batch`, `asyncio.to_thread` + 타임아웃) — 초 단위 블로킹 추론이 더 이상 전체 서버를 프리징하지 않음. 검색/메모리/배치 핫패스 전환. `app/core/embeddings/service.py`
+
+### Changed
+- `PRAGMA synchronous=FULL`(WAL 기본 NORMAL은 커밋 시 fsync 안 함 — 전원 손실 내구성)
+- CI가 `develop`에서도 실행 + Docker 이미지 빌드를 test 게이트(`build needs: test`) 뒤로 — 미검증 `:latest` 발행 차단. `docker-compose.yml`에 리소스 한계(`mem_limit`/`cpus`) + `workers=1`
+
 ## [1.5.5] - 2026-06-09
 
 ### Security

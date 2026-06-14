@@ -17,10 +17,19 @@ except ImportError:
     SQLITE3_MODULE = "sqlite3"
 
 import asyncio
+import contextvars
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+# Marks the asyncio task currently inside a transaction() block so the
+# lock-aware execute()/fetch* helpers skip re-acquiring the connection lock the
+# transaction already holds (which would self-deadlock). Propagates across
+# awaits within the same task.
+_in_transaction: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "mem_mesh_db_in_transaction", default=False
+)
 
 try:
     import sqlite_vec
@@ -105,6 +114,14 @@ class DatabaseConnection:
                 # WAL 모드 활성화 (Requirement 4.1)
                 self.connection.execute("PRAGMA journal_mode=WAL")
                 logger.info("SQLite WAL mode enabled")
+
+                # Durability: under WAL the default synchronous=NORMAL does not
+                # fsync the WAL on commit, so a power loss / kernel panic can
+                # lose the last committed memory+vector (the graceful-close
+                # checkpoint never runs). FULL fsyncs on commit. For a
+                # durability-critical memory store this is the correct default.
+                self.connection.execute("PRAGMA synchronous=FULL")
+                logger.info("SQLite synchronous=FULL enabled")
 
                 # Foreign key 제약 조건 활성화
                 self.connection.execute("PRAGMA foreign_keys=ON")
@@ -214,13 +231,31 @@ class DatabaseConnection:
                     self.connection = None
 
     async def execute(self, query: str, params: Tuple = ()) -> sqlite3.Cursor:
-        """Execute a query."""
+        """Execute a query, serialized on the connection lock.
+
+        All connection access goes through ``_lock`` so a writer can never
+        interleave with — or prematurely commit — another coroutine's open
+        transaction() (the torn-transaction hazard). Calls made inside a
+        transaction() block already hold the lock, so they skip re-acquiring it.
+        Callers that read from the returned cursor must do so synchronously (no
+        await before fetch) — the cursor is valid until the next await.
+        """
         if not self.connection:
             raise RuntimeError("Database not connected")
 
+        if _in_transaction.get():
+            return self._execute_raw(query, params)
+        async with self._lock:
+            return self._execute_raw(query, params)
+
+    def _execute_raw(self, query: str, params: Tuple = ()) -> sqlite3.Cursor:
+        """Run a statement without acquiring the lock.
+
+        Used by execute()/fetch* once the lock is held (or skipped inside a
+        transaction) and by transaction() bodies.
+        """
         try:
-            cursor = self.connection.execute(query, params)
-            return cursor
+            return self.connection.execute(query, params)
         except Exception as e:
             logger.error(
                 f"Query execution failed: {query}, params: {params}, error: {e}"
@@ -228,14 +263,22 @@ class DatabaseConnection:
             raise
 
     async def fetchone(self, query: str, params: Tuple = ()) -> Optional[sqlite3.Row]:
-        """Fetch a single row."""
-        cursor = await self.execute(query, params)
-        return cursor.fetchone()
+        """Fetch a single row (execute + fetch under one lock acquisition)."""
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+        if _in_transaction.get():
+            return self._execute_raw(query, params).fetchone()
+        async with self._lock:
+            return self._execute_raw(query, params).fetchone()
 
     async def fetchall(self, query: str, params: Tuple = ()) -> List[sqlite3.Row]:
-        """Fetch all rows."""
-        cursor = await self.execute(query, params)
-        return cursor.fetchall()
+        """Fetch all rows (execute + fetch under one lock acquisition)."""
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+        if _in_transaction.get():
+            return self._execute_raw(query, params).fetchall()
+        async with self._lock:
+            return self._execute_raw(query, params).fetchall()
 
     def commit(self) -> None:
         """Commit current transaction."""
@@ -244,11 +287,24 @@ class DatabaseConnection:
 
     @asynccontextmanager
     async def transaction(self):
-        """Transaction context manager. All execute() calls inside use _execute_raw."""
+        """Transaction context manager.
+
+        Holds ``_lock`` for the whole BEGIN..COMMIT span and marks the task via
+        ``_in_transaction`` so execute()/fetch* calls in the body run on the
+        already-held lock instead of dead-locking on it (the docstring's old
+        "use _execute_raw" promise is now actually enforced). A nested
+        transaction() on the same task runs inline — the outer one owns the
+        atomic unit.
+        """
         if not self.connection:
             raise RuntimeError("Database not connected")
 
+        if _in_transaction.get():
+            yield
+            return
+
         async with self._lock:
+            token = _in_transaction.set(True)
             try:
                 self.connection.execute("BEGIN")
                 yield
@@ -256,3 +312,5 @@ class DatabaseConnection:
             except Exception:
                 self.connection.execute("ROLLBACK")
                 raise
+            finally:
+                _in_transaction.reset(token)

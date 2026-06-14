@@ -125,7 +125,9 @@ class ContextService:
         """벡터 기반 검색"""
         try:
             # 주요 메모리의 임베딩 생성
-            query_embedding = self.embedding_service.embed(primary_memory.content)
+            query_embedding = await self.embedding_service.aembed(
+                primary_memory.content
+            )
             query_bytes = self.embedding_service.to_bytes(query_embedding)
 
             # SQL 쿼리 구성
@@ -431,7 +433,7 @@ class ContextService:
     ) -> List[RelatedMemory]:
         """확장 검색을 위한 벡터 검색"""
         try:
-            query_embedding = self.embedding_service.embed(memory.content)
+            query_embedding = await self.embedding_service.aembed(memory.content)
             query_bytes = self.embedding_service.to_bytes(query_embedding)
 
             where_conditions = []

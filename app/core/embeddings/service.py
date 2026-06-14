@@ -3,6 +3,7 @@ Embedding Service for mem-mesh
 텍스트를 벡터로 변환하는 서비스
 """
 
+import asyncio
 import logging
 import os
 import ssl
@@ -298,6 +299,12 @@ AVAILABLE_MODELS = [
         "max_tokens": 256,
     },
 ]
+
+
+# Default ceiling for an offloaded embedding call (model inference). On timeout
+# the request fails instead of freezing forever; the worker thread is abandoned
+# (threads are not cancellable) but inference normally completes well under this.
+_DEFAULT_EMBED_TIMEOUT_S = 120.0
 
 
 class EmbeddingService:
@@ -599,14 +606,8 @@ class EmbeddingService:
         prefix = "query: " if is_query else "passage: "
         return prefix + text
 
-    def embed(self, text: str, is_query: bool = False) -> list[float]:
-        """
-        단일 텍스트 임베딩
-
-        Args:
-            text: 임베딩할 텍스트
-            is_query: True면 검색 쿼리용 임베딩 (E5 모델에서 "query:" prefix 적용)
-        """
+    def _ensure_model_ready(self) -> None:
+        """Load the model if needed, or raise if deferred and not yet ready."""
         if self.model is None:
             if self._defer_loading and self._status in (
                 "not_loaded",
@@ -618,26 +619,44 @@ class EmbeddingService:
                     "Please select a model via onboarding first."
                 )
             self.load_model()
-
         assert self.model is not None, "Model should be loaded"
 
+    def _encode_sync(self, text: str, is_query: bool = False) -> list[float]:
+        """Pure blocking encode (model load + inference). No metrics, no event
+        loop access — safe to run in a worker thread via asyncio.to_thread."""
+        self._ensure_model_ready()
+        prepared = self._prepare_text(text, is_query)
+        embedding = self.model.encode(
+            prepared, convert_to_tensor=False, normalize_embeddings=True
+        )
+        return embedding.tolist()
+
+    def _encode_batch_sync(
+        self, texts: list[str], is_query: bool = False
+    ) -> list[list[float]]:
+        """Pure blocking batch encode — safe to offload to a worker thread."""
+        self._ensure_model_ready()
+        prepared = [self._prepare_text(t, is_query) for t in texts]
+        embeddings = self.model.encode(
+            prepared, convert_to_tensor=False, normalize_embeddings=True
+        )
+        return [embedding.tolist() for embedding in embeddings]
+
+    def embed(self, text: str, is_query: bool = False) -> list[float]:
+        """
+        단일 텍스트 임베딩 (동기). 동기 컨텍스트 전용 — 이벤트 루프에서는
+        ``aembed``를 사용해 루프 블로킹을 피한다.
+
+        Args:
+            text: 임베딩할 텍스트
+            is_query: True면 검색 쿼리용 임베딩 (E5 모델에서 "query:" prefix 적용)
+        """
         start_time = time.perf_counter()
-        cache_hit = False
-
         try:
-            prepared = self._prepare_text(text, is_query)
-            embedding = self.model.encode(
-                prepared, convert_to_tensor=False, normalize_embeddings=True
-            )
-            result = embedding.tolist()
-
+            result = self._encode_sync(text, is_query)
             self._collect_embedding_metric(
-                operation="generate",
-                count=1,
-                start_time=start_time,
-                cache_hit=cache_hit,
+                operation="generate", count=1, start_time=start_time, cache_hit=False
             )
-
             return result
         except Exception as e:
             logger.error(f"Failed to generate embedding for text: {e}")
@@ -647,47 +666,64 @@ class EmbeddingService:
         self, texts: list[str], is_query: bool = False
     ) -> list[list[float]]:
         """
-        배치 임베딩
+        배치 임베딩 (동기). 이벤트 루프에서는 ``aembed_batch`` 사용.
 
         Args:
             texts: 임베딩할 텍스트 리스트
             is_query: True면 검색 쿼리용 임베딩 (E5 모델에서 "query:" prefix 적용)
         """
-        if self.model is None:
-            if self._defer_loading and self._status in (
-                "not_loaded",
-                "downloading",
-                "loading",
-            ):
-                raise RuntimeError(
-                    f"Embedding model not ready (status: {self._status}). "
-                    "Please select a model via onboarding first."
-                )
-            self.load_model()
-
-        assert self.model is not None, "Model should be loaded"
-
         start_time = time.perf_counter()
-        cache_hit = False
-
         try:
-            prepared = [self._prepare_text(t, is_query) for t in texts]
-            embeddings = self.model.encode(
-                prepared, convert_to_tensor=False, normalize_embeddings=True
-            )
-            result = [embedding.tolist() for embedding in embeddings]
-
+            result = self._encode_batch_sync(texts, is_query)
             self._collect_embedding_metric(
                 operation="batch_generate",
                 count=len(texts),
                 start_time=start_time,
-                cache_hit=cache_hit,
+                cache_hit=False,
             )
-
             return result
         except Exception as e:
             logger.error(f"Failed to generate batch embeddings: {e}")
             raise
+
+    async def aembed(self, text: str, is_query: bool = False) -> list[float]:
+        """단일 임베딩 (비동기). 블로킹 추론을 워커 스레드로 오프로드해 이벤트
+        루프를 막지 않고, 메트릭은 루프에서 수집한다. (red-team C4)"""
+        start_time = time.perf_counter()
+        timeout = getattr(self, "_embed_timeout", _DEFAULT_EMBED_TIMEOUT_S)
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(self._encode_sync, text, is_query), timeout=timeout
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate embedding (async) for text: {e}")
+            raise
+        self._collect_embedding_metric(
+            operation="generate", count=1, start_time=start_time, cache_hit=False
+        )
+        return result
+
+    async def aembed_batch(
+        self, texts: list[str], is_query: bool = False
+    ) -> list[list[float]]:
+        """배치 임베딩 (비동기). 블로킹 추론을 워커 스레드로 오프로드한다."""
+        start_time = time.perf_counter()
+        timeout = getattr(self, "_embed_timeout", _DEFAULT_EMBED_TIMEOUT_S)
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(self._encode_batch_sync, texts, is_query),
+                timeout=timeout,
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate batch embeddings (async): {e}")
+            raise
+        self._collect_embedding_metric(
+            operation="batch_generate",
+            count=len(texts),
+            start_time=start_time,
+            cache_hit=False,
+        )
+        return result
 
     def to_bytes(self, embedding: list[float]) -> bytes:
         """임베딩을 bytes로 변환 (SQLite 저장용)"""

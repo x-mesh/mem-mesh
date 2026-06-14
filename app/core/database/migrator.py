@@ -37,15 +37,22 @@ class DatabaseMigrator:
             return None
 
     async def set_embedding_metadata(self, key: str, value: str) -> None:
-        """Set embedding metadata value."""
+        """Set embedding metadata value.
+
+        Single atomic upsert (key is PRIMARY KEY) instead of DELETE + INSERT:
+        in autocommit mode the old DELETE committed on its own, so a crash
+        before the INSERT permanently lost the key — after which startup treated
+        the model as unknown and silently re-stamped the current one, masking a
+        real model/dim mismatch. (red-team C5)
+        """
         try:
-            await self.connection.execute(
-                "DELETE FROM embedding_metadata WHERE key = ?", (key,)
-            )
             await self.connection.execute(
                 """
                 INSERT INTO embedding_metadata (key, value, updated_at)
                 VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
                 """,
                 (key, value, datetime.utcnow().isoformat() + "Z"),
             )

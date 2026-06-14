@@ -501,7 +501,7 @@ class MemoryService:
                     attempt + 1,
                     self.max_retries,
                 )
-                return self.embedding_service.embed(content)
+                return await self.embedding_service.aembed(content)
 
             except Exception as e:
                 last_error = e
