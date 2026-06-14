@@ -346,6 +346,14 @@ class DatabaseInitializer:
             "CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)",
             "CREATE INDEX IF NOT EXISTS idx_memories_content_hash ON memories(content_hash)",
             "CREATE INDEX IF NOT EXISTS idx_memories_client ON memories(client)",
+            # Composite indexes for the dashboard list path: a filter (project_id
+            # / category) combined with `ORDER BY created_at DESC`. Without the
+            # sort column in the index, SQLite reads every matching row (incl. the
+            # 4KB embedding BLOB) into a TEMP B-TREE to sort it — ~20ms for a
+            # large project vs ~0.1ms with this index. (covers the bare
+            # project_id / category equality filters too, via the prefix)
+            "CREATE INDEX IF NOT EXISTS idx_memories_project_created ON memories(project_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_memories_category_created ON memories(category, created_at DESC)",
         ]
 
         # Work tracking indexes
