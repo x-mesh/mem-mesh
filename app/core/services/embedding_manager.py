@@ -236,7 +236,7 @@ class EmbeddingManagerService:
                     content = memory["content"]
 
                     # Generate new embedding
-                    embedding = self.embedding_service.embed(content[:2000])
+                    embedding = await self.embedding_service.aembed(content[:2000])
                     embedding_bytes = self.embedding_service.to_bytes(embedding)
 
                     # Update memories table

@@ -78,9 +78,12 @@ USER memmesh
 # 8001: MCP SSE endpoint
 EXPOSE 8000 8001
 
-# Health check
+# Health check — target /api/ready (503 until the model is loaded) so the
+# orchestrator drains a container whose search engine is dead. Note the /api
+# prefix: the old probe hit /health, which does not exist (404), so it never
+# actually validated anything.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8000/api/ready || exit 1
 
 # Default command: Run web server
 CMD ["python", "-m", "app.web"]

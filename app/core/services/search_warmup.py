@@ -119,7 +119,7 @@ class SearchWarmupService:
         dummy_texts = ["search", "검색", "quality", "품질"]
 
         for text in dummy_texts:
-            _ = embedding_service.embed(text)
+            _ = await embedding_service.aembed(text)
             await asyncio.sleep(0.01)  # Small delay
 
     async def _warmup_database(self, db):
@@ -156,7 +156,7 @@ class SearchWarmupService:
         for query in common_queries:
             try:
                 # Generate and cache embeddings
-                embedding = embedding_service.embed(query, is_query=True)
+                embedding = await embedding_service.aembed(query, is_query=True)
                 await cache_manager.cache_embedding(query, embedding)
                 await asyncio.sleep(0.01)
             except Exception as e:

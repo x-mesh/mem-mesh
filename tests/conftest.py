@@ -93,6 +93,10 @@ def mock_embedding_service():
     dim = Settings().embedding_dim
     service = Mock(spec=EmbeddingService)
     service.embed.return_value = [0.1] * dim
+    # Async offload wrappers (aembed/aembed_batch) are AsyncMock via spec; give
+    # them explicit embedding return values so callers get real vectors.
+    service.aembed.return_value = [0.1] * dim
+    service.aembed_batch.return_value = [[0.1] * dim]
     service.to_bytes.return_value = b"\x00" * (dim * 4)
     service.from_bytes.return_value = [0.1] * dim
     service.embed_batch.return_value = [[0.1] * dim]

@@ -27,7 +27,11 @@ services:
       # fails closed without a hook token (below).
       - MEM_MESH_SERVER_HOST=0.0.0.0
       - MEM_MESH_SERVER_PORT=8000
-      - MEM_MESH_SERVER_WORKERS=2
+      # Single worker: each worker is a separate process with its own in-memory
+      # cache (incoherent across workers — stale reads up to cache TTL) and its
+      # own SQLite write connection (WAL lock contention). Keep at 1 until a
+      # shared cache / server DB engine is in place. (red-team multi-worker)
+      - MEM_MESH_SERVER_WORKERS=1
       # REQUIRED: shared secret for hook write endpoints. `docker compose up`
       # fails until this is set (put a strong random value in your .env, e.g.
       # `MEM_MESH_HOOK_TOKEN=$(openssl rand -hex 32)`). Hooks must send it as
@@ -39,12 +43,22 @@ services:
       # - MEM_MESH_EMBEDDING_DIM=1024
 
     restart: unless-stopped
+    # Resource ceiling: the KURE-v1 embedding model (~2.2GB) + torch live in
+    # RAM. Without a limit a load spike drives the host OOM killer to reap the
+    # whole container. Measure real RSS and tune; these are a safe starting
+    # point for a single worker. (mem_limit/cpus are honored by `docker compose`
+    # v2 outside swarm; deploy.resources only applies under swarm.)
+    mem_limit: 4g
+    mem_reservation: 2g
+    cpus: 2.0
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # /api/ready returns 503 until the model is usable (the old /health probe
+      # hit a non-existent path — see Dockerfile note).
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/ready"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 40s
 
 volumes:
   model-cache:

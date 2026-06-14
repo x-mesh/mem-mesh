@@ -348,7 +348,7 @@ class SearchService:
             # Check cache or generate embedding
             query_embedding_list = await self.cache_manager.get_cached_embedding(query)
             if query_embedding_list is None:
-                query_embedding_list = self.embedding_service.embed(
+                query_embedding_list = await self.embedding_service.aembed(
                     query, is_query=True
                 )
                 await self.cache_manager.cache_embedding(query, query_embedding_list)
@@ -659,7 +659,7 @@ class SearchService:
             # Check cache or generate embedding
             query_embedding_list = await self.cache_manager.get_cached_embedding(query)
             if query_embedding_list is None:
-                query_embedding_list = self.embedding_service.embed(
+                query_embedding_list = await self.embedding_service.aembed(
                     query, is_query=True
                 )
                 await self.cache_manager.cache_embedding(query, query_embedding_list)

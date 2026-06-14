@@ -75,7 +75,7 @@ class BatchOperationHandler:
         try:
             # Generate batch embeddings
             logger.info(f"Generating batch embeddings for {len(contents)} memories")
-            embeddings = self.embedding_service.embed_batch(contents)
+            embeddings = await self.embedding_service.aembed_batch(contents)
 
             # Save each memory
             for i, content in enumerate(contents):
@@ -153,7 +153,11 @@ class BatchOperationHandler:
         )  # ~10 tokens saved per individual embedding request
 
         return {
-            "status": "success",
+            # Each item commits independently (no group transaction), so a
+            # mid-batch failure leaves earlier items persisted. Report "partial"
+            # rather than "success" so the caller can tell full success from a
+            # partial write instead of trusting a blanket success.
+            "status": "success" if not errors else "partial",
             "total": len(contents),
             "successful": len(results),
             "failed": len(errors),
@@ -204,7 +208,7 @@ class BatchOperationHandler:
             logger.info(
                 f"Generating batch embeddings for {len(uncached_queries)} uncached queries"
             )
-            new_embeddings = self.embedding_service.embed_batch(
+            new_embeddings = await self.embedding_service.aembed_batch(
                 uncached_queries, is_query=True
             )
 
