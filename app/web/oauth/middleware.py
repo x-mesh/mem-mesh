@@ -70,6 +70,38 @@ def warn_if_hook_exposed_without_token(host: Optional[str] = None) -> bool:
     return exposed
 
 
+_unauth_exposure_warned = False
+
+
+def warn_if_unauthenticated_exposed(host: Optional[str] = None) -> bool:
+    """Emit a one-time WARNING when the whole app is unauthenticated on a
+    non-loopback bind.
+
+    "Unauthenticated" = ``auth_enabled`` is False, so ``BearerTokenMiddleware``
+    short-circuits and every ``/mcp`` and ``/api`` route (read/write/delete of
+    all memories) is reachable without credentials. Mirrors
+    ``warn_if_hook_exposed_without_token`` but covers the MCP/Web API surface
+    rather than only the hook endpoints. Returns whether the exposure condition
+    holds. Logs at most once.
+    """
+    settings = get_settings()
+    effective = host if host is not None else get_effective_bind_host()
+    exposed = not settings.auth_enabled and not is_loopback_host(effective)
+    if exposed:
+        global _unauth_exposure_warned
+        if not _unauth_exposure_warned:
+            _unauth_exposure_warned = True
+            logger.warning(
+                "MCP and Web API endpoints are exposed on non-loopback host %s "
+                "with authentication DISABLED; anyone who can reach this port "
+                "can read, write and delete all memories. Set "
+                "MEM_MESH_AUTH_ENABLED=true (and configure OAuth) before exposing "
+                "this server to a network, or restrict access with a firewall.",
+                effective,
+            )
+    return exposed
+
+
 def verify_hook_token(request: Request) -> None:
     """FastAPI dependency guarding hook endpoints.
 
@@ -113,6 +145,7 @@ OAUTH_PATHS = [
 
 PUBLIC_PATHS = [
     "/health",
+    "/ready",
     "/docs",
     "/redoc",
     "/openapi.json",

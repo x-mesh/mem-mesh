@@ -226,12 +226,22 @@ class Settings(BaseSettings):
     auth_enabled: bool = Field(
         default=False, description="Enable OAuth authentication globally"
     )
-    mcp_auth_enabled: bool = Field(
-        default=False, description="Enable OAuth authentication for MCP SSE endpoints"
+    # None = inherit from auth_enabled (resolved in apply_auth_inheritance).
+    # Set explicitly via MEM_MESH_MCP_AUTH_ENABLED / MEM_MESH_WEB_AUTH_ENABLED to
+    # override the inherited value (e.g. auth_enabled=True but MCP left open).
+    mcp_auth_enabled: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Enable OAuth auth for MCP SSE endpoints. None (default) inherits "
+            "auth_enabled."
+        ),
     )
-    web_auth_enabled: bool = Field(
-        default=False,
-        description="Enable OAuth authentication for Dashboard/Web API endpoints",
+    web_auth_enabled: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Enable OAuth auth for Dashboard/Web API endpoints. None (default) "
+            "inherits auth_enabled."
+        ),
     )
 
     # Hook endpoint authentication (independent of OAuth auth_enabled flags).
@@ -371,6 +381,23 @@ class Settings(BaseSettings):
             raise ValueError(
                 "admin_password must be set when web_basic_auth_enabled is True"
             )
+        return self
+
+    @model_validator(mode="after")
+    def apply_auth_inheritance(self) -> "Settings":
+        """Resolve auth sub-flags: ``None`` inherits ``auth_enabled``.
+
+        Implements the inheritance the OAuth middleware already documents
+        ("mcp/web auth defaults to auth_enabled") but never enforced — the
+        sub-flags were static ``default=False``, so enabling ``auth_enabled``
+        left ``/mcp`` and ``/api`` open. ``object.__setattr__`` bypasses the
+        per-field validation that ``validate_assignment=True`` would otherwise
+        re-trigger here.
+        """
+        if self.mcp_auth_enabled is None:
+            object.__setattr__(self, "mcp_auth_enabled", self.auth_enabled)
+        if self.web_auth_enabled is None:
+            object.__setattr__(self, "web_auth_enabled", self.auth_enabled)
         return self
 
     model_config = {

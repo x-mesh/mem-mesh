@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Union
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.core.errors import (
     InvalidStatusTransitionError,
@@ -33,6 +33,7 @@ from ..common.dependencies import (
     get_session_service,
     get_stats_service,
 )
+from ..oauth.middleware import verify_hook_token
 from ..websocket.realtime import RealtimeNotifier
 from .route_modules import router as modular_router
 
@@ -83,12 +84,17 @@ def _resolve_rule_path(rule_entry: dict) -> Path:
     return candidate
 
 
-@router.post("/internal/notify")
+@router.post("/internal/notify", dependencies=[Depends(verify_hook_token)])
 async def internal_notify(payload: dict) -> dict:
     """stdio MCP -> WebSocket broadcast bridge.
 
     stdio MCP 서버가 HttpNotifier를 통해 이 엔드포인트로 이벤트를 보내면,
     웹서버의 RealtimeNotifier가 WebSocket으로 브로드캐스트합니다.
+
+    Guarded by ``verify_hook_token`` (the same shared-secret scheme as hook
+    endpoints): with no token configured it stays open on loopback for local
+    dev; once MEM_MESH_HOOK_TOKEN is set, a forged event from any other client
+    is rejected. HttpNotifier sends the matching token automatically.
     """
     event_type = payload.get("type")
     data = payload.get("data", {})
@@ -128,6 +134,28 @@ async def api_root():
         "version": __VERSION__,
         "mcp_protocol": MCP_PROTOCOL_VERSION,
         "status": "running",
+    }
+
+
+@router.get("/ready")
+async def readiness_check(response: Response):
+    """Readiness probe — 503 until the embedding model is loaded and usable.
+
+    Unlike /health (liveness: the process responds), this reflects whether the
+    search engine can actually serve queries. Orchestrator HEALTHCHECKs should
+    target /ready so traffic is not routed to a container whose model failed to
+    load — every search() would otherwise raise behind a 200 "healthy". (C8)
+    """
+    from ..lifespan import get_services
+
+    services = get_services()
+    es = services.get("embedding_service")
+    ready = bool(es and es.is_ready)
+    if not ready:
+        response.status_code = 503
+    return {
+        "status": "ready" if ready else "unavailable",
+        "embedding_status": es.status if es else "not_initialized",
     }
 
 

@@ -182,10 +182,14 @@ def create_uvicorn_config(
     # not the static setting. Then emit a one-time exposure warning if the hook
     # write endpoints are reachable on a non-loopback bind without a token.
     from app.core.config import set_effective_bind_host
-    from app.web.oauth.middleware import warn_if_hook_exposed_without_token
+    from app.web.oauth.middleware import (
+        warn_if_hook_exposed_without_token,
+        warn_if_unauthenticated_exposed,
+    )
 
     set_effective_bind_host(config["host"])
     warn_if_hook_exposed_without_token(config["host"])
+    warn_if_unauthenticated_exposed(config["host"])
 
     if reload:
         config.update(

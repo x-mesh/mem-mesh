@@ -14,11 +14,33 @@ env:
   IMAGE_NAME: xmesh/mem-mesh   # Docker Hub: docker.io/xmesh/mem-mesh
 
 jobs:
+  # Test gate: never publish an image (the :latest tag prod pulls) unless the
+  # test suite passes. Without this, any push to main republishes :latest even
+  # with failing tests. (red-team CI gate)
+  test:
+    name: Test gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,server]"
+      - name: Run tests
+        run: pytest tests/ -q
+
   # Build each platform natively on its own runner (no QEMU emulation).
   # Each job pushes by digest only; the merge job stitches the tagged
   # manifest list together afterwards.
   build:
     name: Build (${{ matrix.platform }})
+    needs: test
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:

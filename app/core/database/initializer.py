@@ -425,7 +425,48 @@ class DatabaseInitializer:
                     f"Index creation skipped (may be created after migration): {e}"
                 )
 
+        self._enforce_single_active_session(conn)
+
         logger.info("Database indexes created")
+
+    def _enforce_single_active_session(self, conn) -> None:
+        """Guarantee at most one active session per (project_id, user_id).
+
+        ``get_or_create_active_session`` is a check-then-act (SELECT active →
+        INSERT) with no lock spanning the gap and no cross-process guard, so
+        concurrent resumes — or the web and stdio processes racing — could
+        create duplicate active sessions, splitting a project's pins across
+        them. Dedup any existing duplicates (keep the most recent, complete the
+        rest), then add a partial unique index so a racing INSERT fails loudly
+        and the caller falls back to the surviving session.
+        """
+        from datetime import datetime, timezone
+
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                """
+                UPDATE sessions
+                SET status = 'completed', ended_at = ?, updated_at = ?
+                WHERE status = 'active' AND id NOT IN (
+                    SELECT id FROM (
+                        SELECT id,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY project_id, user_id
+                                   ORDER BY started_at DESC, rowid DESC
+                               ) AS rn
+                        FROM sessions WHERE status = 'active'
+                    ) WHERE rn = 1
+                )
+                """,
+                (now, now),
+            )
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_one_active
+                ON sessions(project_id, user_id) WHERE status = 'active'
+                """)
+        except Exception as e:
+            logger.warning(f"Active-session unique index setup skipped: {e}")
 
     async def _create_vector_tables(self) -> None:
         """Create sqlite-vec virtual tables if available."""

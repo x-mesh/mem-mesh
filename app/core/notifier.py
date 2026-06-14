@@ -27,10 +27,22 @@ class HttpNotifier:
     def _fire(self, event_type: str, data: Dict[str, Any]) -> None:
         """동기 HTTP POST (fire-and-forget)."""
         payload = json.dumps({"type": event_type, "data": data}).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        # Send the shared hook token so /api/internal/notify (guarded by
+        # verify_hook_token) accepts the bridge when a token is configured.
+        # No token configured → header omitted, endpoint stays open on loopback.
+        try:
+            from app.core.config import resolve_hook_token
+
+            token = resolve_hook_token()
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+        except Exception:  # pragma: no cover - notifier must never raise
+            pass
         req = urllib.request.Request(
             self._url,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         try:

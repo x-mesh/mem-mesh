@@ -153,7 +153,11 @@ class BatchOperationHandler:
         )  # ~10 tokens saved per individual embedding request
 
         return {
-            "status": "success",
+            # Each item commits independently (no group transaction), so a
+            # mid-batch failure leaves earlier items persisted. Report "partial"
+            # rather than "success" so the caller can tell full success from a
+            # partial write instead of trusting a blanket success.
+            "status": "success" if not errors else "partial",
             "total": len(contents),
             "successful": len(results),
             "failed": len(errors),

@@ -88,25 +88,48 @@ class SessionService:
         session_id = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
 
-        await self.db.execute(
-            """
-            INSERT INTO sessions
-                (id, project_id, user_id, ide_session_id, client_type,
-                 started_at, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
-            """,
-            (
-                session_id,
-                project_id,
-                effective_user_id,
-                ide_session_id,
-                client_type,
-                now,
-                now,
-                now,
-            ),
-        )
-        self.db.connection.commit()
+        try:
+            await self.db.execute(
+                """
+                INSERT INTO sessions
+                    (id, project_id, user_id, ide_session_id, client_type,
+                     started_at, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                """,
+                (
+                    session_id,
+                    project_id,
+                    effective_user_id,
+                    ide_session_id,
+                    client_type,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            self.db.connection.commit()
+        except Exception as e:
+            # Lost the race against the partial unique index on active sessions
+            # (idx_sessions_one_active): another concurrent resume — or the
+            # other process — created the active session first. Return that one
+            # instead of duplicating.
+            if "UNIQUE" in str(e).upper() or type(e).__name__ == "IntegrityError":
+                existing = await self.db.fetchone(
+                    """
+                    SELECT * FROM sessions
+                    WHERE project_id = ? AND user_id = ? AND status = 'active'
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                    """,
+                    (project_id, effective_user_id),
+                )
+                if existing:
+                    logger.info(
+                        "Active session race resolved; reusing existing session "
+                        f"for project: {project_id}"
+                    )
+                    return self._row_to_response(existing)
+            raise
 
         logger.info(
             f"Created new session: {session_id} for project: {project_id}"
