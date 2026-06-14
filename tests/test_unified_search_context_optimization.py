@@ -31,6 +31,9 @@ def mock_embedding_service():
     dim = Settings().embedding_dim
     service = MagicMock()
     service.embed = MagicMock(return_value=[0.1] * dim)
+    # Search now offloads embedding via the async aembed/aembed_batch wrappers.
+    service.aembed = AsyncMock(return_value=[0.1] * dim)
+    service.aembed_batch = AsyncMock(return_value=[[0.1] * dim])
     service.to_bytes = MagicMock(return_value=b"\x00" * (dim * 4))
     return service
 
