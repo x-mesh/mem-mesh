@@ -197,7 +197,11 @@ class SmartSearchFilter:
 
         if context:
             project_hint = context.get("project")
-            time_range = context.get("time_range", "30d")
+            # Time filter ONLY when explicitly requested. The default used to be
+            # "30d", so every search silently dropped memories older than 30 days
+            # (recall collapsed to ~the share of recent memories). Temporal intent
+            # is handled separately by the temporal-search stage, not here.
+            time_range = context.get("time_range")
             aggressive = context.get("aggressive_filter", False)
 
         # Time filtering
