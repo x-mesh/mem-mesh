@@ -7,6 +7,7 @@ precise ranking than bi-encoder (embedding) similarity alone.
 import logging
 import time
 from dataclasses import dataclass
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,13 @@ class RerankerService:
         self,
         model_name: str = DEFAULT_RERANKING_MODEL,
         preload: bool = True,
+        device: Optional[str] = None,
     ):
         self.model_name = model_name
+        # device: None = CrossEncoder auto. On Apple Silicon set "mps" to run on
+        # GPU — CPU inference of a 568M cross-encoder pegs all cores (loky
+        # multiprocessing) and can spike/hang the machine. See CLAUDE.md L1.
+        self.device = device
         self._model: "CrossEncoder | None" = None
 
         if not CROSS_ENCODER_AVAILABLE:
@@ -59,10 +65,38 @@ class RerankerService:
         if not CROSS_ENCODER_AVAILABLE:
             return
 
+        device = self.device
+        if device is None:
+            # Auto-select the safest accelerator: CUDA (Linux GPU) > MPS (Apple
+            # Silicon) > CPU. CPU inference of a 568M cross-encoder pegs all
+            # cores + loky workers and can spike/hang the host (see CLAUDE.md L1),
+            # so warn loudly — on a CPU-only box, prefer leaving reranking off.
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    device = "cuda"
+                elif torch.backends.mps.is_available():
+                    device = "mps"
+                else:
+                    device = "cpu"
+                    logger.warning(
+                        "Reranker running on CPU — a 568M cross-encoder is heavy "
+                        "and may spike the host. Use a GPU (CUDA/MPS) or keep "
+                        "enable_reranking=False on CPU-only deployments."
+                    )
+            except Exception:
+                pass
+
         start = time.time()
-        self._model = CrossEncoder(self.model_name)
+        self._model = CrossEncoder(self.model_name, device=device)
         elapsed = time.time() - start
-        logger.info("CrossEncoder loaded: %s (%.1fs)", self.model_name, elapsed)
+        logger.info(
+            "CrossEncoder loaded: %s on %s (%.1fs)",
+            self.model_name,
+            device or "auto",
+            elapsed,
+        )
 
     @property
     def is_available(self) -> bool:

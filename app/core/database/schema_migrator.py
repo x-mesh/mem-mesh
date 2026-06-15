@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Current schema version - increment when adding new migrations
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
 
 
 class SchemaMigrator:
@@ -41,6 +41,7 @@ class SchemaMigrator:
             6: self._migration_v6_session_ide_columns,
             7: self._migration_v7_pin_client_column,
             8: self._migration_v8_pin_staging_column,
+            9: self._migration_v9_content_bytes,
         }
 
     async def migrate(self) -> None:
@@ -271,3 +272,24 @@ class SchemaMigrator:
         if await self._table_exists("pins"):
             await self._add_column_if_missing("pins", "is_staging", "INTEGER", "0")
             logger.info("Added is_staging column to pins table via migration v8")
+
+    async def _migration_v9_content_bytes(self, migrator: "SchemaMigrator") -> None:
+        """Add denormalized content_bytes (= LENGTH(content)) to memories.
+
+        Per-project size aggregates can then SUM(content_bytes) instead of
+        SUM(LENGTH(content)). The latter forced a full table scan that paged in
+        the inline ~4KB embedding BLOB on every row (~159ms on a 16k-row DB);
+        summing the narrow integer column avoids touching the payload. Backfills
+        existing rows; the column is kept in sync by add_memory on insert
+        (memories are immutable — updates are delete+insert).
+        """
+        if await self._table_exists("memories"):
+            await self._add_column_if_missing(
+                "memories", "content_bytes", "INTEGER", "NULL"
+            )
+            # Idempotent backfill: only fills rows that don't have it yet.
+            await self.connection.execute(
+                "UPDATE memories SET content_bytes = LENGTH(content) "
+                "WHERE content_bytes IS NULL"
+            )
+            logger.info("Added + backfilled content_bytes on memories via migration v9")

@@ -7,6 +7,7 @@ including counts by project, category, source, and date ranges.
 
 import logging
 import time
+from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 from ..database.base import Database
@@ -347,7 +348,7 @@ class StatsService:
                 SELECT
                     COALESCE(project_id, 'default') as project_id,
                     COUNT(*) as memory_count,
-                    SUM(LENGTH(content)) as total_size,
+                    SUM(content_bytes) as total_size,
                     MIN(created_at) as created_at,
                     MAX(created_at) as updated_at
                 FROM memories
@@ -357,30 +358,42 @@ class StatsService:
 
             projects = await self.db.fetchall(query, ())
 
-            # Aggregate categories and tags per project
+            # Categories per project — one grouped query for all projects.
+            # (was N+1: a DISTINCT-category query per project, each a full scan
+            # because WHERE COALESCE(project_id,'default')=? can't use an index)
+            cat_rows = await self.db.fetchall(
+                """
+                SELECT COALESCE(project_id, 'default') AS pid, category
+                FROM memories
+                GROUP BY pid, category
+                """,
+                (),
+            )
+            cats_by_pid: Dict[str, List[str]] = defaultdict(list)
+            for row in cat_rows:
+                cats_by_pid[row["pid"]].append(row["category"])
+
+            # Tags per project — one grouped query for all projects.
+            # (was N+1: a json_each + full-scan query per project)
+            tag_rows = await self.db.fetchall(
+                """
+                SELECT COALESCE(m.project_id, 'default') AS pid, je.value AS tag
+                FROM memories m,
+                     json_each(CASE
+                         WHEN m.tags IS NULL OR m.tags = '' THEN '[]'
+                         ELSE m.tags
+                     END) je
+                GROUP BY pid, je.value
+                """,
+                (),
+            )
+            tags_by_pid: Dict[str, List[str]] = defaultdict(list)
+            for row in tag_rows:
+                tags_by_pid[row["pid"]].append(row["tag"])
+
             result = []
             for project in projects:
                 pid = project["project_id"]
-
-                # Query categories
-                cat_query = """
-                    SELECT DISTINCT category 
-                    FROM memories 
-                    WHERE COALESCE(project_id, 'default') = ?
-                """
-                categories = await self.db.fetchall(cat_query, (pid,))
-
-                # Query tags
-                tag_query = """
-                    SELECT DISTINCT value as tag
-                    FROM memories m, json_each(CASE 
-                        WHEN m.tags IS NULL OR m.tags = '' THEN '[]'
-                        ELSE m.tags 
-                    END) 
-                    WHERE COALESCE(m.project_id, 'default') = ?
-                """
-                tags = await self.db.fetchall(tag_query, (pid,))
-
                 result.append(
                     {
                         "id": pid,
@@ -392,8 +405,8 @@ class StatsService:
                             if project["memory_count"] > 0
                             else 0
                         ),
-                        "categories": [c["category"] for c in categories],
-                        "tags": [t["tag"] for t in tags],
+                        "categories": cats_by_pid.get(pid, []),
+                        "tags": tags_by_pid.get(pid, []),
                         "created_at": project["created_at"],
                         "updated_at": project["updated_at"],
                     }

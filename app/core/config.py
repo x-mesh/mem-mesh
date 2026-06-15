@@ -151,6 +151,14 @@ class Settings(BaseSettings):
         ge=0.0,
         description="RRF weight for FTS text search results (higher = prefer keyword matches)",
     )
+    enable_adaptive_hybrid: bool = Field(
+        # OFF by default: self-retrieval eval can't measure RRF-weight tuning
+        # (FTS exact-match dominates), so the wiki-mesh +15pp gain is unverified
+        # on this corpus. Enable after a labeled query eval set confirms it.
+        default=False,
+        description="Adapt RRF vector/text weights to query length: short keyword "
+        "queries favor FTS, long natural-language queries favor vector search",
+    )
     enable_search_warmup: bool = Field(
         default=True, description="Enable search warmup on server startup"
     )

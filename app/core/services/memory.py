@@ -57,19 +57,45 @@ class MemoryService:
     # ------------------------------------------------------------------
 
     async def _resolve_vector_table(self) -> str:
-        """벡터 인덱스에 사용할 테이블 이름을 반환한다.
+        """검색/단일 조회에 쓸 active 벡터 테이블(blue-green) 또는 fallback.
 
         Returns:
-            ``"memory_embeddings"`` (sqlite-vec) 또는
-            ``"memories_vec_fallback"`` (폴백).
+            active 슬롯명(``memory_embeddings`` / ``memory_embeddings_b``) 또는
+            ``"memories_vec_fallback"`` (vec0 미가용 폴백).
         """
+        active = await self.db.active_embedding_table()
         cursor = await self.db.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type='table' AND name='memory_embeddings'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (active,),
         )
         if cursor.fetchone():
-            return "memory_embeddings"
+            return active
         return "memories_vec_fallback"
+
+    async def _write_vector_tables(self) -> list[str]:
+        """벡터 write 대상 테이블 목록.
+
+        마이그레이션 진행 중에는 active(검색용) + inactive(재임베딩 대상, green)
+        양쪽에 dual-write 한다. 그래야 진행 중 들어온 신규 메모리가 포인터 스왑
+        이후에도 (새 active가 된 green에) 남아 유실되지 않는다.
+        """
+        active = await self.db.active_embedding_table()
+        cursor = await self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (active,),
+        )
+        if not cursor.fetchone():
+            return ["memories_vec_fallback"]
+        tables = [active]
+        if await self.db.migration_in_progress():
+            inactive = await self.db.inactive_embedding_table()
+            cur2 = await self.db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (inactive,),
+            )
+            if cur2.fetchone():
+                tables.append(inactive)
+        return tables
 
     @staticmethod
     def _embedding_to_json(embedding_bytes: bytes) -> str:
@@ -85,8 +111,7 @@ class MemoryService:
 
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _init_conflict_detector() -> Any:
+    def _init_conflict_detector(self) -> Any:
         """설정 기반 ConflictDetectorService 자동 생성 (lazy-load, graceful degradation)."""
         try:
             from ..config import get_settings
@@ -101,7 +126,13 @@ class MemoryService:
                 model_name=settings.conflict_nli_model,
                 preload=settings.enable_conflict_detection,  # Auto-preload when enabled
                 contradiction_threshold=settings.conflict_contradiction_threshold,
-                similarity_threshold=settings.conflict_similarity_threshold,
+                # Scale the cosine gate to the active embedding model. The Stage-1
+                # vector filter compares raw cosine, and arctic-ko scores lower
+                # than KURE — a fixed 0.7 would drop every candidate and silently
+                # disable dup/conflict detection. KURE is unchanged (identity).
+                similarity_threshold=self.embedding_service.scaled_threshold(
+                    settings.conflict_similarity_threshold
+                ),
                 max_candidates=settings.conflict_max_candidates,
             )
             logger.info(
@@ -528,27 +559,27 @@ class MemoryService:
     ) -> None:
         """벡터 인덱스에 저장"""
         try:
-            table = await self._resolve_vector_table()
+            tables = await self._write_vector_tables()
 
-            if table == "memory_embeddings":
-                embedding_json = self._embedding_to_json(embedding_bytes)
-
-                # Save to vector table (use DELETE + INSERT pattern)
-                await self.db.execute(
-                    "DELETE FROM memory_embeddings WHERE memory_id = ?", (memory_id,)
-                )
-                await self.db.execute(
-                    "INSERT INTO memory_embeddings (memory_id, embedding) VALUES (?, ?)",
-                    (memory_id, embedding_json),
-                )
-                logger.debug("Saved to vector table: %s", memory_id)
-            else:
-                # Use fallback table
+            if tables == ["memories_vec_fallback"]:
                 await self.db.execute(
                     "INSERT INTO memories_vec_fallback (memory_id, embedding) VALUES (?, ?)",
                     (memory_id, embedding_bytes),
                 )
                 logger.debug("Saved to fallback table: %s", memory_id)
+            else:
+                embedding_json = self._embedding_to_json(embedding_bytes)
+                # active (+ inactive during migration); table names from a fixed
+                # slot allowlist, never user input — safe to interpolate.
+                for table in tables:
+                    await self.db.execute(
+                        f"DELETE FROM {table} WHERE memory_id = ?", (memory_id,)
+                    )
+                    await self.db.execute(
+                        f"INSERT INTO {table} (memory_id, embedding) VALUES (?, ?)",
+                        (memory_id, embedding_json),
+                    )
+                logger.debug("Saved to vector table(s) %s: %s", tables, memory_id)
 
         except Exception as e:
             logger.error("Failed to save to vector index: %s", e)
@@ -572,12 +603,13 @@ class MemoryService:
             embedding_bytes = self.embedding_service.to_bytes(embedding_vector)
             embedding_json = self._embedding_to_json(embedding_bytes)
 
-            # Stage 1: Search candidates by vector similarity
+            # Stage 1: Search candidates by vector similarity (active slot)
+            active_table = await self._resolve_vector_table()
             cursor = await self.db.execute(
-                """
+                f"""
                 SELECT m.id, m.content,
                        vec_distance_cosine(e.embedding, ?) AS distance
-                FROM memory_embeddings e
+                FROM {active_table} e
                 JOIN memories m ON m.id = e.memory_id
                 WHERE m.project_id = ? OR ? IS NULL
                 ORDER BY distance ASC
@@ -637,27 +669,27 @@ class MemoryService:
     ) -> None:
         """벡터 인덱스 업데이트"""
         try:
-            table = await self._resolve_vector_table()
+            tables = await self._write_vector_tables()
 
-            if table == "memory_embeddings":
-                embedding_json = self._embedding_to_json(embedding_bytes)
-
-                # Update vector table (use DELETE + INSERT pattern)
-                await self.db.execute(
-                    "DELETE FROM memory_embeddings WHERE memory_id = ?", (memory_id,)
-                )
-                await self.db.execute(
-                    "INSERT INTO memory_embeddings (memory_id, embedding) VALUES (?, ?)",
-                    (memory_id, embedding_json),
-                )
-                logger.debug("Updated vector table: %s", memory_id)
-            else:
-                # Use fallback table
+            if tables == ["memories_vec_fallback"]:
                 await self.db.execute(
                     "UPDATE memories_vec_fallback SET embedding = ? WHERE memory_id = ?",
                     (embedding_bytes, memory_id),
                 )
                 logger.debug("Updated fallback table: %s", memory_id)
+            else:
+                embedding_json = self._embedding_to_json(embedding_bytes)
+                # active (+ inactive during migration); DELETE+INSERT so a row
+                # absent from a freshly created green slot is inserted, not missed.
+                for table in tables:
+                    await self.db.execute(
+                        f"DELETE FROM {table} WHERE memory_id = ?", (memory_id,)
+                    )
+                    await self.db.execute(
+                        f"INSERT INTO {table} (memory_id, embedding) VALUES (?, ?)",
+                        (memory_id, embedding_json),
+                    )
+                logger.debug("Updated vector table(s) %s: %s", tables, memory_id)
 
         except Exception as e:
             logger.error("Failed to update vector index: %s", e)
@@ -683,19 +715,15 @@ class MemoryService:
     async def _delete_from_vector_index(self, memory_id: str) -> None:
         """벡터 인덱스에서 삭제"""
         try:
-            table = await self._resolve_vector_table()
+            tables = await self._write_vector_tables()
 
-            if table == "memory_embeddings":
+            # Delete from every write target (active + inactive during migration,
+            # else fallback) so a deletion can't survive a pointer swap.
+            for table in tables:
                 await self.db.execute(
-                    "DELETE FROM memory_embeddings WHERE memory_id = ?", (memory_id,)
+                    f"DELETE FROM {table} WHERE memory_id = ?", (memory_id,)
                 )
-                logger.debug("Deleted from vector table: %s", memory_id)
-            else:
-                await self.db.execute(
-                    "DELETE FROM memories_vec_fallback WHERE memory_id = ?",
-                    (memory_id,),
-                )
-                logger.debug("Deleted from fallback table: %s", memory_id)
+            logger.debug("Deleted from vector table(s) %s: %s", tables, memory_id)
 
         except Exception as e:
             logger.error("Failed to delete from vector index: %s", e)

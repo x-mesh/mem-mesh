@@ -170,24 +170,32 @@ class EmbeddingManagerService:
             self._migration_progress["message"] = f"Migration failed: {str(e)}"
         finally:
             self._migration_in_progress = False
+            # Ensure dual-write is disabled even if migration failed mid-way
+            # (green is partial and was never swapped in — blue stays active).
+            try:
+                await self.db.set_migration_in_progress(False)
+            except Exception as e:
+                logger.warning(f"Failed to clear migration flag: {e}")
 
-    async def _recreate_vector_table(self, new_dim: int) -> None:
-        """차원 변경 시 memory_embeddings 가상 테이블 DROP → 재생성"""
+    async def _recreate_vector_table(self, table_name: str, new_dim: int) -> None:
+        """지정 슬롯의 vec0 가상테이블을 DROP → 재생성(빈 상태로 준비).
+
+        blue-green 마이그레이션은 이 헬퍼로 inactive(green) 슬롯만 비운다.
+        active(blue) 슬롯은 건드리지 않아 진행 중 검색이 유지된다.
+        """
         conn = self.db.connection
         try:
-            conn.execute("DROP TABLE IF EXISTS memory_embeddings")
+            conn.execute(f"DROP TABLE IF EXISTS {table_name}")
             conn.execute(f"""
-                CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings USING vec0(
+                CREATE VIRTUAL TABLE IF NOT EXISTS {table_name} USING vec0(
                     memory_id TEXT PRIMARY KEY,
                     embedding FLOAT[{new_dim}]
                 )
             """)
             conn.commit()
-            logger.info(
-                f"Recreated memory_embeddings virtual table with dimension {new_dim}"
-            )
+            logger.info(f"Recreated vector table {table_name} (dim={new_dim})")
         except Exception as e:
-            logger.error(f"Failed to recreate vector table: {e}")
+            logger.error(f"Failed to recreate vector table {table_name}: {e}")
             raise
 
     async def _run_migration(
@@ -203,15 +211,29 @@ class EmbeddingManagerService:
             "skipped": 0,
         }
 
-        # Migration regenerates all vectors, so always DROP+CREATE the vec table
-        # (Safe to run even when metadata is corrupted)
+        # Re-embedding needs the (new) model loaded. Production uses deferred
+        # loading, so right after switch_model the status is "not_loaded" and
+        # aembed() would raise. Force the load here, off the event loop.
+        if not self.embedding_service.is_ready:
+            self._migration_progress["message"] = "Loading embedding model..."
+            if progress_callback:
+                progress_callback(self._migration_progress)
+            await asyncio.to_thread(self.embedding_service.load_model)
+
+        # Blue-green: re-embed into the INACTIVE slot (green) while the active
+        # slot (blue) keeps serving search. Only after green is fully built do we
+        # flip the pointer — so a failure or restart leaves the old data intact.
         new_dim = self.embedding_service.dimension
+        green = await self.db.inactive_embedding_table()
+        # Mark migration in progress (DB-persisted) so MemoryService dual-writes
+        # new memories into both slots until the swap.
+        await self.db.set_migration_in_progress(True)
         self._migration_progress["message"] = (
-            f"Recreating vector table (dim={new_dim})..."
+            f"Re-embedding into {green} (dim={new_dim})..."
         )
         if progress_callback:
             progress_callback(self._migration_progress)
-        await self._recreate_vector_table(new_dim)
+        await self._recreate_vector_table(green, new_dim)
 
         offset = 0
         batch_num = 0
@@ -246,14 +268,14 @@ class EmbeddingManagerService:
                         (embedding_bytes, now, memory_id),
                     )
 
-                    # Update vector table
+                    # Update green slot (table name from fixed slot allowlist)
                     embedding_json = json.dumps(embedding)
                     await self.db.execute(
-                        "DELETE FROM memory_embeddings WHERE memory_id = ?",
+                        f"DELETE FROM {green} WHERE memory_id = ?",
                         (memory_id,),
                     )
                     await self.db.execute(
-                        "INSERT INTO memory_embeddings (memory_id, embedding) VALUES (?, ?)",
+                        f"INSERT INTO {green} (memory_id, embedding) VALUES (?, ?)",
                         (memory_id, embedding_json),
                     )
 
@@ -280,6 +302,19 @@ class EmbeddingManagerService:
 
             # Small delay to distribute CPU load
             await asyncio.sleep(0.01)
+
+        # Atomic blue-green swap: flip the active pointer to the freshly built
+        # green slot. From here search/writes target the new model's vectors.
+        await self.db.set_active_embedding_table(green)
+        # Stop dual-writing before reclaiming the old slot.
+        await self.db.set_migration_in_progress(False)
+        # Drop the now-inactive old slot (reclaimed; recreated next migration).
+        old = await self.db.inactive_embedding_table()
+        try:
+            self.db.connection.execute(f"DROP TABLE IF EXISTS {old}")
+            self.db.connection.commit()
+        except Exception as e:
+            logger.warning(f"Failed to drop old embedding slot {old}: {e}")
 
         # Update metadata: set actual data model to new model
         now = datetime.now(timezone.utc).isoformat()

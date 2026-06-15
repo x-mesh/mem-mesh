@@ -322,6 +322,7 @@ async def get_embedding_loading_status(
 async def select_embedding_model(
     body: dict,
     embedding_service=Depends(get_embedding_service),
+    manager: EmbeddingManagerService = Depends(get_embedding_manager),
 ):
     """Select and start downloading an embedding model.
 
@@ -356,6 +357,7 @@ async def select_embedding_model(
 
     services = get_services()
     db = services.get("db")
+    has_existing_memories = False
     if db:
         try:
             from app.core.embeddings.service import MODEL_DIMENSIONS
@@ -378,6 +380,8 @@ async def select_embedding_model(
                 await db._migrator.set_embedding_metadata(
                     "embedding_dimension", str(dim)
                 )
+            else:
+                has_existing_memories = True
         except Exception as e:
             logger.warning(f"Failed to persist model selection: {e}")
 
@@ -398,7 +402,15 @@ async def select_embedding_model(
         except Exception as e:
             logger.debug(f"Failed to broadcast model download progress: {e}")
 
-    embedding_service.load_model_background(on_progress=_on_progress)
+    if has_existing_memories:
+        # Existing memories must be re-embedded into the new model's vector
+        # space. Skipping this leaves the DB mixed (queries use the new model,
+        # stored vectors the old one) which corrupts search. start_migration
+        # loads the model and re-embeds in the background — so model selection
+        # never silently leaves a mixed-space DB. (arctic-switch precondition)
+        await manager.start_migration()
+    else:
+        embedding_service.load_model_background(on_progress=_on_progress)
     return embedding_service.get_status_info()
 
 

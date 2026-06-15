@@ -97,37 +97,10 @@ class DatabaseConnection:
             db_path.parent.mkdir(parents=True, exist_ok=True)
 
             try:
-                # SQLite 연결 생성
-                self.connection = sqlite3.connect(
-                    self.db_path,
-                    check_same_thread=False,
-                    isolation_level=None,  # autocommit mode
+                # 쓰기 전용 연결 생성 (PRAGMA + sqlite-vec 초기화 포함)
+                self.connection, self._vec_loaded = self._create_connection(
+                    read_only=False
                 )
-
-                # Row factory 설정 (dict 형태로 결과 반환)
-                self.connection.row_factory = sqlite3.Row
-
-                # busy_timeout 설정 (Requirement 4.4)
-                self.connection.execute(f"PRAGMA busy_timeout={self.busy_timeout}")
-                logger.info(f"SQLite busy_timeout set to {self.busy_timeout}ms")
-
-                # WAL 모드 활성화 (Requirement 4.1)
-                self.connection.execute("PRAGMA journal_mode=WAL")
-                logger.info("SQLite WAL mode enabled")
-
-                # Durability: under WAL the default synchronous=NORMAL does not
-                # fsync the WAL on commit, so a power loss / kernel panic can
-                # lose the last committed memory+vector (the graceful-close
-                # checkpoint never runs). FULL fsyncs on commit. For a
-                # durability-critical memory store this is the correct default.
-                self.connection.execute("PRAGMA synchronous=FULL")
-                logger.info("SQLite synchronous=FULL enabled")
-
-                # Foreign key 제약 조건 활성화
-                self.connection.execute("PRAGMA foreign_keys=ON")
-
-                # sqlite-vec 로드 시도
-                self._vec_loaded = self._load_sqlite_vec()
 
                 logger.info(f"Database connected: {self.db_path}")
                 return self._vec_loaded
@@ -139,8 +112,74 @@ class DatabaseConnection:
                     self.connection = None
                 raise
 
-    def _load_sqlite_vec(self) -> bool:
-        """Load sqlite-vec extension.
+    def _create_connection(
+        self, read_only: bool = False
+    ) -> Tuple[sqlite3.Connection, bool]:
+        """Create and fully initialize a new SQLite connection.
+
+        Shared by connect() (the single writer connection) and the read pool
+        (C3) so every connection in the process is configured identically —
+        same PRAGMAs, same sqlite-vec extension. ``read_only=True`` adds
+        ``PRAGMA query_only=ON`` so a pooled reader can never mutate the DB,
+        even if a write query is mis-routed to it.
+
+        Returns:
+            (connection, vec_loaded)
+        """
+        conn = sqlite3.connect(
+            self.db_path,
+            check_same_thread=False,
+            isolation_level=None,  # autocommit mode
+        )
+        vec_loaded = self._init_connection(conn, read_only=read_only)
+        return conn, vec_loaded
+
+    def _init_connection(
+        self, conn: sqlite3.Connection, read_only: bool = False
+    ) -> bool:
+        """Apply row factory, PRAGMAs, and load sqlite-vec on ``conn``.
+
+        Idempotent — safe to call on any freshly opened connection. Extracted
+        from connect() so the read pool can initialize its connections through
+        the exact same path.
+
+        Requirements: 4.1 (WAL), 4.4 (busy_timeout).
+
+        Returns:
+            bool: True if sqlite-vec loaded successfully on this connection.
+        """
+        # Row factory 설정 (dict 형태로 결과 반환)
+        conn.row_factory = sqlite3.Row
+
+        # busy_timeout 설정 (Requirement 4.4)
+        conn.execute(f"PRAGMA busy_timeout={self.busy_timeout}")
+
+        # WAL 모드 활성화 (Requirement 4.1)
+        conn.execute("PRAGMA journal_mode=WAL")
+
+        # Durability: under WAL the default synchronous=NORMAL does not fsync
+        # the WAL on commit, so a power loss / kernel panic can lose the last
+        # committed memory+vector (the graceful-close checkpoint never runs).
+        # FULL fsyncs on commit. For a durability-critical memory store this is
+        # the correct default.
+        conn.execute("PRAGMA synchronous=FULL")
+
+        # Foreign key 제약 조건 활성화
+        conn.execute("PRAGMA foreign_keys=ON")
+
+        if read_only:
+            # Pooled reader: hard-block any accidental write at the SQLite layer
+            # so a mis-routed INSERT/UPDATE/DELETE fails loudly instead of
+            # racing the writer connection.
+            conn.execute("PRAGMA query_only=ON")
+
+        return self._load_sqlite_vec(conn)
+
+    def _load_sqlite_vec(self, conn: sqlite3.Connection) -> bool:
+        """Load sqlite-vec extension on ``conn``.
+
+        Args:
+            conn: the connection to load the extension into.
 
         Returns:
             bool: True if loaded successfully
@@ -150,9 +189,9 @@ class DatabaseConnection:
         # Python sqlite3는 기본적으로 extension 로딩이 disabled 이므로
         # 먼저 enable 해야 sqlite_vec.load() / load_extension() 이 성공한다.
         enabled_here = False
-        if hasattr(self.connection, "enable_load_extension"):
+        if hasattr(conn, "enable_load_extension"):
             try:
-                self.connection.enable_load_extension(True)
+                conn.enable_load_extension(True)
                 enabled_here = True
             except Exception as e:
                 logger.warning(f"enable_load_extension failed: {e}")
@@ -161,34 +200,30 @@ class DatabaseConnection:
             if SQLITE_VEC_AVAILABLE:
                 try:
                     # 방법 1: sqlite-vec Python 패키지로 로드
-                    sqlite_vec.load(self.connection)
-                    logger.info("sqlite-vec loaded via Python package")
+                    sqlite_vec.load(conn)
                     vec_loaded = True
                 except Exception as e:
                     logger.warning(f"Failed to load sqlite-vec via Python package: {e}")
 
             # 방법 2: sqlite_vec.loadable_path() 경로로 직접 로드
-            if not vec_loaded and hasattr(self.connection, "load_extension"):
+            if not vec_loaded and hasattr(conn, "load_extension"):
                 try:
                     loadable_path = sqlite_vec.loadable_path()
-                    self.connection.load_extension(loadable_path)
-                    logger.info("sqlite-vec loaded via direct extension loading")
+                    conn.load_extension(loadable_path)
                     vec_loaded = True
                 except Exception as e:
                     logger.warning(f"Failed to load sqlite-vec via extension: {e}")
         finally:
             if enabled_here:
                 try:
-                    self.connection.enable_load_extension(False)
+                    conn.enable_load_extension(False)
                 except Exception as e:
                     logger.warning(f"Failed to disable extension loading: {e}")
 
-        # 방법 3: 벡터 테이블 생성 테스트
+        # 방법 3: 벡터 함수 동작 테스트
         if vec_loaded:
             try:
-                # 벡터 기능 테스트
-                self.connection.execute("SELECT vec_version()")
-                logger.info("sqlite-vec vector functions are available")
+                conn.execute("SELECT vec_version()")
             except Exception as e:
                 logger.warning(
                     f"sqlite-vec loaded but vector functions not available: {e}"

@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-06-15
+
+검색 품질·동시성·임베딩 파이프라인 개선. arctic-ko 임베딩 도입(blue-green 무중단 재임베딩) + read/write 분리 풀(C3) + reranking(opt-in).
+
+### Added
+- arctic-ko 임베딩 모델(`dragonkue/snowflake-arctic-embed-l-v2.0-ko`, MTEB-ko #1) 지원 + 모델별 score scaling — 비대칭 prefix(query에만 `query: `), CLS pooling, per-model similarity baseline로 sigmoid 정규화 중심을 보정. `app/core/embeddings/service.py`
+- Blue-green 재임베딩 마이그레이션 — vec0가 RENAME 불가하므로 active-pointer(`active_embedding_table` 메타데이터) + dual-write + atomic swap으로 무중단 모델 전환. `app/core/services/embedding_manager.py`
+- Read/write 분리 커넥션 풀(C3) — read-only 연결을 단일 스레드 executor에 pin(pysqlite3 threadsafety=1 안전), 읽기 head-of-line blocking 해소. `app/core/database/read_pool.py`, `app/core/database/base.py`
+- Cross-encoder reranking(`BAAI/bge-reranker-v2-m3`, opt-in `enable_reranking`) — 정규화 후 적용, device를 cuda>mps>cpu로 자동 선택 + 문서 truncate(512). GPU에서 +~8% MRR/+15.8% R@1, CPU-only 배포는 비활성 권장. `app/core/services/reranker.py`, `app/core/services/unified_search.py`
+- 쿼리 길이 적응형 RRF 가중치(opt-in `enable_adaptive_hybrid`). `app/core/services/unified_search.py`
+
+### Fixed
+- noise filter가 모든 검색에 30일 시간 필터를 강제하던 버그 제거(`time_range` 기본값 `30d`→`None`) — 30일 이전 메모리가 조용히 누락되어 recall이 무너지던 문제, MRR 3배 개선. `app/core/services/noise_filter.py`
+- blue-green 마이그레이션이 defer-loading된 모델을 로드하지 않아 "Embedding model not ready"로 실패하던 문제 — 재임베딩 전 명시적 load. `app/core/services/embedding_manager.py`
+- `complete_pin`을 conditional UPDATE + rowcount 체크로 원자화 — read pool 도입으로 노출된 read-then-write 경쟁 차단. `app/core/services/memory.py`
+- score normalizer 캐시 키에 `sigmoid_threshold` 포함 — 모델 전환 시 stale 정규화 방지. `app/core/services/score_normalizer.py`
+
+### Performance
+- `/api/projects` N+1 제거(240→3 쿼리). `content_bytes` denormalize로 `SUM(LENGTH(content))` 풀스캔 제거. stats/resume 정렬 경로 인덱스 추가 + fuzzy 후보 풀 축소. dashboard 메모리 목록 복합 인덱스.
+
 ## [1.6.0] - 2026-06-15
 
 운영(production) 전환을 위한 적대적 리뷰(red-team)에서 확인된 차단 결함 해소 + 임베딩 성능 개선.

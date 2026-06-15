@@ -280,7 +280,14 @@ def get_score_normalizer(
                 sigmoid_threshold if sigmoid_threshold is not None else 0.45
             )
 
-    if _normalizer is None or _normalizer.method != method:
+    # Cache key includes sigmoid_threshold: switching embedding models changes
+    # the center, and a stale cached normalizer would keep the old model's
+    # center and mis-normalize the new model's scores.
+    if (
+        _normalizer is None
+        or _normalizer.method != method
+        or _normalizer.sigmoid_threshold != sigmoid_threshold
+    ):
         _normalizer = ScoreNormalizer(
             method=method,
             sigmoid_k=sigmoid_k,

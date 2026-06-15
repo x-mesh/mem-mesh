@@ -256,15 +256,25 @@ class PinService:
 
         now = datetime.now(timezone.utc).isoformat()
 
-        await self.db.execute(
+        # Atomic complete: guard on the status inside the UPDATE so two
+        # concurrent completes can't both win. The writer lock serializes the
+        # two statements and the WHERE makes the loser a no-op (rowcount 0).
+        # The status check above is a fast path only — get_pin() now reads from
+        # the read pool, so both callers can observe "open" before either
+        # writes; this WHERE is what actually closes the race.
+        cursor = await self.db.execute(
             """
             UPDATE pins
             SET status = 'completed', completed_at = ?, updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND status != 'completed'
             """,
             (now, now, pin_id),
         )
+        rows_completed = cursor.rowcount
         self.db.connection.commit()
+
+        if rows_completed == 0:
+            raise PinAlreadyCompletedError(f"Pin already completed: {pin_id}")
 
         logger.info(f"Completed pin: {pin_id}")
 

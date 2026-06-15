@@ -157,8 +157,14 @@ class DatabaseMigrator:
                 logger.info("No memories with embeddings found for migration")
                 return 0
 
+            # Active blue-green slot (mirrors base.EMBEDDING_TABLE_*; migrator is
+            # imported by base, so it can't import back without a cycle).
+            active_table = await self.get_embedding_metadata("active_embedding_table")
+            if active_table not in ("memory_embeddings", "memory_embeddings_b"):
+                active_table = "memory_embeddings"
+
             cursor = await self.connection.execute(
-                "SELECT COUNT(*) as count FROM memory_embeddings"
+                f"SELECT COUNT(*) as count FROM {active_table}"
             )
             existing_count = cursor.fetchone()["count"]
 
@@ -201,11 +207,11 @@ class DatabaseMigrator:
 
                     # sqlite-vec virtual tables don't support INSERT OR REPLACE
                     await self.connection.execute(
-                        "DELETE FROM memory_embeddings WHERE memory_id = ?",
+                        f"DELETE FROM {active_table} WHERE memory_id = ?",
                         (memory["id"],),
                     )
                     await self.connection.execute(
-                        "INSERT INTO memory_embeddings (memory_id, embedding) VALUES (?, ?)",
+                        f"INSERT INTO {active_table} (memory_id, embedding) VALUES (?, ?)",
                         (memory["id"], embedding_json),
                     )
                     migrated_count += 1
