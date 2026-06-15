@@ -341,8 +341,8 @@ class Database:
         await self.execute(
             """
             INSERT INTO memories
-            (id, content, content_hash, project_id, category, source, client, embedding, tags, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, content, content_hash, project_id, category, source, client, embedding, tags, created_at, updated_at, content_bytes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 data["id"],
@@ -356,6 +356,7 @@ class Database:
                 data.get("tags"),
                 data["created_at"],
                 data["updated_at"],
+                len(data["content"]),  # denormalized; keeps content_bytes in sync
             ),
         )
 

@@ -348,7 +348,7 @@ class StatsService:
                 SELECT
                     COALESCE(project_id, 'default') as project_id,
                     COUNT(*) as memory_count,
-                    SUM(LENGTH(content)) as total_size,
+                    SUM(content_bytes) as total_size,
                     MIN(created_at) as created_at,
                     MAX(created_at) as updated_at
                 FROM memories
