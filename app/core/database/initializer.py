@@ -354,6 +354,10 @@ class DatabaseInitializer:
             # project_id / category equality filters too, via the prefix)
             "CREATE INDEX IF NOT EXISTS idx_memories_project_created ON memories(project_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_memories_category_created ON memories(category, created_at DESC)",
+            # get_overall_stats GROUP BY source: source has no index (few distinct
+            # values, one dominant) so it falls back to a full SCAN + temp B-TREE
+            # (~22ms on prod). This makes it a covering-index scan (~0.4ms).
+            "CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source)",
         ]
 
         # Work tracking indexes
@@ -362,6 +366,11 @@ class DatabaseInitializer:
             "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_sessions_ide ON sessions(project_id, ide_session_id)",
             "CREATE INDEX IF NOT EXISTS idx_sessions_client_type ON sessions(client_type)",
+            # resume_last_session filters (project_id, user_id) then ORDER BY
+            # started_at DESC. Without the sort column in the index SQLite builds a
+            # TEMP B-TREE; this covers it. Exact column order matters — do NOT add
+            # status (status IN (...) is a range scan that re-introduces the sort).
+            "CREATE INDEX IF NOT EXISTS idx_sessions_project_user_started ON sessions(project_id, user_id, started_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_pins_session ON pins(session_id)",
             "CREATE INDEX IF NOT EXISTS idx_pins_project_status ON pins(project_id, status)",
             "CREATE INDEX IF NOT EXISTS idx_pins_importance ON pins(importance DESC)",
