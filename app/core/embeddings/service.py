@@ -110,9 +110,26 @@ MODEL_DIMENSIONS = {
     "nlpai-lab/KURE-v1": 1024,
     "nlpai-lab/KoE5": 1024,
     "dragonkue/BGE-m3-ko": 1024,
+    "dragonkue/snowflake-arctic-embed-l-v2.0-ko": 1024,
     "snunlp/KR-SBERT-V40K-klueNLI-augSTS": 768,
     "jhgan/ko-sroberta-sts": 768,
 }
+
+# Per-model cosine-similarity center (typical score of a relevant result).
+# Cosine thresholds across the codebase (conflict 0.7, auto-link 0.7, sigmoid
+# center 0.45, ...) were calibrated for KURE-v1's score distribution. A model
+# whose scores center elsewhere (arctic-ko sits ~0.37 vs KURE ~0.45) would
+# silently over-filter — conflict/dup detection and auto-link stop firing, and
+# normalized scores get compressed. scaled_threshold() shifts those thresholds
+# by the per-model gap so each model filters the same *relative* portion.
+_REFERENCE_SIMILARITY_BASELINE = 0.45  # KURE-v1 era; equals the legacy sigmoid center
+
+MODEL_SIMILARITY_BASELINE = {
+    "nlpai-lab/KURE-v1": 0.45,
+    "dragonkue/snowflake-arctic-embed-l-v2.0-ko": 0.37,
+    # Unlisted models fall back to _REFERENCE_SIMILARITY_BASELINE (no shift).
+}
+
 
 # Model name aliases (short name -> full name)
 MODEL_ALIASES = {
@@ -126,6 +143,8 @@ MODEL_ALIASES = {
     "kure": "nlpai-lab/KURE-v1",
     "koe5": "nlpai-lab/KoE5",
     "bge-m3-ko": "dragonkue/BGE-m3-ko",
+    "arctic-ko": "dragonkue/snowflake-arctic-embed-l-v2.0-ko",
+    "snowflake-arctic-ko": "dragonkue/snowflake-arctic-embed-l-v2.0-ko",
     "kr-sbert": "snunlp/KR-SBERT-V40K-klueNLI-augSTS",
     "ko-sroberta": "jhgan/ko-sroberta-sts",
     "bge-small-en": "BAAI/bge-small-en-v1.5",
@@ -137,11 +156,22 @@ MODEL_ALIASES = {
 # E5-family models require query/passage prefix
 _E5_MODEL_PATTERNS = ("e5-", "/e5-", "multilingual-e5-")
 
+# Arctic-embed models use an ASYMMETRIC prefix: "query: " on queries only,
+# no prefix on passages (documents) — distinct from E5's symmetric
+# query:/passage: scheme. Applying the passage prefix would degrade arctic.
+_ARCTIC_MODEL_PATTERNS = ("arctic-embed", "arctic-ko")
+
 
 def _is_e5_model(model_name: str) -> bool:
     """E5 계열 모델 여부 판단"""
     name_lower = model_name.lower()
     return any(pat in name_lower for pat in _E5_MODEL_PATTERNS)
+
+
+def _is_arctic_model(model_name: str) -> bool:
+    """Arctic-embed 계열 여부 판단 (query에만 'query: ' 접두사 적용)"""
+    name_lower = model_name.lower()
+    return any(pat in name_lower for pat in _ARCTIC_MODEL_PATTERNS)
 
 
 def is_model_cached(model_name: str) -> bool:
@@ -191,6 +221,16 @@ AVAILABLE_MODELS = [
         "dimension": 1024,
         "size": "~2.2GB",
         "description": "BGE-M3 fine-tuned for Korean. Strong Korean + multilingual performance.",
+        "recommended": False,
+        "category": "korean",
+        "lang": "ko/en",
+        "max_tokens": 8192,
+    },
+    {
+        "name": "dragonkue/snowflake-arctic-embed-l-v2.0-ko",
+        "dimension": 1024,
+        "size": "~2.2GB",
+        "description": "Korean retrieval SOTA (MTEB-ko #1, avg NDCG@10 0.740). Snowflake Arctic-Embed L v2.0 Korean fine-tune. Uses 'query: ' prefix on queries only (handled automatically).",
         "recommended": False,
         "category": "korean",
         "lang": "ko/en",
@@ -363,6 +403,16 @@ class EmbeddingService:
             logger.info(
                 "E5 model detected: query/passage prefix will be applied automatically"
             )
+        # Arctic models apply "query: " on queries only (asymmetric)
+        self._is_arctic = _is_arctic_model(self.model_name)
+        if self._is_arctic:
+            logger.info(
+                "Arctic model detected: 'query: ' prefix applied to queries only"
+            )
+        # Cosine-score center used to scale KURE-tuned thresholds to this model
+        self.similarity_baseline = MODEL_SIMILARITY_BASELINE.get(
+            self.model_name, _REFERENCE_SIMILARITY_BASELINE
+        )
 
         # Set default dimension (updated after actual model load)
         self.dimension: int = MODEL_DIMENSIONS.get(self.model_name, 384)
@@ -593,18 +643,43 @@ class EmbeddingService:
         self.model = None
         self.model_name = resolved
         self._is_e5 = _is_e5_model(self.model_name)
+        self._is_arctic = _is_arctic_model(self.model_name)
+        self.similarity_baseline = MODEL_SIMILARITY_BASELINE.get(
+            self.model_name, _REFERENCE_SIMILARITY_BASELINE
+        )
         self.dimension = MODEL_DIMENSIONS.get(self.model_name, 384)
         self._status = "not_loaded"
         self._download_progress = 0.0
         self._error_message = None
         logger.info(f"Model switched to: {self.model_name}")
 
+    def scaled_threshold(self, reference_threshold: float) -> float:
+        """KURE-v1 기준으로 튜닝된 코사인 threshold를 현재 모델 점수 스케일로 보정.
+
+        코드 곳곳의 코사인 threshold(conflict 0.7, auto-link 0.7 등)는 KURE-v1의
+        점수 분포(center ~0.45)에 맞춰져 있다. arctic-ko처럼 점수 center가 낮은
+        (~0.37) 모델은 같은 threshold를 쓰면 같은 관련도라도 점수가 낮아 과도하게
+        걸러진다. baseline 차이만큼 평행이동해 같은 *상대적* 비율을 거르게 한다.
+        KURE-v1(및 미등록 모델)은 차이가 0이라 값이 그대로 반환된다(무회귀).
+        """
+        shifted = reference_threshold - (
+            _REFERENCE_SIMILARITY_BASELINE - self.similarity_baseline
+        )
+        return max(0.0, min(1.0, shifted))
+
     def _prepare_text(self, text: str, is_query: bool) -> str:
-        """E5 모델일 경우 query/passage prefix를 자동 적용"""
-        if not self._is_e5:
-            return text
-        prefix = "query: " if is_query else "passage: "
-        return prefix + text
+        """모델별 query/passage prefix 자동 적용.
+
+        - E5 계열: query/passage 양쪽에 'query: '/'passage: ' (대칭)
+        - Arctic 계열: query에만 'query: ', passage는 접두사 없음 (비대칭)
+        - 그 외(KURE-v1 등): 접두사 없이 raw text
+        """
+        if self._is_e5:
+            prefix = "query: " if is_query else "passage: "
+            return prefix + text
+        if self._is_arctic:
+            return ("query: " + text) if is_query else text
+        return text
 
     def _ensure_model_ready(self) -> None:
         """Load the model if needed, or raise if deferred and not yet ready."""

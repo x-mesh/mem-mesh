@@ -96,7 +96,15 @@ class UnifiedSearchService:
         )
         self.intent_analyzer = None
         self.score_normalizer = (
-            get_score_normalizer(score_normalization_method)
+            get_score_normalizer(
+                score_normalization_method,
+                # Center the sigmoid on this model's score distribution so a
+                # low-scoring model (arctic-ko ~0.37) isn't compressed against a
+                # KURE-tuned center (0.45). Falls back to the configured default.
+                sigmoid_threshold=getattr(
+                    embedding_service, "similarity_baseline", None
+                ),
+            )
             if enable_score_normalization
             else None
         )

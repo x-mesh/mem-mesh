@@ -85,8 +85,7 @@ class MemoryService:
 
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _init_conflict_detector() -> Any:
+    def _init_conflict_detector(self) -> Any:
         """설정 기반 ConflictDetectorService 자동 생성 (lazy-load, graceful degradation)."""
         try:
             from ..config import get_settings
@@ -101,7 +100,13 @@ class MemoryService:
                 model_name=settings.conflict_nli_model,
                 preload=settings.enable_conflict_detection,  # Auto-preload when enabled
                 contradiction_threshold=settings.conflict_contradiction_threshold,
-                similarity_threshold=settings.conflict_similarity_threshold,
+                # Scale the cosine gate to the active embedding model. The Stage-1
+                # vector filter compares raw cosine, and arctic-ko scores lower
+                # than KURE — a fixed 0.7 would drop every candidate and silently
+                # disable dup/conflict detection. KURE is unchanged (identity).
+                similarity_threshold=self.embedding_service.scaled_threshold(
+                    settings.conflict_similarity_threshold
+                ),
                 max_candidates=settings.conflict_max_candidates,
             )
             logger.info(
