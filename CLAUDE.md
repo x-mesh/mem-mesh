@@ -89,4 +89,16 @@ uvicorn app.web.app:app --host 0.0.0.0 --port 8000
 - **버전 정보**: `app.core.version` 단일 소스
 - **커밋 메시지**: `type: description` (feat, fix, refactor, docs, test, chore)
 
+---
+
+## ⚠️ 로컬 측정·벤치마크 주의 (시스템 안정성)
+
+> 2026-06: arctic 품질 측정 중 **cross-encoder reranker를 CPU(맥)에서 반복 추론하다 시스템이 거의 다운됨**. 재발 방지 규칙.
+
+- **L1. CPU에서 cross-encoder/대형 ML 반복 추론 금지.** `BAAI/bge-reranker-v2-m3`(568M) 같은 cross-encoder를 로컬 맥 CPU로 대규모(수천 쌍) 추론하면 CPU·메모리 폭주 + loky 멀티프로세스 누수로 행/다운. rerank 효과 측정은 **GPU 환경 필수**. CPU에선 시도하지 말 것. **운영도 동일** — `enable_reranking`은 GPU(CUDA/MPS) 배포에서만 켠다. `RerankerService`가 device를 cuda>mps>cpu 순으로 자동 선택하고 CPU면 경고하지만, **CPU-only 배포(GPU 없는 Linux 서버 등)에선 `enable_reranking=False` 유지가 안전**. (rerank는 GPU에서 +~8% MRR, MPS+truncate(512)로 query당 ~0.5s.)
+- **L2. 임베딩 모델 동시 로드 금지.** 모델당 ~2GB(arctic/KURE 등). 한 프로세스에서 두 모델(예: 검색용 + rerank용) 동시 로드는 메모리 폭주. 측정은 **단일 모델 + 소표본(≤수십 쿼리) + 백그라운드 단일 작업**으로.
+- **L3. A/B 측정은 캐시 격리.** `get_cache_manager()`는 **전역 싱글톤** — svc 인스턴스가 달라도 캐시 공유. off→on A/B에서 off 결과가 on에 cache hit되어 **dMRR 0 artifact** 발생. run마다 `get_cache_manager().clear_all_caches()`로 격리.
+- **L4. prod DB 복사본 사용.** 측정은 `sqlite3 prod.db ".backup /tmp/eval.db"` 복사본에서. 원본은 `mode=ro`로 열고, 하네스의 `search_metrics` 쓰기가 운영 데이터를 오염시키지 않게 한다.
+- **L5. 무거운 측정은 반드시 백그라운드 + 단일.** 여러 측정 프로세스 누적 금지. 진행 중 하나 끝나고 다음.
+
 > Hook이 bash로 직접 콘텐츠를 DB에 저장하지 않는다. Hook은 세션 라이프사이클(SessionStart)과 AI에게 저장 판단을 위임(prompt/followup)하는 용도로만 사용한다.

@@ -67,14 +67,24 @@ class RerankerService:
 
         device = self.device
         if device is None:
-            # Apple Silicon: prefer MPS (GPU). CPU inference of a 568M
-            # cross-encoder pegs all cores + loky workers and can spike the
-            # machine (see CLAUDE.md L1). MPS keeps it on a single GPU stream.
+            # Auto-select the safest accelerator: CUDA (Linux GPU) > MPS (Apple
+            # Silicon) > CPU. CPU inference of a 568M cross-encoder pegs all
+            # cores + loky workers and can spike/hang the host (see CLAUDE.md L1),
+            # so warn loudly — on a CPU-only box, prefer leaving reranking off.
             try:
                 import torch
 
-                if torch.backends.mps.is_available():
+                if torch.cuda.is_available():
+                    device = "cuda"
+                elif torch.backends.mps.is_available():
                     device = "mps"
+                else:
+                    device = "cpu"
+                    logger.warning(
+                        "Reranker running on CPU — a 568M cross-encoder is heavy "
+                        "and may spike the host. Use a GPU (CUDA/MPS) or keep "
+                        "enable_reranking=False on CPU-only deployments."
+                    )
             except Exception:
                 pass
 
