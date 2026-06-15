@@ -1,0 +1,4 @@
+# git-kit 저장소 설정
+# origin/HEAD가 develop을 가리키므로 base 자동감지는 develop이 된다.
+# develop에서 작업하고 main으로 릴리스하는 워크플로우를 위해 base를 main으로 고정.
+base_branch: main
