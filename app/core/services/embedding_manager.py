@@ -211,6 +211,15 @@ class EmbeddingManagerService:
             "skipped": 0,
         }
 
+        # Re-embedding needs the (new) model loaded. Production uses deferred
+        # loading, so right after switch_model the status is "not_loaded" and
+        # aembed() would raise. Force the load here, off the event loop.
+        if not self.embedding_service.is_ready:
+            self._migration_progress["message"] = "Loading embedding model..."
+            if progress_callback:
+                progress_callback(self._migration_progress)
+            await asyncio.to_thread(self.embedding_service.load_model)
+
         # Blue-green: re-embed into the INACTIVE slot (green) while the active
         # slot (blue) keeps serving search. Only after green is fully built do we
         # flip the pointer — so a failure or restart leaves the old data intact.
