@@ -15,9 +15,15 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .connection import SQLITE3_MODULE, SQLITE_VEC_AVAILABLE, DatabaseConnection
+from .connection import (
+    SQLITE3_MODULE,
+    SQLITE_VEC_AVAILABLE,
+    DatabaseConnection,
+    _in_transaction,
+)
 from .initializer import DatabaseInitializer
 from .migrator import DatabaseMigrator
+from .read_pool import ReadPool
 
 try:
     import pysqlite3.dbapi2 as sqlite3
@@ -59,9 +65,29 @@ class Database:
         self.db_path = db_path
         self.busy_timeout = busy_timeout
         self.embedding_dim = embedding_dim
+        self._db_path_in_memory = self._is_in_memory(db_path)
         self._connection = DatabaseConnection(db_path, busy_timeout)
+        # C3: read-only connection pool for concurrent SELECT / vector search.
+        # Reuses the writer's _create_connection so every connection is
+        # configured identically (PRAGMAs + sqlite-vec), read_only=True.
+        #
+        # An in-memory DB (":memory:") is private to each connection, so a
+        # pooled reader would open an *empty* second database and never see the
+        # writer's tables. Disable the pool there and route every read to the
+        # writer connection. Production uses a file DB, so the pool is active.
+        self._read_pool_enabled = not self._db_path_in_memory
+        self._read_pool = ReadPool(self._connection._create_connection)
         self._initializer = DatabaseInitializer(self._connection, embedding_dim)
         self._migrator = DatabaseMigrator(self._connection)
+
+    @staticmethod
+    def _is_in_memory(db_path: str) -> bool:
+        """True for an in-memory SQLite DB (private to each connection)."""
+        return (
+            db_path in (":memory:", "")
+            or db_path.startswith("file::memory:")
+            or "mode=memory" in db_path
+        )
 
     @property
     def connection(self) -> Optional[sqlite3.Connection]:
@@ -74,6 +100,11 @@ class Database:
     async def connect(self) -> None:
         await self._connection.connect()
         await self.init_tables()
+        # Open the read pool only after schema init so every reader sees the
+        # final schema (and the WAL the writer just created). Skipped for
+        # in-memory DBs, where pooled connections can't see the writer's tables.
+        if self._read_pool_enabled:
+            await self._read_pool.connect()
         logger.info(f"Database connected: {self.db_path}")
 
     async def init_tables(self) -> None:
@@ -82,16 +113,31 @@ class Database:
             await self._migrator.migrate_embeddings_to_vector_table()
 
     async def close(self) -> None:
+        # Close readers first (they hold WAL read locks), then the writer runs
+        # the final checkpoint with no readers pinning the WAL.
+        if self._read_pool_enabled:
+            await self._read_pool.close()
         await self._connection.close()
 
     async def execute(self, query: str, params: Tuple = ()) -> sqlite3.Cursor:
+        # execute() returns a live cursor, which is bound to its connection's
+        # thread and cannot cross the read-pool thread boundary — so it always
+        # runs on the writer connection. Use fetchone/fetchall for pooled reads.
         return await self._connection.execute(query, params)
 
     async def fetchone(self, query: str, params: Tuple = ()) -> Optional[sqlite3.Row]:
-        return await self._connection.fetchone(query, params)
+        # Inside a transaction(), reads must hit the writer connection to see
+        # the open transaction's own uncommitted rows (read-your-writes); the
+        # read pool is a separate connection and would miss them. Outside a
+        # transaction, route to the read pool for concurrency.
+        if _in_transaction.get() or not self._read_pool_enabled:
+            return await self._connection.fetchone(query, params)
+        return await self._read_pool.fetchone(query, params)
 
     async def fetchall(self, query: str, params: Tuple = ()) -> List[sqlite3.Row]:
-        return await self._connection.fetchall(query, params)
+        if _in_transaction.get() or not self._read_pool_enabled:
+            return await self._connection.fetchall(query, params)
+        return await self._read_pool.fetchall(query, params)
 
     async def get_embedding_metadata(self, key: str) -> Optional[str]:
         return await self._migrator.get_embedding_metadata(key)
@@ -117,12 +163,12 @@ class Database:
 
         if SQLITE_VEC_AVAILABLE:
             try:
-                cursor = await self.execute("""
-                    SELECT name FROM sqlite_master 
+                table_row = await self.fetchone("""
+                    SELECT name FROM sqlite_master
                     WHERE type='table' AND name='memory_embeddings'
                 """)
 
-                if cursor.fetchone():
+                if table_row:
                     embedding_array = np.frombuffer(embedding, dtype=np.float32)
                     embedding_json = json.dumps(embedding_array.tolist())
 
@@ -159,8 +205,7 @@ class Database:
 
                     base_query += f" ORDER BY ve.distance LIMIT {limit}"
 
-                    cursor = await self.execute(base_query, tuple(params))
-                    results = cursor.fetchall()
+                    results = await self.fetchall(base_query, tuple(params))
 
                     if results:
                         logger.info(f"Vector search found {len(results)} results")
@@ -196,8 +241,7 @@ class Database:
         base_query += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
 
-        cursor = await self.execute(base_query, tuple(params))
-        return cursor.fetchall()
+        return await self.fetchall(base_query, tuple(params))
 
     async def get_recent_memories(
         self,
@@ -252,8 +296,7 @@ class Database:
             base_query += " LIMIT ? OFFSET ?"
             params.extend([limit, offset])
 
-            cursor = await self.execute(base_query, tuple(params))
-            return cursor.fetchall()
+            return await self.fetchall(base_query, tuple(params))
 
         except Exception as e:
             logger.error(f"Get recent memories failed: {e}")
@@ -281,8 +324,7 @@ class Database:
                     base_query += " AND JSON_EXTRACT(tags, '$') LIKE ?"
                     params.append(f'%"{filters["tag"]}"%')
 
-            cursor = await self.execute(base_query, tuple(params))
-            result = cursor.fetchone()
+            result = await self.fetchone(base_query, tuple(params))
             return result["count"] if result else 0
 
         except Exception as e:
