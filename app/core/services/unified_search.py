@@ -50,6 +50,7 @@ class UnifiedSearchService:
         enable_noise_filter: bool = True,
         enable_score_normalization: bool = True,
         score_normalization_method: str = "sigmoid",
+        enable_adaptive_hybrid: Optional[bool] = None,
         cache_embedding_ttl: Optional[int] = None,
         cache_search_ttl: Optional[int] = None,
         cache_context_ttl: Optional[int] = None,
@@ -152,12 +153,18 @@ class UnifiedSearchService:
             _settings = get_settings()
             self._rrf_vector_weight = _settings.rrf_vector_weight
             self._rrf_text_weight = _settings.rrf_text_weight
+            _cfg_adaptive = _settings.enable_adaptive_hybrid
         except Exception as e:
             logger.debug(
                 f"Failed to load RRF weights from settings, using defaults: {e}"
             )
             self._rrf_vector_weight = 1.0
             self._rrf_text_weight = 1.2
+            _cfg_adaptive = True
+        # Per-query RRF weight adaptation (arg overrides config)
+        self.enable_adaptive_hybrid = (
+            _cfg_adaptive if enable_adaptive_hybrid is None else enable_adaptive_hybrid
+        )
 
         # Korean translation dictionary
         self.korean_translations = self._init_korean_translations()
@@ -627,8 +634,16 @@ class UnifiedSearchService:
         if not vector_search_results and not text_response.results:
             return SearchResponse(results=[])
 
+        if self.enable_adaptive_hybrid:
+            vw, tw = self._adaptive_rrf_weights(query)
+        else:
+            vw, tw = self._rrf_vector_weight, self._rrf_text_weight
         merged_results = self._apply_rrf(
-            vector_search_results, text_response.results, limit
+            vector_search_results,
+            text_response.results,
+            limit,
+            vector_weight=vw,
+            text_weight=tw,
         )
 
         return SearchResponse(results=merged_results, total=len(merged_results))
@@ -653,6 +668,20 @@ class UnifiedSearchService:
             if "가" <= char <= "힣":
                 return True
         return False
+
+    def _adaptive_rrf_weights(self, query: str):
+        """쿼리 길이에 따라 RRF 가중치를 조정한다.
+
+        짧은 키워드/고유명사 쿼리는 FTS(text) 정확 매칭을, 긴 자연어 쿼리는
+        벡터(의미)를 우대한다. 중간 길이는 config 기본 가중치 유지.
+        """
+        n = len(query.split())
+        vw, tw = self._rrf_vector_weight, self._rrf_text_weight
+        if n <= 3:
+            return vw * 0.8, tw * 1.6
+        if n >= 10:
+            return vw * 1.3, tw
+        return vw, tw
 
     def _apply_rrf(
         self,
