@@ -32,7 +32,24 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Database", "SQLITE_VEC_AVAILABLE", "SQLITE3_MODULE"]
+# Blue-green embedding table slots. The vector table is a sqlite-vec vec0
+# virtual table, which cannot be RENAMEd, so model migration re-embeds into the
+# *inactive* slot and then flips the `active_embedding_table` metadata pointer
+# atomically — search/writes always target the active slot. PRIMARY is the
+# legacy name so existing DBs keep working with no migration.
+EMBEDDING_TABLE_PRIMARY = "memory_embeddings"
+EMBEDDING_TABLE_SECONDARY = "memory_embeddings_b"
+EMBEDDING_TABLE_SLOTS = (EMBEDDING_TABLE_PRIMARY, EMBEDDING_TABLE_SECONDARY)
+EMBEDDING_TABLE_FALLBACK = "memories_vec_fallback"
+
+__all__ = [
+    "Database",
+    "SQLITE_VEC_AVAILABLE",
+    "SQLITE3_MODULE",
+    "EMBEDDING_TABLE_PRIMARY",
+    "EMBEDDING_TABLE_SECONDARY",
+    "EMBEDDING_TABLE_SLOTS",
+]
 
 
 class Database:
@@ -66,6 +83,8 @@ class Database:
         self.busy_timeout = busy_timeout
         self.embedding_dim = embedding_dim
         self._db_path_in_memory = self._is_in_memory(db_path)
+        # Cached active embedding-table pointer (blue-green). Invalidated on swap.
+        self._active_embedding_table: Optional[str] = None
         self._connection = DatabaseConnection(db_path, busy_timeout)
         # C3: read-only connection pool for concurrent SELECT / vector search.
         # Reuses the writer's _create_connection so every connection is
@@ -145,6 +164,45 @@ class Database:
     async def set_embedding_metadata(self, key: str, value: str) -> None:
         await self._migrator.set_embedding_metadata(key, value)
 
+    async def active_embedding_table(self) -> str:
+        """현재 검색/쓰기 대상 벡터 테이블(blue-green active slot).
+
+        모델 마이그레이션은 inactive slot에 재임베딩 후 이 포인터를 원자적으로
+        전환한다. 메타데이터 미설정/구버전 DB는 PRIMARY(legacy 이름)로 동작한다.
+        """
+        if self._active_embedding_table is None:
+            name = await self._migrator.get_embedding_metadata("active_embedding_table")
+            self._active_embedding_table = (
+                name if name in EMBEDDING_TABLE_SLOTS else EMBEDDING_TABLE_PRIMARY
+            )
+        return self._active_embedding_table
+
+    async def inactive_embedding_table(self) -> str:
+        """마이그레이션 대상(green) slot — active의 반대편."""
+        active = await self.active_embedding_table()
+        return (
+            EMBEDDING_TABLE_SECONDARY
+            if active == EMBEDDING_TABLE_PRIMARY
+            else EMBEDDING_TABLE_PRIMARY
+        )
+
+    async def set_active_embedding_table(self, table: str) -> None:
+        """active slot 포인터를 원자적으로 전환한다(blue-green swap)."""
+        if table not in EMBEDDING_TABLE_SLOTS:
+            raise ValueError(f"Invalid embedding table slot: {table}")
+        await self._migrator.set_embedding_metadata("active_embedding_table", table)
+        self._active_embedding_table = table
+
+    async def migration_in_progress(self) -> bool:
+        """재임베딩 진행 중 여부(DB 영속 — 서버 재시작에도 유지)."""
+        val = await self._migrator.get_embedding_metadata("migration_in_progress")
+        return val == "1"
+
+    async def set_migration_in_progress(self, value: bool) -> None:
+        await self._migrator.set_embedding_metadata(
+            "migration_in_progress", "1" if value else "0"
+        )
+
     async def check_embedding_model_consistency(
         self, current_model: str, current_dim: int
     ) -> dict:
@@ -163,10 +221,11 @@ class Database:
 
         if SQLITE_VEC_AVAILABLE:
             try:
-                table_row = await self.fetchone("""
-                    SELECT name FROM sqlite_master
-                    WHERE type='table' AND name='memory_embeddings'
-                """)
+                active_table = await self.active_embedding_table()
+                table_row = await self.fetchone(
+                    "SELECT name FROM sqlite_master " "WHERE type='table' AND name=?",
+                    (active_table,),
+                )
 
                 if table_row:
                     embedding_array = np.frombuffer(embedding, dtype=np.float32)
@@ -178,14 +237,16 @@ class Database:
                     )
                     inner_limit = limit * 5 if has_filters else limit
 
-                    base_query = """
-                        SELECT m.*, ve.distance 
+                    # Table name is from a fixed slot allowlist (active_embedding_table),
+                    # never user input — safe to interpolate.
+                    base_query = f"""
+                        SELECT m.*, ve.distance
                         FROM memories m
                         JOIN (
-                            SELECT memory_id, distance 
-                            FROM memory_embeddings 
-                            WHERE embedding MATCH ? 
-                            ORDER BY distance 
+                            SELECT memory_id, distance
+                            FROM {active_table}
+                            WHERE embedding MATCH ?
+                            ORDER BY distance
                             LIMIT ?
                         ) ve ON m.id = ve.memory_id
                     """
