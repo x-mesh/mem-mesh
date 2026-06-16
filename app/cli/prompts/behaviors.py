@@ -14,7 +14,7 @@ from typing import List
 # Prompt schema version — bump on ANY behavioral rule change
 # ---------------------------------------------------------------------------
 
-PROMPT_VERSION: int = 15
+PROMPT_VERSION: int = 16
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,8 @@ CORE_RULES: List[Rule] = [
         description=(
             '코드 변경 작업 시 즉시 pin_add(content, project_id="{project_id}"). '
             "완료 시 반드시 pin_complete 호출 — pin_complete 없이 작업을 끝내지 않는다. "
-            "질문/설명/분석은 pin 불필요. "
+            "Edit/Write로 실제 파일을 바꿀 때만 pin — 질문/설명/분석 등 read-only 턴은 "
+            "pin 불필요(정답). pin 없음 reminder는 write 누락을 잡는 안전망일 뿐이다. "
             "(importance: 3=일반, 4=중요, 5=아키텍처)"
         ),
     ),

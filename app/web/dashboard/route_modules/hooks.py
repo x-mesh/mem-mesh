@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse
 from app.cli.hooks.keywords import match_category
 from app.core.redaction import redact_secrets
 from app.core.schemas.hooks import (
+    PostToolUsePayload,
     SessionStartPayload,
     StopPayload,
     SubagentStopPayload,
@@ -37,7 +38,7 @@ from app.core.schemas.hooks import (
     UserPromptSubmitPayload,
 )
 from app.core.schemas.requests import normalize_project_id
-from app.core.services.hook import HookService
+from app.core.services.hook import WRITE_TOOLS, HookService
 from app.core.services.pin import PinService
 from app.core.services.session import SessionService
 
@@ -160,6 +161,22 @@ def _project_id(cwd: Optional[str], explicit: Optional[str]) -> str:
 
 def _save_marker_present(text: str) -> bool:
     return "mcp__mem-mesh__add" in text or "mcp__mem-mesh__pin_add" in text
+
+
+def _require_write_signal() -> bool:
+    """Whether reminders must be backed by a real write before firing.
+
+    Default on: a pin/save reminder is shown only when the session has an
+    uncaptured write (an Edit/Write since the last save/pin), so pure
+    question/analysis turns never nag. Set ``MEM_MESH_REMINDER_REQUIRE_WRITE=0``
+    to restore the old absence-triggered behaviour.
+    """
+    return os.getenv("MEM_MESH_REMINDER_REQUIRE_WRITE", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
 
 
 def _is_noise(text: Optional[str]) -> bool:
@@ -391,8 +408,23 @@ async def user_prompt_submit(
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"hook memory search failed: {e}")
 
-    # Part 2: save reminder driven by the event stream.
+    # Write-signal gate: both reminders below are evidence-based, not
+    # absence-based. A nag fires only when there is an uncaptured write (an
+    # Edit/Write recorded since the last save/pin) — so a pure question/analysis
+    # session never gets nagged. ``MEM_MESH_REMINDER_REQUIRE_WRITE=0`` disables
+    # the gate (legacy absence-triggered behaviour). With no session id the
+    # write count is unknowable, so the gate stays closed (suppress).
+    require_write = _require_write_signal()
+    writes_since = 0
     if ide_session_id:
+        try:
+            writes_since = await hook_service.writes_since_save(ide_session_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"writes-since-save check failed: {e}")
+    work_done = (not require_write) or writes_since > 0
+
+    # Part 2: save reminder driven by the event stream.
+    if ide_session_id and work_done:
         try:
             interval = int(os.getenv("MEM_MESH_SAVE_REMINDER_TURNS", "5"))
             since = await hook_service.turns_since_save(ide_session_id)
@@ -406,7 +438,9 @@ async def user_prompt_submit(
 
     # Part 3: pin tracking reminder.
     # "Tracked" = open OR in_progress (pin_add creates in_progress by default).
-    if len(prompt) >= 15:
+    # Gated on work_done so it nags only when code was edited without a pin —
+    # the write∧no-tracking mismatch — never on a read-only turn.
+    if len(prompt) >= 15 and work_done:
         try:
             tracked_pins = await pin_service.get_pins(
                 project_id=project_id, status="in_progress", limit=1
@@ -424,6 +458,44 @@ async def user_prompt_submit(
         return _ok("user-prompt-submit: noop")
 
     return _context("UserPromptSubmit", "\n\n".join(parts))
+
+
+# ───────────────────────── PostToolUse ───────────────────────────
+
+
+@router.post("/post-tool-use")
+async def post_tool_use(
+    payload: PostToolUsePayload,
+    hook_service: HookService = Depends(get_hook_service),
+) -> Response:
+    """Record a write-signal so reminders fire on real edits, not on absence.
+
+    Fired after every tool call (the client hook is matched to write tools, but
+    we re-check server-side). Only file mutations are recorded; everything else
+    is a no-op. The signal feeds :meth:`HookService.writes_since_save`, which
+    gates the pin/save reminders in ``user_prompt_submit``.
+    """
+    tool_name = (payload.tool_name or "").strip()
+    if tool_name not in WRITE_TOOLS:
+        return _ok(f"post-tool-use: skip (non-write tool: {tool_name or 'none'})")
+
+    ide_session_id = payload.session_id
+    if not ide_session_id:
+        return _ok("post-tool-use: skip (no session id)")
+
+    project_id = _project_id(payload.cwd, payload.project_id)
+    try:
+        await hook_service.record_write(
+            project_id=project_id,
+            ide_session_id=ide_session_id,
+            tool_name=tool_name,
+            client_type="claude-ai",
+        )
+    except Exception as e:  # noqa: BLE001 — a hook must never raise into the caller
+        logger.warning(f"post-tool-use record failed: {e}")
+        return _ok("post-tool-use: error (degraded)")
+
+    return _ok(f"post-tool-use: recorded write ({tool_name})")
 
 
 # ───────────────────────────── Stop ──────────────────────────────

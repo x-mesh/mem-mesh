@@ -55,6 +55,7 @@ from app.cli.hooks.templates import (
     LOCAL_SUBAGENT_STOP_HOOK_TEMPLATE,
     LOCAL_TASK_COMPLETED_HOOK_TEMPLATE,
     LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
+    POST_TOOL_USE_HOOK_TEMPLATE,
     PRECOMPACT_HOOK_TEMPLATE,
     SESSION_END_HOOK_TEMPLATE,
     SESSION_START_HOOK_TEMPLATE,
@@ -92,6 +93,7 @@ HOOK_PROFILES = {
             "session-start",
             "stop-decide",
             "user-prompt-submit",
+            "post-tool-use",
             "subagent-start",
             "subagent-stop",
             "task-completed",
@@ -105,6 +107,7 @@ HOOK_PROFILES = {
             "session-start",
             "stop-enhanced",
             "user-prompt-submit",
+            "post-tool-use",
             "subagent-start",
             "subagent-stop",
             "task-completed",
@@ -132,9 +135,15 @@ _HTTP_HOOK_ENDPOINTS = {
     "SessionStart": "session-start",
     "Stop": "stop",
     "UserPromptSubmit": "user-prompt-submit",
+    "PostToolUse": "post-tool-use",
     "SubagentStop": "subagent-stop",
     "TaskCompleted": "task-completed",
 }
+
+# PostToolUse fires for every tool; this matcher restricts the hook to file
+# mutations so the write-signal recorder only runs on real edits. Claude Code
+# matches the tool name against this regex (the server re-checks too).
+_WRITE_TOOL_MATCHER = "Edit|Write|MultiEdit|NotebookEdit"
 
 
 # Env var Claude Code interpolates into the HTTP hook Authorization header.
@@ -174,13 +183,16 @@ def _claude_hook_entry(
     mode: str,
     url: str,
     is_async: bool = False,
+    matcher: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build one Claude Code hook entry.
 
     Returns an ``http``-type entry when ``mode == "http"`` and the event has a
     server endpoint; otherwise a ``command``-type entry. HTTP hooks are
     non-blocking by nature, so the ``async`` flag is only meaningful for
-    command hooks.
+    command hooks. ``matcher`` (used by PostToolUse) scopes the entry to a
+    tool-name regex; when set it is emitted alongside ``hooks`` so Claude Code
+    only fires the hook for matching tools.
     """
     if mode == "http" and event in _HTTP_HOOK_ENDPOINTS:
         endpoint = _HTTP_HOOK_ENDPOINTS[event]
@@ -200,6 +212,8 @@ def _claude_hook_entry(
         hook = {"type": "command", "command": command, "timeout": timeout}
         if is_async:
             hook["async"] = True
+    if matcher is not None:
+        return {"matcher": matcher, "hooks": [hook]}
     return {"hooks": [hook]}
 
 
@@ -207,6 +221,7 @@ def _build_claude_hooks_settings(
     profile: str = "standard",
     mode: str = "api",
     url: str = DEFAULT_URL,
+    hooks_prefix: str = "~/.claude/hooks",
 ) -> Dict[str, Any]:
     """Build Claude Code hooks settings dynamically based on profile and mode.
 
@@ -222,6 +237,12 @@ def _build_claude_hooks_settings(
         the rest stay command hooks. The keyword/profile logic for the Stop
         hook runs server-side, so all profiles share the same ``/stop``
         endpoint in http mode.
+
+    ``hooks_prefix`` controls the directory prefix used in ``command`` entries
+    (api/local mode only — http mode uses ``url``).  Pass
+    ``"$CLAUDE_PROJECT_DIR/.claude/hooks"`` for project-scoped installs so
+    Claude Code resolves the path relative to the project root at runtime.
+    The default ``"~/.claude/hooks"`` preserves the legacy global behaviour.
     """
     settings: Dict[str, Any] = {"hooks": {}}
 
@@ -229,7 +250,7 @@ def _build_claude_hooks_settings(
     settings["hooks"]["SessionStart"] = [
         _claude_hook_entry(
             "SessionStart",
-            "~/.claude/hooks/mem-mesh-session-start.sh",
+            f"{hooks_prefix}/mem-mesh-session-start.sh",
             15,
             mode=mode,
             url=url,
@@ -239,9 +260,9 @@ def _build_claude_hooks_settings(
     # Stop: profile picks the command script; http mode collapses all
     # profiles onto the single server-side /stop endpoint.
     stop_command = {
-        "standard": ("~/.claude/hooks/mem-mesh-stop-decide.sh", 10),
-        "enhanced": ("~/.claude/hooks/mem-mesh-stop-enhanced.sh", 20),
-        "minimal": ("~/.claude/hooks/mem-mesh-stop.sh", 10),
+        "standard": (f"{hooks_prefix}/mem-mesh-stop-decide.sh", 10),
+        "enhanced": (f"{hooks_prefix}/mem-mesh-stop-enhanced.sh", 20),
+        "minimal": (f"{hooks_prefix}/mem-mesh-stop.sh", 10),
     }
     stop_cmd, stop_timeout = stop_command.get(profile, stop_command["minimal"])
     settings["hooks"]["Stop"] = [
@@ -255,10 +276,28 @@ def _build_claude_hooks_settings(
         settings["hooks"]["UserPromptSubmit"] = [
             _claude_hook_entry(
                 "UserPromptSubmit",
-                "~/.claude/hooks/mem-mesh-user-prompt-submit.sh",
+                f"{hooks_prefix}/mem-mesh-user-prompt-submit.sh",
                 5,
                 mode=mode,
                 url=url,
+            )
+        ]
+
+    # PostToolUse: record a write-signal so the pin/save reminders fire on real
+    # edits, not on absence (standard/enhanced only). The matcher scopes it to
+    # file-mutating tools; the hook is fire-and-forget (async) and never blocks.
+    # Skipped in local mode — there the UserPromptSubmit hook derives the write
+    # signal from the transcript directly, so no PostToolUse script is needed.
+    if profile != "minimal" and mode != "local":
+        settings["hooks"]["PostToolUse"] = [
+            _claude_hook_entry(
+                "PostToolUse",
+                f"{hooks_prefix}/mem-mesh-post-tool-use.sh",
+                5,
+                mode=mode,
+                url=url,
+                is_async=True,
+                matcher=_WRITE_TOOL_MATCHER,
             )
         ]
 
@@ -268,7 +307,7 @@ def _build_claude_hooks_settings(
         settings["hooks"]["SubagentStart"] = [
             _claude_hook_entry(
                 "SubagentStart",
-                "~/.claude/hooks/mem-mesh-subagent-start.sh",
+                f"{hooks_prefix}/mem-mesh-subagent-start.sh",
                 5,
                 mode=mode,
                 url=url,
@@ -280,7 +319,7 @@ def _build_claude_hooks_settings(
         settings["hooks"]["SubagentStop"] = [
             _claude_hook_entry(
                 "SubagentStop",
-                "~/.claude/hooks/mem-mesh-subagent-stop.sh",
+                f"{hooks_prefix}/mem-mesh-subagent-stop.sh",
                 10,
                 mode=mode,
                 url=url,
@@ -293,7 +332,7 @@ def _build_claude_hooks_settings(
         settings["hooks"]["TaskCompleted"] = [
             _claude_hook_entry(
                 "TaskCompleted",
-                "~/.claude/hooks/mem-mesh-task-completed.sh",
+                f"{hooks_prefix}/mem-mesh-task-completed.sh",
                 10,
                 mode=mode,
                 url=url,
@@ -306,7 +345,7 @@ def _build_claude_hooks_settings(
     settings["hooks"]["SessionEnd"] = [
         _claude_hook_entry(
             "SessionEnd",
-            "~/.claude/hooks/mem-mesh-session-end.sh",
+            f"{hooks_prefix}/mem-mesh-session-end.sh",
             10,
             mode=mode,
             url=url,
@@ -318,7 +357,7 @@ def _build_claude_hooks_settings(
     settings["hooks"]["PreCompact"] = [
         _claude_hook_entry(
             "PreCompact",
-            "~/.claude/hooks/mem-mesh-precompact.sh",
+            f"{hooks_prefix}/mem-mesh-precompact.sh",
             10,
             mode=mode,
             url=url,
@@ -694,8 +733,21 @@ def _install_claude(
     profile: str = "standard",
     *,
     force: bool = False,
+    base_dir: Optional[Path] = None,
 ) -> None:
-    """Install mem-mesh hooks for Claude Code."""
+    """Install mem-mesh hooks for Claude Code.
+
+    ``base_dir`` selects the install root: project scope writes under
+    ``<base_dir>/.claude``, while global scope (``base_dir is None``) keeps
+    the legacy module-level ``HOME/.claude`` paths.
+    """
+    if base_dir is not None:
+        _claude_dir = base_dir / ".claude"
+        hooks_dir = _claude_dir / "hooks"
+        settings_path = _claude_dir / "settings.json"
+    else:
+        hooks_dir = CLAUDE_HOOKS_DIR
+        settings_path = CLAUDE_SETTINGS
     profile_info = HOOK_PROFILES[profile]
     # http mode: events with a server endpoint are configured as native HTTP
     # hooks in settings.json — no shell script is written for them. Events
@@ -707,13 +759,14 @@ def _install_claude(
         f"[claude] Installing hook scripts (profile: {profile}, mode: {mode_label})..."
     )
 
-    session_start_script = CLAUDE_HOOKS_DIR / "mem-mesh-session-start.sh"
-    track_script = CLAUDE_HOOKS_DIR / "mem-mesh-track.sh"
-    stop_script = CLAUDE_HOOKS_DIR / "mem-mesh-stop.sh"
-    enhanced_stop_script = CLAUDE_HOOKS_DIR / "mem-mesh-stop-enhanced.sh"
-    reflect_script = CLAUDE_HOOKS_DIR / "mem-mesh-reflect.sh"
-    decide_script = CLAUDE_HOOKS_DIR / "mem-mesh-stop-decide.sh"
-    ups_script = CLAUDE_HOOKS_DIR / "mem-mesh-user-prompt-submit.sh"
+    session_start_script = hooks_dir / "mem-mesh-session-start.sh"
+    track_script = hooks_dir / "mem-mesh-track.sh"
+    stop_script = hooks_dir / "mem-mesh-stop.sh"
+    enhanced_stop_script = hooks_dir / "mem-mesh-stop-enhanced.sh"
+    reflect_script = hooks_dir / "mem-mesh-reflect.sh"
+    decide_script = hooks_dir / "mem-mesh-stop-decide.sh"
+    ups_script = hooks_dir / "mem-mesh-user-prompt-submit.sh"
+    ptu_script = hooks_dir / "mem-mesh-post-tool-use.sh"
 
     # SessionStart hook (all profiles)
     if not _http:
@@ -808,9 +861,25 @@ def _install_claude(
             )
         print(f"  -> {ups_script}")
 
+    # PostToolUse hook (standard/enhanced only) — write-signal recorder.
+    # api/local modes write a command script; http mode uses the server
+    # endpoint (no script). local mode gates reminders from the transcript in
+    # the UserPromptSubmit hook instead, so it needs no write-signal script.
+    if not _http and mode != "local" and "post-tool-use" in profile_info["hooks"]:
+        _write_script(
+            ptu_script,
+            _render_template(
+                POST_TOOL_USE_HOOK_TEMPLATE,
+                url,
+                source_tag="claude-code-hook",
+                ide_tag="claude",
+            ),
+        )
+        print(f"  -> {ptu_script}")
+
     # SubagentStart hook (standard/enhanced only)
     if "subagent-start" in profile_info["hooks"]:
-        sa_start_script = CLAUDE_HOOKS_DIR / "mem-mesh-subagent-start.sh"
+        sa_start_script = hooks_dir / "mem-mesh-subagent-start.sh"
         if mode == "local":
             _write_script(
                 sa_start_script,
@@ -830,7 +899,7 @@ def _install_claude(
 
     # SubagentStop hook (standard/enhanced only)
     if not _http and "subagent-stop" in profile_info["hooks"]:
-        sa_stop_script = CLAUDE_HOOKS_DIR / "mem-mesh-subagent-stop.sh"
+        sa_stop_script = hooks_dir / "mem-mesh-subagent-stop.sh"
         if mode == "local":
             _write_script(
                 sa_stop_script,
@@ -850,7 +919,7 @@ def _install_claude(
 
     # TaskCompleted hook (standard/enhanced only)
     if not _http and "task-completed" in profile_info["hooks"]:
-        tc_script = CLAUDE_HOOKS_DIR / "mem-mesh-task-completed.sh"
+        tc_script = hooks_dir / "mem-mesh-task-completed.sh"
         if mode == "local":
             _write_script(
                 tc_script,
@@ -869,7 +938,7 @@ def _install_claude(
         print(f"  -> {tc_script}")
 
     # SessionEnd hook (all profiles)
-    session_end_script = CLAUDE_HOOKS_DIR / "mem-mesh-session-end.sh"
+    session_end_script = hooks_dir / "mem-mesh-session-end.sh"
     if mode == "local":
         _write_script(
             session_end_script,
@@ -888,7 +957,7 @@ def _install_claude(
     print(f"  -> {session_end_script}")
 
     # PreCompact hook (all profiles)
-    precompact_script = CLAUDE_HOOKS_DIR / "mem-mesh-precompact.sh"
+    precompact_script = hooks_dir / "mem-mesh-precompact.sh"
     if mode == "local":
         _write_script(
             precompact_script,
@@ -925,8 +994,9 @@ def _install_claude(
             enhanced_stop_script,
             stop_script,
             ups_script,
-            CLAUDE_HOOKS_DIR / "mem-mesh-subagent-stop.sh",
-            CLAUDE_HOOKS_DIR / "mem-mesh-task-completed.sh",
+            ptu_script,
+            hooks_dir / "mem-mesh-subagent-stop.sh",
+            hooks_dir / "mem-mesh-task-completed.sh",
         ):
             if script.exists():
                 script.unlink()
@@ -944,11 +1014,20 @@ def _install_claude(
         )
 
     print("[claude] Updating settings.json...")
-    hooks_settings = _build_claude_hooks_settings(profile, mode, url)
-    _merge_json_settings(CLAUDE_SETTINGS, hooks_settings, force=force)
-    # Remove legacy PostToolUse (track hook) from settings
-    _remove_hook_event(CLAUDE_SETTINGS, "PostToolUse")
-    print(f"  -> {CLAUDE_SETTINGS}")
+    # Project-scoped install: use $CLAUDE_PROJECT_DIR variable so Claude Code
+    # resolves the hooks directory relative to the project root at runtime.
+    # Global install: keep the legacy ~/.claude/hooks default.
+    if base_dir is not None:
+        _hooks_prefix = "$CLAUDE_PROJECT_DIR/.claude/hooks"
+    else:
+        _hooks_prefix = "~/.claude/hooks"
+    hooks_settings = _build_claude_hooks_settings(profile, mode, url, _hooks_prefix)
+    _merge_json_settings(settings_path, hooks_settings, force=force)
+    # NOTE: mem-mesh now *owns* a PostToolUse hook (write-signal recorder), so
+    # the legacy "remove all PostToolUse" cleanup is gone — _merge_json_settings
+    # already replaces the old mem-mesh-track.sh entry while preserving any
+    # user-defined PostToolUse hooks.
+    print(f"  -> {settings_path}")
 
     if profile == "enhanced":
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -963,11 +1042,30 @@ def _install_claude(
     print("[claude] Done.")
 
 
-def _install_kiro(url: str, mode: str = "api", path: str = "") -> None:
-    """Install mem-mesh hooks for Kiro."""
+def _install_kiro(
+    url: str,
+    mode: str = "api",
+    path: str = "",
+    *,
+    base_dir: Optional[Path] = None,
+) -> None:
+    """Install mem-mesh hooks for Kiro.
+
+    ``base_dir`` selects the install root: project scope writes under
+    ``<base_dir>/.kiro``, while global scope (``base_dir is None``) keeps the
+    legacy module-level ``HOME/.kiro`` paths.
+    """
     print("[kiro] Installing hook script...")
 
-    stop_script = KIRO_HOOKS_DIR / "mem-mesh-stop.sh"
+    if base_dir is not None:
+        _kiro_dir = base_dir / ".kiro"
+        hooks_dir = _kiro_dir / "hooks"
+        settings_path = _kiro_dir / "settings" / "hooks.json"
+    else:
+        hooks_dir = KIRO_HOOKS_DIR
+        settings_path = KIRO_SETTINGS
+
+    stop_script = hooks_dir / "mem-mesh-stop.sh"
     if mode == "local":
         _write_script(
             stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path)
@@ -996,9 +1094,9 @@ def _install_kiro(url: str, mode: str = "api", path: str = "") -> None:
 
     # Load existing or create new
     existing: Dict[str, Any] = {"hooks": []}
-    if KIRO_SETTINGS.exists():
+    if settings_path.exists():
         try:
-            existing = json.loads(KIRO_SETTINGS.read_text(encoding="utf-8"))
+            existing = json.loads(settings_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             existing = {"hooks": []}
 
@@ -1009,11 +1107,11 @@ def _install_kiro(url: str, mode: str = "api", path: str = "") -> None:
     hooks.append(kiro_hook_entry)
     existing["hooks"] = hooks
 
-    KIRO_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
-    KIRO_SETTINGS.write_text(
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
         json.dumps(existing, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    print(f"  -> {KIRO_SETTINGS}")
+    print(f"  -> {settings_path}")
 
     print("[kiro] Done.")
 
@@ -1025,18 +1123,32 @@ def _install_cursor(
     profile: str = "standard",
     *,
     force: bool = False,
+    base_dir: Optional[Path] = None,
 ) -> None:
-    """Install mem-mesh hooks for Cursor."""
+    """Install mem-mesh hooks for Cursor.
+
+    ``base_dir`` selects the install root: project scope writes under
+    ``<base_dir>/.cursor``, while global scope (``base_dir is None``) keeps the
+    legacy module-level ``HOME/.cursor`` paths.
+    """
     print(f"[cursor] Installing hook scripts (profile: {profile})...")
 
-    session_start_script = CURSOR_HOOKS_DIR / "mem-mesh-session-start.sh"
-    track_script = CURSOR_HOOKS_DIR / "mem-mesh-track.sh"
-    stop_script = CURSOR_HOOKS_DIR / "mem-mesh-stop.sh"
-    before_submit_prompt_script = CURSOR_HOOKS_DIR / "mem-mesh-before-submit-prompt.sh"
-    precompact_script = CURSOR_HOOKS_DIR / "mem-mesh-precompact.sh"
-    subagent_start_script = CURSOR_HOOKS_DIR / "mem-mesh-subagent-start.sh"
-    subagent_stop_script = CURSOR_HOOKS_DIR / "mem-mesh-subagent-stop.sh"
-    session_end_script = CURSOR_HOOKS_DIR / "mem-mesh-session-end.sh"
+    if base_dir is not None:
+        _cursor_dir = base_dir / ".cursor"
+        hooks_dir = _cursor_dir / "hooks"
+        settings_path = _cursor_dir / "hooks.json"
+    else:
+        hooks_dir = CURSOR_HOOKS_DIR
+        settings_path = CURSOR_SETTINGS
+
+    session_start_script = hooks_dir / "mem-mesh-session-start.sh"
+    track_script = hooks_dir / "mem-mesh-track.sh"
+    stop_script = hooks_dir / "mem-mesh-stop.sh"
+    before_submit_prompt_script = hooks_dir / "mem-mesh-before-submit-prompt.sh"
+    precompact_script = hooks_dir / "mem-mesh-precompact.sh"
+    subagent_start_script = hooks_dir / "mem-mesh-subagent-start.sh"
+    subagent_stop_script = hooks_dir / "mem-mesh-subagent-stop.sh"
+    session_end_script = hooks_dir / "mem-mesh-session-end.sh"
 
     if mode == "local":
         _write_script(
@@ -1168,13 +1280,13 @@ def _install_cursor(
 
     print("[cursor] Updating hooks.json...")
     _merge_json_settings(
-        CURSOR_SETTINGS,
-        _build_cursor_hooks_settings(CURSOR_HOOKS_DIR, scope="global"),
+        settings_path,
+        _build_cursor_hooks_settings(hooks_dir, scope="global"),
         force=force,
     )
     # Remove legacy postToolUse (track hook) from hooks.json
-    _remove_hook_event(CURSOR_SETTINGS, "postToolUse")
-    print(f"  -> {CURSOR_SETTINGS}")
+    _remove_hook_event(settings_path, "postToolUse")
+    print(f"  -> {settings_path}")
 
     print("[cursor] Done.")
 
@@ -1192,6 +1304,7 @@ def _uninstall_claude() -> None:
         "mem-mesh-session-end.sh",
         "mem-mesh-precompact.sh",
         "mem-mesh-user-prompt-submit.sh",
+        "mem-mesh-post-tool-use.sh",
         "mem-mesh-subagent-start.sh",
         "mem-mesh-subagent-stop.sh",
         "mem-mesh-task-completed.sh",
@@ -1616,8 +1729,21 @@ def cmd_install(
     profile: str = "standard",
     *,
     force: bool = False,
+    scope: str = "global",
+    dir_path: str = "",
 ) -> None:
-    """Install hooks for the specified target."""
+    """Install hooks for the specified target.
+
+    ``scope`` selects the install root. ``global`` (the default) installs under
+    the user's home (``HOME/.claude`` etc.); ``project`` installs under a target
+    project directory (``dir_path`` or the current working directory when empty).
+    """
+    # Project scope resolves a base directory the install helpers write under;
+    # global scope leaves base_dir as None so the legacy HOME paths are used.
+    base_dir: Optional[Path] = None
+    if scope == "project":
+        base_dir = Path(dir_path or os.getcwd()).expanduser().resolve()
+
     # Validate the API URL up front (local mode renders a path, not a URL).
     # An invalid/malicious URL would otherwise be interpolated into the hook
     # shell scripts; reject it here with a clear message instead of failing
@@ -1649,17 +1775,23 @@ def cmd_install(
         resolved = ""
         print(f"Installing mem-mesh hooks (mode: {mode}, url: {url})")
 
+    if base_dir is not None:
+        print(f"Scope: project ({base_dir})")
     print(f"Prompt version: {PROMPT_VERSION} | Profile: {profile}\n")
 
     try:
         if target in ("claude", "all"):
-            _install_claude(url, mode, resolved, profile, force=force)
+            _install_claude(
+                url, mode, resolved, profile, force=force, base_dir=base_dir
+            )
             print()
         if target in ("kiro", "all"):
-            _install_kiro(url, mode, resolved)
+            _install_kiro(url, mode, resolved, base_dir=base_dir)
             print()
         if target in ("cursor", "all"):
-            _install_cursor(url, mode, resolved, profile, force=force)
+            _install_cursor(
+                url, mode, resolved, profile, force=force, base_dir=base_dir
+            )
             print()
     except MalformedSettingsError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -1824,6 +1956,23 @@ def main(argv: Optional[List[str]] = None) -> None:
         help="Hook profile: standard (prompt hook, hybrid save), enhanced (+reflect), minimal (command, no LLM)",
     )
     install_parser.add_argument(
+        "--scope",
+        choices=["global", "project"],
+        default="global",
+        help=(
+            "Install scope: global (user home — ~/.claude, ~/.kiro, ~/.cursor; "
+            "default) or project (<dir>/.claude, <dir>/.kiro, <dir>/.cursor)"
+        ),
+    )
+    install_parser.add_argument(
+        "--dir",
+        default="",
+        help=(
+            "Target project directory for '--scope project' "
+            "(default: current working directory)"
+        ),
+    )
+    install_parser.add_argument(
         "-i",
         "--interactive",
         action="store_true",
@@ -1887,6 +2036,8 @@ def main(argv: Optional[List[str]] = None) -> None:
             args.path,
             args.profile,
             force=args.force,
+            scope=args.scope,
+            dir_path=args.dir,
         )
     elif args.command == "uninstall":
         cmd_uninstall(args.target)

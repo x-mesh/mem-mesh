@@ -15,6 +15,54 @@ PROMPT=$(echo "$INPUT" | jq -r '.prompt // empty')
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 [ -z "$PROMPT" ] && exit 0
 
+# ── Write-signal gate ──
+# Reminders are evidence-based: they fire only when the transcript shows a real
+# file edit (Edit/Write/MultiEdit/NotebookEdit) since the last save — never on a
+# read-only turn. Set MEM_MESH_REMINDER_REQUIRE_WRITE=0 to disable (legacy).
+REQUIRE_WRITE="${MEM_MESH_REMINDER_REQUIRE_WRITE:-1}"
+WORK_DONE=1
+case "$(printf '%s' "$REQUIRE_WRITE" | tr '[:upper:]' '[:lower:]')" in
+  0|false|no|off) WORK_DONE=1 ;;  # gate disabled → always allow
+  *)
+    WORK_DONE=0
+    if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+      WORK_DONE=$(python3 -c "
+import sys, json
+transcript_path = sys.argv[1]
+WRITE_TOOLS = {'Edit', 'Write', 'MultiEdit', 'NotebookEdit'}
+turn = last_save_turn = last_write_turn = 0
+try:
+    with open(transcript_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get('type') != 'assistant':
+                continue
+            turn += 1
+            content = entry.get('message', {}).get('content', '')
+            if isinstance(content, list):
+                names = [c.get('name', '') for c in content if isinstance(c, dict)]
+                text = ' '.join(c.get('text', '') for c in content if isinstance(c, dict))
+            else:
+                names, text = [], str(content)
+            if 'mcp__mem-mesh__add' in text or 'mcp__mem-mesh__pin_add' in text or \
+               'mcp__mem-mesh__add' in ' '.join(names) or 'mcp__mem-mesh__pin_add' in ' '.join(names):
+                last_save_turn = turn
+            if any(n in WRITE_TOOLS for n in names):
+                last_write_turn = turn
+    print('1' if last_write_turn > last_save_turn else '0')
+except Exception:
+    print('0')
+" "$TRANSCRIPT_PATH" 2>/dev/null) || WORK_DONE=0
+    fi
+    ;;
+esac
+
 PARTS=()
 
 # ── Part 1: Keyword-filtered memory search (local) ──
@@ -122,7 +170,7 @@ except Exception:
     pass
 " "$TRANSCRIPT_PATH" "$SAVE_REMINDER_INTERVAL" 2>/dev/null) || REMINDER=""
 
-  [ -n "$REMINDER" ] && PARTS+=("$REMINDER")
+  [ -n "$REMINDER" ] && [ "$WORK_DONE" = "1" ] && PARTS+=("$REMINDER")
 fi
 
 # ── Part 3: Pin tracking reminder (no auto-creation) ──
@@ -135,7 +183,7 @@ AUTH=()
 if [ -n "$HOOK_TOKEN" ]; then
   AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}")
 fi
-if [ ${#PROMPT} -ge 15 ]; then
+if [ ${#PROMPT} -ge 15 ] && [ "$WORK_DONE" = "1" ]; then
   PIN_PROJECT=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
   NO_TRACKED_PINS=1
   for PIN_STATUS in in_progress open; do

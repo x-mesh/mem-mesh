@@ -30,6 +30,15 @@ _SAVE_MARKERS = ("mcp__mem-mesh__add", "mcp__mem-mesh__pin_add")
 # semantics. Stop is part of the response lifecycle and must not inflate N.
 _COUNT_EVENT = "UserPromptSubmit"
 
+# Tools whose completion counts as a "write" — the objective signal that real
+# work happened. The reminder gate uses this so pin/save nags fire only after
+# an actual file edit, never on a read-only (question/analysis) turn.
+WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+
+# Event name recorded for a write-tool PostToolUse. Distinct from the lifecycle
+# events so it never inflates the UserPromptSubmit turn counter.
+_WRITE_EVENT = "PostToolUse"
+
 
 class HookService:
     """Records Claude Code hook events and derives per-session state."""
@@ -156,6 +165,62 @@ class HookService:
             WHERE ide_session_id = ? AND turn_index > ? AND event_name = ?
             """,
             (ide_session_id, last_save_turn, _COUNT_EVENT),
+        )
+        return int(row["c"]) if row else 0
+
+    async def record_write(
+        self,
+        *,
+        project_id: str,
+        ide_session_id: str,
+        tool_name: str,
+        client_type: Optional[str] = None,
+    ) -> int:
+        """Record a write-tool PostToolUse event into the session stream.
+
+        Stored as a ``PostToolUse`` event with the tool name kept in
+        ``assistant_message`` for debugging. ``saved_memory`` stays 0 so write
+        events never reset the save reminder; they are the *evidence* the gate
+        looks for, not a save.
+        """
+        return await self.record_event(
+            project_id=project_id,
+            ide_session_id=ide_session_id,
+            event_name=_WRITE_EVENT,
+            client_type=client_type,
+            assistant_message=tool_name,
+            saved_memory=False,
+        )
+
+    async def writes_since_save(self, ide_session_id: str) -> int:
+        """Count write events recorded after the most recent memory save.
+
+        Mirrors :meth:`turns_since_save` but counts ``PostToolUse`` write events
+        instead of user prompts. A pin_add / add lands as ``saved_memory=1``, so
+        a fresh pin or save resets this to 0 — the gate then stays quiet until
+        the next real edit. Zero means "no uncaptured work", so a pin/save
+        reminder would be noise and is suppressed.
+        """
+        if not ide_session_id:
+            return 0
+
+        last_save = await self.db.fetchone(
+            """
+            SELECT MAX(turn_index) AS m FROM hook_events
+            WHERE ide_session_id = ? AND saved_memory = 1
+            """,
+            (ide_session_id,),
+        )
+        last_save_turn = (
+            last_save["m"] if last_save and last_save["m"] is not None else -1
+        )
+
+        row = await self.db.fetchone(
+            """
+            SELECT COUNT(*) AS c FROM hook_events
+            WHERE ide_session_id = ? AND turn_index > ? AND event_name = ?
+            """,
+            (ide_session_id, last_save_turn, _WRITE_EVENT),
         )
         return int(row["c"]) if row else 0
 

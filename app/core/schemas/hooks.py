@@ -64,3 +64,14 @@ class TaskCompletedPayload(HookEventBase):
     task_subject: str = Field(default="")
     task_description: Optional[str] = Field(default=None)
     teammate_name: Optional[str] = Field(default=None)
+
+
+class PostToolUsePayload(HookEventBase):
+    """A PostToolUse event — fired after each tool call completes.
+
+    Only the tool *name* is needed: the server records a write-signal when the
+    tool was a file mutation (Edit/Write/...), which gates the pin/save
+    reminders so they fire on real edits instead of on read-only turns.
+    """
+
+    tool_name: str = Field(default="", description="Name of the tool that just ran")

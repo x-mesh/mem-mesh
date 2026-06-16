@@ -40,3 +40,7 @@ SUBAGENT_STOP_HOOK_TEMPLATE = _load_template("subagent-stop.sh")
 LOCAL_SUBAGENT_STOP_HOOK_TEMPLATE = _load_template("local-subagent-stop.sh")
 TASK_COMPLETED_HOOK_TEMPLATE = _load_template("task-completed.sh")
 LOCAL_TASK_COMPLETED_HOOK_TEMPLATE = _load_template("local-task-completed.sh")
+
+# PostToolUse hook template — write-signal recorder (api/http modes). Feeds the
+# server's reminder gate so pin/save nags fire on real edits, not on absence.
+POST_TOOL_USE_HOOK_TEMPLATE = _load_template("post-tool-use.sh")
