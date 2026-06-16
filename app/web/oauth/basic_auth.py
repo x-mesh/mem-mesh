@@ -13,7 +13,6 @@ from fastapi import Request, Response
 from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 

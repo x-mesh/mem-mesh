@@ -25,7 +25,7 @@ import base64
 import hashlib
 import os
 import secrets
-from typing import Optional, Tuple
+from typing import Tuple
 
 from app.core.auth.utils import verify_secret
 from app.core.config import get_settings
