@@ -1,114 +1,42 @@
 #!/bin/bash
 __VERSION_MARKER__
-# Claude Code SessionStart hook: inject mem-mesh session context
-# Fires on session start AND after compaction (context re-injection)
-# Returns hookSpecificOutput JSON via /api/work/sessions/resume/{project_id}
+# Claude Code SessionStart hook → mem-mesh /api/hooks/claude/session-start
 #
-# Features:
-# 1. Session resume data injection (existing)
-# 2. Context continuation detection — reminds AI to call session_resume (new)
+# Thin forwarder: POST the raw hook event; the server resumes context, detects
+# continuation (from the event stream, not the local transcript), and renders
+# the rules block — returning hookSpecificOutput. Auth is the shared hook token
+# (MEM_MESH_HOOK_TOKEN env, falling back to ~/.mem-mesh/hook_token) so every
+# client authenticates against verify_hook_token uniformly.
 
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || { echo '{}'; exit 0; }
 command -v curl >/dev/null 2>&1 || { echo '{}'; exit 0; }
 
 API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)}"
+HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
+AUTH=()
+if [ -n "$HOOK_TOKEN" ]; then
+  AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}")
+fi
 
 INPUT=$(cat)
 
-# Detect project from CWD
+# Explicit project_id (git toplevel basename); the server falls back to
+# basename(cwd) but this is more accurate for worktrees.
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
+PAYLOAD=$(printf '%s' "$INPUT" | jq -c --arg pid "$PROJECT_DIR" '. + {project_id: $pid}' 2>/dev/null) || PAYLOAD="$INPUT"
 
-# ── Extract IDE session_id from hook stdin ──
-IDE_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
-CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
+RESP=$(curl -s --max-time 8 \
+  -X POST "${API_URL}/api/hooks/claude/session-start" \
+  -H "Content-Type: application/json" \
+  ${AUTH[@]+"${AUTH[@]}"} \
+  -d "$PAYLOAD" 2>/dev/null) || RESP=""
 
-# ── Detect context continuation ──
-# Claude Code fires SessionStart both on fresh start AND after context compaction.
-# After compaction, the transcript_path still exists with prior entries,
-# and session_id is preserved. We detect this to inject a stronger reminder.
-IS_CONTINUATION="false"
-TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
-if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-  # If transcript has assistant entries, this is a continuation (post-compaction)
-  HAS_ASSISTANT=$(python3 -c "
-import json, sys
-try:
-    count = 0
-    with open(sys.argv[1], 'r') as f:
-        for line in f:
-            try:
-                entry = json.loads(line.strip())
-                if entry.get('type') == 'assistant':
-                    count += 1
-                    if count >= 2:
-                        print('true')
-                        sys.exit(0)
-            except (ValueError, KeyError, TypeError):
-                pass
-    print('false')
-except Exception:
-    print('false')
-" "$TRANSCRIPT_PATH" 2>/dev/null) || HAS_ASSISTANT="false"
-  IS_CONTINUATION="$HAS_ASSISTANT"
+# Server returns hookSpecificOutput JSON, or an empty body on no-op. Emit valid
+# JSON verbatim; fall back to {} so Claude Code's output schema check passes.
+if printf '%s' "$RESP" | jq -e . >/dev/null 2>&1; then
+  printf '%s\n' "$RESP"
+else
+  echo '{}'
 fi
-
-# Fetch session resume data (same API as Cursor — consistent cross-IDE)
-# Pass IDE session_id as query param for session correlation
-RESUME_PARAMS="expand=smart"
-[ -n "$IDE_SESSION_ID" ] && RESUME_PARAMS="${RESUME_PARAMS}&ide_session_id=${IDE_SESSION_ID}&client_type=claude-ai"
-RESUME_DATA=$(curl -s --max-time 5 \
-  "${API_URL}/api/work/sessions/resume/${PROJECT_DIR}?${RESUME_PARAMS}" \
-  2>/dev/null) || RESUME_DATA='{"error": "mem-mesh API not available"}'
-
-# Extract compact summary from session_resume response
-SESSION_SUMMARY=$(echo "$RESUME_DATA" | python3 -c "
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    if 'error' in data:
-        print('[WARNING] mem-mesh API 연결 실패 — 오프라인 모드')
-    else:
-        lines = []
-        pins = data.get('pins', [])
-        open_list = [p for p in pins if p.get('status') in ('open', 'in_progress')]
-        if open_list:
-            lines.append('**미완료 작업:**')
-            for p in open_list:
-                content = p.get('content', '?')[:100]
-                client = p.get('client', '') or ''
-                client_str = f'({client}) ' if client else ''
-                lines.append(f'- [pin] {client_str}{content}')
-        if not lines:
-            lines.append('No recent activity.')
-        print('\n'.join(lines))
-except Exception:
-    print('mem-mesh not available')
-" 2>/dev/null) || SESSION_SUMMARY="mem-mesh not available"
-
-# Build context with continuation-aware reminder
-CONTINUATION_REMINDER=""
-if [ "$IS_CONTINUATION" = "true" ]; then
-  CONTINUATION_REMINDER="
-### [IMPORTANT] Context Continuation Detected
-This session was compacted and resumed. Previous context may be lost.
-**You MUST call \`session_resume(project_id=\"${PROJECT_DIR}\", expand=\"smart\")\` immediately** to restore mem-mesh context.
-If there were unsaved decisions, bugs, or design changes in the previous context, save them with \`mcp__mem-mesh__add\` before continuing.
-"
-fi
-
-CONTEXT="## mem-mesh Session Context (Auto-injected)
-${CONTINUATION_REMINDER}
-### Recent Activity (${PROJECT_DIR})
-${SESSION_SUMMARY}
-
-### Rules
-__RULES_TEXT__"
-
-jq -n --arg ctx "$CONTEXT" '{
-  hookSpecificOutput: {
-    hookEventName: "SessionStart",
-    additionalContext: $ctx
-  }
-}'

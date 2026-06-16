@@ -9,6 +9,9 @@ command -v jq >/dev/null 2>&1 || exit 0
 command -v curl >/dev/null 2>&1 || exit 0
 
 API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)}"
+HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
+AUTH=()
+if [ -n "$HOOK_TOKEN" ]; then AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}"); fi
 
 INPUT=$(cat)
 AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // empty')
@@ -27,6 +30,7 @@ RESPONSE=$(curl -s --max-time 3 \
   --data-urlencode "project_id=${PROJECT_DIR}" \
   --data-urlencode "category=decision" \
   --data-urlencode "limit=5" \
+  ${AUTH[@]+"${AUTH[@]}"} \
   2>/dev/null) || exit 0
 
 CONTEXT=$(python3 -c "

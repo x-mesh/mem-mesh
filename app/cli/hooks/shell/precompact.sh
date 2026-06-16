@@ -9,6 +9,9 @@ command -v jq >/dev/null 2>&1 || exit 0
 command -v curl >/dev/null 2>&1 || exit 0
 
 API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)}"
+HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
+AUTH=()
+if [ -n "$HOOK_TOKEN" ]; then AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}"); fi
 
 INPUT=$(cat)
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
@@ -88,6 +91,7 @@ fi
 # ── End session via API ──
 curl -s -o /dev/null --max-time 5 \
   -X POST "${API_URL}/api/work/sessions/end-by-project/${PROJECT_DIR}?summary=Auto-ended%20by%20PreCompact%20hook" \
+  ${AUTH[@]+"${AUTH[@]}"} \
   2>/dev/null || true
 
 # ── Return save reminder as hookSpecificOutput ──
@@ -105,6 +109,7 @@ fi
 OPEN_PINS=""
 OPEN_PINS=$(curl -s --max-time 3 \
   "${API_URL}/api/work/sessions/resume/${PROJECT_DIR}?expand=false" \
+  ${AUTH[@]+"${AUTH[@]}"} \
   2>/dev/null | python3 -c "
 import sys, json
 try:

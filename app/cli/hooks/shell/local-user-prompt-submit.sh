@@ -130,11 +130,17 @@ fi
 # in_progress first so the common case needs one request; the status filter
 # is exact-match, so each status is its own request.
 LOCAL_API_URL="${MEM_MESH_API_URL:-http://localhost:8000}"
+HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
+AUTH=()
+if [ -n "$HOOK_TOKEN" ]; then
+  AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}")
+fi
 if [ ${#PROMPT} -ge 15 ]; then
   PIN_PROJECT=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
   NO_TRACKED_PINS=1
   for PIN_STATUS in in_progress open; do
     PIN_COUNT=$(curl -s --max-time 2 \
+      ${AUTH[@]+"${AUTH[@]}"} \
       "${LOCAL_API_URL}/api/work/pins?project_id=${PIN_PROJECT}&status=${PIN_STATUS}&limit=1" \
       2>/dev/null | python3 -c "
 import sys, json
