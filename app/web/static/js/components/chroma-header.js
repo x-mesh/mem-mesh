@@ -99,6 +99,12 @@ class ChromaHeader extends HTMLElement {
                 </svg>
                 <span>Security</span>
               </a>
+              <a href="/connect" class="nav-link" data-route="/connect" data-nav="connect">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                  <path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>Connect</span>
+              </a>
               <a href="/settings" class="nav-link" data-route="/settings" data-nav="settings">
                 <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
                   <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
@@ -247,6 +253,12 @@ class ChromaHeader extends HTMLElement {
                   <path d="M12 2l8 4v6c0 4.5-3.2 7.8-8 10-4.8-2.2-8-5.5-8-10V6l8-4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
                 </svg>
                 <span>Security</span>
+              </a>
+              <a href="/connect" class="mobile-nav-link" data-route="/connect" data-nav="connect">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                  <path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>Connect</span>
               </a>
               <a href="/settings" class="mobile-nav-link" data-route="/settings" data-nav="settings">
                 <svg class="nav-icon" viewBox="0 0 24 24" fill="none">

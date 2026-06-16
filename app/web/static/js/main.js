@@ -49,6 +49,7 @@ import { MonitoringPage } from './pages/monitoring.js';
 import { ProjectAnalyticsPage } from './pages/project-analytics.js';
 import { OAuthPage } from './pages/oauth.js';
 import { SecurityPage } from './pages/security-page.js';
+import { ConnectPage } from './pages/connect-page.js';
 import { OnboardingPage } from './pages/onboarding.js';
 
 /**
@@ -135,6 +136,7 @@ class App {
     this.pages.set('project-analytics', ProjectAnalyticsPage);
     this.pages.set('oauth', OAuthPage);
     this.pages.set('security', SecurityPage);
+    this.pages.set('connect', ConnectPage);
     this.pages.set('onboarding', OnboardingPage);
   }
   
@@ -159,6 +161,7 @@ class App {
     this.router.register('/project-analytics', () => this.renderPage('project-analytics'));
     this.router.register('/oauth', () => this.renderPage('oauth'));
     this.router.register('/security', () => this.renderPage('security'));
+    this.router.register('/connect', () => this.renderPage('connect'));
     this.router.register('/onboarding', () => this.renderPage('onboarding'));
   }
 
@@ -428,6 +431,9 @@ class App {
         case 'security':
           pageElement = document.createElement('security-page');
           break;
+        case 'connect':
+          pageElement = document.createElement('connect-page');
+          break;
         case 'onboarding':
           pageElement = document.createElement('onboarding-page');
           break;
@@ -472,6 +478,7 @@ class App {
         (route === '/analytics' && pageName === 'analytics') ||
         (route === '/settings' && pageName === 'settings') ||
         (route === '/security' && pageName === 'security') ||
+        (route === '/connect' && pageName === 'connect') ||
         (route === '/work' && pageName === 'work') ||
         (route === '/monitoring' && pageName === 'monitoring')
       ) {
