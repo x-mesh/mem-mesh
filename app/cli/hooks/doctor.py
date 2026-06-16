@@ -149,6 +149,148 @@ def _check_env_vars(profile: str) -> List[str]:
     return issues
 
 
+# ── Authentication diagnostics ──────────────────────────────────────────
+
+
+def _mask_token(token: str) -> str:
+    """Mask a secret to ``Ab12●●●●wX9z`` (first/last 4)."""
+    if not token:
+        return ""
+    if len(token) <= 8:
+        return "●" * len(token)
+    return f"{token[:4]}●●●●{token[-4:]}"
+
+
+def _http(method: str, url: str, headers=None, data=None, timeout: float = 5.0):
+    """Minimal HTTP probe. Returns (status_code|None, body_bytes). None = no connection."""
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(
+        url, data=data, method=method, headers=headers or {}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+    except Exception:
+        return None, b""
+
+
+def _check_authentication(url: str) -> List[str]:
+    """[Authentication]: local hook token + server auth config (env/db/default)."""
+    issues: List[str] = []
+    print(header("[Authentication]"))
+
+    # Hook token — resolved the same way the server does (env > data-dir > ~/.mem-mesh).
+    try:
+        from app.core.config import hook_token_source, resolve_hook_token
+
+        token = resolve_hook_token()
+        source = hook_token_source()
+        if token:
+            print(f"  Hook token:  {ok(source)}  {dim(_mask_token(token))}")
+        else:
+            print(
+                f"  Hook token:  {warn('not configured locally')} "
+                f"{dim('(server auto-generates one at startup)')}"
+            )
+    except Exception as e:  # pragma: no cover - defensive
+        print(f"  Hook token:  {err(f'resolve failed: {e}')}")
+
+    # Server auth config via GET /api/security/overview.
+    status, body = _http("GET", f"{url.rstrip('/')}/api/security/overview")
+    if status == 200:
+        try:
+            d = json.loads(body)
+            web = d.get("web_dashboard_auth", {})
+            mcp = d.get("mcp_auth", {})
+            bind = d.get("bind", {})
+            ba = "enabled" if web.get("basic_auth_enabled") else "disabled"
+            pwd = "admin password set" if web.get("admin_password_set") else "no password"
+            print(f"  Basic Auth:  {ba} ({pwd})")
+            print(
+                f"  OAuth:       auth_enabled={mcp.get('oauth_auth_enabled')}  "
+                f"mcp_auth={mcp.get('mcp_auth_enabled')}"
+            )
+            host = bind.get("effective_host", "")
+            loop = bind.get("is_loopback")
+            print(f"  Bind:        {host} {dim('(loopback)') if loop else warn('(exposed)')}")
+            if (
+                not loop
+                and not web.get("basic_auth_enabled")
+                and not mcp.get("oauth_auth_enabled")
+            ):
+                msg = "server on a non-loopback bind with NO authentication"
+                print(f"  {warn(msg)}")
+                issues.append(msg)
+        except Exception:
+            print(f"  Server auth: {warn('overview response could not be parsed')}")
+    elif status == 401:
+        print(f"  Server auth: {ok('OAuth web auth enabled (overview requires a token)')}")
+    elif status is None:
+        print(f"  Server auth: {dim('server unreachable — local checks only')}")
+    else:
+        print(f"  Server auth: {warn(f'overview returned HTTP {status}')}")
+    print()
+    return issues
+
+
+def _test_hook_auth(url: str) -> List[str]:
+    """[Auth Test]: POST the hook endpoint with/without the local token."""
+    issues: List[str] = []
+    print(header("[Auth Test]"))
+    ep = f"{url.rstrip('/')}/api/hooks/claude/session-start"
+    ct = {"Content-Type": "application/json"}
+
+    s_no, _ = _http("POST", ep, headers=ct, data=b"{}")
+    if s_no is None:
+        print(f"  {dim('server unreachable — auth test skipped')}")
+        print()
+        return issues
+
+    # Unauthenticated POST: 401 = guarded (good); 2xx = unauthenticated writes.
+    if s_no == 401:
+        print(f"  hook POST no-token  -> {ok('401 rejected')}")
+    elif 200 <= s_no < 300:
+        print(
+            f"  hook POST no-token  -> {warn(f'{s_no} ACCEPTED — hook writes are unauthenticated')}"
+        )
+        issues.append(
+            "hook endpoint accepts unauthenticated writes (no token configured server-side)"
+        )
+    else:
+        print(f"  hook POST no-token  -> {dim(str(s_no))}")
+
+    # Authenticated POST with the locally-resolved token.
+    try:
+        from app.core.config import resolve_hook_token
+
+        token = resolve_hook_token()
+    except Exception:
+        token = None
+    if not token:
+        print(f"  hook POST w/ token  -> {dim('skipped (no local token)')}")
+        print()
+        return issues
+
+    s_tok, _ = _http(
+        "POST", ep, headers={**ct, "Authorization": f"Bearer {token}"}, data=b"{}"
+    )
+    if s_tok is None:
+        print(f"  hook POST w/ token  -> {dim('no response')}")
+    elif s_tok == 401:
+        print(
+            f"  hook POST w/ token  -> {err('401 — local token rejected (mismatch with server)')}"
+        )
+        issues.append("hook token mismatch: locally-resolved token rejected by server")
+    else:
+        print(f"  hook POST w/ token  -> {ok(f'{s_tok} accepted')}")
+    print()
+    return issues
+
+
 def cmd_doctor() -> None:
     """Run full diagnostics: status + connectivity + permissions + env."""
     # Run status first
@@ -254,6 +396,12 @@ def cmd_doctor() -> None:
         else:
             print(f"  Baked health: {warn(baked_msg)}")
     print()
+
+    # 5. Authentication config (hook token + server OAuth/Basic Auth state)
+    issues.extend(_check_authentication(url))
+
+    # 6. Live auth test (hook endpoint with/without the resolved token)
+    issues.extend(_test_hook_auth(url))
 
     # Summary
     print(header("[Summary]"))
