@@ -60,6 +60,15 @@ export class ConnectPage extends HTMLElement {
           <div class="cn-step"><span>3</span><strong>Copy config</strong></div>
         </div>
 
+        <div class="cn-rule-summary" role="note" aria-label="Installed hook behavior">
+          <strong>Installed hook behavior</strong>
+          <ul>
+            <li>Session context is loaded at startup and asks the agent to call <code>session_resume</code>.</li>
+            <li>File-changing or multi-step work must create a pin, then finish it with <code>pin_complete</code>.</li>
+            <li>Read-only questions should skip pin creation with an explicit reason.</li>
+          </ul>
+        </div>
+
         <div class="card">
           <div class="card-body">
             <div class="cn-controls">
@@ -73,6 +82,8 @@ export class ConnectPage extends HTMLElement {
                 <select id="cn-client">
                   <option value="codex">Codex (MCP + installer hooks)</option>
                   <option value="claude">Claude Code (hooks + MCP)</option>
+                  <option value="kiro">Kiro (MCP + installer hooks)</option>
+                  <option value="antigravity">Antigravity (MCP only)</option>
                   <option value="cursor">Cursor (hooks + MCP)</option>
                   <option value="claude-desktop">Claude Desktop (MCP only)</option>
                   <option value="generic">Generic MCP client</option>
@@ -177,6 +188,20 @@ export class ConnectPage extends HTMLElement {
         hookPath: '~/.claude/settings.json',
         installTarget: 'claude',
       },
+      kiro: {
+        mcpClient: 'kiro',
+        hooks: 'installer',
+        hookTarget: 'kiro',
+        hookPath: '~/.kiro/settings/mcp.json + ~/.kiro/hooks',
+        installTarget: 'kiro',
+      },
+      antigravity: {
+        mcpClient: 'antigravity',
+        hooks: 'none',
+        hookTarget: 'antigravity',
+        hookPath: '~/.antigravity/mcp.json',
+        installTarget: 'antigravity',
+      },
       cursor: {
         mcpClient: 'cursor',
         hooks: 'paste',
@@ -217,6 +242,14 @@ export class ConnectPage extends HTMLElement {
     const base = serverUrl.replace(/\/$/, '');
     const shortCommand = `curl -fsSL ${base}/${target} | bash`;
     const apiCommand = `curl -fsSL ${base}/api/connect/install/${target}.sh | bash`;
+    const installNote =
+      meta.hooks === 'none'
+        ? 'Installs MCP config for this client on the machine where you run it.'
+        : 'Installs this client on the machine where you run it. No local mem-mesh checkout is required; hooks call this server over HTTP.';
+    const rulesNote =
+      meta.hooks === 'none'
+        ? ''
+        : '<p class="hint">Also installs prompt rules for <code>session_resume</code>, <code>pin_add</code>, and <code>pin_complete</code>.</p>';
     return `
       <div class="card">
         <div class="card-header">
@@ -224,7 +257,8 @@ export class ConnectPage extends HTMLElement {
           <button class="btn btn-sm btn-primary copy-install-command">Copy command</button>
         </div>
         <div class="card-body">
-          <p class="hint">Installs this client on the machine where you run it. No local mem-mesh checkout is required; hooks call this server over HTTP.</p>
+          <p class="hint">${installNote}</p>
+          ${rulesNote}
           <pre class="snippet"><code>${this.esc(shortCommand)}</code></pre>
           <p class="hint">Stable API endpoint: <code>${this.esc(apiCommand)}</code></p>
         </div>
@@ -245,8 +279,8 @@ export class ConnectPage extends HTMLElement {
     // server URL is blocked, steer to Command (api) mode instead of an http
     // config that fails at runtime.
     const blocked = h.http_hook_blocked
-      ? `<p class="hint warn" style="border-left:3px solid #e5484d;padding-left:.6em">
-           ⚠ HTTP hooks can't reach <code>${this.esc(h.server_url)}</code>: ${this.esc(h.http_hook_blocked)}
+      ? `<p class="hint warn">
+           Warning: HTTP hooks can't reach <code>${this.esc(h.server_url)}</code>: ${this.esc(h.http_hook_blocked)}
            <br>Switch <b>Hook mode → Command (api)</b> for this server.</p>`
       : '';
     // HTTP hooks read $MEM_MESH_HOOK_TOKEN from the shell (no file fallback), so
@@ -255,6 +289,9 @@ export class ConnectPage extends HTMLElement {
       h.mode === 'http'
         ? `<p class="hint">HTTP hooks read the token from your shell — run <code>mem-mesh-hooks setup-token</code> so <code>${this.esc(h.hook_token_env)}</code> isn't sent empty.</p>`
         : '';
+    const rulesNote = h.rules_note
+      ? `<p class="hint">${this.esc(h.rules_note)}</p>`
+      : '';
     return `
       <div class="card">
         <div class="card-header">
@@ -267,6 +304,7 @@ export class ConnectPage extends HTMLElement {
         <div class="card-body">
           ${blocked}
           <p class="hint">${this.esc(h.note)}</p>
+          ${rulesNote}
           ${cliNote}
           ${tokenRow}
           ${tokenHint}
@@ -473,6 +511,11 @@ export class ConnectPage extends HTMLElement {
         .cn-step { display: flex; align-items: center; gap: 0.55rem; padding: 0.65rem 0.75rem; background: var(--bg-secondary, #f8f9fa); border: 1px solid var(--border-color, #e5e5e5); border-radius: 8px; min-width: 0; }
         .cn-step span { display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border-radius: 999px; background: var(--text-primary, #171717); color: var(--bg-primary, #fff); font-size: 0.75rem; font-weight: 700; flex-shrink: 0; }
         .cn-step strong { font-size: 0.86rem; color: var(--text-primary, #171717); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .cn-rule-summary { display: flex; align-items: flex-start; gap: 1rem; padding: 0.85rem 1rem; margin-bottom: 1rem; border: 1px solid var(--border-color, #e5e5e5); border-radius: 8px; background: var(--bg-secondary, #f8f9fa); color: var(--text-primary, #171717); }
+        .cn-rule-summary strong { flex: 0 0 auto; font-size: 0.88rem; font-weight: 600; }
+        .cn-rule-summary ul { margin: 0; padding-left: 1rem; display: grid; gap: 0.2rem; }
+        .cn-rule-summary li { font-size: 0.84rem; color: var(--text-secondary, #525252); }
+        .cn-rule-summary code { background: var(--code-bg, #f1f3f5); padding: 0.1rem 0.35rem; border-radius: 4px; }
         .cn-token { margin: 0.5rem 0 1rem; font-size: 0.88rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
         .cn-token code { background: var(--code-bg, #f1f3f5); padding: 0.15rem 0.45rem; border-radius: 4px; word-break: break-all; }
         .snippet { background: var(--code-bg, #1e1e2e); color: var(--code-fg, #e0e0e0); padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.82rem; margin: 0; }
@@ -502,6 +545,7 @@ export class ConnectPage extends HTMLElement {
         .cn-test-row { font-size: 0.85rem; padding: 0.15rem 0; }
         @media (max-width: 720px) {
           .cn-steps { grid-template-columns: 1fr; }
+          .cn-rule-summary { flex-direction: column; gap: 0.45rem; }
           .cn-url-row { flex-direction: column; }
           .connect-page .card-header { align-items: flex-start; flex-direction: column; }
         }

@@ -32,18 +32,20 @@ router = APIRouter(prefix="/connect", tags=["Connect"])
 _HOOK_SETTINGS_PATH = {
     "claude": "~/.claude/settings.json",
     "cursor": "~/.cursor/settings.json (hooks)",
-    "kiro": "~/.kiro/hooks.json",
+    "kiro": "~/.kiro/settings/hooks.json + ~/.kiro/hooks/*.kiro.hook",
     "codex": "~/.codex/hooks.json (installer managed)",
 }
 _MCP_CONFIG_PATH = {
     "claude-desktop": "~/Library/Application Support/Claude/claude_desktop_config.json",
     "claude-code": "~/.claude.json  (or project .mcp.json)",
     "cursor": "~/.cursor/mcp.json",
+    "kiro": "~/.kiro/settings/mcp.json",
+    "antigravity": "~/.antigravity/mcp.json",
     "codex": "~/.codex/config.toml",
     "generic": "your MCP client's config file",
 }
 
-_INSTALL_TARGETS = {"codex", "claude", "all"}
+_INSTALL_TARGETS = {"codex", "claude", "kiro", "antigravity", "all"}
 
 
 def _server_url(request: Request, override: Optional[str] = None) -> str:
@@ -86,6 +88,7 @@ def _bootstrap_payload(
     from app.cli.codex_config import build_codex_mcp_block_from_entry
     from app.cli.install_hooks import (
         ENHANCED_STOP_HOOK_TEMPLATE,
+        KIRO_STOP_HOOK_TEMPLATE,
         POST_TOOL_USE_HOOK_TEMPLATE,
         PRECOMPACT_HOOK_TEMPLATE,
         SESSION_END_HOOK_TEMPLATE,
@@ -101,6 +104,11 @@ def _bootstrap_payload(
         _render_template,
     )
     from app.cli.mcp_config import MCP_SERVER_KEY, generate_mcp_entry
+    from app.cli.prompts.renderers import (
+        render_kiro_auto_create_pin,
+        render_kiro_auto_save,
+        render_kiro_load_context,
+    )
 
     clients = {}
 
@@ -294,6 +302,52 @@ def _bootstrap_payload(
             "mcp_json": {"mcpServers": {MCP_SERVER_KEY: claude_entry}},
         }
 
+    if target in ("kiro", "all"):
+        kiro_entry = _with_mcp_auth(
+            generate_mcp_entry("http", url, tool_key="kiro"), mcp_auth_on
+        )
+        clients["kiro"] = {
+            "hooks_dir": "~/.kiro/hooks",
+            "scripts": {
+                "mem-mesh-stop.sh": _render_template(
+                    KIRO_STOP_HOOK_TEMPLATE,
+                    url,
+                    source_tag="kiro-hook",
+                    ide_tag="kiro",
+                    client_tag="kiro",
+                )
+            },
+            "kiro_hooks_json_path": "~/.kiro/settings/hooks.json",
+            "kiro_hooks_json": {
+                "hooks": [
+                    {
+                        "name": "mem-mesh: Save Response",
+                        "trigger": "agentResponse",
+                        "action": "shell",
+                        "command": "__HOME__/.kiro/hooks/mem-mesh-stop.sh",
+                        "env": {"KIRO_RESULT": "$response"},
+                    }
+                ]
+            },
+            "kiro_hook_files_dir": "~/.kiro/hooks",
+            "kiro_hook_files": {
+                "auto-save-conversations.kiro.hook": render_kiro_auto_save(),
+                "auto-create-pin-on-task.kiro.hook": render_kiro_auto_create_pin(),
+                "load-project-context.kiro.hook": render_kiro_load_context(),
+            },
+            "mcp_json_path": "~/.kiro/settings/mcp.json",
+            "mcp_json": {"mcpServers": {MCP_SERVER_KEY: kiro_entry}},
+        }
+
+    if target in ("antigravity", "all"):
+        antigravity_entry = _with_mcp_auth(
+            generate_mcp_entry("http", url, tool_key="antigravity"), mcp_auth_on
+        )
+        clients["antigravity"] = {
+            "mcp_json_path": "~/.antigravity/mcp.json",
+            "mcp_json": {"mcpServers": {MCP_SERVER_KEY: antigravity_entry}},
+        }
+
     return {
         "target": target,
         "server_url": url,
@@ -301,6 +355,10 @@ def _bootstrap_payload(
         "token": token or "",
         "token_revealed": bool(token),
         "mcp_auth_on": mcp_auth_on,
+        "rules_installed": any(
+            client.get("hooks_json_path") or client.get("kiro_hook_files_dir")
+            for client in clients.values()
+        ),
         "clients": clients,
     }
 
@@ -424,6 +482,37 @@ def merge_mcp_json(path, incoming):
     write_json(path, existing)
 
 
+def merge_kiro_hooks_json(path, incoming):
+    existing = read_json(path, {{"hooks": []}})
+    if not isinstance(existing, dict):
+        existing = {{"hooks": []}}
+    hooks = existing.get("hooks")
+    if not isinstance(hooks, list):
+        hooks = []
+    incoming_hooks = incoming.get("hooks", [])
+    names = {{
+        h.get("name")
+        for h in incoming_hooks
+        if isinstance(h, dict) and isinstance(h.get("name"), str)
+    }}
+    existing["hooks"] = [
+        h
+        for h in hooks
+        if not (isinstance(h, dict) and h.get("name") in names)
+    ] + incoming_hooks
+    write_json(path, existing)
+
+
+def write_hook_files(path, files):
+    path.mkdir(parents=True, exist_ok=True)
+    for name, content in files.items():
+        target = path / name
+        if isinstance(content, (dict, list)):
+            target.write_text(json.dumps(content, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+        else:
+            target.write_text(str(content), encoding="utf-8")
+
+
 def strip_codex_mem_mesh(text):
     lines = text.splitlines(keepends=True)
     result = []
@@ -467,15 +556,25 @@ if payload.get("token"):
 
 installed = []
 for name, client in payload["clients"].items():
-    hooks_dir = expand(client["hooks_dir"])
-    hooks_dir.mkdir(parents=True, exist_ok=True)
-    for script_name, content in client.get("scripts", {{}}).items():
-        path = hooks_dir / script_name
-        path.write_text(content, encoding="utf-8")
-        path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    hooks_dir = None
+    if client.get("hooks_dir"):
+        hooks_dir = expand(client["hooks_dir"])
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        for script_name, content in client.get("scripts", {{}}).items():
+            path = hooks_dir / script_name
+            path.write_text(content, encoding="utf-8")
+            path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     if client.get("hooks_json_path"):
         merge_hooks_json(expand(client["hooks_json_path"]), subst(client["hooks_json"]))
+    if client.get("kiro_hooks_json_path"):
+        merge_kiro_hooks_json(
+            expand(client["kiro_hooks_json_path"]), subst(client["kiro_hooks_json"])
+        )
+    if client.get("kiro_hook_files_dir"):
+        write_hook_files(
+            expand(client["kiro_hook_files_dir"]), subst(client.get("kiro_hook_files", {{}}))
+        )
     if client.get("mcp_json_path"):
         merge_mcp_json(expand(client["mcp_json_path"]), subst(client["mcp_json"]))
     if client.get("codex_toml_path"):
@@ -484,6 +583,10 @@ for name, client in payload["clients"].items():
 
 print("mem-mesh client install complete: " + ", ".join(installed))
 print("server_url: " + payload["server_url"])
+if payload.get("rules_installed"):
+    print("hook rules: session_resume on start, pin_add for file-changing or multi-step work, pin_complete on finish")
+else:
+    print("hook rules: not installed for this MCP-only target")
 if payload.get("token_revealed"):
     print("hook token: written to ~/.mem-mesh/hook_token")
     if payload.get("mcp_auth_on"):
@@ -591,6 +694,11 @@ async def connect_hooks(
             "settings.json — export it where the client runs). Events without an "
             "endpoint stay command hooks that also need the shell scripts; for "
             "the complete set run `mem-mesh-hooks install`."
+        ),
+        "rules_note": (
+            "Installed hook context tells the agent to run session_resume, create "
+            "pins for file-changing or multi-step work, and call pin_complete "
+            "before final response."
         ),
         # Hooks for Cursor/Kiro depend on installed shell scripts, so paste is
         # only partial — flag it so the page can recommend the CLI installer.

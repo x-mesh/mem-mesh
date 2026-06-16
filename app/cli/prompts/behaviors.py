@@ -14,7 +14,7 @@ from typing import List
 # Prompt schema version — bump on ANY behavioral rule change
 # ---------------------------------------------------------------------------
 
-PROMPT_VERSION: int = 16
+PROMPT_VERSION: int = 17
 
 
 # ---------------------------------------------------------------------------
@@ -74,12 +74,15 @@ CORE_RULES: List[Rule] = [
     ),
     Rule(
         key="pin_tracking",
-        title="Pin으로 작업 추적 (필수)",
+        title="Pin Gate로 작업 추적 (필수)",
         description=(
-            '코드 변경 작업 시 즉시 pin_add(content, project_id="{project_id}"). '
-            "완료 시 반드시 pin_complete 호출 — pin_complete 없이 작업을 끝내지 않는다. "
-            "Edit/Write로 실제 파일을 바꿀 때만 pin — 질문/설명/분석 등 read-only 턴은 "
-            "pin 불필요(정답). pin 없음 reminder는 write 누락을 잡는 안전망일 뿐이다. "
+            "작업 시작 전 반드시 Pin Gate를 판단한다. 파일 변경, 구현, 버그 수정, "
+            "리팩토링, 마이그레이션, 다단계 조사, 다음 턴으로 이어질 수 있는 작업이면 "
+            '즉시 pin_add(content, project_id="{project_id}", importance=3). '
+            "단순 질문/설명/조회/read-only 분석은 pin 생성 X가 정답이다. 기존 "
+            "in_progress pin이 현재 요청과 무관하면 재사용하지 않는다. 응답에는 "
+            "`Pin created: <id>` 또는 `No pin created: <reason>` 중 하나를 남긴다. "
+            "완료 즉시 pin_complete 호출 — 활성 pin을 남긴 채 최종 응답하지 않는다. "
             "(importance: 3=일반, 4=중요, 5=아키텍처)"
         ),
     ),
@@ -131,11 +134,15 @@ SAVE_CRITERIA = SaveCriteria(
 )
 
 PIN_CRITERIA = PinCriteria(
-    create_when="코드 수정/구현/버그 수정/리팩토링 등 실제 코드 변경이 필요한 요청",
-    skip_when="질문, 설명 요청, 분석 요청, 점검, 리뷰, 단순 확인, hook 자체 논의",
+    create_when=(
+        "파일 변경, 구현, 버그 수정, 리팩토링, 마이그레이션, 다단계 조사, "
+        "다음 턴으로 이어질 수 있는 작업"
+    ),
+    skip_when="질문, 설명 요청, 조회, read-only 분석, 단순 확인, hook 자체 논의",
     pin_format=(
         'mcp_mem_mesh_pin_add(content="[1줄 요약]", '
         'project_id="{project_id}", importance=3, tags=[...])\n'
+        '응답 표기: "Pin created: <id>" 또는 "No pin created: <reason>"\n'
         '완료 시: mcp_mem_mesh_pin_complete(pin_id="...") — 생략 금지'
     ),
 )

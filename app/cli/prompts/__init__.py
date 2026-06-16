@@ -12,6 +12,7 @@ from app.cli.prompts.behaviors import (
     SessionConfig,
 )
 from app.cli.prompts.renderers import (
+    render_claude_project_rules,
     render_cursor_context,
     render_cursor_followup,
     render_kiro_auto_create_pin,
@@ -35,6 +36,7 @@ __all__ = [
     "SESSION_CONFIG",
     # Renderers
     "render_rules_text",
+    "render_claude_project_rules",
     "render_kiro_auto_save",
     "render_kiro_auto_create_pin",
     "render_kiro_load_context",

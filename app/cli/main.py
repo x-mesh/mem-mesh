@@ -107,7 +107,7 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     hooks_sync = hooks_sub.add_parser("sync-project", help="Sync project-local hooks")
     hooks_sync.add_argument(
-        "--target", choices=["kiro", "cursor", "all"], default="all"
+        "--target", choices=["claude", "kiro", "cursor", "all"], default="all"
     )
     hooks_sync.add_argument("--project-id", default="mem-mesh")
 

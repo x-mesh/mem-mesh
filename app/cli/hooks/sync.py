@@ -1,6 +1,7 @@
 """Project-local hook synchronization commands."""
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -25,6 +26,7 @@ from app.cli.hooks.templates import (
 )
 from app.cli.prompts.behaviors import PROMPT_VERSION
 from app.cli.prompts.renderers import (
+    render_claude_project_rules,
     render_kiro_auto_create_pin,
     render_kiro_auto_save,
     render_kiro_load_context,
@@ -54,6 +56,9 @@ def cmd_sync_project(target: str = "all", project_id: str = "mem-mesh") -> None:
     print(f"=== sync-project (prompt-version: {PROMPT_VERSION}) ===")
     print(f"Project root: {project_root}\n")
 
+    if target in ("claude", "all"):
+        _sync_claude_rules(project_root, project_id)
+
     if target in ("kiro", "all"):
         _sync_kiro_hooks(project_root, project_id)
 
@@ -61,6 +66,29 @@ def cmd_sync_project(target: str = "all", project_id: str = "mem-mesh") -> None:
         _sync_cursor_hooks(project_root, project_id)
 
     print("\nSync complete.")
+
+
+_CLAUDE_RULES_BEGIN_RE = re.compile(
+    r"<!-- mem-mesh-hooks:BEGIN v\d+ -->.*?<!-- mem-mesh-hooks:END v\d+ -->",
+    re.DOTALL,
+)
+
+
+def _sync_claude_rules(project_root: Path, project_id: str) -> None:
+    """Create or refresh the managed mem-mesh block in project CLAUDE.md."""
+    claude_path = project_root / "CLAUDE.md"
+    block = render_claude_project_rules(project_id)
+    if claude_path.exists():
+        existing = claude_path.read_text(encoding="utf-8")
+        if _CLAUDE_RULES_BEGIN_RE.search(existing):
+            content = _CLAUDE_RULES_BEGIN_RE.sub(block, existing)
+        else:
+            content = existing.rstrip() + "\n\n---\n\n" + block + "\n"
+    else:
+        content = "# Claude Project Rules\n\n" + block + "\n"
+    claude_path.write_text(content, encoding="utf-8")
+    print("[claude] Regenerating project CLAUDE.md managed rules...")
+    print(f"  -> {claude_path}")
 
 
 def _sync_kiro_hooks(project_root: Path, project_id: str) -> None:

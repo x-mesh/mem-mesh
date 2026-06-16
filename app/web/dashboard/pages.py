@@ -120,6 +120,18 @@ async def serve_claude_install_alias(request: Request):
     return _install_alias_response(request, "claude")
 
 
+@router.get("/kiro", include_in_schema=False)
+async def serve_kiro_install_alias(request: Request):
+    """Short install alias: curl <server>/kiro | bash."""
+    return _install_alias_response(request, "kiro")
+
+
+@router.get("/antigravity", include_in_schema=False)
+async def serve_antigravity_install_alias(request: Request):
+    """Short install alias: curl <server>/antigravity | bash."""
+    return _install_alias_response(request, "antigravity")
+
+
 @router.get("/all", include_in_schema=False)
 async def serve_all_install_alias(request: Request):
     """Short install alias: curl <server>/all | bash."""

@@ -57,6 +57,17 @@ MCP_TOOLS: list[dict] = [
         "detect": lambda: (Path.home() / ".kiro").exists(),
     },
     {
+        "name": "Antigravity",
+        "key": "antigravity",
+        "config_path": Path.home() / ".antigravity" / "mcp.json",
+        "detect": lambda: (
+            (Path.home() / ".antigravity").exists()
+            or (
+                Path.home() / "Library" / "Application Support" / "Antigravity"
+            ).exists()
+        ),
+    },
+    {
         "name": "Claude Desktop",
         "key": "claude-desktop",
         "config_path": Path.home()
@@ -456,7 +467,7 @@ def run_mcp_setup(
         print(f"  {warn('No supported dev tools detected.')}")
         print(
             dim(
-                "  Supported: Codex, Cursor, Kiro, Claude Desktop, VS Code, Windsurf, LM Studio"
+                "  Supported: Codex, Cursor, Kiro, Antigravity, Claude Desktop, VS Code, Windsurf, LM Studio"
             )
         )
         print()
