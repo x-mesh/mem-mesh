@@ -1,46 +1,31 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 15
-# TaskCompleted hook: auto-save completed tasks to mem-mesh
-# stdin: {task_id, task_subject, task_description, teammate_name, team_name, ...}
+# mem-mesh-hooks prompt-version: 16
+# TaskCompleted hook → mem-mesh /api/hooks/claude/task-completed
+#
+# Thin forwarder: the server builds the task summary and saves it. Auth = shared
+# hook token (env or ~/.mem-mesh/hook_token). stdin carries task_subject /
+# task_description / teammate_name (team-driven); forwarded as-is.
 
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
+command -v curl >/dev/null 2>&1 || exit 0
 
 API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://meme.24x365.online)}"
+HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
+AUTH=()
+if [ -n "$HOOK_TOKEN" ]; then
+  AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}")
+fi
 
 INPUT=$(cat)
-TASK_SUBJECT=$(echo "$INPUT" | jq -r '.task_subject // empty')
-TASK_DESC=$(echo "$INPUT" | jq -r '.task_description // empty')
-TEAMMATE=$(echo "$INPUT" | jq -r '.teammate_name // empty')
-
-[ -z "$TASK_SUBJECT" ] && exit 0
-
-# Build content
-CONTENT="## Task Completed: ${TASK_SUBJECT}"
-[ -n "$TASK_DESC" ] && CONTENT="${CONTENT}\n\n${TASK_DESC}"
-[ -n "$TEAMMATE" ] && CONTENT="${CONTENT}\n\nCompleted by: ${TEAMMATE}"
-# Char-safe truncation: jq slices by Unicode codepoint (no UTF-8 byte corruption)
-CONTENT=$(printf '%b' "$CONTENT" | jq -Rrs '.[0:5000]')
-
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+[ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
+PAYLOAD=$(printf '%s' "$INPUT" | jq -c --arg pid "$PROJECT_DIR" '. + {project_id: $pid}' 2>/dev/null) || PAYLOAD="$INPUT"
 
-PAYLOAD=$(jq -n \
-  --arg content "$CONTENT" \
-  --arg project_id "$PROJECT_DIR" \
-  --arg source "claude-code-hook" \
-  --arg client "claude_code" \
-  '{
-    content: $content,
-    project_id: $project_id,
-    category: "task",
-    source: $source,
-    client: $client,
-    tags: ["auto-save", "task-completed"]
-  }')
-
-curl -s -o /dev/null --max-time 5 \
-  -X POST "${API_URL}/api/memories" \
+curl -s -o /dev/null --max-time 8 \
+  -X POST "${API_URL}/api/hooks/claude/task-completed" \
   -H "Content-Type: application/json" \
+  ${AUTH[@]+"${AUTH[@]}"} \
   -d "$PAYLOAD" 2>/dev/null || true
 
 exit 0

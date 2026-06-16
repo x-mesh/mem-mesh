@@ -58,6 +58,7 @@ def _verify_password(plain: str, stored: str) -> bool:
     # Legacy unsalted sha256 — verified for back-compat, never newly written.
     return verify_secret(plain, stored)
 
+
 # Managed keys -> kind. 'tribool' allows None (inherit from auth_enabled);
 # 'secret' is hashed when stored in the DB.
 MANAGED_AUTH_KEYS = {

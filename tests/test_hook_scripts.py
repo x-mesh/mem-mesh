@@ -169,16 +169,17 @@ def test_stop_decide_already_saved_via_mcp_exits(tmp_path: Path) -> None:
 
 
 def test_session_start_outputs_valid_json(tmp_path: Path) -> None:
-    """The session-start hook must produce valid JSON on stdout even when API is unavailable."""
+    """The session-start hook must produce valid JSON on stdout even when the API
+    is unavailable. The thin forwarder emits the server's hookSpecificOutput, or
+    ``{}`` on a no-op/unreachable server — both valid JSON for Claude Code's
+    output schema."""
     script = _render_and_write(
         tmp_path, SESSION_START_HOOK_TEMPLATE, project_id="test-project"
     )
     result = _run_hook(script, {})
     assert result.returncode == 0
-    # stdout must be parseable JSON
-    parsed = json.loads(result.stdout)
-    # Support both legacy and new hook output formats
-    assert "additional_context" in parsed or "hookSpecificOutput" in parsed
+    parsed = json.loads(result.stdout)  # offline → {} (still valid JSON)
+    assert isinstance(parsed, dict)
 
 
 def _extract_context(parsed: dict) -> str:
@@ -188,15 +189,22 @@ def _extract_context(parsed: dict) -> str:
     return parsed.get("hookSpecificOutput", {}).get("additionalContext", "")
 
 
-def test_session_start_includes_rules_text(tmp_path: Path) -> None:
-    """The additional_context field must reference mem-mesh rules."""
+def test_session_start_forwards_server_context(tmp_path: Path, hook_api_server) -> None:
+    """The rules block is rendered server-side now; the thin forwarder emits the
+    server's hookSpecificOutput verbatim. With the server reachable, its context
+    (referencing mem-mesh) must reach stdout."""
+    state, url = hook_api_server
+    state["response"] = {
+        "hookSpecificOutput": {
+            "additionalContext": "mem-mesh rules: pin code changes, save decisions."
+        }
+    }
     script = _render_and_write(
         tmp_path, SESSION_START_HOOK_TEMPLATE, project_id="test-project"
     )
-    result = _run_hook(script, {})
+    result = _run_hook(script, {}, env={"MEM_MESH_API_URL": url})
     assert result.returncode == 0
-    parsed = json.loads(result.stdout)
-    context = _extract_context(parsed)
+    context = _extract_context(json.loads(result.stdout))
     assert "mem-mesh" in context
 
 
@@ -290,6 +298,39 @@ NO_KEYWORD_PROMPT = "please refactor this module for clarity"
 
 
 @pytest.fixture()
+def hook_api_server():
+    """Mock mem-mesh serving POST /api/hooks/claude/* with a settable response.
+
+    Exercises the thin-forwarder contract: the hook POSTs the event and emits
+    whatever hookSpecificOutput the server returns. Set ``state["response"]`` to
+    the JSON the server should reply with.
+    """
+    state: dict = {"response": {}}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802 — BaseHTTPRequestHandler contract
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            self.rfile.read(length)
+            # ensure_ascii=False to mirror FastAPI's UTF-8 JSON (so multibyte
+            # context survives the round-trip through the hook to stdout).
+            body = json.dumps(state["response"], ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # silence request logging
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield state, f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+@pytest.fixture()
 def pin_api_server():
     """Mock mem-mesh API serving /api/work/pins from a per-status pin map."""
     state: dict[str, list] = {}
@@ -320,10 +361,12 @@ def pin_api_server():
 
 
 def test_user_prompt_submit_reminds_when_no_tracked_pins(
-    tmp_path: Path, pin_api_server
+    tmp_path: Path, hook_api_server
 ) -> None:
-    """No open/in_progress pins → the pin_add reminder is injected."""
-    state, url = pin_api_server
+    """The pin reminder is decided server-side; when the server returns it, the
+    thin forwarder surfaces it on stdout."""
+    state, url = hook_api_server
+    state["response"] = {"hookSpecificOutput": {"additionalContext": PIN_REMINDER_TEXT}}
     script = _render_and_write(
         tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
     )

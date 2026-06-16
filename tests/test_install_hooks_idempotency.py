@@ -480,6 +480,15 @@ def test_ensure_hook_token_generates_0600_and_reuses(
 ) -> None:
     token_file = tmp_path / ".mem-mesh" / "hook_token"
     monkeypatch.setattr(install_hooks, "HOOK_TOKEN_FILE", token_file)
+    # _ensure_hook_token consults config.resolve_hook_token before writing, which
+    # reads config's own legacy HOOK_TOKEN_FILE plus the data-dir fallback. Point
+    # both at tmp so a real ~/.mem-mesh or ./data token can't leak in and defeat
+    # the reuse check.
+    monkeypatch.setattr("app.core.config.HOOK_TOKEN_FILE", token_file)
+    monkeypatch.setattr(
+        "app.core.config._data_dir_hook_token_file",
+        lambda: tmp_path / "data" / "hook_token",
+    )
     monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
 
     first = install_hooks._ensure_hook_token()

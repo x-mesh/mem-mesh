@@ -13,7 +13,6 @@ from fastapi import Request, Response
 from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-
 logger = logging.getLogger(__name__)
 
 SESSION_COOKIE_NAME = "mem_mesh_session"

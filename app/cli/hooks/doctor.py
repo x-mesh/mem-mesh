@@ -166,9 +166,7 @@ def _http(method: str, url: str, headers=None, data=None, timeout: float = 5.0):
     import urllib.error
     import urllib.request
 
-    req = urllib.request.Request(
-        url, data=data, method=method, headers=headers or {}
-    )
+    req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.read()
@@ -208,7 +206,9 @@ def _check_authentication(url: str) -> List[str]:
             mcp = d.get("mcp_auth", {})
             bind = d.get("bind", {})
             ba = "enabled" if web.get("basic_auth_enabled") else "disabled"
-            pwd = "admin password set" if web.get("admin_password_set") else "no password"
+            pwd = (
+                "admin password set" if web.get("admin_password_set") else "no password"
+            )
             print(f"  Basic Auth:  {ba} ({pwd})")
             print(
                 f"  OAuth:       auth_enabled={mcp.get('oauth_auth_enabled')}  "
@@ -216,7 +216,9 @@ def _check_authentication(url: str) -> List[str]:
             )
             host = bind.get("effective_host", "")
             loop = bind.get("is_loopback")
-            print(f"  Bind:        {host} {dim('(loopback)') if loop else warn('(exposed)')}")
+            print(
+                f"  Bind:        {host} {dim('(loopback)') if loop else warn('(exposed)')}"
+            )
             if (
                 not loop
                 and not web.get("basic_auth_enabled")
@@ -228,7 +230,9 @@ def _check_authentication(url: str) -> List[str]:
         except Exception:
             print(f"  Server auth: {warn('overview response could not be parsed')}")
     elif status == 401:
-        print(f"  Server auth: {ok('OAuth web auth enabled (overview requires a token)')}")
+        print(
+            f"  Server auth: {ok('OAuth web auth enabled (overview requires a token)')}"
+        )
     elif status is None:
         print(f"  Server auth: {dim('server unreachable — local checks only')}")
     else:

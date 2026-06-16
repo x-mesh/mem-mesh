@@ -53,7 +53,9 @@ class TestWritesSinceSave:
     @pytest.mark.asyncio
     async def test_zero_with_no_writes(self, hook_service):
         await hook_service.record_event(
-            project_id="p", ide_session_id="s1", event_name="UserPromptSubmit",
+            project_id="p",
+            ide_session_id="s1",
+            event_name="UserPromptSubmit",
             prompt="just a question",
         )
         assert await hook_service.writes_since_save("s1") == 0
@@ -77,7 +79,9 @@ class TestWritesSinceSave:
         assert await hook_service.writes_since_save("s1") == 1
 
         await hook_service.record_event(
-            project_id="p", ide_session_id="s1", event_name="Stop",
+            project_id="p",
+            ide_session_id="s1",
+            event_name="Stop",
             assistant_message="called mcp__mem-mesh__pin_add to track work",
         )
         # The save turn resets the counter — nothing uncaptured remains.
@@ -94,7 +98,9 @@ class TestWritesSinceSave:
         # PostToolUse writes must never count as UserPromptSubmit turns, else
         # the "N turns since save" reminder would mis-fire.
         await hook_service.record_event(
-            project_id="p", ide_session_id="s1", event_name="UserPromptSubmit",
+            project_id="p",
+            ide_session_id="s1",
+            event_name="UserPromptSubmit",
             prompt="q1",
         )
         await hook_service.record_write(

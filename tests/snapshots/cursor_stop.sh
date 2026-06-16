@@ -1,40 +1,44 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 15
-# Cursor stop hook: conditionally suggest saving to mem-mesh
-# stdin: {"last_assistant_message":"...", "transcript":[...]} JSON
+# mem-mesh-hooks prompt-version: 16
+# Cursor Stop hook → mem-mesh /api/hooks/claude/stop
+#
+# Thin forwarder: the server keyword-matches the finished turn, redacts secrets,
+# and saves if the content matches a save category. Auth = shared hook token
+# (MEM_MESH_HOOK_TOKEN env or ~/.mem-mesh/hook_token).
 
 set -euo pipefail
+command -v jq >/dev/null 2>&1 || exit 0
+command -v curl >/dev/null 2>&1 || exit 0
+
+API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://meme.24x365.online)}"
+HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
+AUTH=()
+if [ -n "$HOOK_TOKEN" ]; then
+  AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}")
+fi
 
 INPUT=$(cat)
 
-# Check if there were meaningful tool uses (file edits, code changes)
-HAS_TOOL_USE=$(echo "$INPUT" | python3 -c "
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    transcript = data.get('transcript', [])
-    meaningful = any(
-        msg.get('type') == 'tool_use' and
-        msg.get('tool_name', '') in ('Edit', 'Write', 'Bash', 'NotebookEdit')
-        for msg in transcript
-        if isinstance(msg, dict)
-    )
-    print('true' if meaningful else 'false')
-except Exception:
-    print('false')
-" 2>/dev/null) || HAS_TOOL_USE="false"
+# Loop guard locally to skip a needless request (server also enforces this).
+# Cursor may send stopHookActive (camelCase); handle both.
+ACTIVE=$(printf '%s' "$INPUT" | jq -r '.stop_hook_active // .stopHookActive // false' 2>/dev/null) || ACTIVE="false"
+[ "$ACTIVE" = "true" ] && exit 0
 
-if [ "$HAS_TOOL_USE" = "true" ]; then
-    python3 -c "
-import json
-print(json.dumps({'followup_message': '''방금 완료한 작업이 중요하다면, mem-mesh에 기록해주세요.
+PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+[ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 
-**저장 기준**: 버그 진단/해결, 아키텍처 또는 설계 결정, 중요 설정 변경 또는 마이그레이션
-**스킵 기준**: 단순 질문/답변 ("뭐야?", "보여줘"), 파일 읽기만 한 경우, 이미 저장된 내용의 반복, hook/설정 자체의 점검·수정·메타 대화 (hook 동작 확인, settings.json 수정 포함)
+# Normalize Cursor camelCase fields to snake_case and inject project_id.
+# Cursor may send: stopHookActive, lastAssistantMessage (or assistant_message / result).
+PAYLOAD=$(printf '%s' "$INPUT" | jq -c --arg pid "$PROJECT_DIR" '. + {
+  stop_hook_active: (.stop_hook_active // .stopHookActive // false),
+  last_assistant_message: (.last_assistant_message // .lastAssistantMessage // .assistant_message // .result // null),
+  project_id: $pid
+}' 2>/dev/null) || PAYLOAD="$INPUT"
 
-저장 시: 버그 수정은 category="bug", 설계 결정은 category="decision", 코드 패턴은 category="code_snippet"으로 add(project_id="mem-mesh")를 호출하세요.
-일상적 작업이었다면 무시하세요.'''}))
-"
-else
-    echo '{}'
-fi
+curl -s -o /dev/null --max-time 8 \
+  -X POST "${API_URL}/api/hooks/claude/stop" \
+  -H "Content-Type: application/json" \
+  ${AUTH[@]+"${AUTH[@]}"} \
+  -d "$PAYLOAD" 2>/dev/null || true
+
+exit 0

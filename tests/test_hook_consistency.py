@@ -261,22 +261,27 @@ async def test_noise_artifacts_skip_save_in_http_stop_path(monkeypatch) -> None:
     save_memory.assert_not_awaited()
 
 
-def test_noise_artifacts_skip_save_in_command_stop_decide(tmp_path: Path) -> None:
-    """Command Stop must match HTTP noise behavior and avoid emitting a save payload."""
+def test_command_stop_forwards_raw_payload_for_server_to_filter(
+    tmp_path: Path,
+) -> None:
+    """The command Stop hook is a thin forwarder now: noise filtering moved
+    server-side (covered by test_noise_artifacts_skip_save_in_http_stop_path).
+    So the command hook must forward the raw event verbatim — it must NOT drop
+    it locally — and the server decides whether to persist."""
+    noise = (
+        "<task-notification> 버그를 수정했고 decision을 완료했다는 시스템 "
+        "아티팩트입니다. 충분히 길지만 메모리에 저장되면 안 됩니다. </task-notification>"
+    )
     result, command_payload = _run_stop_decide(
         tmp_path,
-        {
-            "stop_hook_active": False,
-            "last_assistant_message": (
-                "<task-notification> 버그를 수정했고 decision을 완료했다는 시스템 "
-                "아티팩트입니다. 충분히 길지만 메모리에 저장되면 안 됩니다. </task-notification>"
-            ),
-        },
+        {"stop_hook_active": False, "last_assistant_message": noise},
         toplevel="/repo/mem-mesh",
     )
 
     assert result.returncode == 0
-    assert command_payload is None
+    # Raw forward: the hook sends the event unfiltered; the server skips the save.
+    assert command_payload is not None
+    assert command_payload["last_assistant_message"] == noise
 
 
 def test_command_stop_truncates_multibyte_text_on_character_boundary(
@@ -292,7 +297,7 @@ def test_command_stop_truncates_multibyte_text_on_character_boundary(
 
     assert result.returncode == 0
     assert command_payload is not None, result.stdout + result.stderr
-    content = command_payload["content"]
+    content = command_payload["last_assistant_message"]
     content.encode("utf-8").decode("utf-8")
     assert "\ufffd" not in content
-    assert len(content) <= 9500
+    assert content == long_korean  # forwarded verbatim; truncation is server-side

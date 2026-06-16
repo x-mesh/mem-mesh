@@ -930,97 +930,144 @@ class TestBearerTokenMiddleware:
         assert middleware._requires_auth("/oauth/register", settings) is False
 
     def test_requires_auth_mcp_paths(self):
-        """MCP paths follow mcp_auth_enabled setting."""
-        from unittest.mock import MagicMock
+        """MCP paths follow mcp_auth_enabled (resolved via runtime_config)."""
+        from unittest.mock import MagicMock, patch
 
         from app.web.oauth.middleware import BearerTokenMiddleware
 
         middleware = BearerTokenMiddleware(app=MagicMock())
-        settings = MagicMock()
-        settings.auth_enabled = True
 
         # MCP auth enabled
-        settings.mcp_auth_enabled = True
-        settings.web_auth_enabled = False
-        assert middleware._requires_auth("/mcp/sse", settings) is True
-        assert middleware._requires_auth("/mcp/messages", settings) is True
+        with (
+            patch("app.core.runtime_config.effective_bool", return_value=True),
+            patch(
+                "app.core.runtime_config.effective_tribool",
+                side_effect=lambda k: {
+                    "mcp_auth_enabled": True,
+                    "web_auth_enabled": False,
+                }.get(k),
+            ),
+        ):
+            assert middleware._requires_auth("/mcp/sse") is True
+            assert middleware._requires_auth("/mcp/messages") is True
 
         # MCP auth disabled
-        settings.mcp_auth_enabled = False
-        assert middleware._requires_auth("/mcp/sse", settings) is False
+        with (
+            patch("app.core.runtime_config.effective_bool", return_value=True),
+            patch(
+                "app.core.runtime_config.effective_tribool",
+                side_effect=lambda k: {"mcp_auth_enabled": False}.get(k),
+            ),
+        ):
+            assert middleware._requires_auth("/mcp/sse") is False
 
     def test_requires_auth_api_paths(self):
-        """API paths follow web_auth_enabled setting."""
-        from unittest.mock import MagicMock
+        """API paths follow web_auth_enabled (resolved via runtime_config)."""
+        from unittest.mock import MagicMock, patch
 
         from app.web.oauth.middleware import BearerTokenMiddleware
 
         middleware = BearerTokenMiddleware(app=MagicMock())
-        settings = MagicMock()
-        settings.auth_enabled = True
 
         # Web auth enabled
-        settings.mcp_auth_enabled = False
-        settings.web_auth_enabled = True
-        assert middleware._requires_auth("/api/memories", settings) is True
-        assert middleware._requires_auth("/api/oauth/clients", settings) is True
+        with (
+            patch("app.core.runtime_config.effective_bool", return_value=True),
+            patch(
+                "app.core.runtime_config.effective_tribool",
+                side_effect=lambda k: {
+                    "mcp_auth_enabled": False,
+                    "web_auth_enabled": True,
+                }.get(k),
+            ),
+        ):
+            assert middleware._requires_auth("/api/memories") is True
+            assert middleware._requires_auth("/api/oauth/clients") is True
 
         # Web auth disabled
-        settings.web_auth_enabled = False
-        assert middleware._requires_auth("/api/memories", settings) is False
+        with (
+            patch("app.core.runtime_config.effective_bool", return_value=True),
+            patch(
+                "app.core.runtime_config.effective_tribool",
+                side_effect=lambda k: {"web_auth_enabled": False}.get(k),
+            ),
+        ):
+            assert middleware._requires_auth("/api/memories") is False
 
     def test_requires_auth_dashboard_pages(self):
-        """Dashboard pages follow web_auth_enabled setting."""
-        from unittest.mock import MagicMock
+        """Dashboard pages are guarded by BasicAuthMiddleware (browser session),
+        not the bearer middleware — so they are always exempt here (False),
+        regardless of web_auth_enabled. This prevents enabling api/mcp OAuth from
+        locking the SPA out of its own pages."""
+        from unittest.mock import MagicMock, patch
 
         from app.web.oauth.middleware import BearerTokenMiddleware
 
         middleware = BearerTokenMiddleware(app=MagicMock())
-        settings = MagicMock()
-        settings.auth_enabled = True
-        settings.mcp_auth_enabled = False
 
-        # Web auth enabled - dashboard pages should require auth
-        settings.web_auth_enabled = True
-        assert middleware._requires_auth("/", settings) is True
-        assert middleware._requires_auth("/work", settings) is True
-        assert middleware._requires_auth("/search", settings) is True
-
-        # Web auth disabled - dashboard pages should not require auth
-        settings.web_auth_enabled = False
-        assert middleware._requires_auth("/", settings) is False
-        assert middleware._requires_auth("/work", settings) is False
+        with (
+            patch("app.core.runtime_config.effective_bool", return_value=True),
+            patch(
+                "app.core.runtime_config.effective_tribool",
+                side_effect=lambda k: {"web_auth_enabled": True}.get(k),
+            ),
+        ):
+            assert middleware._requires_auth("/") is False
+            assert middleware._requires_auth("/work") is False
+            assert middleware._requires_auth("/search") is False
 
     def test_requires_auth_combined_settings(self):
-        """Test various combinations of auth settings."""
-        from unittest.mock import MagicMock
+        """Combinations: /mcp and /api follow their own tribool; dashboard pages
+        are always exempt (handled by BasicAuthMiddleware)."""
+        from unittest.mock import MagicMock, patch
 
         from app.web.oauth.middleware import BearerTokenMiddleware
 
         middleware = BearerTokenMiddleware(app=MagicMock())
-        settings = MagicMock()
 
         # Scenario 1: Only MCP auth enabled
-        settings.auth_enabled = True
-        settings.mcp_auth_enabled = True
-        settings.web_auth_enabled = False
-        assert middleware._requires_auth("/mcp/sse", settings) is True
-        assert middleware._requires_auth("/api/memories", settings) is False
-        assert middleware._requires_auth("/work", settings) is False
+        with (
+            patch("app.core.runtime_config.effective_bool", return_value=True),
+            patch(
+                "app.core.runtime_config.effective_tribool",
+                side_effect=lambda k: {
+                    "mcp_auth_enabled": True,
+                    "web_auth_enabled": False,
+                }.get(k),
+            ),
+        ):
+            assert middleware._requires_auth("/mcp/sse") is True
+            assert middleware._requires_auth("/api/memories") is False
+            assert middleware._requires_auth("/work") is False
 
-        # Scenario 2: Only Web auth enabled
-        settings.mcp_auth_enabled = False
-        settings.web_auth_enabled = True
-        assert middleware._requires_auth("/mcp/sse", settings) is False
-        assert middleware._requires_auth("/api/memories", settings) is True
-        assert middleware._requires_auth("/work", settings) is True
+        # Scenario 2: Only Web (api) auth enabled — pages still exempt
+        with (
+            patch("app.core.runtime_config.effective_bool", return_value=True),
+            patch(
+                "app.core.runtime_config.effective_tribool",
+                side_effect=lambda k: {
+                    "mcp_auth_enabled": False,
+                    "web_auth_enabled": True,
+                }.get(k),
+            ),
+        ):
+            assert middleware._requires_auth("/mcp/sse") is False
+            assert middleware._requires_auth("/api/memories") is True
+            assert middleware._requires_auth("/work") is False
 
-        # Scenario 3: Both enabled
-        settings.mcp_auth_enabled = True
-        settings.web_auth_enabled = True
-        assert middleware._requires_auth("/mcp/sse", settings) is True
-        assert middleware._requires_auth("/api/memories", settings) is True
-        assert middleware._requires_auth("/work", settings) is True
+        # Scenario 3: Both enabled — pages still exempt
+        with (
+            patch("app.core.runtime_config.effective_bool", return_value=True),
+            patch(
+                "app.core.runtime_config.effective_tribool",
+                side_effect=lambda k: {
+                    "mcp_auth_enabled": True,
+                    "web_auth_enabled": True,
+                }.get(k),
+            ),
+        ):
+            assert middleware._requires_auth("/mcp/sse") is True
+            assert middleware._requires_auth("/api/memories") is True
+            assert middleware._requires_auth("/work") is False
 
 
 # ============================================================================
@@ -1032,31 +1079,30 @@ class TestBasicAuth:
     """Test Basic Auth for web dashboard."""
 
     def test_verify_credentials_valid(self):
-        """Test valid credentials verification."""
-        from unittest.mock import MagicMock, patch
+        """Valid credentials via runtime_config (env or dashboard DB)."""
+        from unittest.mock import patch
 
         from app.web.oauth.basic_auth import verify_credentials
 
-        mock_settings = MagicMock()
-        mock_settings.admin_username = "admin"
-        mock_settings.admin_password = "secret123"
-
-        with patch("app.web.oauth.basic_auth.get_settings", return_value=mock_settings):
+        with (
+            patch("app.core.runtime_config.admin_password_set", return_value=True),
+            patch("app.core.runtime_config.effective", return_value=("admin", "env")),
+            patch(
+                "app.core.runtime_config.check_admin_password",
+                side_effect=lambda p: p == "secret123",
+            ),
+        ):
             assert verify_credentials("admin", "secret123") is True
             assert verify_credentials("admin", "wrong") is False
             assert verify_credentials("wrong", "secret123") is False
 
     def test_verify_credentials_no_password_set(self):
-        """Test credentials verification when no password is set."""
-        from unittest.mock import MagicMock, patch
+        """No admin password set → always rejected."""
+        from unittest.mock import patch
 
         from app.web.oauth.basic_auth import verify_credentials
 
-        mock_settings = MagicMock()
-        mock_settings.admin_username = "admin"
-        mock_settings.admin_password = ""  # Empty password
-
-        with patch("app.web.oauth.basic_auth.get_settings", return_value=mock_settings):
+        with patch("app.core.runtime_config.admin_password_set", return_value=False):
             assert verify_credentials("admin", "") is False
 
     @pytest.mark.asyncio
@@ -1105,14 +1151,17 @@ class TestBasicAuth:
         assert middleware._is_public_path("/login") is True
         assert middleware._is_public_path("/logout") is True
 
-        # OAuth/MCP paths should be exempt
-        assert middleware._is_oauth_path("/mcp/sse") is True
-        assert middleware._is_oauth_path("/oauth/token") is True
+        # OAuth/MCP/API paths are exempt from basic auth — they authenticate via
+        # OAuth bearer or the static API token, not the browser session.
+        assert middleware._is_exempt_path("/mcp/sse") is True
+        assert middleware._is_exempt_path("/oauth/token") is True
         assert (
-            middleware._is_oauth_path("/.well-known/oauth-authorization-server") is True
+            middleware._is_exempt_path("/.well-known/oauth-authorization-server")
+            is True
         )
+        assert middleware._is_exempt_path("/api/memories") is True
 
-        # Dashboard paths should not be exempt
+        # Dashboard pages are neither public nor exempt (browser session required)
         assert middleware._is_public_path("/") is False
         assert middleware._is_public_path("/work") is False
-        assert middleware._is_oauth_path("/api/memories") is False
+        assert middleware._is_exempt_path("/work") is False
