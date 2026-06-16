@@ -4,6 +4,7 @@ import json
 from typing import Any, Dict
 
 from ..core.config import get_settings
+from ..core.utils.time import localize_timestamps
 from .token_estimator import add_token_metadata
 
 
@@ -25,6 +26,10 @@ def format_tool_response(
 
     if include_meta:
         result = add_token_metadata(result)
+
+    # Localize UTC timestamps to the configured display timezone at the output
+    # boundary (no-op when display_timezone is UTC). Storage stays UTC.
+    result = localize_timestamps(result)
 
     return {
         "content": [{"type": "text", "text": json.dumps(result)}],
