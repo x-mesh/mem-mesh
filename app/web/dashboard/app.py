@@ -25,8 +25,6 @@ templates = Jinja2Templates(directory=str(_WEB_ROOT / "templates"))
 
 def create_dashboard_app() -> FastAPI:
     """Dashboard 전용 FastAPI 애플리케이션 생성"""
-    from app.core.config import get_settings
-
     app = FastAPI(
         title="mem-mesh Dashboard",
         description="Web Dashboard for mem-mesh memory management",
@@ -36,13 +34,15 @@ def create_dashboard_app() -> FastAPI:
 
     setup_middleware(app)
 
-    settings = get_settings()
-    if settings.web_basic_auth_enabled:
-        from app.web.oauth.basic_auth import BasicAuthMiddleware
-        from app.web.oauth.login_routes import router as login_router
+    # Mount unconditionally: the middleware's dispatch no-ops when Basic Auth is
+    # off (it resolves effective_bool('web_basic_auth_enabled') per request), so
+    # a runtime DB toggle takes effect without a restart. Gating the mount on the
+    # boot-time setting would make the no-restart promise false.
+    from app.web.oauth.basic_auth import BasicAuthMiddleware
+    from app.web.oauth.login_routes import router as login_router
 
-        app.add_middleware(BasicAuthMiddleware)
-        app.include_router(login_router)
+    app.add_middleware(BasicAuthMiddleware)
+    app.include_router(login_router)
 
     setup_exception_handlers(app)
 

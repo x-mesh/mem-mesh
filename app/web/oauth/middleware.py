@@ -151,6 +151,8 @@ PUBLIC_PATHS = [
     "/openapi.json",
     "/static",
     "/favicon.ico",
+    "/login",
+    "/logout",
 ]
 
 
@@ -162,6 +164,15 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         path = request.url.path
 
         if not self._requires_auth(path, settings):
+            return await call_next(request)
+
+        # Dual auth for the REST API: a valid dashboard Basic Auth session
+        # (attached by BasicAuthMiddleware) authenticates the browser SPA on
+        # /api, which has no OAuth bearer. MCP and other surfaces stay
+        # OAuth-only — a session must never authenticate /mcp.
+        if path.startswith("/api/") and getattr(
+            request.state, "dashboard_session", None
+        ):
             return await call_next(request)
 
         authorization = request.headers.get("Authorization")
@@ -200,9 +211,13 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
 
         return await call_next(request)
 
-    def _requires_auth(self, path: str, settings) -> bool:
+    def _requires_auth(self, path: str, settings=None) -> bool:
         """
         Determine if a path requires authentication.
+
+        Resolves auth flags through ``runtime_config`` (env > dashboard DB >
+        default) so a dashboard toggle applies without a restart. The
+        ``settings`` arg is accepted for backwards compatibility and ignored.
 
         Logic:
         1. If auth_enabled=False, no authentication required anywhere
@@ -212,8 +227,10 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         5. For /api/* paths: use web_auth_enabled (defaults to auth_enabled)
         6. For dashboard pages: use web_auth_enabled (defaults to auth_enabled)
         """
+        from app.core.runtime_config import effective_bool, effective_tribool
+
         # Global auth disabled = no auth anywhere
-        if not settings.auth_enabled:
+        if not effective_bool("auth_enabled"):
             return False
 
         # Hook endpoints use their own token scheme (verify_hook_token), which
@@ -232,21 +249,19 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
             if path == oauth_path or path.startswith(oauth_path):
                 return False
 
-        # MCP endpoints: check mcp_auth_enabled
-        # When auth_enabled=True and mcp_auth_enabled is not explicitly set,
-        # it defaults to False (opt-in for MCP auth)
+        # MCP endpoints: check mcp_auth_enabled (inherits auth_enabled when unset)
         if path.startswith("/mcp/"):
-            return settings.mcp_auth_enabled
+            return effective_tribool("mcp_auth_enabled")
 
-        # API endpoints: check web_auth_enabled
-        # When auth_enabled=True and web_auth_enabled is not explicitly set,
-        # it defaults to False (opt-in for Web API auth)
+        # API endpoints: check web_auth_enabled (inherits auth_enabled when unset)
         if path.startswith("/api/"):
-            return settings.web_auth_enabled
+            return effective_tribool("web_auth_enabled")
 
-        # Dashboard pages (/, /work, /oauth, etc.): follow web_auth_enabled
-        # This ensures dashboard pages are protected when web auth is enabled
-        return settings.web_auth_enabled
+        # Dashboard pages (/, /work, /security, etc.) are guarded by
+        # BasicAuthMiddleware (browser id/pw session), NOT OAuth — the SPA has no
+        # bearer token. Exempt them here so enabling api/mcp OAuth doesn't lock
+        # the browser out of its own pages.
+        return False
 
 
 def require_scope(required_scope: str):

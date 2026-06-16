@@ -89,7 +89,7 @@ class SessionStore:
         if self._db is not None:
             await self._ensure_table()
             try:
-                row = await self._db.fetch_one(
+                row = await self._db.fetchone(
                     "SELECT username, expires_at FROM web_sessions WHERE session_id = ?",
                     (session_id,),
                 )
@@ -170,15 +170,24 @@ async def delete_session(session_id: str) -> None:
 
 
 def verify_credentials(username: str, password: str) -> bool:
-    """Verify username and password against settings."""
-    settings = get_settings()
+    """Verify username/password against the active source (env or dashboard DB).
 
-    if not settings.admin_password:
+    The password may be an env-provided plaintext or a dashboard-set hash;
+    :func:`check_admin_password` handles both.
+    """
+    from app.core.runtime_config import (
+        admin_password_set,
+        check_admin_password,
+        effective,
+    )
+
+    if not admin_password_set():
         logger.warning("Basic auth enabled but no admin password set")
         return False
 
-    username_match = secrets.compare_digest(username, settings.admin_username)
-    password_match = secrets.compare_digest(password, settings.admin_password)
+    uname, _ = effective("admin_username")
+    username_match = secrets.compare_digest(str(username), str(uname or "admin"))
+    password_match = check_admin_password(password)
 
     return username_match and password_match
 
@@ -189,70 +198,116 @@ LOGIN_PAGE_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - mem-mesh</title>
+    <title>Login · mem-mesh</title>
+    <script>
+      // Apply the dashboard theme before paint (no FOUC). Mirrors theme-manager:
+      // localStorage 'mem-mesh-theme' = light | dark | system.
+      (function () {
+        try {
+          var t = localStorage.getItem('mem-mesh-theme') || 'system';
+          var dark = t === 'dark' || (t === 'system' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="stylesheet" href="/static/css/main.css">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
+            margin: 0;
             display: flex;
             align-items: center;
             justify-content: center;
+            padding: 1.5rem;
+            background: var(--bg-secondary, #fafafa);
+            font-family: var(--font-body, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+            color: var(--text-primary, #171717);
         }
-        .login-container {
-            background: white;
-            padding: 2.5rem;
-            border-radius: 16px;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        .login-card {
             width: 100%;
-            max-width: 400px;
+            max-width: 380px;
+            background: var(--card-bg, #ffffff);
+            border: 1px solid var(--border-color, #e5e5e5);
+            border-radius: 16px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 12px 32px rgba(0, 0, 0, 0.05);
+            padding: 2.5rem 2rem;
+            box-sizing: border-box;
         }
-        .logo { text-align: center; margin-bottom: 2rem; }
-        .logo h1 { font-size: 2rem; color: #1a1a2e; margin-bottom: 0.5rem; }
-        .logo p { color: #666; font-size: 0.9rem; }
-        .form-group { margin-bottom: 1.5rem; }
-        .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; color: #333; }
-        .form-group input {
-            width: 100%; padding: 0.75rem 1rem;
-            border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1rem;
-            transition: border-color 0.2s;
+        .login-brand { text-align: center; margin-bottom: 2rem; }
+        .login-brand .mark {
+            display: inline-flex; align-items: center; gap: 0.55rem;
+            font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em;
+            color: var(--text-primary, #171717);
         }
-        .form-group input:focus { outline: none; border-color: #667eea; }
-        .btn-login {
-            width: 100%; padding: 0.875rem;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white; border: none; border-radius: 8px;
-            font-size: 1rem; font-weight: 600; cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
+        .login-brand .mark svg { width: 26px; height: 26px; color: var(--text-primary, #171717); }
+        .login-brand p { margin: 0.5rem 0 0; font-size: 0.85rem; color: var(--text-secondary, #525252); }
+        .login-form { display: flex; flex-direction: column; gap: 1.1rem; }
+        .login-field label {
+            display: block; margin-bottom: 0.4rem;
+            font-size: 0.82rem; font-weight: 500; color: var(--text-secondary, #525252);
         }
-        .btn-login:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3); }
+        .login-field input {
+            width: 100%; box-sizing: border-box;
+            padding: 0.7rem 0.85rem;
+            border: 1px solid var(--border-color, #e5e5e5);
+            border-radius: 10px;
+            background: var(--bg-primary, #ffffff);
+            color: var(--text-primary, #171717);
+            font-size: 0.95rem;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .login-field input:focus {
+            outline: none;
+            border-color: var(--text-primary, #171717);
+            box-shadow: 0 0 0 3px rgba(115, 115, 115, 0.14);
+        }
+        .login-btn {
+            margin-top: 0.4rem;
+            width: 100%; padding: 0.8rem;
+            background: var(--text-primary, #171717);
+            color: var(--bg-primary, #ffffff);
+            border: none; border-radius: 10px;
+            font-size: 0.95rem; font-weight: 600; cursor: pointer;
+            transition: opacity 0.15s, transform 0.1s;
+        }
+        .login-btn:hover { opacity: 0.9; }
+        .login-btn:active { transform: translateY(1px); }
         .error-message {
-            background: #fee2e2; color: #dc2626;
-            padding: 0.75rem 1rem; border-radius: 8px;
-            margin-bottom: 1.5rem; font-size: 0.9rem;
+            background: var(--error-bg, #fef2f2);
+            color: var(--error-color, #dc2626);
+            border: 1px solid rgba(239, 68, 68, 0.22);
+            padding: 0.7rem 0.85rem; border-radius: 10px;
+            font-size: 0.85rem; margin-bottom: 1.25rem;
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <div class="logo">
-            <h1>mem-mesh</h1>
-            <p>AI Memory Management System</p>
+    <main class="login-card">
+        <div class="login-brand">
+            <span class="mark">
+                <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M16 4L4 10L16 16L28 10L16 4Z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+                    <path d="M4 22L16 28L28 22" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+                    <path d="M4 16L16 22L28 16" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+                </svg>
+                mem-mesh
+            </span>
+            <p>AI Memory Management</p>
         </div>
         {error_html}
-        <form method="POST" action="/login">
-            <div class="form-group">
+        <form class="login-form" method="POST" action="/login?next={next}">
+            <div class="login-field">
                 <label for="username">Username</label>
-                <input type="text" id="username" name="username" required autofocus>
+                <input type="text" id="username" name="username" required autofocus autocomplete="username">
             </div>
-            <div class="form-group">
+            <div class="login-field">
                 <label for="password">Password</label>
-                <input type="password" id="password" name="password" required>
+                <input type="password" id="password" name="password" required autocomplete="current-password">
             </div>
-            <button type="submit" class="btn-login">Sign In</button>
+            <button type="submit" class="login-btn">Sign in</button>
         </form>
-    </div>
+    </main>
 </body>
 </html>
 """
@@ -267,32 +322,55 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         "/favicon.ico",
         "/login",
         "/logout",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
     ]
 
-    OAUTH_PATHS = [
-        "/.well-known/oauth-authorization-server",
+    # Surfaces that carry their OWN auth scheme (OAuth bearer / hook token) or
+    # are not browser pages. Basic Auth gates dashboard *pages* only — gating
+    # these would lock out API / MCP / hook clients that have no dashboard
+    # session cookie (Claude Code hooks authenticate with MEM_MESH_HOOK_TOKEN;
+    # MCP and the REST API via OAuth bearer). Their own middleware
+    # (BearerTokenMiddleware / verify_hook_token) enforces auth independently —
+    # configure it with MEM_MESH_WEB_AUTH_ENABLED / MEM_MESH_MCP_AUTH_ENABLED.
+    EXEMPT_PATHS = [
+        "/.well-known/",
         "/oauth/",
         "/mcp/",
+        "/api/",
     ]
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        settings = get_settings()
+        from app.core.runtime_config import effective_bool
+
         path = request.url.path
 
-        if not settings.web_basic_auth_enabled:
+        # Resolve env > db(dashboard) > default so a dashboard toggle applies
+        # without a restart.
+        if not effective_bool("web_basic_auth_enabled"):
             return await call_next(request)
 
         if self._is_public_path(path):
             return await call_next(request)
 
-        if self._is_oauth_path(path):
-            return await call_next(request)
-
+        # Resolve a dashboard session once and reuse it for both the page gate
+        # and the API exemption. Attaching it to request.state lets
+        # BearerTokenMiddleware accept the browser SPA's /api calls (which carry
+        # only the session cookie, no OAuth bearer).
         session_id = request.cookies.get(SESSION_COOKIE_NAME)
         session = await validate_session(session_id) if session_id else None
-
         if session:
             request.state.auth_user = session["username"]
+            request.state.dashboard_session = session["username"]
+
+        # /api, /mcp, /oauth carry their own auth — never redirect them to login.
+        # The session (if any) was attached above for the /api dual-auth path.
+        if self._is_exempt_path(path):
+            return await call_next(request)
+
+        # Dashboard pages require a valid session.
+        if session:
             return await call_next(request)
 
         return RedirectResponse(url=f"/login?next={path}", status_code=302)
@@ -303,8 +381,8 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
                 return True
         return False
 
-    def _is_oauth_path(self, path: str) -> bool:
-        for oauth_path in self.OAUTH_PATHS:
-            if path.startswith(oauth_path):
+    def _is_exempt_path(self, path: str) -> bool:
+        for prefix in self.EXEMPT_PATHS:
+            if path.startswith(prefix):
                 return True
         return False

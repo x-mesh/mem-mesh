@@ -106,6 +106,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             storage_mode=settings.storage_mode,
         )
 
+        # Ensure a hook auth token exists before serving. If neither
+        # MEM_MESH_HOOK_TOKEN nor an on-disk token is set, one is generated in
+        # the data dir (persists on the mounted volume). This lets
+        # `docker compose up` start without a pre-seeded token while keeping
+        # hook write endpoints authenticated. The token value is never logged.
+        from app.core.config import bootstrap_hook_token
+
+        try:
+            _, _hook_token_created = bootstrap_hook_token()
+            logger.info(
+                "Hook auth token ready",
+                source="generated" if _hook_token_created else "configured",
+            )
+        except Exception as e:
+            # Persisting the token is best-effort: a read-only data dir
+            # (OSError) or an undeterminable home for a '~' path
+            # (RuntimeError from expanduser) must not crash startup. Hook auth
+            # then falls back to verify_hook_token's loopback/warning policy.
+            logger.warning("Could not persist a hook auth token", error=str(e))
+
         logger.info(
             "Initializing database connection", database_path=settings.database_path
         )
@@ -115,6 +135,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await db.connect()
 
         logger.info("Database connected successfully")
+
+        # Load dashboard-set runtime config overrides (auth settings) into the
+        # in-process cache so the auth middleware resolves env > db > default
+        # without a DB hit per request.
+        from app.core.runtime_config import load_overrides
+
+        try:
+            await load_overrides(db)
+        except Exception as e:
+            logger.warning("Could not load runtime config overrides", error=str(e))
+
+        # Expose the DB on app.state so route handlers (e.g. the security config
+        # API) can persist runtime overrides without importing module globals.
+        app.state.db = db
 
         # Initialize embedding service (deferred loading — server starts immediately)
         # Priority: target_embedding_model (onboarding choice) > embedding_model (DB) > settings
