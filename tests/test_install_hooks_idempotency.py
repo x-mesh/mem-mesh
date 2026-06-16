@@ -606,3 +606,192 @@ def test_render_rejects_project_id_injection() -> None:
         )
     with pytest.raises(ValueError):
         _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, "/tmp/safe", project_id="`id`")
+
+
+def test_install_codex_api_writes_command_hooks_and_mcp_config(
+    tmp_path: Path, monkeypatch
+) -> None:
+    token_file = tmp_path / ".mem-mesh" / "hook_token"
+    monkeypatch.setattr(install_hooks, "HOOK_TOKEN_FILE", token_file)
+    monkeypatch.setattr("app.core.config.HOOK_TOKEN_FILE", token_file)
+    monkeypatch.setattr(
+        "app.core.config._data_dir_hook_token_file",
+        lambda: tmp_path / "data" / "hook_token",
+    )
+    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
+
+    install_hooks._install_codex(
+        url="https://mem.example.com",
+        mode="api",
+        path="",
+        profile="standard",
+        base_dir=tmp_path,
+    )
+
+    codex_dir = tmp_path / ".codex"
+    hooks_dir = codex_dir / "hooks"
+    hooks_path = codex_dir / "hooks.json"
+    config_path = codex_dir / "config.toml"
+
+    assert (hooks_dir / "mem-mesh-session-start.sh").exists()
+    assert (hooks_dir / "mem-mesh-stop-decide.sh").exists()
+    assert (hooks_dir / "mem-mesh-precompact.sh").exists()
+
+    hooks = _read_json(hooks_path)["hooks"]
+    all_handlers = [
+        hook
+        for entries in hooks.values()
+        for entry in entries
+        for hook in entry["hooks"]
+    ]
+    assert all(handler["type"] == "command" for handler in all_handlers)
+    assert all("async" not in handler for handler in all_handlers)
+    assert not any(handler.get("type") == "http" for handler in all_handlers)
+    assert "PostToolUse" in hooks
+    assert (
+        hooks["PostToolUse"][0]["matcher"]
+        == "Edit|Write|MultiEdit|NotebookEdit|apply_patch"
+    )
+
+    config_text = config_path.read_text(encoding="utf-8")
+    assert "[mcp_servers.mem-mesh]" in config_text
+    assert 'url = "https://mem.example.com/mcp/sse"' in config_text
+    assert 'bearer_token_env_var = "MEM_MESH_HOOK_TOKEN"' in config_text
+    assert 'MEM_MESH_CLIENT = "codex"' in config_text
+
+    first_hooks = hooks_path.read_text(encoding="utf-8")
+    first_config = config_path.read_text(encoding="utf-8")
+    install_hooks._install_codex(
+        url="https://mem.example.com",
+        mode="api",
+        path="",
+        profile="standard",
+        base_dir=tmp_path,
+    )
+    assert hooks_path.read_text(encoding="utf-8") == first_hooks
+    assert config_path.read_text(encoding="utf-8") == first_config
+
+
+def test_install_codex_local_uses_stdio_mcp_and_no_post_tool_hook(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "repo"
+    project.mkdir()
+
+    install_hooks._install_codex(
+        url="http://localhost:8000",
+        mode="local",
+        path=str(project),
+        profile="standard",
+        base_dir=tmp_path,
+    )
+
+    hooks = _read_json(tmp_path / ".codex" / "hooks.json")["hooks"]
+    assert "PostToolUse" not in hooks
+    stop_command = hooks["Stop"][0]["hooks"][0]["command"]
+    assert stop_command.endswith("mem-mesh-stop.sh")
+
+    config_text = (tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8")
+    assert "command =" in config_text
+    assert 'args = ["-m", "app.mcp_stdio"]' in config_text
+    assert f'cwd = "{project}"' in config_text
+    assert 'MEM_MESH_CLIENT = "codex"' in config_text
+
+
+def test_uninstall_codex_preserves_user_hooks_and_removes_mcp(
+    tmp_path: Path, monkeypatch
+) -> None:
+    codex_dir = tmp_path / ".codex"
+    hooks_dir = codex_dir / "hooks"
+    hooks_dir.mkdir(parents=True)
+    hooks_file = codex_dir / "hooks.json"
+    config_path = codex_dir / "config.toml"
+    (hooks_dir / "mem-mesh-stop-decide.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    hooks_file.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {"hooks": [{"type": "command", "command": "/opt/user.sh"}]},
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": str(
+                                        hooks_dir / "mem-mesh-stop-decide.sh"
+                                    ),
+                                }
+                            ]
+                        },
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        "\n".join(
+            [
+                'model = "gpt-5.5"',
+                "",
+                "[mcp_servers.mem-mesh]",
+                'url = "http://localhost:8000/mcp/sse"',
+                "",
+                "[mcp_servers.other]",
+                'command = "other"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(install_hooks, "CODEX_HOOKS_DIR", hooks_dir)
+    monkeypatch.setattr(install_hooks, "CODEX_HOOKS_FILE", hooks_file)
+    monkeypatch.setattr(install_hooks, "CODEX_CONFIG", config_path)
+
+    install_hooks._uninstall_codex()
+
+    data = _read_json(hooks_file)
+    cmds = [h["command"] for entry in data["hooks"]["Stop"] for h in entry["hooks"]]
+    assert "/opt/user.sh" in cmds
+    assert all("mem-mesh" not in cmd for cmd in cmds)
+    assert not (hooks_dir / "mem-mesh-stop-decide.sh").exists()
+
+    config_text = config_path.read_text(encoding="utf-8")
+    assert 'model = "gpt-5.5"' in config_text
+    assert "[mcp_servers.mem-mesh]" not in config_text
+    assert "[mcp_servers.other]" in config_text
+
+
+def test_mcp_config_configures_codex_toml(tmp_path: Path) -> None:
+    from app.cli import mcp_config
+
+    config_path = tmp_path / ".codex" / "config.toml"
+    tool = {
+        "name": "Codex",
+        "key": "codex",
+        "config_path": config_path,
+        "installed": True,
+        "has_config": False,
+    }
+    entry = mcp_config.generate_mcp_entry(
+        mode="http", url="https://mem.example.com", tool_key="codex"
+    )
+
+    ok, msg = mcp_config.configure_tool(tool, entry, do_backup=True)
+
+    assert ok is True
+    assert msg == "added"
+    text = config_path.read_text(encoding="utf-8")
+    assert "[mcp_servers.mem-mesh]" in text
+    assert 'url = "https://mem.example.com/mcp/sse"' in text
+    assert 'MEM_MESH_CLIENT = "codex"' in text
+
+    verified, verify_msg = mcp_config.verify_tool_config(tool)
+    assert verified is True
+    assert verify_msg == "configured (Codex config.toml)"
+
+    removed, remove_msg = mcp_config.remove_tool_config(tool)
+    assert removed is True
+    assert remove_msg == "removed"
+    assert "[mcp_servers.mem-mesh]" not in config_path.read_text(encoding="utf-8")
