@@ -60,34 +60,122 @@ def test_is_loopback_host(host, expected):
 # ──────────────────────── resolve_hook_token ────────────────────────
 
 
+def _settings(tmp_path, *, hook_token):
+    """Stand-in settings with a database_path (drives the data-dir token path)."""
+    return SimpleNamespace(
+        hook_token=hook_token, database_path=str(tmp_path / "memories.db")
+    )
+
+
 def test_resolve_token_env_first(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        cfg, "get_settings", lambda: SimpleNamespace(hook_token="env-tok")
+        cfg, "get_settings", lambda: _settings(tmp_path, hook_token="env-tok")
     )
-    monkeypatch.setattr(cfg, "HOOK_TOKEN_FILE", tmp_path / "hook_token")
+    monkeypatch.setattr(cfg, "HOOK_TOKEN_FILE", tmp_path / "legacy_hook_token")
     assert cfg.resolve_hook_token() == "env-tok"
 
 
-def test_resolve_token_file_fallback(monkeypatch, tmp_path):
-    f = tmp_path / "hook_token"
-    f.write_text("file-tok\n", encoding="utf-8")
-    monkeypatch.setattr(cfg, "get_settings", lambda: SimpleNamespace(hook_token=None))
-    monkeypatch.setattr(cfg, "HOOK_TOKEN_FILE", f)
-    assert cfg.resolve_hook_token() == "file-tok"
+def test_resolve_token_data_dir_before_legacy(monkeypatch, tmp_path):
+    # The data-dir token (next to the DB) outranks the legacy ~/.mem-mesh file.
+    (tmp_path / "hook_token").write_text("data-tok\n", encoding="utf-8")
+    legacy = tmp_path / "legacy_hook_token"
+    legacy.write_text("legacy-tok\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cfg, "get_settings", lambda: _settings(tmp_path, hook_token=None)
+    )
+    monkeypatch.setattr(cfg, "HOOK_TOKEN_FILE", legacy)
+    assert cfg.resolve_hook_token() == "data-tok"
+
+
+def test_resolve_token_legacy_fallback(monkeypatch, tmp_path):
+    # No env, no data-dir token -> fall through to the legacy ~/.mem-mesh file.
+    legacy = tmp_path / "legacy_hook_token"
+    legacy.write_text("legacy-tok\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cfg,
+        "get_settings",
+        lambda: SimpleNamespace(
+            hook_token=None, database_path=str(tmp_path / "sub" / "memories.db")
+        ),
+    )
+    monkeypatch.setattr(cfg, "HOOK_TOKEN_FILE", legacy)
+    assert cfg.resolve_hook_token() == "legacy-tok"
 
 
 def test_resolve_token_none_when_unset(monkeypatch, tmp_path):
-    monkeypatch.setattr(cfg, "get_settings", lambda: SimpleNamespace(hook_token=None))
+    monkeypatch.setattr(
+        cfg,
+        "get_settings",
+        lambda: SimpleNamespace(
+            hook_token=None, database_path=str(tmp_path / "sub" / "memories.db")
+        ),
+    )
     monkeypatch.setattr(cfg, "HOOK_TOKEN_FILE", tmp_path / "absent")
     assert cfg.resolve_hook_token() is None
 
 
 def test_resolve_token_blank_env_falls_through_to_file(monkeypatch, tmp_path):
-    f = tmp_path / "hook_token"
-    f.write_text("file-tok", encoding="utf-8")
-    monkeypatch.setattr(cfg, "get_settings", lambda: SimpleNamespace(hook_token="   "))
-    monkeypatch.setattr(cfg, "HOOK_TOKEN_FILE", f)
-    assert cfg.resolve_hook_token() == "file-tok"
+    (tmp_path / "hook_token").write_text("data-tok", encoding="utf-8")
+    monkeypatch.setattr(
+        cfg, "get_settings", lambda: _settings(tmp_path, hook_token="   ")
+    )
+    monkeypatch.setattr(cfg, "HOOK_TOKEN_FILE", tmp_path / "legacy_absent")
+    assert cfg.resolve_hook_token() == "data-tok"
+
+
+# ─────────────────── bootstrap / rotate / source ────────────────────
+
+
+def test_bootstrap_generates_when_unset(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        cfg, "get_settings", lambda: _settings(tmp_path, hook_token=None)
+    )
+    monkeypatch.setattr(cfg, "HOOK_TOKEN_FILE", tmp_path / "legacy_absent")
+    token, created = cfg.bootstrap_hook_token()
+    assert created is True and token
+    data_file = tmp_path / "hook_token"
+    assert data_file.read_text(encoding="utf-8").strip() == token
+    assert (data_file.stat().st_mode & 0o777) == 0o600
+    # Idempotent: a second call reuses the persisted token.
+    token2, created2 = cfg.bootstrap_hook_token()
+    assert created2 is False and token2 == token
+
+
+def test_bootstrap_reuses_legacy_without_writing_data_dir(monkeypatch, tmp_path):
+    # A pre-existing legacy token must NOT be shadowed by a new data-dir file.
+    legacy = tmp_path / "legacy_hook_token"
+    legacy.write_text("legacy-tok\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cfg, "get_settings", lambda: _settings(tmp_path, hook_token=None)
+    )
+    monkeypatch.setattr(cfg, "HOOK_TOKEN_FILE", legacy)
+    token, created = cfg.bootstrap_hook_token()
+    assert created is False and token == "legacy-tok"
+    assert not (tmp_path / "hook_token").exists()
+
+
+def test_rotate_replaces_token(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        cfg, "get_settings", lambda: _settings(tmp_path, hook_token=None)
+    )
+    monkeypatch.setattr(cfg, "HOOK_TOKEN_FILE", tmp_path / "legacy_absent")
+    t1, _ = cfg.bootstrap_hook_token()
+    t2 = cfg.rotate_hook_token()
+    assert t2 != t1
+    assert cfg.resolve_hook_token() == t2
+
+
+def test_hook_token_source(monkeypatch, tmp_path):
+    monkeypatch.setattr(cfg, "HOOK_TOKEN_FILE", tmp_path / "legacy_absent")
+    monkeypatch.setattr(
+        cfg, "get_settings", lambda: _settings(tmp_path, hook_token="x")
+    )
+    assert cfg.hook_token_source() == "env"
+    (tmp_path / "hook_token").write_text("d", encoding="utf-8")
+    monkeypatch.setattr(
+        cfg, "get_settings", lambda: _settings(tmp_path, hook_token=None)
+    )
+    assert cfg.hook_token_source() == "data_file"
 
 
 # ───────────────────────── verify_hook_token ────────────────────────
@@ -162,13 +250,16 @@ def test_effective_host_override_not_static_setting(monkeypatch):
 def test_oauth_middleware_exempts_hook_paths(monkeypatch):
     # Hook paths must be skipped by the OAuth validator (own token scheme),
     # even when web auth is enabled, so a hook bearer is not double-validated.
-    settings = SimpleNamespace(
-        auth_enabled=True, web_auth_enabled=True, mcp_auth_enabled=True
-    )
+    # _requires_auth now resolves flags through runtime_config (env > db >
+    # default); stub them "on" to exercise the gating logic.
+    import app.core.runtime_config as rc
+
+    monkeypatch.setattr(rc, "effective_bool", lambda key: True)
+    monkeypatch.setattr(rc, "effective_tribool", lambda key: True)
     middleware = mw.BearerTokenMiddleware(app=lambda *a, **k: None)
-    assert middleware._requires_auth("/api/hooks/claude/stop", settings) is False
+    assert middleware._requires_auth("/api/hooks/claude/stop") is False
     # A normal API path is still gated.
-    assert middleware._requires_auth("/api/memories", settings) is True
+    assert middleware._requires_auth("/api/memories") is True
 
 
 def test_router_has_token_dependency():
