@@ -42,16 +42,34 @@ _MCP_CONFIG_PATH = {
 def _server_url(request: Request, override: Optional[str] = None) -> str:
     """The origin the client should point at.
 
-    An explicit ``override`` (the page's Server URL field) wins when it is a
-    valid http(s) URL — so a reverse-proxied deployment served on a domain can
-    emit that domain instead of the internal bind. Otherwise the dashboard's own
-    origin (``request.base_url``, honoring proxy headers when configured).
+    Precedence: explicit ``override`` (the page's Server URL field, for a one-off
+    preview) > the shared ``public_url`` runtime setting (env or dashboard-set,
+    so a reverse-proxied/domain deployment emits the domain for ALL users) >
+    the request origin (``request.base_url``, honoring proxy headers).
     """
-    if override:
-        o = override.strip().rstrip("/")
-        if o.startswith("http://") or o.startswith("https://"):
-            return o
+    for candidate in (override, rc.effective_str("public_url")):
+        if candidate:
+            c = candidate.strip().rstrip("/")
+            if c.startswith("http://") or c.startswith("https://"):
+                return c
     return str(request.base_url).rstrip("/")
+
+
+@router.get("/config")
+async def connect_config(request: Request, response: Response):
+    """The shared public URL (env > dashboard DB > unset) and the origin fallback.
+
+    The page uses this as the Server URL default for every user — set once,
+    shared by all — instead of a per-browser localStorage value.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    pub, source = rc.effective("public_url")
+    return {
+        "public_url": pub or "",
+        "source": source,
+        "env_pinned": rc.is_env_pinned("public_url"),
+        "origin": str(request.base_url).rstrip("/"),
+    }
 
 
 @router.get("/hooks")
@@ -77,6 +95,19 @@ async def connect_hooks(
 
     settings = _build_claude_hooks_settings(profile, mode, url)
 
+    # Claude Code's native HTTP hooks refuse private/link-local/CGNAT hosts
+    # (Tailscale/VPN/LAN) as an SSRF guard — only loopback and public addresses
+    # pass. Flag a blocked URL so the page can steer the user to api (command)
+    # mode instead of emitting an http config that fails at runtime.
+    http_hook_blocked = None
+    if mode == "http":
+        try:
+            from app.cli.hooks.netcheck import check_http_hook_url
+
+            http_hook_blocked = check_http_hook_url(url)
+        except Exception:  # pragma: no cover - defensive
+            http_hook_blocked = None
+
     token = resolve_hook_token()
     reveal = _can_reveal(request)
     return {
@@ -86,6 +117,7 @@ async def connect_hooks(
         "server_url": url,
         "settings": settings,
         "settings_path": _HOOK_SETTINGS_PATH.get(client, "~/.claude/settings.json"),
+        "http_hook_blocked": http_hook_blocked,
         "hook_token": token if reveal else None,
         "hook_token_masked": _mask(token) if token else "",
         "hook_token_env": "MEM_MESH_HOOK_TOKEN",
@@ -130,22 +162,51 @@ async def connect_mcp(
     mcp_auth_on = bool(
         rc.effective_bool("auth_enabled") and rc.effective_tribool("mcp_auth_enabled")
     )
-    oauth = (
-        {
+    if mcp_auth_on and mode in ("http", "sse"):
+        # Static token header (jina-style) so the pasted block authenticates
+        # without the interactive OAuth flow — the server accepts its hook token
+        # as an MCP API key on /mcp. Env-ref form; the value is returned below.
+        entry["headers"] = {"Authorization": "Bearer ${MEM_MESH_HOOK_TOKEN}"}
+    oauth = None
+    if mode in ("http", "sse"):
+        # Always surface the EXISTING OAuth clients (registered in Security → MCP
+        # OAuth) and whether MCP auth is actually ON. This clarifies the common
+        # confusion: making a client does NOT enable OAuth — mcp_auth_enabled
+        # must be on too. When off, the page shows the clients exist but are not
+        # enforced and links to Security to enable.
+        svc = getattr(request.app.state, "oauth_service", None)
+        clients = []
+        if svc is not None:
+            try:
+                for c in await svc.list_clients(limit=20):
+                    clients.append(
+                        {
+                            "client_id": c.client_id,
+                            "client_name": getattr(c, "client_name", ""),
+                            "is_active": getattr(c, "is_active", True),
+                        }
+                    )
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning("connect: listing OAuth clients failed: %s", e)
+        oauth = {
+            "enabled": mcp_auth_on,
             "metadata_url": f"{url}/.well-known/oauth-authorization-server",
             "authorize_url": f"{url}/oauth/authorize",
             "token_url": f"{url}/oauth/token",
             "register_url": f"{url}/oauth/register",
+            "clients": clients,
         }
-        if mcp_auth_on and mode in ("http", "sse")
-        else None
-    )
     return {
         "client": client,
         "mode": mode,
         "server_url": url,
         "config": {"mcpServers": {MCP_SERVER_KEY: entry}},
         "config_path": _MCP_CONFIG_PATH.get(client, "your MCP client's config file"),
-        "oauth_required": oauth is not None,
+        "oauth_required": mcp_auth_on,
         "oauth": oauth,
+        "mcp_token": (
+            resolve_hook_token() if (mcp_auth_on and _can_reveal(request)) else None
+        ),
+        "mcp_token_masked": _mask(resolve_hook_token()) if mcp_auth_on else "",
+        "mcp_token_env": "MEM_MESH_HOOK_TOKEN",
     }

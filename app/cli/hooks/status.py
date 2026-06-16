@@ -282,6 +282,29 @@ def cmd_status() -> None:
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     print(f"  ANTHROPIC_API_KEY: {_colorize_status('set' if api_key else 'not set')}")
 
+    # Hook auth token. HTTP hooks / MCP read $MEM_MESH_HOOK_TOKEN from the SHELL
+    # (no file fallback), so distinguish "exported in shell" from "file only": a
+    # file-only token authenticates command (.sh) hooks but leaves HTTP hooks and
+    # MCP unauthenticated until exported (run `mem-mesh-hooks setup-token`).
+    env_token = os.environ.get("MEM_MESH_HOOK_TOKEN")
+    try:
+        from app.core.config import resolve_hook_token
+
+        file_token = resolve_hook_token()
+    except Exception:
+        file_token = env_token
+    if env_token:
+        print(
+            f"  MEM_MESH_HOOK_TOKEN: {ok('set')} {dim('(shell env — HTTP hooks/MCP ok)')}"
+        )
+    elif file_token:
+        print(
+            f"  MEM_MESH_HOOK_TOKEN: {warn('file only')} "
+            f"{dim('(.sh hooks ok; HTTP/MCP need: mem-mesh-hooks setup-token)')}"
+        )
+    else:
+        print(f"  MEM_MESH_HOOK_TOKEN: {_colorize_status('not set')}")
+
     if CLAUDE_SETTINGS.exists():
         try:
             settings = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))

@@ -188,6 +188,17 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+        # Single static API token: the server's hook token authenticates hook,
+        # MCP, AND REST (/api) clients — one token for all programmatic access
+        # (jina-style header on /mcp; Bearer on /api). The browser dashboard
+        # still uses its session (dual-auth) on /api, and OAuth remains an
+        # advanced alternative. /api/hooks has its own verify_hook_token and is
+        # already exempt from _requires_auth.
+        if path.startswith("/mcp/") or path.startswith("/api/"):
+            static_token = resolve_hook_token()
+            if static_token and secrets.compare_digest(token, static_token):
+                return await call_next(request)
+
         oauth_service = getattr(request.app.state, "oauth_service", None)
         if not oauth_service:
             logger.error("OAuth service not initialized")

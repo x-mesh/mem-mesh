@@ -69,11 +69,12 @@ MANAGED_AUTH_KEYS = {
     "admin_password": "secret",
 }
 
-# Non-auth runtime settings (display/formatting), kept separate from the auth
-# keys above so changes to one never touch the other. 'str' kind = stored and
-# returned verbatim.
+# Non-auth runtime settings (display/formatting, public URL), kept separate from
+# the auth keys above so changes to one never touch the other. 'str' kind =
+# stored and returned verbatim.
 MANAGED_DISPLAY_KEYS = {
     "display_timezone": "str",
+    "public_url": "str",
 }
 
 # All runtime-managed keys (auth + display), public so callers can validate
@@ -93,6 +94,7 @@ DB_OVERRIDABLE_KEYS = {
     "admin_username",
     "admin_password",
     "display_timezone",
+    "public_url",
     "auth_enabled",
     "mcp_auth_enabled",
     "web_auth_enabled",

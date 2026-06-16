@@ -53,7 +53,7 @@ export class SecurityPage extends HTMLElement {
         </header>
 
         <div class="sec-tabs">
-          <button class="sec-tab active" data-tab="hook">Hook Token</button>
+          <button class="sec-tab active" data-tab="hook">API Token</button>
           <button class="sec-tab" data-tab="web">Web Dashboard Auth</button>
           <button class="sec-tab" data-tab="mcp">MCP OAuth</button>
         </div>
@@ -99,6 +99,12 @@ export class SecurityPage extends HTMLElement {
       this.config = config;
       this.renderHookPanel();
       this.renderWebPanel();
+      // Auto-reveal for an authorized operator (loopback / logged-in / OAuth) so
+      // the token is always visible and recoverable — it's server-stored, so
+      // losing it never needs a regenerate. Mirrors Connect's behavior.
+      if (this.overview.hook && this.overview.hook.can_reveal && !this.revealedToken) {
+        this.toggleReveal();
+      }
     } catch (error) {
       const msg = `<div class="error-message">Failed to load security status: ${this.escapeHtml(error.message)}</div>`;
       const hp = this.querySelector('#panel-hook');
@@ -137,11 +143,13 @@ export class SecurityPage extends HTMLElement {
     panel.innerHTML = `
       <div class="card">
         <div class="card-header">
-          <h2>Hook Token</h2>
+          <h2>API Token</h2>
           <span class="status-badge ${hook.configured ? 'active' : 'inactive'}">${hook.configured ? 'Configured' : 'Missing'}</span>
         </div>
         <div class="card-body">
-          <p class="muted">Shared secret guarding <code>POST /api/hooks/claude/*</code> against unauthenticated memory writes.</p>
+          <p class="muted">Single static Bearer token for <strong>all programmatic access</strong> — hooks (<code>/api/hooks/claude/*</code>), MCP (<code>/mcp</code>), and the REST API (<code>/api</code>). One token, set as <code>MEM_MESH_HOOK_TOKEN</code> where clients run.</p>
+          <p class="hint">Web dashboard login (password) and OAuth are separate — see the other tabs.</p>
+          <p class="hint">Stored on the server — if you lose it, just reveal it here again. No need to regenerate (which would break every existing client).</p>
 
           <div class="kv"><span class="k">Source</span><span class="v">${this.escapeHtml(sourceLabel)}${hook.env_pinned ? ' <span class="pill">env-pinned</span>' : ''}</span></div>
 
@@ -291,10 +299,11 @@ export class SecurityPage extends HTMLElement {
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-header">
-          <h2>OAuth (MCP / Web API)</h2>
-        </div>
+      <details class="card oauth-advanced">
+        <summary class="oauth-summary">
+          <span class="oauth-summary-title">OAuth (MCP / Web API) — Advanced</span>
+          <span class="hint">Optional — the API token already covers api &amp; mcp. Expand only for standard OAuth clients (dynamic registration, /mcp Authenticate).</span>
+        </summary>
         <div class="card-body">
           <p class="muted">Protects <code>/api</code> and <code>/mcp</code> with OAuth bearer tokens (one shared scheme — manage clients in the <strong>MCP OAuth</strong> tab). The browser dashboard keeps access through its Basic Auth session.</p>
           ${oauthWarn}
@@ -320,7 +329,7 @@ export class SecurityPage extends HTMLElement {
           <div class="kv"><span class="k">Bind host</span><span class="v"><code>${this.escapeHtml(bind.effective_host || '')}</code> ${bind.is_loopback ? '<span class="pill">loopback</span>' : '<span class="pill warn-pill">exposed</span>'}</span></div>
           ${oauthPinnedNote}
         </div>
-      </div>
+      </details>
     `;
 
     if (editable) {
@@ -472,6 +481,12 @@ export class SecurityPage extends HTMLElement {
         .switch-row { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; }
         .switch-row input { width: 18px; height: 18px; }
         .security-page input:disabled { opacity: 0.6; cursor: not-allowed; }
+        .oauth-advanced { padding: 0; }
+        .oauth-summary { cursor: pointer; padding: 0.9rem 1.25rem; display: flex; flex-direction: column; gap: 0.25rem; background: var(--card-header-bg, #f8f9fa); list-style: none; }
+        .oauth-summary::-webkit-details-marker { display: none; }
+        .oauth-summary::marker { content: ''; }
+        .oauth-summary-title { font-size: 1.1rem; font-weight: 600; color: var(--text-primary, #171717); }
+        .oauth-advanced[open] .oauth-summary { border-bottom: 1px solid var(--border-color, #e0e0e0); }
       </style>
     `;
   }

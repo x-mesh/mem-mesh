@@ -9,6 +9,27 @@ import { showToast } from '../utils/toast-notifications.js';
 export class ConnectPage extends HTMLElement {
   connectedCallback() {
     this.render();
+    this.init();
+  }
+
+  async init() {
+    // Server URL default comes from the shared server config (env > db), not a
+    // per-browser value — set once, shared by all users.
+    try {
+      const cfg = await this.fetchJSON('/api/connect/config');
+      const input = this.querySelector('#cn-url');
+      input.value = cfg.public_url || cfg.origin || window.location.origin;
+      if (cfg.env_pinned) {
+        input.disabled = true;
+        const save = this.querySelector('#cn-save-url');
+        if (save) save.disabled = true;
+        const hint = this.querySelector('.cn-url-pinned');
+        if (hint) hint.textContent = ' (pinned via MEM_MESH_PUBLIC_URL)';
+      }
+    } catch (e) {
+      const input = this.querySelector('#cn-url');
+      if (input) input.value = window.location.origin;
+    }
     this.load();
   }
 
@@ -35,8 +56,11 @@ export class ConnectPage extends HTMLElement {
         <div class="card">
           <div class="card-body">
             <div class="cn-controls">
-              <label class="cn-url-label">Server URL <span class="hint">(domain/proxy — saved, applied to all snippets)</span>
-                <input type="text" id="cn-url" placeholder="https://your-host">
+              <label class="cn-url-label">Server URL <span class="hint">(shared — domain/proxy for all users<span class="cn-url-pinned"></span>)</span>
+                <div class="cn-url-row">
+                  <input type="text" id="cn-url" placeholder="https://your-host">
+                  <button type="button" class="btn btn-sm btn-secondary" id="cn-save-url">Save for all</button>
+                </div>
               </label>
               <label>Client
                 <select id="cn-client">
@@ -71,24 +95,24 @@ export class ConnectPage extends HTMLElement {
     this.querySelector('#cn-hookmode').addEventListener('change', () => this.load());
     this.querySelector('#cn-mcpmode').addEventListener('change', () => this.load());
 
-    // Server URL persists across visits (same server == same public URL).
-    const urlInput = this.querySelector('#cn-url');
-    urlInput.value = this.savedUrl();
-    urlInput.addEventListener('change', () => {
-      const v = urlInput.value.trim();
-      try {
-        if (v) localStorage.setItem(ConnectPage.URL_KEY, v);
-        else localStorage.removeItem(ConnectPage.URL_KEY);
-      } catch (e) {}
-      this.load();
-    });
+    // Server URL is shared (server-stored): change = local preview, Save = persist.
+    this.querySelector('#cn-url').addEventListener('change', () => this.load());
+    this.querySelector('#cn-save-url').addEventListener('click', () => this.savePublicUrl());
   }
 
-  savedUrl() {
+  async savePublicUrl() {
+    const url = (this.querySelector('#cn-url')?.value || '').trim();
     try {
-      return localStorage.getItem(ConnectPage.URL_KEY) || window.location.origin;
+      // Persist via the runtime-config write API (public_url is dashboard-settable).
+      await this.fetchJSON('/api/security/auth', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ public_url: url }),
+      });
+      showToast(url ? 'Server URL saved for all users.' : 'Server URL cleared.', 'success');
+      this.load();
     } catch (e) {
-      return window.location.origin;
+      showToast('Failed to save: ' + e.message, 'error');
     }
   }
 
@@ -132,6 +156,20 @@ export class ConnectPage extends HTMLElement {
     const cliNote = h.paste_complete
       ? ''
       : `<p class="hint warn">Paste covers HTTP hooks only — command hooks also need shell scripts. For the full set: <code>mem-mesh-hooks install</code>.</p>`;
+    // SSRF guard: Claude Code HTTP hooks reject private/VPN/LAN hosts. When the
+    // server URL is blocked, steer to Command (api) mode instead of an http
+    // config that fails at runtime.
+    const blocked = h.http_hook_blocked
+      ? `<p class="hint warn" style="border-left:3px solid #e5484d;padding-left:.6em">
+           ⚠ HTTP hooks can't reach <code>${this.esc(h.server_url)}</code>: ${this.esc(h.http_hook_blocked)}
+           <br>Switch <b>Hook mode → Command (api)</b> for this server.</p>`
+      : '';
+    // HTTP hooks read $MEM_MESH_HOOK_TOKEN from the shell (no file fallback), so
+    // remind the user to export it or it is sent empty (401).
+    const tokenHint =
+      h.mode === 'http'
+        ? `<p class="hint">HTTP hooks read the token from your shell — run <code>mem-mesh-hooks setup-token</code> so <code>${this.esc(h.hook_token_env)}</code> isn't sent empty.</p>`
+        : '';
     return `
       <div class="card">
         <div class="card-header">
@@ -142,9 +180,11 @@ export class ConnectPage extends HTMLElement {
           </div>
         </div>
         <div class="card-body">
+          ${blocked}
           <p class="hint">${this.esc(h.note)}</p>
           ${cliNote}
           ${tokenRow}
+          ${tokenHint}
           <div class="cn-test-result"></div>
           <pre class="snippet"><code>${this.esc(json)}</code></pre>
         </div>
@@ -153,18 +193,7 @@ export class ConnectPage extends HTMLElement {
 
   mcpCard(m) {
     const json = JSON.stringify(m.config, null, 2);
-    const oauthBlock = m.oauth_required
-      ? `<div class="cn-oauth">
-           <p class="hint warn">MCP OAuth is enabled — this client authenticates via OAuth. Register a client, then complete the flow on first connect.</p>
-           <div class="cn-actions">
-             <button class="btn btn-sm btn-secondary cn-create-oauth">Register OAuth client</button>
-             <a href="/security" class="btn btn-sm btn-secondary" data-route="/security">Manage in Security →</a>
-           </div>
-           <div class="cn-oauth-result"></div>
-         </div>`
-      : `<div class="cn-oauth">
-           <p class="hint">MCP OAuth is off — clients connect without auth. <a href="/security" data-route="/security">Enable it in Security →</a> if this server is network-exposed.</p>
-         </div>`;
+    const oauthBlock = m.oauth ? this.mcpOAuthBlock(m.oauth, m) : '';
     return `
       <div class="card">
         <div class="card-header">
@@ -178,6 +207,54 @@ export class ConnectPage extends HTMLElement {
       </div>`;
   }
 
+  mcpOAuthBlock(o, m) {
+    const clients = o.clients || [];
+    const clientList = clients.length
+      ? `<div class="cn-clients"><span class="hint">Registered OAuth clients:</span>
+           <ul>${clients
+             .map(
+               (c) =>
+                 `<li><code>${this.esc(c.client_id)}</code> <span class="hint">${this.esc(c.client_name || '')}${
+                   c.is_active === false ? ' · inactive' : ''
+                 }</span></li>`
+             )
+             .join('')}</ul></div>`
+      : '';
+
+    // MCP auth OFF: making a client does NOT enable OAuth; the config works as-is.
+    if (!o.enabled) {
+      const warn = clients.length
+        ? `<p class="hint warn"><strong>${clients.length} OAuth client(s) registered, but MCP auth is OFF</strong> — not enforced, so this config <strong>works as-is without auth</strong>. Making a client doesn't enable OAuth. <a href="/security" data-route="/security">Enable MCP auth in Security →</a> to require it.</p>`
+        : `<p class="hint">MCP OAuth is off — clients connect without auth, so this config <strong>works as-is</strong> (fine for localhost/loopback). <a href="/security" data-route="/security">Enable it in Security →</a> if network-exposed.</p>`;
+      return `<div class="cn-oauth">${warn}${clientList}</div>`;
+    }
+
+    // MCP auth ON: Claude Code does NOT auto-OAuth from the URL — the user must
+    // Authenticate (CLI) or paste a bearer header. Spell that out so the pasted
+    // block is actually usable.
+    const endpoints = `<details class="cn-endpoints"><summary>OAuth endpoints</summary>
+         <div class="cn-token">metadata: <code>${this.esc(o.metadata_url || '')}</code></div>
+         <div class="cn-token">authorize: <code>${this.esc(o.authorize_url || '')}</code></div>
+         <div class="cn-token">token: <code>${this.esc(o.token_url || '')}</code></div>
+       </details>`;
+    const env = (m && m.mcp_token_env) || 'MEM_MESH_HOOK_TOKEN';
+    const tokenRow = m && m.mcp_token
+      ? `<div class="cn-token">Set <code>${this.esc(env)}</code> = <code id="cn-mcptok">${this.esc(m.mcp_token)}</code> <button class="btn btn-sm copy-mcptok">Copy token</button></div>`
+      : `<div class="cn-token">Token: <code>${this.esc((m && m.mcp_token_masked) || '')}</code> <span class="hint">(reveal requires dashboard login or local access)</span></div>`;
+    return `<div class="cn-oauth">
+         <p class="hint warn">MCP auth is enabled — the block above already includes a <code>headers</code> Bearer token, so it works as-is once the env var is set:</p>
+         ${tokenRow}
+         <p class="hint">The header reads <code>\${${this.esc(env)}}</code> — export that env where the client runs (jina-style), or paste the token inline. Prefer interactive OAuth instead? Remove the header and use Claude Code <code>/mcp</code> → Authenticate (endpoints below).</p>
+         ${clients.length ? clientList : ''}
+         ${endpoints}
+         <div class="cn-actions">
+           <button class="btn btn-sm btn-secondary cn-create-oauth">Register OAuth client</button>
+           <a href="/security" class="btn btn-sm btn-secondary" data-route="/security">Manage in Security →</a>
+         </div>
+         <div class="cn-oauth-result"></div>
+       </div>`;
+  }
+
   bindCopies(root) {
     root.querySelectorAll('.copy-block').forEach((b) =>
       b.addEventListener('click', () => {
@@ -188,6 +265,12 @@ export class ConnectPage extends HTMLElement {
     root.querySelectorAll('.copy-token').forEach((b) =>
       b.addEventListener('click', () => {
         const el = this.querySelector('#cn-tok');
+        if (el) this.copy(el.textContent);
+      })
+    );
+    root.querySelectorAll('.copy-mcptok').forEach((b) =>
+      b.addEventListener('click', () => {
+        const el = this.querySelector('#cn-mcptok');
         if (el) this.copy(el.textContent);
       })
     );
@@ -290,8 +373,9 @@ export class ConnectPage extends HTMLElement {
         .cn-controls { display: flex; flex-wrap: wrap; gap: 1.25rem; }
         .cn-controls label { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.82rem; color: var(--text-secondary, #525252); font-weight: 500; }
         .cn-controls select, .cn-controls input { padding: 0.5rem 0.7rem; border: 1px solid var(--border-color, #e5e5e5); border-radius: 8px; background: var(--bg-primary, #fff); color: var(--text-primary, #171717); font-size: 0.9rem; min-width: 220px; }
-        .cn-url-label { flex: 1 1 280px; }
-        .cn-url-label input { width: 100%; box-sizing: border-box; }
+        .cn-url-label { flex: 1 1 320px; }
+        .cn-url-row { display: flex; gap: 0.5rem; }
+        .cn-url-row input { flex: 1; min-width: 0; box-sizing: border-box; }
         .cn-token { margin: 0.5rem 0 1rem; font-size: 0.88rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
         .cn-token code { background: var(--code-bg, #f1f3f5); padding: 0.15rem 0.45rem; border-radius: 4px; word-break: break-all; }
         .snippet { background: var(--code-bg, #1e1e2e); color: var(--code-fg, #e0e0e0); padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.82rem; margin: 0; }
@@ -307,6 +391,13 @@ export class ConnectPage extends HTMLElement {
         .error-message { background: #f8d7da; color: #721c24; padding: 1rem; border-radius: 8px; }
         .cn-oauth { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color, #e5e5e5); }
         .cn-oauth-result { margin-top: 0.6rem; }
+        .cn-clients ul { margin: 0.4rem 0 0.8rem; padding-left: 1.2rem; }
+        .cn-clients li { margin: 0.2rem 0; word-break: break-all; }
+        .cn-endpoints { margin: 0.6rem 0; }
+        .cn-endpoints summary { cursor: pointer; font-size: 0.85rem; color: var(--text-secondary, #666); }
+        .cn-howto { margin: 0.4rem 0 0.8rem; padding-left: 1.2rem; font-size: 0.85rem; }
+        .cn-howto li { margin: 0.3rem 0; }
+        .cn-howto code { background: var(--code-bg, #f1f3f5); padding: 0.1rem 0.35rem; border-radius: 4px; }
         .connect-page .hint.warn { color: #856404; background: #fff3cd; padding: 0.5rem 0.7rem; border-radius: 6px; }
         .connect-page .btn-secondary { background: var(--secondary-bg, #e9ecef); color: var(--text-primary, #333); }
         .cn-actions { display: flex; gap: 0.5rem; }
@@ -317,5 +408,4 @@ export class ConnectPage extends HTMLElement {
   }
 }
 
-ConnectPage.URL_KEY = 'mem-mesh-connect-url';
 customElements.define('connect-page', ConnectPage);

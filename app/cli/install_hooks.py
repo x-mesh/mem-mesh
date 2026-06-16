@@ -2002,6 +2002,29 @@ def main(argv: Optional[List[str]] = None) -> None:
     # doctor
     subparsers.add_parser("doctor", help="Run diagnostics and connectivity checks")
 
+    # setup-token
+    token_parser = subparsers.add_parser(
+        "setup-token",
+        help="Export MEM_MESH_HOOK_TOKEN in your shell rc (needed for HTTP hooks / MCP)",
+    )
+    token_parser.add_argument(
+        "--print",
+        dest="print_only",
+        action="store_true",
+        help="Print the export block instead of editing the rc file",
+    )
+    token_parser.add_argument(
+        "--api-url", default=None, help="Also export MEM_MESH_API_URL"
+    )
+    token_parser.add_argument(
+        "--no-test", action="store_true", help="Skip the post-setup auth test"
+    )
+    token_parser.add_argument(
+        "--rc",
+        default=None,
+        help="Shell rc file to edit (default: auto-detect from $SHELL)",
+    )
+
     # sync-project
     sync_parser = subparsers.add_parser(
         "sync-project",
@@ -2047,6 +2070,15 @@ def main(argv: Optional[List[str]] = None) -> None:
         from app.cli.hooks.doctor import cmd_doctor
 
         cmd_doctor()
+    elif args.command == "setup-token":
+        from app.cli.hooks.token_setup import cmd_setup_token
+
+        cmd_setup_token(
+            print_only=args.print_only,
+            api_url=args.api_url,
+            no_test=args.no_test,
+            rc_path=args.rc,
+        )
     elif args.command == "sync-project":
         cmd_sync_project(args.target, args.project_id)
 

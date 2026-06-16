@@ -298,6 +298,14 @@ class Settings(BaseSettings):
         default="http://localhost:8000",
         description="OAuth issuer URL (used in metadata discovery)",
     )
+    public_url: str = Field(
+        default="",
+        description=(
+            "Public base URL (domain/proxy) advertised to clients in the /connect "
+            "config. Shared by all dashboard users. Empty = fall back to the "
+            "request origin. Env: MEM_MESH_PUBLIC_URL; also dashboard-settable."
+        ),
+    )
     oauth_access_token_ttl: int = Field(
         default=3600,
         ge=60,

@@ -69,8 +69,16 @@ def _web_auth_enforced() -> bool:
 
 
 def _can_reveal(request: Request) -> bool:
-    """Whether the plaintext hook token / auth change is allowed for this request."""
+    """Whether the plaintext token / auth change is allowed for this request.
+
+    Allowed for: a validated OAuth web-auth bearer; a logged-in dashboard
+    session (Basic Auth — the operator authenticated and reaches /api via
+    dual-auth, so revealing to them is safe and expected, e.g. recovering the
+    token); or a loopback request. Otherwise masked only.
+    """
     if _web_auth_enforced():
+        return True
+    if getattr(request.state, "dashboard_session", None):
         return True
     client = request.client.host if request.client else None
     return is_loopback_host(client)
