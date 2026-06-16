@@ -32,11 +32,14 @@ services:
       # own SQLite write connection (WAL lock contention). Keep at 1 until a
       # shared cache / server DB engine is in place. (red-team multi-worker)
       - MEM_MESH_SERVER_WORKERS=1
-      # REQUIRED: shared secret for hook write endpoints. `docker compose up`
-      # fails until this is set (put a strong random value in your .env, e.g.
-      # `MEM_MESH_HOOK_TOKEN=$(openssl rand -hex 32)`). Hooks must send it as
-      # `Authorization: Bearer <token>`.
-      - MEM_MESH_HOOK_TOKEN=${MEM_MESH_HOOK_TOKEN:?Set MEM_MESH_HOOK_TOKEN in .env to a strong random secret; the server is bound to 0.0.0.0 and fails closed without it}
+      # Shared secret for hook write endpoints. OPTIONAL: if left empty the
+      # server auto-generates one at startup and persists it to
+      # ./data/hook_token (the mounted volume), so `docker compose up` always
+      # starts. Set it explicitly in .env to pin a known value, e.g.
+      # `MEM_MESH_HOOK_TOKEN=$(openssl rand -hex 32)`. Either way, hooks must
+      # send it as `Authorization: Bearer <token>`; retrieve/rotate the
+      # generated token from the dashboard Security page.
+      - MEM_MESH_HOOK_TOKEN=${MEM_MESH_HOOK_TOKEN:-}
       # Embedding model: defaults to nlpai-lab/KURE-v1 (Korean-tuned, 1024-dim)
       # Override by uncommenting and setting MEM_MESH_EMBEDDING_MODEL below.
       # - MEM_MESH_EMBEDDING_MODEL=intfloat/multilingual-e5-large

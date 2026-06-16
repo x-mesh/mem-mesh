@@ -8,8 +8,10 @@ Supports storage_mode for direct SQLite access or API mode.
 
 import os
 import platform
+import secrets
+import tempfile
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Tuple
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
@@ -93,6 +95,18 @@ class Settings(BaseSettings):
         ),
     )
     embedding_dim: int = Field(default=1024, description="Embedding vector dimensions")
+
+    # Display timezone for API/MCP output. Storage stays UTC everywhere; only
+    # the response boundary localizes timestamps. Runtime-overridable from the
+    # dashboard (see runtime_config). Env: MEM_MESH_DISPLAY_TIMEZONE.
+    display_timezone: str = Field(
+        default="UTC",
+        description=(
+            "IANA timezone used to localize timestamps in API/MCP responses "
+            "(e.g. Asia/Seoul). Storage is always UTC; default UTC returns "
+            "timestamps unchanged. Override via MEM_MESH_DISPLAY_TIMEZONE."
+        ),
+    )
 
     # Search configuration
     search_threshold: float = Field(
@@ -382,6 +396,19 @@ class Settings(BaseSettings):
             raise ValueError("embedding_model cannot be empty")
         return v.strip()
 
+    @field_validator("display_timezone")
+    @classmethod
+    def validate_display_timezone(cls, v: str) -> str:
+        """Validate the display timezone is a known IANA name (or UTC)."""
+        name = (v or "UTC").strip() or "UTC"
+        try:
+            from zoneinfo import ZoneInfo
+
+            ZoneInfo(name)
+        except Exception as exc:
+            raise ValueError(f"invalid IANA timezone: {name!r}") from exc
+        return name
+
     @model_validator(mode="after")
     def validate_basic_auth_password(self) -> "Settings":
         """Ensure admin_password is set when basic auth is enabled."""
@@ -466,33 +493,131 @@ def create_settings(**kwargs) -> Settings:
     return Settings(**kwargs)
 
 
-# Path of the on-disk hook-token fallback (written 0600 by the installer).
+# Legacy on-disk hook-token fallback, written 0600 by the CLI installer
+# (``app.cli.install_hooks._ensure_hook_token``). Kept for backwards
+# compatibility; the server now prefers the data-dir token below.
 HOOK_TOKEN_FILE = Path.home() / ".mem-mesh" / "hook_token"
 
 
-def resolve_hook_token() -> Optional[str]:
-    """Resolve the hook auth token: MEM_MESH_HOOK_TOKEN env first, file fallback.
+def _data_dir_hook_token_file() -> Path:
+    """Server-managed hook-token path inside the data directory.
 
-    Resolution order (matches the installer contract):
-    1. ``settings.hook_token`` (from MEM_MESH_HOOK_TOKEN / .env)
-    2. ``~/.mem-mesh/hook_token`` file contents (trimmed)
-
-    Returns None when neither is configured. Read every call (no caching) so a
-    token written after startup is picked up without a restart.
+    Sits next to the SQLite database (``database_path``), so when ``./data`` is
+    a mounted Docker volume the auto-generated token survives container
+    restarts. Preferred over ``~/.mem-mesh/hook_token`` because a container home
+    directory is typically ephemeral.
     """
-    token = (get_settings().hook_token or "").strip()
-    if token:
-        return token
+    db_path = getattr(get_settings(), "database_path", None) or _default_db_path()
+    return Path(db_path).expanduser().resolve().parent / "hook_token"
 
+
+def _read_token_file(path: Path) -> Optional[str]:
+    """Return the trimmed contents of a token file, or None if absent/unreadable."""
     try:
-        if HOOK_TOKEN_FILE.exists():
-            file_token = HOOK_TOKEN_FILE.read_text(encoding="utf-8").strip()
-            return file_token or None
+        if path.exists():
+            token = path.read_text(encoding="utf-8").strip()
+            return token or None
     except OSError:
         # Unreadable token file degrades to "no token configured"; the
         # loopback/warning logic in verify_hook_token then applies.
         pass
     return None
+
+
+def hook_token_source() -> str:
+    """Report where the active hook token comes from.
+
+    One of ``"env"`` (MEM_MESH_HOOK_TOKEN / .env), ``"data_file"``
+    (``<data dir>/hook_token``), ``"legacy_file"`` (``~/.mem-mesh/hook_token``)
+    or ``"none"``. Mirrors the precedence in :func:`resolve_hook_token` so the
+    dashboard can warn that an env-pinned token overrides a rotated one.
+    """
+    if (get_settings().hook_token or "").strip():
+        return "env"
+    if _read_token_file(_data_dir_hook_token_file()):
+        return "data_file"
+    if _read_token_file(HOOK_TOKEN_FILE):
+        return "legacy_file"
+    return "none"
+
+
+def resolve_hook_token() -> Optional[str]:
+    """Resolve the hook auth token: env first, then on-disk fallbacks.
+
+    Resolution order:
+    1. ``settings.hook_token`` (from MEM_MESH_HOOK_TOKEN / .env)
+    2. ``<data dir>/hook_token`` — server-managed, generated by
+       :func:`bootstrap_hook_token`; persists on the mounted data volume.
+    3. ``~/.mem-mesh/hook_token`` — legacy path written by the CLI installer.
+
+    Returns None when none is configured. Read every call (no caching) so a
+    token written/rotated after startup is picked up without a restart.
+    """
+    token = (get_settings().hook_token or "").strip()
+    if token:
+        return token
+    return _read_token_file(_data_dir_hook_token_file()) or _read_token_file(
+        HOOK_TOKEN_FILE
+    )
+
+
+def _atomic_write_token(path: Path, token: str) -> None:
+    """Write ``token`` to ``path`` atomically with 0600 perms.
+
+    Mirrors ``app.cli.hooks.json_ops._atomic_write_text`` but kept local so the
+    core layer does not import the CLI layer. The content is written to a temp
+    file in the same directory, chmod'd, then ``os.replace``'d into place so a
+    crash mid-write can never truncate the original.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(token + "\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def bootstrap_hook_token() -> Tuple[str, bool]:
+    """Ensure a hook auth token exists, generating one if none is configured.
+
+    Returns ``(token, created)``. When a token already resolves (env or either
+    on-disk fallback) it is returned with ``created=False``. Otherwise a fresh
+    ``secrets.token_urlsafe(32)`` is written to ``<data dir>/hook_token`` (0600)
+    and returned with ``created=True``.
+
+    Called once at server startup so ``docker compose up`` succeeds without a
+    pre-seeded MEM_MESH_HOOK_TOKEN, while hook writes still require
+    authentication (a token always exists; unauthenticated writes are rejected).
+    """
+    existing = resolve_hook_token()
+    if existing:
+        return existing, False
+    token = secrets.token_urlsafe(32)
+    _atomic_write_token(_data_dir_hook_token_file(), token)
+    return token, True
+
+
+def rotate_hook_token() -> str:
+    """Generate a new hook token in the data dir, replacing any existing one.
+
+    Returns the new token. Unlike :func:`bootstrap_hook_token` this always
+    writes a fresh value — used by the dashboard "regenerate" action. Note that
+    an env-provided MEM_MESH_HOOK_TOKEN takes precedence in
+    :func:`resolve_hook_token`, so rotation has no effect while that env var is
+    set; callers should surface that to the operator.
+    """
+    token = secrets.token_urlsafe(32)
+    _atomic_write_token(_data_dir_hook_token_file(), token)
+    return token
 
 
 # The host uvicorn actually binds to. ``settings.server_host`` is the *static*

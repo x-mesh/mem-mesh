@@ -150,16 +150,17 @@ def _ensure_hook_token() -> str:
     is written 0600 via an atomic swap. An existing token is reused so repeated
     installs stay idempotent.
     """
-    env_token = (os.environ.get(HOOK_TOKEN_ENV_VAR) or "").strip()
-    if env_token:
-        return env_token
-    try:
-        if HOOK_TOKEN_FILE.exists():
-            existing = HOOK_TOKEN_FILE.read_text(encoding="utf-8").strip()
-            if existing:
-                return existing
-    except OSError:
-        pass
+    # Reuse whatever token the *server* already resolves (env -> data-dir ->
+    # ~/.mem-mesh, see app.core.config.resolve_hook_token) so the installer and
+    # the server never mint divergent tokens — otherwise a server that
+    # auto-generated a data-dir token would reject hooks authenticated with a
+    # freshly written ~/.mem-mesh token. Only when nothing resolves do we create
+    # a new legacy-file token here.
+    from app.core.config import resolve_hook_token
+
+    existing = resolve_hook_token()
+    if existing:
+        return existing
     token = secrets.token_urlsafe(32)
     _atomic_write_text(HOOK_TOKEN_FILE, token + "\n", mode=0o600)
     return token
