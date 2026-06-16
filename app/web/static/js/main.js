@@ -464,6 +464,7 @@ class App {
    * Update navigation active state
    */
   updateNavigation(pageName) {
+    const settingsPages = new Set(['settings', 'security', 'connect', 'oauth']);
     const navLinks = document.querySelectorAll('.nav-link, .mobile-nav-link');
     navLinks.forEach(link => {
       link.classList.remove('active');
@@ -476,7 +477,7 @@ class App {
         (route === '/projects' && pageName === 'projects') ||
         (route === '/memories' && pageName === 'memories') ||
         (route === '/analytics' && pageName === 'analytics') ||
-        (route === '/settings' && pageName === 'settings') ||
+        (route === '/settings' && settingsPages.has(pageName)) ||
         (route === '/security' && pageName === 'security') ||
         (route === '/connect' && pageName === 'connect') ||
         (route === '/work' && pageName === 'work') ||

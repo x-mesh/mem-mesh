@@ -19,6 +19,12 @@ from app.cli.hooks.constants import (
     KIRO_SETTINGS,
 )
 from app.cli.hooks.json_ops import _count_mem_mesh_hook_entries
+from app.cli.codex_config import (
+    CODEX_CONFIG,
+    CODEX_HOOKS_DIR,
+    CODEX_HOOKS_FILE,
+    codex_config_has_mem_mesh,
+)
 from app.cli.prompts.behaviors import PROMPT_VERSION
 from app.cli.prompts.renderers import extract_prompt_version
 
@@ -388,6 +394,39 @@ def cmd_status() -> None:
             print(f"  hooks.json:   {err('parse error')}")
     else:
         print(f"  hooks.json:   {dim('not found')}")
+
+    print()
+
+    # Codex
+    print(header("[Codex]"))
+    codex_session = CODEX_HOOKS_DIR / "mem-mesh-session-start.sh"
+    codex_stop = CODEX_HOOKS_DIR / "mem-mesh-stop-decide.sh"
+    codex_stop_simple = CODEX_HOOKS_DIR / "mem-mesh-stop.sh"
+    codex_precompact = CODEX_HOOKS_DIR / "mem-mesh-precompact.sh"
+    print(f"  session hook: {_colorize_status(_check_script_version(codex_session))}")
+    if codex_stop.exists():
+        print(f"  stop hook:    {_colorize_status(_check_script_version(codex_stop))}")
+    else:
+        print(
+            f"  stop hook:    {_colorize_status(_check_script_version(codex_stop_simple))}"
+        )
+    print(
+        f"  precompact:   {_colorize_status(_check_script_version(codex_precompact))}"
+    )
+    if CODEX_HOOKS_FILE.exists():
+        try:
+            count = _count_mem_mesh_hook_entries(CODEX_HOOKS_FILE)
+            print(f"  hooks.json:   {ok(f'configured (mem-mesh entries: {count})')}")
+        except (json.JSONDecodeError, OSError):
+            print(f"  hooks.json:   {err('parse error')}")
+    else:
+        print(f"  hooks.json:   {dim('not found')}")
+    if codex_config_has_mem_mesh(CODEX_CONFIG):
+        print(f"  MCP config:   {ok('configured')}")
+    elif CODEX_CONFIG.exists():
+        print(f"  MCP config:   {warn('config exists, mem-mesh missing')}")
+    else:
+        print(f"  MCP config:   {dim('not found')}")
 
     # Project-local hooks
     project_root = _find_project_root()

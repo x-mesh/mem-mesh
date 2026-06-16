@@ -15,6 +15,13 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 from app.cli.hooks.colors import bold, dim, err, info, ok, warn
+from app.cli.codex_config import (
+    CODEX_CONFIG,
+    build_codex_mcp_block_from_entry,
+    codex_config_has_mem_mesh,
+    merge_codex_mcp_config,
+    remove_codex_mcp_config,
+)
 
 
 def has_uvx() -> bool:
@@ -25,6 +32,12 @@ def has_uvx() -> bool:
 # ── Tool Registry ──
 
 MCP_TOOLS: list[dict] = [
+    {
+        "name": "Codex",
+        "key": "codex",
+        "config_path": CODEX_CONFIG,
+        "detect": lambda: (Path.home() / ".codex").exists(),
+    },
     {
         "name": "Claude Code",
         "key": "claude-code",
@@ -213,6 +226,22 @@ def configure_tool(
     """
     config_path: Path = tool["config_path"]
 
+    if tool["key"] == "codex":
+        backup_path = None
+        if do_backup and config_path.exists():
+            backup_path = backup_config(config_path)
+        already = codex_config_has_mem_mesh(config_path)
+        try:
+            merge_codex_mcp_config(
+                config_path, build_codex_mcp_block_from_entry(mcp_entry)
+            )
+        except OSError as e:
+            return False, f"write failed: {e}"
+        msg = "updated" if already else "added"
+        if backup_path:
+            msg += f" (backup: {backup_path.name})"
+        return True, msg
+
     # Backup existing config
     backup_path = None
     if do_backup and config_path.exists():
@@ -249,6 +278,18 @@ def remove_tool_config(tool: dict) -> tuple[bool, str]:
     """
     config_path: Path = tool["config_path"]
 
+    if tool["key"] == "codex":
+        if not config_path.exists():
+            return True, "no config file"
+        if not codex_config_has_mem_mesh(config_path):
+            return True, "not configured"
+        backup_config(config_path)
+        try:
+            remove_codex_mcp_config(config_path)
+        except OSError as e:
+            return False, f"write failed: {e}"
+        return True, "removed"
+
     if not config_path.exists():
         return True, "no config file"
 
@@ -281,6 +322,13 @@ def verify_tool_config(
     Returns (success, message).
     """
     config_path: Path = tool["config_path"]
+
+    if tool["key"] == "codex":
+        if not config_path.exists():
+            return False, "config file not found"
+        if not codex_config_has_mem_mesh(config_path):
+            return False, "mem-mesh entry missing"
+        return True, "configured (Codex config.toml)"
 
     if not config_path.exists():
         return False, "config file not found"
@@ -408,7 +456,7 @@ def run_mcp_setup(
         print(f"  {warn('No supported dev tools detected.')}")
         print(
             dim(
-                "  Supported: Cursor, Kiro, Claude Desktop, VS Code, Windsurf, LM Studio"
+                "  Supported: Codex, Cursor, Kiro, Claude Desktop, VS Code, Windsurf, LM Studio"
             )
         )
         print()
@@ -423,8 +471,12 @@ def run_mcp_setup(
             )
             # Check if mem-mesh already configured
             if t["has_config"]:
-                data = read_config(t["config_path"])
-                if MCP_SERVER_KEY in data.get("mcpServers", {}):
+                if t["key"] == "codex":
+                    configured = codex_config_has_mem_mesh(t["config_path"])
+                else:
+                    data = read_config(t["config_path"])
+                    configured = MCP_SERVER_KEY in data.get("mcpServers", {})
+                if configured:
                     config_status = ok("mem-mesh configured")
             print(
                 f"    {ok('✓')} {t['name']:<16} {dim(str(t['config_path']))}  [{config_status}]"

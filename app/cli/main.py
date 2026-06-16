@@ -35,7 +35,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
     install_parser.add_argument(
         "--target",
-        choices=["claude", "kiro", "cursor", "all", "auto"],
+        choices=["claude", "kiro", "cursor", "codex", "all", "auto"],
         default="auto",
         help="Target IDE (default: auto-detect)",
     )
@@ -71,18 +71,36 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     hooks_install = hooks_sub.add_parser("install", help="Install hooks")
     hooks_install.add_argument(
-        "--target", choices=["claude", "kiro", "cursor", "all"], default="all"
+        "--target", choices=["claude", "kiro", "cursor", "codex", "all"], default="all"
     )
     hooks_install.add_argument("--url", default=None, help="API URL")
-    hooks_install.add_argument("--mode", choices=["api", "local"], default="api")
+    hooks_install.add_argument(
+        "--mode", choices=["api", "local", "http"], default="api"
+    )
     hooks_install.add_argument("--path", default="", help="mem-mesh path (local mode)")
     hooks_install.add_argument(
         "--profile", choices=["standard", "enhanced", "minimal"], default="standard"
     )
+    hooks_install.add_argument(
+        "--scope",
+        choices=["global", "project"],
+        default="global",
+        help="Install globally or under a project directory",
+    )
+    hooks_install.add_argument(
+        "--dir",
+        default="",
+        help="Project directory for --scope project (default: current directory)",
+    )
+    hooks_install.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite malformed hook settings after backing them up",
+    )
     hooks_install.add_argument("-i", "--interactive", action="store_true")
 
     hooks_sub.add_parser("uninstall", help="Uninstall hooks").add_argument(
-        "--target", choices=["claude", "kiro", "cursor", "all"], default="all"
+        "--target", choices=["claude", "kiro", "cursor", "codex", "all"], default="all"
     )
     hooks_sub.add_parser("status", help="Show hook status")
     hooks_sub.add_parser("doctor", help="Run hook diagnostics")
@@ -117,7 +135,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     mcp_sub.add_parser("stdio", help="Start FastMCP stdio server")
     mcp_sub.add_parser("pure", help="Start Pure MCP stdio server")
     mcp_config_parser = mcp_sub.add_parser(
-        "config", help="Configure MCP for dev tools (Cursor, Kiro, etc.)"
+        "config", help="Configure MCP for dev tools (Codex, Cursor, Kiro, etc.)"
     )
     mcp_config_parser.add_argument("--url", default=None, help="API server URL")
     mcp_config_parser.add_argument(
@@ -230,7 +248,16 @@ def _dispatch_hooks(args: argparse.Namespace) -> None:
             from app.cli.install_hooks import cmd_install
 
             url = args.url or DEFAULT_URL
-            cmd_install(args.target, url, args.mode, args.path, args.profile)
+            cmd_install(
+                args.target,
+                url,
+                args.mode,
+                args.path,
+                args.profile,
+                force=args.force,
+                scope=args.scope,
+                dir_path=args.dir,
+            )
 
     elif args.hooks_command == "uninstall":
         from app.cli.install_hooks import cmd_uninstall

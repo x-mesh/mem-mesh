@@ -10,15 +10,24 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
 from app.cli.hooks.constants import CLAUDE_HOOKS_DIR, DEFAULT_URL
 from app.cli.hooks.status import check_connectivity, resolve_api_url
 
+TARGET_LABELS = {
+    "claude": "Claude Code",
+    "kiro": "Kiro",
+    "cursor": "Cursor",
+    "codex": "Codex",
+}
 
-def _detect_target() -> str:
-    """Auto-detect which IDE to install hooks for."""
+TARGET_ORDER = ["claude", "kiro", "cursor", "codex"]
+
+
+def _detect_targets() -> list[str]:
+    """Auto-detect which tools to install hooks for."""
     targets = []
     if CLAUDE_HOOKS_DIR.parent.exists():
         targets.append("claude")
@@ -28,12 +37,58 @@ def _detect_target() -> str:
     cursor_dir = Path.home() / ".cursor"
     if cursor_dir.exists():
         targets.append("cursor")
+    codex_dir = Path.home() / ".codex"
+    if codex_dir.exists():
+        targets.append("codex")
 
+    return targets
+
+
+def _detect_target() -> str:
+    """Backward-compatible single target detector."""
+    targets = _detect_targets()
     if not targets:
         return "claude"
-    if len(targets) == 1:
-        return targets[0]
-    return "all"
+    return targets[0] if len(targets) == 1 else "all"
+
+
+def _format_targets(targets: Union[list[str], str]) -> str:
+    if isinstance(targets, str):
+        if targets == "all":
+            return "all supported tools"
+        return TARGET_LABELS.get(targets, targets)
+    if not targets:
+        return "none"
+    return ", ".join(TARGET_LABELS.get(target, target) for target in targets)
+
+
+def _resolve_hook_targets(target: str, yes: bool) -> tuple[list[str], str]:
+    """Resolve the CLI target into concrete hook install targets and a label."""
+    if target != "auto":
+        if target == "all":
+            return TARGET_ORDER.copy(), "all supported tools"
+        return [target], _format_targets(target)
+
+    detected = _detect_targets()
+    if not detected:
+        return ["claude"], "Claude Code (fallback; no supported tool dirs detected)"
+    if len(detected) == 1 or yes:
+        return detected, _format_targets(detected)
+
+    print(f"  Detected tools: {info(_format_targets(detected))}")
+    print()
+    options = [
+        f"All detected ({_format_targets(detected)})",
+        *[TARGET_LABELS.get(target_key, target_key) for target_key in detected],
+        "All supported tools",
+    ]
+    chosen = _prompt_choice("Install hooks for [1]:", options, default=options[0])
+    if chosen == options[0]:
+        return detected, _format_targets(detected)
+    if chosen == options[-1]:
+        return TARGET_ORDER.copy(), "all supported tools"
+    selected = detected[options.index(chosen) - 1]
+    return [selected], _format_targets(selected)
 
 
 def _has_docker() -> bool:
@@ -347,7 +402,12 @@ def cmd_onboarding(
         print()
 
         if yes:
-            print(dim("  (--yes: skipping server setup)"))
+            if _has_uvx():
+                print(dim("  (--yes: using uvx for MCP; skipping API server setup)"))
+                _warm_uvx_cache()
+                preferred_mcp_mode = "uvx"
+            else:
+                print(dim("  (--yes: skipping server setup)"))
         else:
             # Ask how to set up the server
             print(
@@ -407,11 +467,8 @@ def cmd_onboarding(
     # --- Step 2: Hook installation ---
     print(bold("[2/3] Hook Installation"))
 
-    if target == "auto":
-        target = _detect_target()
-        print(f"  Detected IDE: {info(target)}")
-    else:
-        print(f"  Target:       {info(target)}")
+    hook_targets, hook_target_label = _resolve_hook_targets(target, yes)
+    print(f"  Target:       {info(hook_target_label)}")
     print(f"  Profile:      {info(profile)}")
 
     hook_default = "n" if preferred_mcp_mode == "uvx" else "Y"
@@ -421,25 +478,33 @@ def cmd_onboarding(
             f"  {dim('With uvx, MCP works without a server but hooks do not. Skip unless you will run the server separately.')}"
         )
 
+    skip_hooks = yes and hook_default == "n"
+    if skip_hooks:
+        print(
+            dim("  (--yes: skipping hooks because uvx mode has no running API server)")
+        )
+
     if not yes:
         prompt_label = (
-            f"  Install hooks for {target}? [{hook_default}/n] "
+            f"  Install hooks for {hook_target_label}? [{hook_default}/n] "
             if hook_default == "Y"
-            else f"  Install hooks for {target}? [y/{hook_default}] "
+            else f"  Install hooks for {hook_target_label}? [y/{hook_default}] "
         )
         raw = input(prompt_label).strip().lower()
         if hook_default == "Y":
             skip_hooks = raw in ("n", "no")
         else:
             skip_hooks = raw not in ("y", "yes")
-        if skip_hooks:
-            print(dim("  Skipping hook installation."))
-            print()
-            from app.cli.mcp_config import run_mcp_setup
+    if skip_hooks:
+        print(dim("  Skipping hook installation."))
+        print()
+        from app.cli.mcp_config import run_mcp_setup
 
-            run_mcp_setup(url=resolved_url, yes=yes, preferred_mode=preferred_mcp_mode)
-            _print_summary(resolved_url, reachable, False, target, preferred_mcp_mode)
-            return
+        run_mcp_setup(url=resolved_url, yes=yes, preferred_mode=preferred_mcp_mode)
+        _print_summary(
+            resolved_url, reachable, False, hook_target_label, preferred_mcp_mode
+        )
+        return
 
     install_url = resolved_url if resolved_url else DEFAULT_URL
     hooks_installed = False
@@ -447,7 +512,8 @@ def cmd_onboarding(
     try:
         from app.cli.install_hooks import cmd_install
 
-        cmd_install(target, install_url, "api", "", profile)
+        for hook_target in hook_targets:
+            cmd_install(hook_target, install_url, "api", "", profile)
         hooks_installed = True
         print(f"  {ok('Hooks installed successfully.')}")
     except Exception as e:
@@ -460,7 +526,9 @@ def cmd_onboarding(
     run_mcp_setup(url=resolved_url, yes=yes, preferred_mode=preferred_mcp_mode)
 
     # --- Summary ---
-    _print_summary(resolved_url, reachable, hooks_installed, target, preferred_mcp_mode)
+    _print_summary(
+        resolved_url, reachable, hooks_installed, hook_target_label, preferred_mcp_mode
+    )
 
 
 def _print_summary(
@@ -494,7 +562,7 @@ def _print_summary(
     print()
     if mcp_mode == "uvx":
         print(
-            f"  {bold('Next step:')} restart your MCP client (Cursor / Claude Desktop / Kiro)."
+            f"  {bold('Next step:')} restart your MCP client (Codex / Cursor / Claude Desktop / Kiro)."
         )
         print(dim("             First MCP call spawns mem-mesh from the uv cache."))
     elif not server_ok:

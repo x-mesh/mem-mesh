@@ -15,6 +15,12 @@ from app.cli.hooks.constants import (
     KIRO_SETTINGS,
 )
 from app.cli.hooks.json_ops import _is_mem_mesh_entry
+from app.cli.codex_config import (
+    CODEX_CONFIG,
+    CODEX_HOOKS_DIR,
+    CODEX_HOOKS_FILE,
+    codex_config_has_mem_mesh,
+)
 from app.cli.hooks.netcheck import check_http_hook_url
 from app.cli.hooks.status import (
     _detect_profile,
@@ -138,6 +144,15 @@ def _check_http_hook_urls(settings_path: Path, label: str) -> List[str]:
                         f"{label}: HTTP hook will be blocked by Claude Code — "
                         f"{reason} (re-install with --mode api)"
                     )
+    return issues
+
+
+def _check_codex_config(config_path: Path) -> List[str]:
+    issues: List[str] = []
+    if not config_path.exists():
+        return issues
+    if not codex_config_has_mem_mesh(config_path):
+        issues.append("Codex config.toml: no mem-mesh MCP server configured")
     return issues
 
 
@@ -311,6 +326,7 @@ def cmd_doctor() -> None:
         ("Claude", CLAUDE_HOOKS_DIR),
         ("Kiro", KIRO_HOOKS_DIR),
         ("Cursor", CURSOR_HOOKS_DIR),
+        ("Codex", CODEX_HOOKS_DIR),
     ]:
         perm_issues = _check_permissions(hooks_dir)
         if not hooks_dir.exists():
@@ -333,6 +349,7 @@ def cmd_doctor() -> None:
         ("Claude", CLAUDE_SETTINGS),
         ("Kiro", KIRO_SETTINGS),
         ("Cursor", CURSOR_SETTINGS),
+        ("Codex", CODEX_HOOKS_FILE),
     ]:
         json_issues = _check_settings_json(settings_path, label)
         json_issues.extend(_check_http_hook_urls(settings_path, label))
@@ -344,6 +361,13 @@ def cmd_doctor() -> None:
             issues.extend(json_issues)
         else:
             print(f"  {label}: {ok('valid')}")
+    codex_issues = _check_codex_config(CODEX_CONFIG)
+    if CODEX_CONFIG.exists() and codex_issues:
+        for issue in codex_issues:
+            print(f"  {err(issue)}")
+        issues.extend(codex_issues)
+    elif CODEX_CONFIG.exists():
+        print(f"  Codex config.toml: {ok('valid')}")
     print()
 
     # 3. Environment variables

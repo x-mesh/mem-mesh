@@ -53,6 +53,42 @@ export class SettingsPage extends HTMLElement {
         </div>
       </div>
 
+      <!-- Client Setup & Security -->
+      <div class="settings-section" id="settings-access">
+        <div class="section-header">
+          <span class="section-label">Client Setup &amp; Security</span>
+        </div>
+        <div class="section-body">
+          <p class="section-desc">Connect AI clients, manage tokens, and control dashboard or MCP authentication.</p>
+          <div class="data-actions settings-access-actions">
+            <div class="data-action-row">
+              <div class="data-action-info">
+                <span class="data-action-title">Connect Clients</span>
+                <span class="data-action-desc">Generate MCP and hook config for Codex, Claude Code, Cursor, and other MCP clients</span>
+              </div>
+              <a href="/connect" class="settings-btn-primary" data-route="/connect">Open Connect</a>
+            </div>
+            <div class="data-action-row">
+              <div class="data-action-info">
+                <span class="data-action-title">Security &amp; Tokens</span>
+                <span class="data-action-desc">Reveal or rotate the hook token, enable web auth, and manage MCP OAuth clients</span>
+              </div>
+              <a href="/security" class="settings-btn" data-route="/security">Open Security</a>
+            </div>
+          </div>
+          <div class="oauth-env settings-access-env">
+            <span class="env-title">Environment Variables</span>
+            <div class="env-list">
+              <div class="env-item"><code>MEM_MESH_HOOK_TOKEN</code><span>Hook, MCP, and REST API bearer token</span></div>
+              <div class="env-item"><code>MEM_MESH_PUBLIC_URL</code><span>Shared URL used by Connect config</span></div>
+              <div class="env-item"><code>MEM_MESH_AUTH_ENABLED</code><span>Global auth toggle</span></div>
+              <div class="env-item"><code>MEM_MESH_MCP_AUTH_ENABLED</code><span>MCP SSE auth</span></div>
+              <div class="env-item"><code>MEM_MESH_WEB_AUTH_ENABLED</code><span>Web API auth</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Embedding Status -->
       <div class="settings-section">
         <div class="section-header">
@@ -156,28 +192,6 @@ export class SettingsPage extends HTMLElement {
             </div>
             <div class="rules-col">
               <textarea id="rules-output" class="rules-textarea" rows="14" placeholder="Merged output will appear here..."></textarea>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Security & Tokens -->
-      <div class="settings-section">
-        <div class="section-header">
-          <span class="section-label">Security &amp; Tokens</span>
-        </div>
-        <div class="section-body">
-          <p class="section-desc">Hook token, web dashboard auth, and MCP OAuth clients in one place.</p>
-          <div class="oauth-row">
-            <a href="/security" class="settings-btn-primary" data-route="/security">Open Security Settings</a>
-          </div>
-          <div class="oauth-env">
-            <span class="env-title">Environment Variables</span>
-            <div class="env-list">
-              <div class="env-item"><code>MEM_MESH_HOOK_TOKEN</code><span>Hook endpoint secret (auto-generated if unset)</span></div>
-              <div class="env-item"><code>MEM_MESH_AUTH_ENABLED</code><span>Global auth toggle</span></div>
-              <div class="env-item"><code>MEM_MESH_MCP_AUTH_ENABLED</code><span>MCP SSE auth</span></div>
-              <div class="env-item"><code>MEM_MESH_WEB_AUTH_ENABLED</code><span>Web API auth</span></div>
             </div>
           </div>
         </div>
@@ -1242,6 +1256,10 @@ style.textContent = `
   padding-top: var(--space-2);
 }
 
+.settings-access-env {
+  margin-top: var(--space-3);
+}
+
 .env-title {
   font-size: var(--text-xs);
   font-weight: var(--font-semibold);
@@ -1536,6 +1554,11 @@ details[open] .info-summary::before {
   .migration-row {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .data-action-row {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

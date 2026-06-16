@@ -6,7 +6,7 @@ SPA (Single Page Application) 라우팅을 위한 페이지 서빙을 담당합�
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.templating import Jinja2Templates
 
 from app.core.version import __VERSION__
@@ -95,6 +95,35 @@ async def serve_monitoring_page(request: Request):
 async def serve_settings_page(request: Request):
     """설정 페이지 서빙 (SPA 라우팅)"""
     return templates.TemplateResponse(request, "index.html", {"version": __VERSION__})
+
+
+def _install_alias_response(request: Request, target: str) -> Response:
+    from app.web.dashboard.route_modules.connect import build_install_script
+
+    script = build_install_script(request, target=target)
+    return Response(
+        script,
+        media_type="text/x-shellscript; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/codex", include_in_schema=False)
+async def serve_codex_install_alias(request: Request):
+    """Short install alias: curl <server>/codex | bash."""
+    return _install_alias_response(request, "codex")
+
+
+@router.get("/claude", include_in_schema=False)
+async def serve_claude_install_alias(request: Request):
+    """Short install alias: curl <server>/claude | bash."""
+    return _install_alias_response(request, "claude")
+
+
+@router.get("/all", include_in_schema=False)
+async def serve_all_install_alias(request: Request):
+    """Short install alias: curl <server>/all | bash."""
+    return _install_alias_response(request, "all")
 
 
 # Catch-all route for SPA routing (must be last)

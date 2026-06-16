@@ -30,6 +30,7 @@ export class ConnectPage extends HTMLElement {
       const input = this.querySelector('#cn-url');
       if (input) input.value = window.location.origin;
     }
+    this.syncClientControls();
     this.load();
   }
 
@@ -49,9 +50,15 @@ export class ConnectPage extends HTMLElement {
         <header class="page-header">
           <div class="page-header-main">
             <h1 class="page-title">Connect a client</h1>
-            <p class="page-subtitle">Copy-paste hook &amp; MCP config — this server's URL and token are filled in for you.</p>
+            <p class="page-subtitle">Copy-paste MCP and hook config with this server's URL and token already filled in.</p>
           </div>
         </header>
+
+        <div class="cn-steps">
+          <div class="cn-step"><span>1</span><strong>Confirm URL</strong></div>
+          <div class="cn-step"><span>2</span><strong>Select client</strong></div>
+          <div class="cn-step"><span>3</span><strong>Copy config</strong></div>
+        </div>
 
         <div class="card">
           <div class="card-body">
@@ -64,13 +71,14 @@ export class ConnectPage extends HTMLElement {
               </label>
               <label>Client
                 <select id="cn-client">
+                  <option value="codex">Codex (MCP + installer hooks)</option>
                   <option value="claude">Claude Code (hooks + MCP)</option>
                   <option value="cursor">Cursor (hooks + MCP)</option>
                   <option value="claude-desktop">Claude Desktop (MCP only)</option>
                   <option value="generic">Generic MCP client</option>
                 </select>
               </label>
-              <label>Hook mode
+              <label>Hook mode <span class="hint" id="cn-hook-hint"></span>
                 <select id="cn-hookmode">
                   <option value="http">HTTP (native)</option>
                   <option value="api">API (curl)</option>
@@ -91,7 +99,10 @@ export class ConnectPage extends HTMLElement {
       </div>
       ${this.styles()}
     `;
-    this.querySelector('#cn-client').addEventListener('change', () => this.load());
+    this.querySelector('#cn-client').addEventListener('change', () => {
+      this.syncClientControls();
+      this.load();
+    });
     this.querySelector('#cn-hookmode').addEventListener('change', () => this.load());
     this.querySelector('#cn-mcpmode').addEventListener('change', () => this.load());
 
@@ -125,10 +136,14 @@ export class ConnectPage extends HTMLElement {
     const mcpMode = this.querySelector('#cn-mcpmode').value;
     const serverUrl = (this.querySelector('#cn-url')?.value || '').trim();
     const q = serverUrl ? `&server_url=${encodeURIComponent(serverUrl)}` : '';
-    const hasHooks = client === 'claude' || client === 'cursor';
+    const meta = this.clientMeta(client);
+    const hasHooks = meta.hooks === 'paste';
 
     try {
       const cards = [];
+      if (meta.installTarget) {
+        cards.push(this.quickInstallCard(meta, serverUrl || window.location.origin));
+      }
       if (hasHooks) {
         const h = await this.fetchJSON(`/api/connect/hooks?client=${client}&mode=${hookMode}${q}`);
         this._hookData = h;
@@ -136,7 +151,7 @@ export class ConnectPage extends HTMLElement {
       } else {
         this._hookData = null;
       }
-      const mcpClient = client === 'claude' ? 'claude-code' : client;
+      const mcpClient = meta.mcpClient;
       const m = await this.fetchJSON(`/api/connect/mcp?client=${mcpClient}&mode=${mcpMode}${q}`);
       cards.push(this.mcpCard(m));
       out.innerHTML = cards.join('');
@@ -144,6 +159,76 @@ export class ConnectPage extends HTMLElement {
     } catch (e) {
       out.innerHTML = `<div class="error-message">Failed to generate: ${this.esc(e.message)}</div>`;
     }
+  }
+
+  clientMeta(client) {
+    const clients = {
+      codex: {
+        mcpClient: 'codex',
+        hooks: 'installer',
+        hookTarget: 'codex',
+        hookPath: '~/.codex/hooks.json',
+        installTarget: 'codex',
+      },
+      claude: {
+        mcpClient: 'claude-code',
+        hooks: 'paste',
+        hookTarget: 'claude',
+        hookPath: '~/.claude/settings.json',
+        installTarget: 'claude',
+      },
+      cursor: {
+        mcpClient: 'cursor',
+        hooks: 'paste',
+        hookTarget: 'cursor',
+      },
+      'claude-desktop': {
+        mcpClient: 'claude-desktop',
+        hooks: 'none',
+      },
+      generic: {
+        mcpClient: 'generic',
+        hooks: 'none',
+      },
+    };
+    return clients[client] || clients.generic;
+  }
+
+  syncClientControls() {
+    const client = this.querySelector('#cn-client')?.value || 'codex';
+    const meta = this.clientMeta(client);
+    const hookMode = this.querySelector('#cn-hookmode');
+    const hint = this.querySelector('#cn-hook-hint');
+    if (!hookMode) return;
+    hookMode.disabled = meta.hooks !== 'paste';
+    if (hint) {
+      hint.textContent =
+        meta.hooks === 'paste'
+          ? '(paste-ready)'
+          : meta.hooks === 'installer'
+            ? '(installer managed)'
+            : '(MCP only)';
+    }
+  }
+
+  quickInstallCard(meta, serverUrl) {
+    const target = meta.hookTarget || 'codex';
+    const path = meta.hookPath || 'client hook settings';
+    const base = serverUrl.replace(/\/$/, '');
+    const shortCommand = `curl -fsSL ${base}/${target} | bash`;
+    const apiCommand = `curl -fsSL ${base}/api/connect/install/${target}.sh | bash`;
+    return `
+      <div class="card">
+        <div class="card-header">
+          <h2>One-line install → <code>${this.esc(path)}</code></h2>
+          <button class="btn btn-sm btn-primary copy-install-command">Copy command</button>
+        </div>
+        <div class="card-body">
+          <p class="hint">Installs this client on the machine where you run it. No local mem-mesh checkout is required; hooks call this server over HTTP.</p>
+          <pre class="snippet"><code>${this.esc(shortCommand)}</code></pre>
+          <p class="hint">Stable API endpoint: <code>${this.esc(apiCommand)}</code></p>
+        </div>
+      </div>`;
   }
 
   hookCard(h) {
@@ -192,16 +277,17 @@ export class ConnectPage extends HTMLElement {
   }
 
   mcpCard(m) {
-    const json = JSON.stringify(m.config, null, 2);
+    const format = m.config_format === 'toml' ? 'TOML' : 'JSON';
+    const configText = m.config_text || JSON.stringify(m.config, null, 2);
     const oauthBlock = m.oauth ? this.mcpOAuthBlock(m.oauth, m) : '';
     return `
       <div class="card">
         <div class="card-header">
           <h2>MCP → <code>${this.esc(m.config_path)}</code></h2>
-          <button class="btn btn-sm btn-primary copy-block">Copy JSON</button>
+          <button class="btn btn-sm btn-primary copy-block">Copy ${format}</button>
         </div>
         <div class="card-body">
-          <pre class="snippet"><code>${this.esc(json)}</code></pre>
+          <pre class="snippet"><code>${this.esc(configText)}</code></pre>
           ${oauthBlock}
         </div>
       </div>`;
@@ -224,8 +310,8 @@ export class ConnectPage extends HTMLElement {
     // MCP auth OFF: making a client does NOT enable OAuth; the config works as-is.
     if (!o.enabled) {
       const warn = clients.length
-        ? `<p class="hint warn"><strong>${clients.length} OAuth client(s) registered, but MCP auth is OFF</strong> — not enforced, so this config <strong>works as-is without auth</strong>. Making a client doesn't enable OAuth. <a href="/security" data-route="/security">Enable MCP auth in Security →</a> to require it.</p>`
-        : `<p class="hint">MCP OAuth is off — clients connect without auth, so this config <strong>works as-is</strong> (fine for localhost/loopback). <a href="/security" data-route="/security">Enable it in Security →</a> if network-exposed.</p>`;
+        ? `<p class="hint warn"><strong>${clients.length} OAuth client(s) registered, but MCP auth is OFF</strong> — not enforced, so this config <strong>works as-is without auth</strong>. Making a client doesn't enable OAuth. <a href="/security" data-route="/security">Open Settings → Security</a> to require it.</p>`
+        : `<p class="hint">MCP OAuth is off — clients connect without auth, so this config <strong>works as-is</strong> (fine for localhost/loopback). <a href="/security" data-route="/security">Open Settings → Security</a> if network-exposed.</p>`;
       return `<div class="cn-oauth">${warn}${clientList}</div>`;
     }
 
@@ -249,7 +335,7 @@ export class ConnectPage extends HTMLElement {
          ${endpoints}
          <div class="cn-actions">
            <button class="btn btn-sm btn-secondary cn-create-oauth">Register OAuth client</button>
-           <a href="/security" class="btn btn-sm btn-secondary" data-route="/security">Manage in Security →</a>
+           <a href="/security" class="btn btn-sm btn-secondary" data-route="/security">Open Settings → Security</a>
          </div>
          <div class="cn-oauth-result"></div>
        </div>`;
@@ -279,6 +365,12 @@ export class ConnectPage extends HTMLElement {
     );
     root.querySelectorAll('.cn-test-hook').forEach((b) =>
       b.addEventListener('click', () => this.testHookAuth(b))
+    );
+    root.querySelectorAll('.copy-install-command').forEach((b) =>
+      b.addEventListener('click', () => {
+        const code = b.closest('.card')?.querySelector('pre code');
+        if (code) this.copy(code.textContent);
+      })
     );
   }
 
@@ -365,7 +457,7 @@ export class ConnectPage extends HTMLElement {
       <style>
         .connect-page { width: 100%; }
         .connect-page .page-header { margin-bottom: 1.25rem; }
-        .connect-page .card { background: var(--card-bg, #fff); border: 1px solid var(--border-color, #e5e5e5); border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); overflow: hidden; margin-bottom: 1.25rem; }
+        .connect-page .card { background: var(--card-bg, #fff); border: 1px solid var(--border-color, #e5e5e5); border-radius: 8px; overflow: hidden; margin-bottom: 1.25rem; }
         .connect-page .card-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.9rem 1.25rem; background: var(--card-header-bg, #f8f9fa); border-bottom: 1px solid var(--border-color, #e5e5e5); }
         .connect-page .card-header h2 { font-size: 1rem; margin: 0; font-weight: 600; }
         .connect-page .card-header code { background: var(--code-bg, #f1f3f5); padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.82em; }
@@ -373,9 +465,14 @@ export class ConnectPage extends HTMLElement {
         .cn-controls { display: flex; flex-wrap: wrap; gap: 1.25rem; }
         .cn-controls label { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.82rem; color: var(--text-secondary, #525252); font-weight: 500; }
         .cn-controls select, .cn-controls input { padding: 0.5rem 0.7rem; border: 1px solid var(--border-color, #e5e5e5); border-radius: 8px; background: var(--bg-primary, #fff); color: var(--text-primary, #171717); font-size: 0.9rem; min-width: 220px; }
+        .cn-controls select:disabled { opacity: 0.55; cursor: not-allowed; }
         .cn-url-label { flex: 1 1 320px; }
         .cn-url-row { display: flex; gap: 0.5rem; }
         .cn-url-row input { flex: 1; min-width: 0; box-sizing: border-box; }
+        .cn-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-bottom: 1rem; }
+        .cn-step { display: flex; align-items: center; gap: 0.55rem; padding: 0.65rem 0.75rem; background: var(--bg-secondary, #f8f9fa); border: 1px solid var(--border-color, #e5e5e5); border-radius: 8px; min-width: 0; }
+        .cn-step span { display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border-radius: 999px; background: var(--text-primary, #171717); color: var(--bg-primary, #fff); font-size: 0.75rem; font-weight: 700; flex-shrink: 0; }
+        .cn-step strong { font-size: 0.86rem; color: var(--text-primary, #171717); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .cn-token { margin: 0.5rem 0 1rem; font-size: 0.88rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
         .cn-token code { background: var(--code-bg, #f1f3f5); padding: 0.15rem 0.45rem; border-radius: 4px; word-break: break-all; }
         .snippet { background: var(--code-bg, #1e1e2e); color: var(--code-fg, #e0e0e0); padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.82rem; margin: 0; }
@@ -403,6 +500,11 @@ export class ConnectPage extends HTMLElement {
         .cn-actions { display: flex; gap: 0.5rem; }
         .cn-test-result { margin: 0.5rem 0; }
         .cn-test-row { font-size: 0.85rem; padding: 0.15rem 0; }
+        @media (max-width: 720px) {
+          .cn-steps { grid-template-columns: 1fr; }
+          .cn-url-row { flex-direction: column; }
+          .connect-page .card-header { align-items: flex-start; flex-direction: column; }
+        }
       </style>
     `;
   }

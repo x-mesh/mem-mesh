@@ -66,6 +66,14 @@ from app.cli.hooks.templates import (
     TASK_COMPLETED_HOOK_TEMPLATE,
     USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
 )
+from app.cli.codex_config import (
+    CODEX_CONFIG,
+    CODEX_HOOKS_DIR,
+    CODEX_HOOKS_FILE,
+    build_codex_mcp_block,
+    merge_codex_mcp_config,
+    remove_codex_mcp_config,
+)
 from app.cli.prompts.behaviors import PROMPT_VERSION, REFLECT_CONFIG
 from app.cli.prompts.renderers import (
     VERSION_MARKER,
@@ -651,6 +659,121 @@ KIRO_SETTINGS = HOME / ".kiro" / "settings" / "hooks.json"
 
 CURSOR_HOOKS_DIR = HOME / ".cursor" / "hooks"
 CURSOR_SETTINGS = HOME / ".cursor" / "hooks.json"
+
+
+def _build_codex_hooks_settings(
+    hooks_dir: Path, profile: str = "standard", mode: str = "api"
+) -> Dict[str, Any]:
+    """Build Codex hooks.json using only command hooks.
+
+    Codex currently parses but skips ``async: true`` command hooks and does not
+    run native ``type: http`` hook handlers, so this is intentionally separate
+    from the Claude Code settings builder.
+    """
+    stop_script = {
+        "standard": (
+            hooks_dir / "mem-mesh-stop.sh"
+            if mode == "local"
+            else hooks_dir / "mem-mesh-stop-decide.sh"
+        ),
+        "enhanced": hooks_dir / "mem-mesh-stop-enhanced.sh",
+        "minimal": hooks_dir / "mem-mesh-stop.sh",
+    }.get(profile, hooks_dir / "mem-mesh-stop-decide.sh")
+
+    hooks: Dict[str, Any] = {
+        "SessionStart": [
+            {
+                "matcher": "startup|resume|clear|compact",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": str(hooks_dir / "mem-mesh-session-start.sh"),
+                        "timeout": 15,
+                        "statusMessage": "Loading mem-mesh context",
+                    }
+                ],
+            }
+        ],
+        "Stop": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": str(stop_script),
+                        "timeout": 20 if profile == "enhanced" else 10,
+                        "statusMessage": "Saving mem-mesh checkpoint",
+                    }
+                ]
+            }
+        ],
+        "PreCompact": [
+            {
+                "matcher": "manual|auto",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": str(hooks_dir / "mem-mesh-precompact.sh"),
+                        "timeout": 10,
+                        "statusMessage": "Checking mem-mesh checkpoint",
+                    }
+                ],
+            }
+        ],
+    }
+
+    if profile != "minimal":
+        hooks["UserPromptSubmit"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": str(hooks_dir / "mem-mesh-user-prompt-submit.sh"),
+                        "timeout": 5,
+                        "statusMessage": "Searching mem-mesh context",
+                    }
+                ]
+            }
+        ]
+        if mode != "local":
+            hooks["PostToolUse"] = [
+                {
+                    "matcher": "Edit|Write|MultiEdit|NotebookEdit|apply_patch",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": str(hooks_dir / "mem-mesh-post-tool-use.sh"),
+                            "timeout": 5,
+                            "statusMessage": "Recording mem-mesh write signal",
+                        }
+                    ],
+                }
+            ]
+        hooks["SubagentStart"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": str(hooks_dir / "mem-mesh-subagent-start.sh"),
+                        "timeout": 5,
+                        "statusMessage": "Loading mem-mesh subagent context",
+                    }
+                ]
+            }
+        ]
+        hooks["SubagentStop"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": str(hooks_dir / "mem-mesh-subagent-stop.sh"),
+                        "timeout": 10,
+                        "statusMessage": "Saving mem-mesh subagent result",
+                    }
+                ]
+            }
+        ]
+
+    return {"hooks": hooks}
 
 
 def _build_cursor_hooks_settings(
@@ -1291,6 +1414,181 @@ def _install_cursor(
     print("[cursor] Done.")
 
 
+def _install_codex(
+    url: str,
+    mode: str = "api",
+    path: str = "",
+    profile: str = "standard",
+    *,
+    force: bool = False,
+    base_dir: Optional[Path] = None,
+) -> None:
+    """Install mem-mesh hooks and MCP config for Codex.
+
+    Codex does not run native HTTP hook handlers today; even when the installer
+    mode is ``http``, lifecycle hooks are installed as command scripts. MCP
+    still uses Streamable HTTP for ``api``/``http`` modes and stdio for
+    ``local`` mode.
+    """
+    print(f"[codex] Installing hook scripts (profile: {profile})...")
+
+    if base_dir is not None:
+        codex_dir = base_dir / ".codex"
+        hooks_dir = codex_dir / "hooks"
+        hooks_path = codex_dir / "hooks.json"
+        config_path = codex_dir / "config.toml"
+    else:
+        hooks_dir = CODEX_HOOKS_DIR
+        hooks_path = CODEX_HOOKS_FILE
+        config_path = CODEX_CONFIG
+
+    script_mode = "api" if mode == "http" else mode
+
+    scripts: Dict[str, str] = {}
+    if script_mode == "local":
+        scripts["mem-mesh-session-start.sh"] = _render_local_template(
+            LOCAL_SESSION_START_HOOK_TEMPLATE, path
+        )
+        scripts["mem-mesh-precompact.sh"] = _render_local_template(
+            LOCAL_PRECOMPACT_HOOK_TEMPLATE, path
+        )
+        if profile == "enhanced":
+            scripts["mem-mesh-stop-enhanced.sh"] = _render_local_template(
+                LOCAL_ENHANCED_STOP_HOOK_TEMPLATE, path
+            )
+        elif profile in ("minimal", "standard"):
+            scripts["mem-mesh-stop.sh"] = _render_local_template(
+                LOCAL_STOP_HOOK_TEMPLATE, path
+            )
+        if profile != "minimal":
+            scripts["mem-mesh-user-prompt-submit.sh"] = _render_local_template(
+                LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE, path
+            )
+            scripts["mem-mesh-subagent-start.sh"] = _render_local_template(
+                LOCAL_SUBAGENT_START_HOOK_TEMPLATE, path
+            )
+            scripts["mem-mesh-subagent-stop.sh"] = _render_local_template(
+                LOCAL_SUBAGENT_STOP_HOOK_TEMPLATE, path
+            )
+    else:
+        scripts["mem-mesh-session-start.sh"] = _render_template(
+            SESSION_START_HOOK_TEMPLATE,
+            url,
+            source_tag="codex-hook",
+            ide_tag="codex",
+            client_tag="codex",
+        )
+        scripts["mem-mesh-precompact.sh"] = _render_template(
+            PRECOMPACT_HOOK_TEMPLATE,
+            url,
+            source_tag="codex-hook",
+            ide_tag="codex",
+            client_tag="codex",
+        )
+        if profile == "enhanced":
+            scripts["mem-mesh-stop-enhanced.sh"] = _render_template(
+                ENHANCED_STOP_HOOK_TEMPLATE,
+                url,
+                source_tag="codex-hook",
+                ide_tag="codex",
+                client_tag="codex",
+            )
+        elif profile == "minimal":
+            scripts["mem-mesh-stop.sh"] = _render_template(
+                STOP_HOOK_TEMPLATE,
+                url,
+                source_tag="codex-hook",
+                ide_tag="codex",
+                client_tag="codex",
+            )
+        else:
+            scripts["mem-mesh-stop-decide.sh"] = _render_template(
+                STOP_DECIDE_HOOK_TEMPLATE,
+                url,
+                source_tag="codex-hook",
+                ide_tag="codex",
+                client_tag="codex",
+            )
+        if profile != "minimal":
+            scripts["mem-mesh-user-prompt-submit.sh"] = _render_template(
+                USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
+                url,
+                source_tag="codex-hook",
+                ide_tag="codex",
+                client_tag="codex",
+            )
+            scripts["mem-mesh-post-tool-use.sh"] = _render_template(
+                POST_TOOL_USE_HOOK_TEMPLATE,
+                url,
+                source_tag="codex-hook",
+                ide_tag="codex",
+                client_tag="codex",
+            )
+            scripts["mem-mesh-subagent-start.sh"] = _render_template(
+                SUBAGENT_START_HOOK_TEMPLATE,
+                url,
+                source_tag="codex-hook",
+                ide_tag="codex",
+                client_tag="codex",
+            )
+            scripts["mem-mesh-subagent-stop.sh"] = _render_template(
+                SUBAGENT_STOP_HOOK_TEMPLATE,
+                url,
+                source_tag="codex-hook",
+                ide_tag="codex",
+                client_tag="codex",
+            )
+
+    for name, content in scripts.items():
+        script_path = hooks_dir / name
+        _write_script(script_path, content)
+        print(f"  -> {script_path}")
+
+    stale_by_profile = {
+        "standard": ["mem-mesh-stop.sh", "mem-mesh-stop-enhanced.sh"],
+        "enhanced": ["mem-mesh-stop.sh", "mem-mesh-stop-decide.sh"],
+        "minimal": [
+            "mem-mesh-stop-decide.sh",
+            "mem-mesh-stop-enhanced.sh",
+            "mem-mesh-user-prompt-submit.sh",
+            "mem-mesh-post-tool-use.sh",
+            "mem-mesh-subagent-start.sh",
+            "mem-mesh-subagent-stop.sh",
+        ],
+    }
+    for name in stale_by_profile.get(profile, []):
+        stale = hooks_dir / name
+        if stale.exists() and name not in scripts:
+            stale.unlink()
+            print(f"  removed {stale} (not in {profile} profile)")
+
+    print("[codex] Updating hooks.json...")
+    _merge_json_settings(
+        hooks_path,
+        _build_codex_hooks_settings(hooks_dir, profile, mode=script_mode),
+        force=force,
+    )
+    print(f"  -> {hooks_path}")
+
+    print("[codex] Updating config.toml MCP server...")
+    mcp_mode = "local" if mode == "local" else "http"
+    mcp_path = path or str(Path(__file__).resolve().parent.parent.parent)
+    merge_codex_mcp_config(
+        config_path,
+        build_codex_mcp_block(mode=mcp_mode, url=url, path=mcp_path),
+    )
+    print(f"  -> {config_path}")
+
+    if mode != "local":
+        _ensure_hook_token()
+        print(
+            f"  hook/MCP auth: token at {HOOK_TOKEN_FILE} — export "
+            f"{HOOK_TOKEN_ENV_VAR} if the server requires bearer auth"
+        )
+
+    print("[codex] Done.")
+
+
 def _uninstall_claude() -> None:
     """Remove mem-mesh hooks for Claude Code."""
     print("[claude] Removing hook scripts...")
@@ -1356,6 +1654,34 @@ def _uninstall_cursor() -> None:
     _remove_mem_mesh_hooks_from_json(CURSOR_SETTINGS)
 
     print("[cursor] Done.")
+
+
+def _uninstall_codex() -> None:
+    """Remove mem-mesh hooks and MCP config for Codex."""
+    print("[codex] Removing hook scripts...")
+    for name in (
+        "mem-mesh-session-start.sh",
+        "mem-mesh-stop.sh",
+        "mem-mesh-stop-decide.sh",
+        "mem-mesh-stop-enhanced.sh",
+        "mem-mesh-user-prompt-submit.sh",
+        "mem-mesh-post-tool-use.sh",
+        "mem-mesh-subagent-start.sh",
+        "mem-mesh-subagent-stop.sh",
+        "mem-mesh-precompact.sh",
+    ):
+        script = CODEX_HOOKS_DIR / name
+        if script.exists():
+            script.unlink()
+            print(f"  removed {script}")
+
+    print("[codex] Removing mem-mesh hooks from hooks.json...")
+    _remove_mem_mesh_hooks_from_json(CODEX_HOOKS_FILE)
+
+    print("[codex] Removing mem-mesh MCP server from config.toml...")
+    remove_codex_mcp_config(CODEX_CONFIG)
+
+    print("[codex] Done.")
 
 
 # ---------------------------------------------------------------------------
@@ -1793,6 +2119,9 @@ def cmd_install(
                 url, mode, resolved, profile, force=force, base_dir=base_dir
             )
             print()
+        if target in ("codex", "all"):
+            _install_codex(url, mode, resolved, profile, force=force, base_dir=base_dir)
+            print()
     except MalformedSettingsError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1)
@@ -1810,6 +2139,9 @@ def cmd_uninstall(target: str) -> None:
         print()
     if target in ("cursor", "all"):
         _uninstall_cursor()
+        print()
+    if target in ("codex", "all"):
+        _uninstall_codex()
         print()
     print("Uninstallation complete.")
 
@@ -1847,9 +2179,9 @@ def cmd_interactive() -> None:
 
     # Step 1: target
     print("[1/4] Select target IDE:")
-    targets = ["Claude Code", "Kiro", "Cursor", "All"]
-    target_keys = ["claude", "kiro", "cursor", "all"]
-    idx = _prompt_choice("", targets, default=3)
+    targets = ["Claude Code", "Kiro", "Cursor", "Codex", "All"]
+    target_keys = ["claude", "kiro", "cursor", "codex", "all"]
+    idx = _prompt_choice("", targets, default=4)
     target = target_keys[idx]
     print()
 
@@ -1879,8 +2211,8 @@ def cmd_interactive() -> None:
     suggested_url, url_source = resolve_api_url()
     print("[3/4] Select storage mode:")
     modes = [
-        f"HTTP — Claude Code native HTTP hooks ({suggested_url})",
-        f"API  — Remote server via bash+curl hooks ({suggested_url})",
+        f"HTTP — Streamable HTTP where supported; command hooks elsewhere ({suggested_url})",
+        f"API  — Remote server via command+curl hooks ({suggested_url})",
         "Local — Save directly to local SQLite",
     ]
     mode_keys = ["http", "api", "local"]
@@ -1916,11 +2248,14 @@ def main(argv: Optional[List[str]] = None) -> None:
     """CLI entry point for mem-mesh-hooks."""
     parser = argparse.ArgumentParser(
         prog="mem-mesh-hooks",
-        description="Install/uninstall mem-mesh hooks for Claude Code, Kiro, and Cursor.",
+        description=(
+            "Install/uninstall mem-mesh hooks for Claude Code, Kiro, Cursor, "
+            "and Codex."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
-    target_choices = ["claude", "kiro", "cursor", "all"]
+    target_choices = ["claude", "kiro", "cursor", "codex", "all"]
 
     # install
     install_parser = subparsers.add_parser("install", help="Install hooks")
@@ -1941,7 +2276,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         default="api",
         help=(
             "Storage mode: api (remote server, bash+curl hooks), "
-            "local (SQLite direct), or http (Claude Code native HTTP hooks)"
+            "local (SQLite direct), or http (native HTTP where supported; "
+            "command hooks elsewhere)"
         ),
     )
     install_parser.add_argument(
@@ -1960,8 +2296,9 @@ def main(argv: Optional[List[str]] = None) -> None:
         choices=["global", "project"],
         default="global",
         help=(
-            "Install scope: global (user home — ~/.claude, ~/.kiro, ~/.cursor; "
-            "default) or project (<dir>/.claude, <dir>/.kiro, <dir>/.cursor)"
+            "Install scope: global (user home — ~/.claude, ~/.kiro, ~/.cursor, "
+            "~/.codex; default) or project (<dir>/.claude, <dir>/.kiro, "
+            "<dir>/.cursor, <dir>/.codex)"
         ),
     )
     install_parser.add_argument(
