@@ -46,7 +46,8 @@ Auto-normalized: camelCase/PascalCase → kebab-case (myApp → my-app)
 | 장애/사고 | `incident` |
 | 아이디어 | `idea` |
 
-일상 작업은 `pin_add` → `pin_complete`으로 추적. `add`는 영구 보존 가치가 있는 것만.
+파일 변경, 구현, 버그 수정, 리팩토링, 마이그레이션, 다단계 조사처럼 이어질 수 있는 작업은
+`pin_add` → `pin_complete`으로 추적. `add`는 영구 보존 가치가 있는 것만.
 
 ### SAVE FORMAT
 
@@ -67,10 +68,13 @@ Tags: 3-6개 (기술 + 모듈 + 액션). 중복 시 `update(memory_id)` 사용.
 
 ### PIN WORKFLOW (SHOULD)
 
-진행 중 작업 추적:
-1. `pin_add(content, project_id, importance=3)` — 작업 시작 (기본 상태: `in_progress`)
-2. `pin_complete(pin_id, promote=true)` — 완료 + 승격을 한 번에 처리
-3. importance ≥ 4 → 별도 승격 시 `pin_promote(pin_id)`
+작업 시작 전 Pin Gate를 판단:
+1. 생성 O: 파일 변경, 구현, 버그 수정, 리팩토링, 마이그레이션, 다단계 조사, 다음 턴으로 이어질 수 있는 작업
+2. 생성 X: 질문, 설명 요청, 조회, read-only 분석, 단순 확인
+3. 생성 시 `pin_add(content, project_id, importance=3)` (기본 상태: `in_progress`)
+4. 응답에 `Pin created: <id>` 또는 `No pin created: <reason>` 표기
+5. 완료 시 `pin_complete(pin_id, promote=true)` 호출. 활성 pin을 남긴 채 최종 응답하지 않음
+6. importance ≥ 4 → 별도 승격 시 `pin_promote(pin_id)`
 
 핀 상태: `open`(계획됨) → `in_progress`(작업 중, 기본값) → `completed`(완료)
 Stale 자동 정리: session_resume 시 in_progress 7일, open 30일 경과 → completed

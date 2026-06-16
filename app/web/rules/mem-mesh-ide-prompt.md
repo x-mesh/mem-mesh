@@ -15,12 +15,14 @@ Auto-normalized: camelCase/PascalCase → kebab-case (e.g. "myApp" → "my-app")
 
 ### WORKFLOW
 1. Start: session_resume(project_id, expand="smart", limit=10) — stale pins auto-cleaned
-2. Task: pin_add(content, project_id, importance=3) — default status: in_progress
-3. Search: search(query, project_id, limit=5) — phrases, not words
-4. Save: add(content, category, project_id, tags)
-5. Stats: stats(project_id) — memory statistics
-6. Done: pin_complete(pin_id, promote=true) — complete+promote in one call
-7. End: session_end(project_id)
+2. Pin Gate: create pin for file-changing or multi-step work; skip read-only questions
+3. Task: pin_add(content, project_id, importance=3) — default status: in_progress
+   Say "Pin created: <id>" or "No pin created: <reason>"
+4. Search: search(query, project_id, limit=5) — phrases, not words
+5. Save: add(content, category, project_id, tags)
+6. Stats: stats(project_id) — memory statistics
+7. Done: pin_complete(pin_id, promote=true) — complete+promote in one call
+8. End: session_end(project_id)
 
 ### SEARCH
 - ✅ "token optimization strategy" ❌ "token"
