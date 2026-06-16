@@ -93,6 +93,12 @@ class ChromaHeader extends HTMLElement {
                 </svg>
                 <span>Analytics</span>
               </a>
+              <a href="/security" class="nav-link" data-route="/security" data-nav="security">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 2l8 4v6c0 4.5-3.2 7.8-8 10-4.8-2.2-8-5.5-8-10V6l8-4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                </svg>
+                <span>Security</span>
+              </a>
               <a href="/settings" class="nav-link" data-route="/settings" data-nav="settings">
                 <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
                   <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
@@ -235,6 +241,12 @@ class ChromaHeader extends HTMLElement {
                   <path d="M6 20V14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                 </svg>
                 <span>Analytics</span>
+              </a>
+              <a href="/security" class="mobile-nav-link" data-route="/security" data-nav="security">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 2l8 4v6c0 4.5-3.2 7.8-8 10-4.8-2.2-8-5.5-8-10V6l8-4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                </svg>
+                <span>Security</span>
               </a>
               <a href="/settings" class="mobile-nav-link" data-route="/settings" data-nav="settings">
                 <svg class="nav-icon" viewBox="0 0 24 24" fill="none">

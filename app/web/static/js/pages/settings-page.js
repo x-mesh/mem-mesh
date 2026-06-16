@@ -161,19 +161,20 @@ export class SettingsPage extends HTMLElement {
         </div>
       </div>
 
-      <!-- OAuth -->
+      <!-- Security & Tokens -->
       <div class="settings-section">
         <div class="section-header">
-          <span class="section-label">OAuth / Authentication</span>
+          <span class="section-label">Security &amp; Tokens</span>
         </div>
         <div class="section-body">
-          <p class="section-desc">Manage OAuth 2.1 clients for MCP authentication.</p>
+          <p class="section-desc">Hook token, web dashboard auth, and MCP OAuth clients in one place.</p>
           <div class="oauth-row">
-            <a href="/oauth" class="settings-btn-primary" data-route="/oauth">Manage OAuth Clients</a>
+            <a href="/security" class="settings-btn-primary" data-route="/security">Open Security Settings</a>
           </div>
           <div class="oauth-env">
             <span class="env-title">Environment Variables</span>
             <div class="env-list">
+              <div class="env-item"><code>MEM_MESH_HOOK_TOKEN</code><span>Hook endpoint secret (auto-generated if unset)</span></div>
               <div class="env-item"><code>MEM_MESH_AUTH_ENABLED</code><span>Global auth toggle</span></div>
               <div class="env-item"><code>MEM_MESH_MCP_AUTH_ENABLED</code><span>MCP SSE auth</span></div>
               <div class="env-item"><code>MEM_MESH_WEB_AUTH_ENABLED</code><span>Web API auth</span></div>
