@@ -164,6 +164,18 @@ class Database:
     async def set_embedding_metadata(self, key: str, value: str) -> None:
         await self._migrator.set_embedding_metadata(key, value)
 
+    # Runtime app-config overrides reuse the metadata key-value table under a
+    # ``config.`` namespace so dashboard-set settings persist without a new
+    # migration. See app.core.runtime_config for the precedence/resolver.
+    async def get_app_config(self, key: str) -> Optional[str]:
+        return await self._migrator.get_embedding_metadata(f"config.{key}")
+
+    async def set_app_config(self, key: str, value: str) -> None:
+        await self._migrator.set_embedding_metadata(f"config.{key}", value)
+
+    async def delete_app_config(self, key: str) -> None:
+        await self._migrator.delete_embedding_metadata(f"config.{key}")
+
     async def active_embedding_table(self) -> str:
         """현재 검색/쓰기 대상 벡터 테이블(blue-green active slot).
 

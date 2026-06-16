@@ -62,6 +62,17 @@ class DatabaseMigrator:
             logger.error(f"Failed to set embedding metadata: {e}")
             raise
 
+    async def delete_embedding_metadata(self, key: str) -> None:
+        """Delete a metadata row by key (no-op if absent)."""
+        try:
+            await self.connection.execute(
+                "DELETE FROM embedding_metadata WHERE key = ?", (key,)
+            )
+            self.connection.commit()
+        except Exception as e:
+            logger.error(f"Failed to delete embedding metadata: {e}")
+            raise
+
     async def check_embedding_model_consistency(
         self, current_model: str, current_dim: int
     ) -> dict:
