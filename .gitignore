@@ -19,7 +19,9 @@ __pycache__/
 
 # Tool-local state (IDE / AI assistants / build harnesses)
 .beads/
-.claude/
+.claude/*
+# ...but share project slash commands with the team
+!.claude/commands/
 .cursor/
 .hypothesis/
 .kiro/
