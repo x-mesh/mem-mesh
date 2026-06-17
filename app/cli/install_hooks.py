@@ -20,6 +20,14 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.cli.codex_config import (
+    CODEX_CONFIG,
+    CODEX_HOOKS_DIR,
+    CODEX_HOOKS_FILE,
+    build_codex_mcp_block,
+    merge_codex_mcp_config,
+    remove_codex_mcp_config,
+)
 from app.cli.hooks.cursor_adapters import (
     adapt_cursor_before_submit_prompt,
     adapt_cursor_precompact,
@@ -65,14 +73,6 @@ from app.cli.hooks.templates import (
     SUBAGENT_STOP_HOOK_TEMPLATE,
     TASK_COMPLETED_HOOK_TEMPLATE,
     USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
-)
-from app.cli.codex_config import (
-    CODEX_CONFIG,
-    CODEX_HOOKS_DIR,
-    CODEX_HOOKS_FILE,
-    build_codex_mcp_block,
-    merge_codex_mcp_config,
-    remove_codex_mcp_config,
 )
 from app.cli.prompts.behaviors import PROMPT_VERSION, REFLECT_CONFIG
 from app.cli.prompts.renderers import (
