@@ -14,8 +14,16 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
+      # Named volumes (NOT bind mounts): Docker initializes an empty named
+      # volume with the image's ownership/permissions at the mount point, so
+      # /app/data and /app/logs inherit memmesh:memmesh (UID 1000) from the
+      # Dockerfile chown. A bind mount instead exposes the host dir's perms
+      # (root:root when docker auto-creates a missing ./data), and the non-root
+      # memmesh user then can't open the SQLite DB ("unable to open database
+      # file") — startup fails with exit 3. Back up with:
+      #   docker compose cp mem-mesh:/app/data/memories.db ./backup.db
+      - mem-mesh-data:/app/data
+      - mem-mesh-logs:/app/logs
       - model-cache:/home/memmesh/.cache/huggingface
     environment:
       - MEM_MESH_DATABASE_PATH=/app/data/memories.db
@@ -66,3 +74,7 @@ services:
 volumes:
   model-cache:
     name: mem-mesh-model-cache
+  mem-mesh-data:
+    name: mem-mesh-data
+  mem-mesh-logs:
+    name: mem-mesh-logs
