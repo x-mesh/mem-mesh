@@ -348,6 +348,23 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         # Resolve env > db(dashboard) > default so a dashboard toggle applies
         # without a restart.
         if not effective_bool("web_basic_auth_enabled"):
+            # First-run onboarding: while no dashboard auth is configured a
+            # setup token is pending (minted by lifespan). Steer browser page
+            # navigations to /setup so the operator discovers onboarding
+            # instead of landing on an empty dashboard. Only a GET HTML
+            # navigation to a dashboard page triggers it (assets/API/login/
+            # setup itself pass through), and only while basic auth is off — a
+            # single file stat in the first-run window, gone once auth is set.
+            if (
+                request.method == "GET"
+                and "text/html" in request.headers.get("accept", "")
+                and not self._is_public_path(path)
+                and not self._is_exempt_path(path)
+            ):
+                from app.core.config import read_setup_token
+
+                if read_setup_token() is not None:
+                    return RedirectResponse(url="/setup", status_code=302)
             return await call_next(request)
 
         if self._is_public_path(path):

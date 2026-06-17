@@ -167,7 +167,16 @@ SETUP_PAGE_HTML = """
             background: var(--bg-secondary, #fafafa);
             border: 1px solid var(--border-color, #e5e5e5);
             border-radius: 10px; padding: 0.7rem 0.85rem; margin-bottom: 1.25rem;
-            line-height: 1.45;
+            line-height: 1.6;
+        }
+        .setup-hint code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.76rem;
+            background: var(--card-bg, #ffffff);
+            border: 1px solid var(--border-color, #e5e5e5);
+            border-radius: 6px; padding: 0.12rem 0.4rem;
+            color: var(--text-primary, #171717);
+            word-break: break-all;
         }
         .login-form { display: flex; flex-direction: column; gap: 1.1rem; }
         .login-field label {
@@ -223,8 +232,13 @@ SETUP_PAGE_HTML = """
             <p>First-run setup</p>
         </div>
         <div class="setup-hint">
-            Paste the <strong>setup token</strong> printed on the server console,
-            then choose an admin username and password to secure the dashboard.
+            The one-time <strong>setup token</strong> is printed in the server console log
+            at startup. If you don't have it, read it from the data directory inside the
+            container:
+            <br>
+            <code>docker exec mem-mesh-prod cat /app/data/setup_token</code>
+            <br>
+            Then choose an admin username and password to secure the dashboard.
         </div>
         {error_html}
         <form class="login-form" method="POST" action="/setup">

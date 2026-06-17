@@ -10,11 +10,12 @@ Covers:
 
 import pytest
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from httpx import ASGITransport, AsyncClient
 
 import app.core.config as cfg
 from app.core import runtime_config as rc
-from app.web.oauth.basic_auth import SESSION_COOKIE_NAME
+from app.web.oauth.basic_auth import BasicAuthMiddleware, SESSION_COOKIE_NAME
 
 
 @pytest.fixture
@@ -181,3 +182,64 @@ async def test_post_setup_refuses_reuse_after_consumed(temp_db, setup_token_file
         )
     assert r.status_code == 302
     assert r.headers["location"] == "/"
+
+
+# ─────────────── first-run redirect middleware (integration) ───────────────
+
+
+def _app_with_middleware(db):
+    from app.web.oauth.setup_routes import router
+
+    app = FastAPI()
+    app.add_middleware(BasicAuthMiddleware)
+    app.include_router(router)
+
+    @app.get("/")
+    async def _root():
+        return HTMLResponse("<html>dashboard</html>")
+
+    app.state.db = db
+    return app
+
+
+@pytest.mark.asyncio
+async def test_page_redirects_to_setup_when_token_pending(temp_db, setup_token_file):
+    cfg.ensure_setup_token()
+    transport = ASGITransport(app=_app_with_middleware(temp_db))
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.get("/", headers={"accept": "text/html"}, follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers["location"] == "/setup"
+
+
+@pytest.mark.asyncio
+async def test_page_not_redirected_when_no_token(temp_db, setup_token_file):
+    # No pending token (auth configured / already onboarded) → normal page.
+    transport = ASGITransport(app=_app_with_middleware(temp_db))
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.get("/", headers={"accept": "text/html"}, follow_redirects=False)
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_setup_page_itself_not_redirected(temp_db, setup_token_file):
+    cfg.ensure_setup_token()
+    transport = ASGITransport(app=_app_with_middleware(temp_db))
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.get(
+            "/setup", headers={"accept": "text/html"}, follow_redirects=False
+        )
+    assert r.status_code == 200
+    assert "Setup token" in r.text
+
+
+@pytest.mark.asyncio
+async def test_non_html_request_not_redirected(temp_db, setup_token_file):
+    # A fetch/XHR (no text/html Accept) is not a navigation — must pass through.
+    cfg.ensure_setup_token()
+    transport = ASGITransport(app=_app_with_middleware(temp_db))
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.get(
+            "/", headers={"accept": "application/json"}, follow_redirects=False
+        )
+    assert r.status_code == 200
