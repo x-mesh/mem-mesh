@@ -14,13 +14,19 @@ services:
       - /app/.hypothesis
       - model-cache:/home/memmesh/.cache/huggingface
     environment:
-      - DATABASE_PATH=/app/data/memories.db
-      - LOG_LEVEL=DEBUG
-      - MCP_LOG_FORMAT=text
+      # Pydantic Settings reads MEM_MESH_-prefixed vars only (env_prefix in
+      # app/core/config.py); the old unprefixed names were silently ignored.
+      - MEM_MESH_DATABASE_PATH=/app/data/memories.db
+      - MEM_MESH_LOG_LEVEL=DEBUG
+      - MEM_MESH_LOG_FORMAT=text
       - PYTHONUNBUFFERED=1
       - MEM_MESH_SERVER_HOST=0.0.0.0
       - MEM_MESH_SERVER_PORT=8000
       - MEM_MESH_SERVER_WORKERS=3
+      # Logs reach host ./logs through the .:/app bind above (/app/logs ==
+      # ./logs), so no extra volume line is needed — just turn on file output.
+      - MEM_MESH_LOG_OUTPUT=both
+      - MEM_MESH_LOG_FILE=/app/logs/mem-mesh.log
 
     stdin_open: true
     tty: true
