@@ -14,21 +14,31 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Named volumes (NOT bind mounts): Docker initializes an empty named
-      # volume with the image's ownership/permissions at the mount point, so
-      # /app/data and /app/logs inherit memmesh:memmesh (UID 1000) from the
-      # Dockerfile chown. A bind mount instead exposes the host dir's perms
-      # (root:root when docker auto-creates a missing ./data), and the non-root
-      # memmesh user then can't open the SQLite DB ("unable to open database
-      # file") — startup fails with exit 3. Back up with:
+      # Data uses a NAMED volume (NOT a bind mount): Docker initializes an empty
+      # named volume with the image's ownership at the mount point, so /app/data
+      # inherits memmesh:memmesh (UID 1000) from the Dockerfile chown. A bind
+      # mount instead exposes the host dir's perms (root:root when docker
+      # auto-creates a missing ./data), and the non-root memmesh user then can't
+      # open the SQLite DB ("unable to open database file") — startup fails with
+      # exit 3. Back up with:
       #   docker compose cp mem-mesh:/app/data/memories.db ./backup.db
       - mem-mesh-data:/app/data
-      - mem-mesh-logs:/app/logs
+      # Logs bind-mounted to host ./logs so they're readable without a
+      # `docker compose cp`. The host dir MUST be writable by the container's
+      # non-root user (UID 1000), or docker creates it root:root and the file
+      # handler silently fails (logs still reach stdout via LOG_OUTPUT=both):
+      #   mkdir -p ./logs && sudo chown 1000:1000 ./logs
+      - ./logs:/app/logs
       - model-cache:/home/memmesh/.cache/huggingface
     environment:
       - MEM_MESH_DATABASE_PATH=/app/data/memories.db
       - MEM_MESH_LOG_LEVEL=INFO
       - MEM_MESH_LOG_FORMAT=text
+      # Write logs to the bind-mounted ./logs AND keep them on stdout, so
+      # `docker compose logs` still works. access.log is written alongside
+      # this path (see setup_access_log). Use "file" to drop the stdout copy.
+      - MEM_MESH_LOG_OUTPUT=both
+      - MEM_MESH_LOG_FILE=/app/logs/mem-mesh.log
       # Must be 0.0.0.0 so the published port reaches the app inside the
       # container. Network exposure is controlled by the `ports:` mapping above,
       # not by this value. Because the app sees a non-loopback bind, it
@@ -76,5 +86,3 @@ volumes:
     name: mem-mesh-model-cache
   mem-mesh-data:
     name: mem-mesh-data
-  mem-mesh-logs:
-    name: mem-mesh-logs
