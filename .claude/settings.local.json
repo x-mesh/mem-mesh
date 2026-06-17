@@ -27,7 +27,9 @@
       "Bash(# 5. SessionEnd 훅 테스트 \\(API 호출 시도 - curl output 확인\\)\necho '{}' | bash -x ~/.claude/hooks/mem-mesh-session-end.sh 2>&1)",
       "Bash(# 6. PreCompact 훅 테스트\necho '{}' | bash -x ~/.claude/hooks/mem-mesh-precompact.sh 2>&1)",
       "Bash(ls:*)",
-      "mcp__mem-mesh__pin_add"
+      "mcp__mem-mesh__pin_add",
+      "Bash(docker volume *)",
+      "Bash(docker run *)"
     ]
   }
 }
