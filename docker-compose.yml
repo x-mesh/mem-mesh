@@ -12,7 +12,7 @@ services:
     # host loopback only. To expose remotely, change the published address to
     # 0.0.0.0:8000:8000 — a hook token is enforced (see MEM_MESH_HOOK_TOKEN).
     ports:
-      - "127.0.0.1:8000:8000"
+      - "8000:8000"
     volumes:
       # Named volumes (NOT bind mounts): Docker initializes an empty named
       # volume with the image's ownership/permissions at the mount point, so
