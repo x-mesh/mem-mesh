@@ -11,7 +11,11 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.cli.hooks.json_ops import _atomic_write_text
+# NOTE: ``_atomic_write_text`` is imported lazily inside the two writer functions
+# below, NOT at module top level. Importing ``app.cli.hooks.json_ops`` here would
+# trigger ``app.cli.hooks/__init__`` which eagerly imports ``status``, and
+# ``status`` imports this module back -> circular import. Keeping it function-local
+# makes ``codex_config`` a leaf module that is safe to import in any order.
 
 CODEX_DIR = Path.home() / ".codex"
 CODEX_HOOKS_DIR = CODEX_DIR / "hooks"
@@ -130,6 +134,8 @@ def _strip_mem_mesh_tables(text: str) -> str:
 
 def merge_codex_mcp_config(config_path: Path, block: str) -> None:
     """Upsert the mem-mesh MCP block in a Codex ``config.toml`` file."""
+    from app.cli.hooks.json_ops import _atomic_write_text
+
     existing = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
     cleaned = _strip_mem_mesh_tables(_strip_managed_block(existing)).rstrip()
     new_text = (cleaned + "\n\n" if cleaned else "") + block
@@ -137,6 +143,8 @@ def merge_codex_mcp_config(config_path: Path, block: str) -> None:
 
 
 def remove_codex_mcp_config(config_path: Path) -> None:
+    from app.cli.hooks.json_ops import _atomic_write_text
+
     if not config_path.exists():
         return
     existing = config_path.read_text(encoding="utf-8")
