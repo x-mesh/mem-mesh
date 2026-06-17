@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-06-17
+
+멀티 IDE 클라이언트 지원 확장 — Codex IDE 지원 + Kiro/Antigravity 클라이언트 + Claude 프로젝트 로컬 룰 동기화.
+
+### Added
+- Codex IDE 지원 — hook 설치, MCP 설정, `status`/`doctor` 명령, interactive installer 및 web dashboard connect 통합을 Claude Code/Kiro/Cursor와 나란히 추가. `app/cli/codex_config.py`, `app/cli/install_hooks.py`, `app/cli/hooks/status.py`, `app/cli/hooks/doctor.py`, `app/web/dashboard/route_modules/connect.py`
+- Kiro / Antigravity 클라이언트 지원 — `mcp_config.py`의 MCP 도구 자동 감지, 대시보드 `/kiro`·`/antigravity` 설치 alias, connect 부트스트랩(Kiro hook 설정 + Antigravity MCP config), 클라이언트 타깃 UI 및 안내. `app/cli/mcp_config.py`, `app/web/dashboard/pages.py`, `app/web/dashboard/route_modules/connect.py`, `app/web/static/js/pages/connect-page.js`
+- Claude 프로젝트 로컬 룰 동기화 — `_sync_claude_rules()`가 세션/핀 gate를 담은 managed CLAUDE.md 블록 생성, `sync-project --target`에 `claude`/`kiro`/`antigravity` 추가, `render_claude_project_rules()` 렌더러. `app/cli/hooks/sync.py`, `app/cli/prompts/renderers.py`
+
+### Changed
+- Pin gate 결정 로직 명확화(PIN_CRITERIA v17) — "파일이 변경되는 작업만 pin" 등 핀 생성 기준 정리. `app/cli/prompts/behaviors.py`
+
 ## [1.7.0] - 2026-06-15
 
 검색 품질·동시성·임베딩 파이프라인 개선. arctic-ko 임베딩 도입(blue-green 무중단 재임베딩) + read/write 분리 풀(C3) + reranking(opt-in).
