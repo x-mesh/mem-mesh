@@ -628,6 +628,67 @@ def rotate_hook_token() -> str:
     return token
 
 
+# ---------------------------------------------------------------------------
+# First-run setup token
+# ---------------------------------------------------------------------------
+# A one-time bootstrap secret that lets an operator configure dashboard auth from
+# the web ``/setup`` page WITHOUT shell access, while preserving the loopback
+# gate's security property: only someone who can read the server console (or the
+# data-dir file) ever sees it. Generated at startup ONLY when no dashboard auth
+# is configured yet, and consumed (deleted) the moment setup completes — so a
+# network-exposed, still-unconfigured server cannot be hijacked remotely.
+
+
+def _data_dir_setup_token_file() -> Path:
+    """First-run setup-token path inside the data directory (next to the DB).
+
+    Shares the data volume so the token survives a container restart mid-onboard,
+    and is removed once auth is configured.
+    """
+    db_path = getattr(get_settings(), "database_path", None) or _default_db_path()
+    return Path(db_path).expanduser().resolve().parent / "setup_token"
+
+
+def read_setup_token() -> Optional[str]:
+    """Return the pending first-run setup token, or None if none is active."""
+    return _read_token_file(_data_dir_setup_token_file())
+
+
+def ensure_setup_token() -> str:
+    """Return the pending setup token, generating + persisting one if absent.
+
+    The caller decides *whether* a token should exist (i.e. that no dashboard
+    auth is configured yet); this only manages the file. Idempotent — repeated
+    calls return the same token until it is cleared.
+    """
+    existing = read_setup_token()
+    if existing:
+        return existing
+    token = secrets.token_urlsafe(32)
+    _atomic_write_token(_data_dir_setup_token_file(), token)
+    return token
+
+
+def clear_setup_token() -> None:
+    """Delete the setup-token file if present (idempotent).
+
+    Called when setup completes, and at startup when auth is already configured
+    so a stale token from an earlier state cannot linger as a live credential.
+    """
+    try:
+        _data_dir_setup_token_file().unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def verify_setup_token(candidate: str) -> bool:
+    """Constant-time check of ``candidate`` against the pending setup token."""
+    token = read_setup_token()
+    if not token or not candidate:
+        return False
+    return secrets.compare_digest(str(candidate), str(token))
+
+
 # The host uvicorn actually binds to. ``settings.server_host`` is the *static*
 # default (127.0.0.1) and does NOT reflect a ``--host`` / ``MEM_MESH_SERVER_HOST``
 # override passed at launch, so hook-token loopback judgment must use this

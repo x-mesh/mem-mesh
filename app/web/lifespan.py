@@ -146,6 +146,49 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning("Could not load runtime config overrides", error=str(e))
 
+        # First-run setup token. When NO dashboard auth is configured yet (no
+        # Basic Auth, no OAuth web auth, no admin password), mint a one-time
+        # token so an operator can configure auth from the web /setup page
+        # without shell access. It is shown ONLY on the server console and
+        # persisted next to the DB (survives a restart mid-onboarding). Once
+        # auth IS configured, any stale token is removed so a still-exposed
+        # server can never be reconfigured by a leftover credential. Resolved
+        # AFTER load_overrides so a DB-set toggle counts as configured.
+        try:
+            from app.core.config import clear_setup_token, ensure_setup_token
+            from app.core.runtime_config import admin_password_set, effective_bool
+
+            auth_configured = (
+                effective_bool("web_basic_auth_enabled")
+                or effective_bool("auth_enabled")
+                or admin_password_set()
+            )
+            if auth_configured:
+                clear_setup_token()
+            else:
+                setup_token = ensure_setup_token()
+                public = (settings.public_url or "").rstrip("/")
+                setup_url = f"{public}/setup" if public else "/setup"
+                logger.warning(
+                    "First-run setup token generated (dashboard auth not configured)"
+                )
+                print(
+                    "\n"
+                    + "=" * 60
+                    + "\n  FIRST-RUN SETUP  —  dashboard auth is NOT configured"
+                    + "\n"
+                    + "=" * 60
+                    + f"\n  Open : {setup_url}"
+                    + f"\n  Token: {setup_token}"
+                    + "\n  (one-time — consumed the moment you finish setup)"
+                    + "\n"
+                    + "=" * 60
+                    + "\n",
+                    flush=True,
+                )
+        except Exception as e:
+            logger.warning("Could not initialize first-run setup token", error=str(e))
+
         # Expose the DB on app.state so route handlers (e.g. the security config
         # API) can persist runtime overrides without importing module globals.
         app.state.db = db

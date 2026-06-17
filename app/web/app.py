@@ -22,6 +22,7 @@ from .monitoring import router as monitoring_router
 from .oauth import router as oauth_router
 from .oauth.basic_auth import BasicAuthMiddleware
 from .oauth.login_routes import router as login_router
+from .oauth.setup_routes import router as setup_router
 from .oauth.middleware import BearerTokenMiddleware
 from .websocket import router as websocket_router
 
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
     # Register routers (order matters!)
     app.include_router(oauth_router)  # OAuth endpoints
     app.include_router(login_router)  # Basic Auth login/logout pages
+    app.include_router(setup_router)  # First-run setup page (one-time token)
     app.include_router(websocket_router)  # WebSocket
     app.include_router(mcp_sse.router)  # MCP SSE
     app.include_router(monitoring_router)  # Monitoring API

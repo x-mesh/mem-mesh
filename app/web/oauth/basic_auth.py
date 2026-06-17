@@ -320,6 +320,7 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         "/favicon.ico",
         "/login",
         "/logout",
+        "/setup",
         "/docs",
         "/redoc",
         "/openapi.json",
