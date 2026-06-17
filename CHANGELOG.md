@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - First-run setup token — 대시보드 인증이 전혀 구성되지 않은 상태(`web_basic_auth_enabled`·`auth_enabled`·admin_password 모두 미설정)에서만 부팅 시 일회용 토큰을 생성해 **서버 콘솔에 출력**하고 `<data dir>/setup_token`(0600, hook token과 동일 패턴)에 영속한다. 웹 `/setup` 페이지에서 토큰 + admin 계정 입력 시 Basic Auth 활성화 · 비밀번호 설정 · 토큰 소멸 · 자동 로그인을 한 번에 처리한다. auth가 이미 구성된 경우 토큰은 발급되지 않고 stale 토큰은 부팅 시 제거된다. WHY: auth 미설정(부트스트랩) 상태에선 원격 웹에서 인증을 켤 수 없어(loopback / 세션 / OAuth 모두 부재) SSH나 env 수정이 필요했다. 노출된 서버를 원격에서 탈취하지 못하게 막는 `_can_reveal` 가드는 그대로 유지하면서, 그 1회성 온보딩 마찰을 "콘솔/데이터 디렉터리를 읽을 수 있는 운영자"에게로 옮긴다(첫 유효 제출이 토큰을 소비 → first-writer-wins로 race 차단). `app/core/config.py`, `app/web/oauth/setup_routes.py`, `app/web/lifespan.py`, `app/web/oauth/basic_auth.py`, `app/web/app.py`
+- First-run 자동 리다이렉트 — dashboard 인증이 미설정이고 setup token이 pending인 동안, 브라우저 페이지 내비게이션(GET + `Accept: text/html`)을 `/setup`으로 리다이렉트해 빈 대시보드 대신 온보딩 화면을 바로 보여준다(정적 자산 · API · `/login` · `/setup` 자체는 통과, basic auth가 켜지면 자동 해제). setup 페이지에는 토큰을 `<data dir>/setup_token`에서 읽는 방법(`docker exec … cat /app/data/setup_token`)을 안내한다. `app/web/oauth/basic_auth.py`, `app/web/oauth/setup_routes.py`
 
 ### Fixed
 - Production Docker compose가 `./data`·`./logs`를 bind mount로 걸어, 호스트에 디렉터리가 없으면 docker가 root 소유로 생성 → 비-root(`memmesh`, UID 1000) 컨테이너가 SQLite DB를 열지 못해(`unable to open database file`) 부팅이 exit 3 루프에 빠지던 문제. named volume으로 전환해 이미지의 `memmesh` 소유권이 볼륨 초기화 시 복사되도록 함(호스트 chown 불필요). 백업은 `docker compose cp mem-mesh:/app/data/memories.db ./backup.db`. `docker-compose.yml`
