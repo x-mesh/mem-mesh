@@ -13,32 +13,37 @@ services:
     # 0.0.0.0:8000:8000 — a hook token is enforced (see MEM_MESH_HOOK_TOKEN).
     ports:
       - "8000:8000"
+    # Run as the HOST user so the bind-mounted ./logs (owned by whoever runs
+    # this) is writable — the non-root image user (memmesh, 1000) otherwise
+    # can't write a host dir owned by root/your-uid, and uvicorn's access_file
+    # handler is FATAL on failure (crash loop). Pass the host IDs per machine:
+    #   ubuntu root server → put HOST_UID=0 / HOST_GID=0 in .env
+    #   mac/linux dev       → HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up
+    # Falls back to the image user (1000) if unset. The named volumes below stay
+    # writable for any host UID on a root server (root) — keep prod on root, or
+    # chown the volumes if you pin a non-root, non-1000 user.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     volumes:
-      # Data uses a NAMED volume (NOT a bind mount): Docker initializes an empty
-      # named volume with the image's ownership at the mount point, so /app/data
-      # inherits memmesh:memmesh (UID 1000) from the Dockerfile chown. A bind
-      # mount instead exposes the host dir's perms (root:root when docker
-      # auto-creates a missing ./data), and the non-root memmesh user then can't
-      # open the SQLite DB ("unable to open database file") — startup fails with
-      # exit 3. Back up with:
+      # Data + model cache stay in NAMED volumes (initialized memmesh:1000 from
+      # the Dockerfile chown) so the SQLite DB and the 2GB model survive across
+      # `up`/recreate and aren't exposed as raw host files. Back up with:
       #   docker compose cp mem-mesh:/app/data/memories.db ./backup.db
       - mem-mesh-data:/app/data
-      # Logs bind-mounted to host ./logs so they're readable without a
-      # `docker compose cp`. The host dir MUST be writable by the container's
-      # non-root user (UID 1000), or docker creates it root:root and the file
-      # handler silently fails (logs still reach stdout via LOG_OUTPUT=both):
-      #   mkdir -p ./logs && sudo chown 1000:1000 ./logs
-      - ./logs:/app/logs
       - model-cache:/home/memmesh/.cache/huggingface
+      # Logs are HOST-BOUND so you can `tail -f logs/mem-mesh.log` directly.
+      # Requires the `user:` above to own ./logs (hence host-uid). access.log is
+      # written here too (LOG_OUTPUT=both → also on `docker compose logs`).
+      - ./logs:/app/logs
     environment:
       - MEM_MESH_DATABASE_PATH=/app/data/memories.db
       - MEM_MESH_LOG_LEVEL=INFO
       - MEM_MESH_LOG_FORMAT=text
-      # Write logs to the bind-mounted ./logs AND keep them on stdout, so
-      # `docker compose logs` still works. access.log is written alongside
-      # this path (see setup_access_log). Use "file" to drop the stdout copy.
       - MEM_MESH_LOG_OUTPUT=both
       - MEM_MESH_LOG_FILE=/app/logs/mem-mesh.log
+      # A numeric `user:` override has no /etc/passwd home, so pin HOME to the
+      # image user's home — its .cache/huggingface is the model-cache mount, so
+      # the cached model is reused instead of re-downloaded.
+      - HOME=/home/memmesh
       # Must be 0.0.0.0 so the published port reaches the app inside the
       # container. Network exposure is controlled by the `ports:` mapping above,
       # not by this value. Because the app sees a non-loopback bind, it
