@@ -5,6 +5,12 @@ import os
 from pathlib import Path
 from typing import List
 
+from app.cli.codex_config import (
+    CODEX_CONFIG,
+    CODEX_HOOKS_DIR,
+    CODEX_HOOKS_FILE,
+    codex_config_has_mem_mesh,
+)
 from app.cli.hooks.colors import bold, dim, err, header, ok, warn
 from app.cli.hooks.constants import (
     CLAUDE_HOOKS_DIR,
@@ -15,12 +21,6 @@ from app.cli.hooks.constants import (
     KIRO_SETTINGS,
 )
 from app.cli.hooks.json_ops import _is_mem_mesh_entry
-from app.cli.codex_config import (
-    CODEX_CONFIG,
-    CODEX_HOOKS_DIR,
-    CODEX_HOOKS_FILE,
-    codex_config_has_mem_mesh,
-)
 from app.cli.hooks.netcheck import check_http_hook_url
 from app.cli.hooks.status import (
     _detect_profile,

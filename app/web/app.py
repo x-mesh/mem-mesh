@@ -22,8 +22,8 @@ from .monitoring import router as monitoring_router
 from .oauth import router as oauth_router
 from .oauth.basic_auth import BasicAuthMiddleware
 from .oauth.login_routes import router as login_router
-from .oauth.setup_routes import router as setup_router
 from .oauth.middleware import BearerTokenMiddleware
+from .oauth.setup_routes import router as setup_router
 from .websocket import router as websocket_router
 
 _WEB_ROOT = Path(__file__).resolve().parent

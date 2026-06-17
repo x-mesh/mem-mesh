@@ -14,7 +14,6 @@ from typing import Optional
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from app.cli.hooks.colors import bold, dim, err, info, ok, warn
 from app.cli.codex_config import (
     CODEX_CONFIG,
     build_codex_mcp_block_from_entry,
@@ -22,6 +21,7 @@ from app.cli.codex_config import (
     merge_codex_mcp_config,
     remove_codex_mcp_config,
 )
+from app.cli.hooks.colors import bold, dim, err, info, ok, warn
 
 
 def has_uvx() -> bool:

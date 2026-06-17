@@ -15,7 +15,7 @@ from httpx import ASGITransport, AsyncClient
 
 import app.core.config as cfg
 from app.core import runtime_config as rc
-from app.web.oauth.basic_auth import BasicAuthMiddleware, SESSION_COOKIE_NAME
+from app.web.oauth.basic_auth import SESSION_COOKIE_NAME, BasicAuthMiddleware
 
 
 @pytest.fixture

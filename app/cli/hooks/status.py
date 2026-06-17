@@ -8,6 +8,12 @@ import urllib.request
 from pathlib import Path
 from typing import Optional, Tuple
 
+from app.cli.codex_config import (
+    CODEX_CONFIG,
+    CODEX_HOOKS_DIR,
+    CODEX_HOOKS_FILE,
+    codex_config_has_mem_mesh,
+)
 from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
 from app.cli.hooks.constants import (
     CLAUDE_HOOKS_DIR,
@@ -19,12 +25,6 @@ from app.cli.hooks.constants import (
     KIRO_SETTINGS,
 )
 from app.cli.hooks.json_ops import _count_mem_mesh_hook_entries
-from app.cli.codex_config import (
-    CODEX_CONFIG,
-    CODEX_HOOKS_DIR,
-    CODEX_HOOKS_FILE,
-    codex_config_has_mem_mesh,
-)
 from app.cli.prompts.behaviors import PROMPT_VERSION
 from app.cli.prompts.renderers import extract_prompt_version
 
