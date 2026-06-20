@@ -1,9 +1,7 @@
 """Index LongMemEval sessions into per-question mem-mesh databases."""
 
-import asyncio
 import logging
 import time
-from pathlib import Path
 
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService

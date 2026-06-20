@@ -24,7 +24,7 @@ from app.core.schemas.responses import SearchResponse
 from app.core.storage.direct import DirectStorageBackend
 
 from benchmarks.longmemeval.indexer import create_indexer
-from benchmarks.longmemeval.models import BenchmarkItem, QuestionResult, RetrievalMetrics
+from benchmarks.longmemeval.models import BenchmarkItem, QuestionResult
 from benchmarks.longmemeval.reporter import generate_report, print_report
 from benchmarks.longmemeval.retriever import Retriever
 

@@ -16,7 +16,6 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
-from datetime import datetime
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -267,7 +266,7 @@ class ContextTokenOptimizationMigrator:
             await self.connect()
 
             logger.info(f"\n{'='*60}")
-            logger.info(f"Starting context-token-optimization migration")
+            logger.info("Starting context-token-optimization migration")
             logger.info(f"Database: {self.db_path}")
             logger.info(f"Mode: {'DRY RUN' if self.dry_run else 'LIVE'}")
             logger.info(f"{'='*60}\n")

@@ -4,7 +4,6 @@ mem-mesh Web UI Build Script
 Optimizes and prepares the web UI for production deployment
 """
 
-import os
 import json
 import shutil
 import gzip

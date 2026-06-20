@@ -3,12 +3,11 @@
 전체 파이프라인: 데이터 로드 → 인덱싱 → 검색 → 생성 → 평가 → 리포트
 """
 
-import asyncio
 import json
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from app.core.storage.direct import DirectStorageBackend
 

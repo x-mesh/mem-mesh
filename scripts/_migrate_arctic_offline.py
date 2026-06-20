@@ -24,7 +24,6 @@ Usage:
       [--limit N] [--batch-size 256] [--truncate 2000] [--dry-run]
 """
 import argparse
-import json
 import sqlite3
 import struct
 import sys

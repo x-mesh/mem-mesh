@@ -2,7 +2,7 @@
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService

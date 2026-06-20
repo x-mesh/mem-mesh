@@ -2,9 +2,8 @@
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from huggingface_hub import hf_hub_download
 

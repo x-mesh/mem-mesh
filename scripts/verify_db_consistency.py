@@ -10,9 +10,8 @@ Usage:
 """
 
 import sqlite3
-import hashlib
 from pathlib import Path
-from typing import Dict, List, Tuple, Set
+from typing import Dict, List, Tuple
 
 # Project root path
 ROOT_DIR = Path(__file__).parent.parent
@@ -63,7 +62,7 @@ def compare_memories(db_memories: List[Tuple[str, Dict[str, Dict]]]) -> Dict:
     all_ids = [set(memories.keys()) for _, memories in db_memories]
     common_ids = set.intersection(*all_ids)
 
-    print(f"📊 Memory ID Analysis:")
+    print("📊 Memory ID Analysis:")
     for db_name, memories in db_memories:
         print(f"   {db_name}: {len(memories):,} memories")
     print(f"   Common IDs: {len(common_ids):,} memories")
@@ -88,7 +87,7 @@ def compare_memories(db_memories: List[Tuple[str, Dict[str, Dict]]]) -> Dict:
         'metadata_mismatch': [],
     }
 
-    print(f"🔍 Verifying content consistency... (sample: first 1000)")
+    print("🔍 Verifying content consistency... (sample: first 1000)")
 
     # Sample: only verify first 1000 (full verification takes a long time)
     sample_ids = list(common_ids)[:1000]
@@ -163,7 +162,7 @@ def compare_memories(db_memories: List[Tuple[str, Dict[str, Dict]]]) -> Dict:
 
 def print_inconsistencies(inconsistencies: Dict):
     """Print inconsistency details."""
-    print(f"\n📋 Verification Results:\n")
+    print("\n📋 Verification Results:\n")
 
     total_issues = sum(len(issues) for issues in inconsistencies.values())
 
@@ -232,7 +231,7 @@ def main():
             print(f"❌ Database not found: {db_path}")
             return 1
 
-    print(f"Databases to verify:")
+    print("Databases to verify:")
     for db_path in DATABASES:
         print(f"   - {db_path}")
     print()

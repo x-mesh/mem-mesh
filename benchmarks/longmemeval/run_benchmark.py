@@ -96,15 +96,15 @@ def _log_report(report: dict) -> None:
             f"recall_any={data['recall_any']:.2f}  recall_all={data['recall_all']:.2f}"
         )
     rm = report.get("retrieval_metrics", {})
-    _log(f"\n  --- Retrieval Metrics ---")
+    _log("\n  --- Retrieval Metrics ---")
     _log(f"  Recall@K (any):  {rm.get('recall_any_avg', 0):.4f}")
     _log(f"  Recall@K (all):  {rm.get('recall_all_avg', 0):.4f}")
     t = report.get("timing", {})
-    _log(f"\n  --- Timing ---")
+    _log("\n  --- Timing ---")
     _log(f"  Avg search:      {t.get('avg_search_ms', 0):.0f} ms")
     _log(f"  Avg generation:  {t.get('avg_generation_s', 0):.1f} s")
     c = report.get("config", {})
-    _log(f"\n  --- Config ---")
+    _log("\n  --- Config ---")
     _log(
         f"  variant={c.get('variant')}  topk={c.get('topk')}  "
         f"mode={c.get('search_mode')}  cot={c.get('use_cot')}  "
@@ -297,12 +297,12 @@ async def run_benchmark(config: BenchmarkConfig) -> None:
         failed_ids = set(get_failed_question_ids(checkpoint))
         remaining = [q for q in questions if q.question_id in failed_ids]
         is_retry_mode = True
-        _log(f"\nLongMemEval Benchmark (retry-failed mode)")
+        _log("\nLongMemEval Benchmark (retry-failed mode)")
         _log(f"  Total: {len(questions)} | Failed to retry: {len(remaining)}")
     else:
         completed_set = set(checkpoint.completed_ids)
         remaining = [q for q in questions if q.question_id not in completed_set]
-        _log(f"\nLongMemEval Benchmark")
+        _log("\nLongMemEval Benchmark")
         _log(f"  Total: {len(questions)} | Completed: {len(completed_set)} | Remaining: {len(remaining)}")
 
     _log(

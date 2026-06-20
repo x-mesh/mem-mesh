@@ -6,7 +6,6 @@ Script to run the MCP server.
 import subprocess
 import sys
 import os
-import signal
 import time
 
 

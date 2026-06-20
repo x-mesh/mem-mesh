@@ -6,7 +6,6 @@
   Phase 3: 전체 haystack (선택)
 """
 
-import asyncio
 import json
 import logging
 from pathlib import Path

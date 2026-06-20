@@ -3,7 +3,7 @@
 import json
 import logging
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from .checkpoint import CheckpointData
@@ -176,17 +176,17 @@ def print_report(report: dict) -> None:
         )
 
     rm = report.get("retrieval_metrics", {})
-    print(f"\n  --- Retrieval Metrics ---")
+    print("\n  --- Retrieval Metrics ---")
     print(f"  Recall@K (any):  {rm.get('recall_any_avg', 0):.4f}")
     print(f"  Recall@K (all):  {rm.get('recall_all_avg', 0):.4f}")
 
     t = report.get("timing", {})
-    print(f"\n  --- Timing ---")
+    print("\n  --- Timing ---")
     print(f"  Avg search:      {t.get('avg_search_ms', 0):.0f} ms")
     print(f"  Avg generation:  {t.get('avg_generation_s', 0):.1f} s")
 
     c = report.get("config", {})
-    print(f"\n  --- Config ---")
+    print("\n  --- Config ---")
     print(f"  variant={c.get('variant')}  topk={c.get('topk')}  "
           f"mode={c.get('search_mode')}  cot={c.get('use_cot')}  "
           f"model={c.get('claude_model')}")

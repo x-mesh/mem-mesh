@@ -1,6 +1,5 @@
 
 import asyncio
-import os
 import logging
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
@@ -50,7 +49,7 @@ async def verify_features():
     )
 
     for query in queries:
-        print(f"\n" + "-"*60)
+        print("\n" + "-"*60)
         print(f"🧪 Query: '{query}'")
         print("-"*60)
 

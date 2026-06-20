@@ -1041,7 +1041,7 @@ class StatsService:
         try:
             col = "source" if dimension == "source" else "client"
 
-            conds = [f"DATE(created_at) >= DATE('now', ?)"]
+            conds = ["DATE(created_at) >= DATE('now', ?)"]
             params: list = [f"-{int(days)} days"]
             if project_id:
                 conds.append("project_id = ?")
