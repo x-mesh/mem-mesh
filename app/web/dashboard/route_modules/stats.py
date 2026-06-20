@@ -103,3 +103,95 @@ async def get_projects(service: StatsService = Depends(get_stats_service)):
     except Exception as e:
         logger.error(f"Get projects error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== Analytics extensions =====
+
+
+@router.get("/analytics/productivity")
+async def get_productivity_analytics(
+    project_id: str = None,
+    days: int = Query(default=7, ge=1, le=365),
+    weeks: int = Query(default=8, ge=1, le=52),
+    service: StatsService = Depends(get_stats_service),
+):
+    """Work-tracking productivity: pin/session throughput and lead time."""
+    try:
+        pin_stats = await service.get_pin_stats(project_id=project_id)
+        session_stats = await service.get_session_stats(project_id=project_id)
+        daily = await service.get_daily_pin_completions(
+            project_id=project_id, days=days
+        )
+        weekly = await service.get_weekly_pin_completions(
+            project_id=project_id, weeks=weeks
+        )
+        return {
+            "pins": pin_stats,
+            "sessions": session_stats,
+            "daily_completions": daily,
+            "weekly_completions": weekly,
+        }
+    except Exception as e:
+        logger.error(f"Get productivity analytics error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/analytics/token-economics")
+async def get_token_economics_analytics(
+    project_id: str = None,
+    start_date: str = None,
+    end_date: str = None,
+    service: StatsService = Depends(get_stats_service),
+):
+    """Token-savings economics aggregated from token_usage."""
+    try:
+        return await service.get_token_economics(
+            project_id=project_id, start_date=start_date, end_date=end_date
+        )
+    except Exception as e:
+        logger.error(f"Get token economics error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/analytics/kb-health")
+async def get_kb_health_analytics(
+    project_id: str = None,
+    service: StatsService = Depends(get_stats_service),
+):
+    """Knowledge-base health: age distribution, stale/orphan ratio, graph density."""
+    try:
+        return await service.get_kb_health(project_id=project_id)
+    except Exception as e:
+        logger.error(f"Get KB health error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/analytics/recall")
+async def get_recall_analytics(
+    project_id: str = None,
+    limit: int = Query(default=10, ge=1, le=50),
+    service: StatsService = Depends(get_stats_service),
+):
+    """Recall/usage: most-recalled memories, dead-memory ratio, access distribution."""
+    try:
+        return await service.get_recall_stats(project_id=project_id, limit=limit)
+    except Exception as e:
+        logger.error(f"Get recall analytics error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/analytics/activity-trend")
+async def get_activity_trend_analytics(
+    project_id: str = None,
+    days: int = Query(default=30, ge=1, le=365),
+    dimension: str = Query(default="client"),
+    service: StatsService = Depends(get_stats_service),
+):
+    """Daily activity broken down by client or source (stacked time series)."""
+    try:
+        return await service.get_activity_trend(
+            project_id=project_id, days=days, dimension=dimension
+        )
+    except Exception as e:
+        logger.error(f"Get activity trend error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

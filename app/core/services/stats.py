@@ -700,3 +700,387 @@ class StatsService:
         except Exception as e:
             logger.error(f"Failed to get session stats: {e}")
             raise
+
+    # ===== Analytics Extensions (token economics / KB health / recall / trend) =====
+
+    @staticmethod
+    def _memory_filters(
+        project_id: Optional[str],
+        start_date: Optional[str],
+        end_date: Optional[str],
+        *,
+        date_col: str = "created_at",
+        use_date_fn: bool = False,
+    ) -> tuple[str, list]:
+        """Build a WHERE clause + params for project/date filtering.
+
+        use_date_fn wraps the date column in DATE() and compares against plain
+        YYYY-MM-DD strings — robust to ISO 'T'/'Z' vs space-separated storage
+        (token_usage). The created_at form keeps the indexable comparison used
+        by the memories table elsewhere.
+        """
+        conds: list[str] = []
+        params: list = []
+        if project_id:
+            conds.append("project_id = ?")
+            params.append(project_id)
+        if start_date:
+            if use_date_fn:
+                conds.append(f"DATE({date_col}) >= ?")
+                params.append(start_date)
+            else:
+                conds.append(f"{date_col} >= ?")
+                params.append(f"{start_date}T00:00:00Z")
+        if end_date:
+            if use_date_fn:
+                conds.append(f"DATE({date_col}) <= ?")
+                params.append(end_date)
+            else:
+                conds.append(f"{date_col} <= ?")
+                params.append(f"{end_date}T23:59:59Z")
+        where = ("WHERE " + " AND ".join(conds)) if conds else ""
+        return where, params
+
+    async def get_token_economics(
+        self,
+        project_id: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """토큰 절약 이코노믹스 (token_usage 집계).
+
+        mem-mesh 핵심 가치 제안(컨텍스트 토큰 절감)을 수치화한다.
+        """
+        try:
+            where, params = self._memory_filters(
+                project_id, start_date, end_date, use_date_fn=True
+            )
+
+            totals_row = await self.db.fetchone(
+                f"""
+                SELECT
+                    COALESCE(SUM(tokens_used), 0)   AS tokens_used,
+                    COALESCE(SUM(tokens_saved), 0)  AS tokens_saved,
+                    COUNT(*)                        AS operations,
+                    COALESCE(SUM(optimization_applied), 0) AS optimized_ops
+                FROM token_usage {where}
+                """,
+                tuple(params),
+            )
+            tokens_used = totals_row["tokens_used"] if totals_row else 0
+            tokens_saved = totals_row["tokens_saved"] if totals_row else 0
+            operations = totals_row["operations"] if totals_row else 0
+            optimized_ops = totals_row["optimized_ops"] if totals_row else 0
+
+            by_op_rows = await self.db.fetchall(
+                f"""
+                SELECT
+                    operation_type,
+                    COALESCE(SUM(tokens_used), 0)  AS tokens_used,
+                    COALESCE(SUM(tokens_saved), 0) AS tokens_saved,
+                    COUNT(*)                       AS operations
+                FROM token_usage {where}
+                GROUP BY operation_type
+                ORDER BY tokens_saved DESC
+                """,
+                tuple(params),
+            )
+
+            daily_rows = await self.db.fetchall(
+                f"""
+                SELECT
+                    DATE(created_at)               AS date,
+                    COALESCE(SUM(tokens_saved), 0) AS tokens_saved,
+                    COALESCE(SUM(tokens_used), 0)  AS tokens_used
+                FROM token_usage {where}
+                GROUP BY DATE(created_at)
+                ORDER BY date
+                """,
+                tuple(params),
+            )
+
+            gross = tokens_used + tokens_saved
+            return {
+                "tokens_used": tokens_used,
+                "tokens_saved": tokens_saved,
+                "operations": operations,
+                "optimized_ops": optimized_ops,
+                "optimization_rate": (
+                    round(optimized_ops / operations, 4) if operations else 0.0
+                ),
+                "savings_rate": (round(tokens_saved / gross, 4) if gross else 0.0),
+                "avg_saved_per_op": (
+                    round(tokens_saved / operations, 2) if operations else 0.0
+                ),
+                "by_operation": [
+                    {
+                        "operation_type": row["operation_type"] or "unknown",
+                        "tokens_used": row["tokens_used"],
+                        "tokens_saved": row["tokens_saved"],
+                        "operations": row["operations"],
+                    }
+                    for row in by_op_rows
+                ],
+                "daily": [
+                    {
+                        "date": row["date"],
+                        "tokens_saved": row["tokens_saved"],
+                        "tokens_used": row["tokens_used"],
+                    }
+                    for row in daily_rows
+                ],
+            }
+        except Exception as e:
+            logger.error(f"Failed to get token economics: {e}")
+            raise
+
+    async def get_kb_health(
+        self, project_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """지식베이스 건강도 (나이 분포 / stale / 고아 / 그래프 밀도)."""
+        try:
+            where, params = self._memory_filters(project_id, None, None)
+            and_or_where = (where + " AND ") if where else "WHERE "
+
+            total_row = await self.db.fetchone(
+                f"SELECT COUNT(*) AS c FROM memories {where}", tuple(params)
+            )
+            total = total_row["c"] if total_row else 0
+
+            age_row = await self.db.fetchone(
+                f"""
+                SELECT
+                    SUM(CASE WHEN age <= 1 THEN 1 ELSE 0 END)               AS d1,
+                    SUM(CASE WHEN age > 1 AND age <= 7 THEN 1 ELSE 0 END)   AS d7,
+                    SUM(CASE WHEN age > 7 AND age <= 30 THEN 1 ELSE 0 END)  AS d30,
+                    SUM(CASE WHEN age > 30 AND age <= 90 THEN 1 ELSE 0 END) AS d90,
+                    SUM(CASE WHEN age > 90 THEN 1 ELSE 0 END)               AS older
+                FROM (
+                    SELECT julianday('now') - julianday(created_at) AS age
+                    FROM memories {where}
+                )
+                """,
+                tuple(params),
+            )
+
+            stale_row = await self.db.fetchone(
+                f"""
+                SELECT COUNT(*) AS c FROM memories
+                {and_or_where} julianday('now') - julianday(updated_at) > 90
+                """,
+                tuple(params),
+            )
+            stale = stale_row["c"] if stale_row else 0
+
+            orphan_row = await self.db.fetchone(
+                f"""
+                SELECT COUNT(*) AS c FROM memories
+                {and_or_where} NOT EXISTS (
+                    SELECT 1 FROM memory_relations r
+                    WHERE r.source_id = memories.id OR r.target_id = memories.id
+                )
+                """,
+                tuple(params),
+            )
+            orphans = orphan_row["c"] if orphan_row else 0
+
+            # Relations touching the filtered memory set (global when no filter).
+            id_subq = f"SELECT id FROM memories {where}"
+            rel_row = await self.db.fetchone(
+                f"""
+                SELECT COUNT(*) AS c FROM memory_relations r
+                WHERE r.source_id IN ({id_subq})
+                   OR r.target_id IN ({id_subq})
+                """,
+                tuple(params) + tuple(params),
+            )
+            total_relations = rel_row["c"] if rel_row else 0
+
+            # Most connected nodes (degree = appearances as source or target).
+            top_connected_rows = await self.db.fetchall(
+                f"""
+                SELECT m.id AS id, SUBSTR(m.content, 1, 80) AS snippet,
+                       m.category AS category, deg.degree AS degree
+                FROM (
+                    SELECT mid, COUNT(*) AS degree FROM (
+                        SELECT source_id AS mid FROM memory_relations
+                        UNION ALL
+                        SELECT target_id AS mid FROM memory_relations
+                    ) GROUP BY mid
+                ) deg
+                JOIN memories m ON m.id = deg.mid
+                {("WHERE m.project_id = ?" if project_id else "")}
+                ORDER BY deg.degree DESC
+                LIMIT 10
+                """,
+                (project_id,) if project_id else (),
+            )
+
+            return {
+                "total_memories": total,
+                "age_distribution": {
+                    "le_1d": (age_row["d1"] or 0) if age_row else 0,
+                    "le_7d": (age_row["d7"] or 0) if age_row else 0,
+                    "le_30d": (age_row["d30"] or 0) if age_row else 0,
+                    "le_90d": (age_row["d90"] or 0) if age_row else 0,
+                    "older": (age_row["older"] or 0) if age_row else 0,
+                },
+                "stale_count": stale,
+                "stale_ratio": (round(stale / total, 4) if total else 0.0),
+                "orphan_count": orphans,
+                "orphan_ratio": (round(orphans / total, 4) if total else 0.0),
+                "total_relations": total_relations,
+                "graph_density": (round(total_relations / total, 4) if total else 0.0),
+                "top_connected": [
+                    {
+                        "id": row["id"],
+                        "snippet": row["snippet"],
+                        "category": row["category"],
+                        "degree": row["degree"],
+                    }
+                    for row in top_connected_rows
+                ],
+            }
+        except Exception as e:
+            logger.error(f"Failed to get KB health: {e}")
+            raise
+
+    async def get_recall_stats(
+        self, project_id: Optional[str] = None, limit: int = 10
+    ) -> Dict[str, Any]:
+        """리콜/활용도 통계 (most-recalled / dead memory / 접근 분포)."""
+        try:
+            where, params = self._memory_filters(project_id, None, None)
+            and_or_where = (where + " AND ") if where else "WHERE "
+
+            summary_row = await self.db.fetchone(
+                f"""
+                SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN COALESCE(access_count, 0) = 0 THEN 1 ELSE 0 END) AS dead,
+                    SUM(CASE WHEN COALESCE(access_count, 0) > 0 THEN 1 ELSE 0 END) AS recalled,
+                    COALESCE(SUM(access_count), 0) AS total_accesses,
+                    COALESCE(AVG(access_count), 0)  AS avg_access
+                FROM memories {where}
+                """,
+                tuple(params),
+            )
+            total = summary_row["total"] if summary_row else 0
+            dead = summary_row["dead"] if summary_row else 0
+            recalled = summary_row["recalled"] if summary_row else 0
+
+            dist_row = await self.db.fetchone(
+                f"""
+                SELECT
+                    SUM(CASE WHEN COALESCE(access_count,0) = 0 THEN 1 ELSE 0 END)  AS b0,
+                    SUM(CASE WHEN access_count BETWEEN 1 AND 2 THEN 1 ELSE 0 END)  AS b1,
+                    SUM(CASE WHEN access_count BETWEEN 3 AND 5 THEN 1 ELSE 0 END)  AS b3,
+                    SUM(CASE WHEN access_count BETWEEN 6 AND 10 THEN 1 ELSE 0 END) AS b6,
+                    SUM(CASE WHEN access_count > 10 THEN 1 ELSE 0 END)             AS b10
+                FROM memories {where}
+                """,
+                tuple(params),
+            )
+
+            top_rows = await self.db.fetchall(
+                f"""
+                SELECT id, SUBSTR(content, 1, 80) AS snippet, category,
+                       COALESCE(access_count, 0) AS access_count, last_accessed_at
+                FROM memories
+                {and_or_where} COALESCE(access_count, 0) > 0
+                ORDER BY access_count DESC, last_accessed_at DESC
+                LIMIT ?
+                """,
+                tuple(params) + (limit,),
+            )
+
+            return {
+                "total_memories": total,
+                "recalled_count": recalled,
+                "dead_count": dead,
+                "dead_ratio": (round(dead / total, 4) if total else 0.0),
+                "recall_ratio": (round(recalled / total, 4) if total else 0.0),
+                "total_accesses": (
+                    summary_row["total_accesses"] if summary_row else 0
+                ),
+                "avg_access": (
+                    round(summary_row["avg_access"], 2) if summary_row else 0.0
+                ),
+                "distribution": {
+                    "never": (dist_row["b0"] or 0) if dist_row else 0,
+                    "1_2": (dist_row["b1"] or 0) if dist_row else 0,
+                    "3_5": (dist_row["b3"] or 0) if dist_row else 0,
+                    "6_10": (dist_row["b6"] or 0) if dist_row else 0,
+                    "gt_10": (dist_row["b10"] or 0) if dist_row else 0,
+                },
+                "most_recalled": [
+                    {
+                        "id": row["id"],
+                        "snippet": row["snippet"],
+                        "category": row["category"],
+                        "access_count": row["access_count"],
+                        "last_accessed_at": row["last_accessed_at"],
+                    }
+                    for row in top_rows
+                ],
+            }
+        except Exception as e:
+            logger.error(f"Failed to get recall stats: {e}")
+            raise
+
+    async def get_activity_trend(
+        self,
+        project_id: Optional[str] = None,
+        days: int = 30,
+        dimension: str = "client",
+    ) -> Dict[str, Any]:
+        """일별 활동 추이를 클라이언트/소스 차원으로 분해 (stacked 시계열).
+
+        dimension: 'client' 또는 'source'. 그 외 값은 client로 처리.
+        """
+        try:
+            col = "source" if dimension == "source" else "client"
+
+            conds = [f"DATE(created_at) >= DATE('now', ?)"]
+            params: list = [f"-{int(days)} days"]
+            if project_id:
+                conds.append("project_id = ?")
+                params.append(project_id)
+            where = "WHERE " + " AND ".join(conds)
+
+            rows = await self.db.fetchall(
+                f"""
+                SELECT DATE(created_at) AS date,
+                       COALESCE({col}, 'unknown') AS key,
+                       COUNT(*) AS count
+                FROM memories
+                {where}
+                GROUP BY DATE(created_at), {col}
+                ORDER BY date
+                """,
+                tuple(params),
+            )
+
+            # Pivot to {dates: [...], series: {key: [counts aligned to dates]}}.
+            counts: Dict[str, Dict[str, int]] = defaultdict(dict)
+            keys: list = []
+            for row in rows:
+                d, k, c = row["date"], row["key"], row["count"]
+                counts[d][k] = c
+                if k not in keys:
+                    keys.append(k)
+
+            dates = sorted(counts.keys())
+            series = {
+                k: [counts[d].get(k, 0) for d in dates] for k in keys
+            }
+
+            return {
+                "dimension": col,
+                "dates": dates,
+                "series": series,
+                "totals": {k: sum(series[k]) for k in keys},
+            }
+        except Exception as e:
+            logger.error(f"Failed to get activity trend: {e}")
+            raise

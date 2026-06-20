@@ -71,3 +71,4 @@ dist/
 *.whl
 *.tar.gz
 *.egg-info/
+.gstack/

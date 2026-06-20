@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Current schema version - increment when adding new migrations
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 
 
 class SchemaMigrator:
@@ -42,6 +42,7 @@ class SchemaMigrator:
             7: self._migration_v7_pin_client_column,
             8: self._migration_v8_pin_staging_column,
             9: self._migration_v9_content_bytes,
+            10: self._migration_v10_access_tracking,
         }
 
     async def migrate(self) -> None:
@@ -293,3 +294,28 @@ class SchemaMigrator:
                 "WHERE content_bytes IS NULL"
             )
             logger.info("Added + backfilled content_bytes on memories via migration v9")
+
+    async def _migration_v10_access_tracking(self, migrator: "SchemaMigrator") -> None:
+        """Add recall-tracking columns to memories for usage analytics.
+
+        - access_count: number of times the memory was surfaced by a search.
+        - last_accessed_at: ISO8601 timestamp of the most recent surfacing.
+
+        These power the Analytics "recall" panel (most-recalled memories, dead
+        memories that were stored but never retrieved). The columns default so
+        existing rows and add_memory inserts (which omit them) stay valid; the
+        search hot path increments them best-effort on every non-empty query.
+        """
+        if await self._table_exists("memories"):
+            await self._add_column_if_missing(
+                "memories", "access_count", "INTEGER", "0"
+            )
+            await self._add_column_if_missing(
+                "memories", "last_accessed_at", "TEXT", "NULL"
+            )
+            # Idempotent backfill: NULL access_count -> 0 so analytics SQL can
+            # treat "never recalled" uniformly without COALESCE everywhere.
+            await self.connection.execute(
+                "UPDATE memories SET access_count = 0 WHERE access_count IS NULL"
+            )
+            logger.info("Added access_count/last_accessed_at on memories via migration v10")

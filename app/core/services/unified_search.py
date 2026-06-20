@@ -296,6 +296,9 @@ class UnifiedSearchService:
                 logger.info(
                     f"[Cache HIT] Returning cached results for query: '{query}'"
                 )
+                # Recall tracking must run on cache hits too, else frequently
+                # searched (cached) memories would look "dead" in analytics.
+                await self._record_access(cached_results)
                 return cached_results
 
         # 4. Build filter conditions
@@ -451,7 +454,36 @@ class UnifiedSearchService:
             f"results={len(result.results)}, time={search_time:.3f}s"
         )
 
+        # Recall tracking (best-effort): bump access_count for surfaced memories.
+        await self._record_access(result)
+
         return result
+
+    async def _record_access(self, result: SearchResponse) -> None:
+        """Best-effort recall tracking for surfaced memories.
+
+        Bumps access_count and last_accessed_at for every memory returned by a
+        non-empty query, powering the Analytics recall panel (most-recalled vs
+        dead memories never retrieved). A tracking failure must never break a
+        search, so errors are swallowed at debug level.
+        """
+        if not result or not getattr(result, "results", None):
+            return
+        try:
+            memory_ids = [r.id for r in result.results if getattr(r, "id", None)]
+            if not memory_ids:
+                return
+            now = datetime.now(timezone.utc).isoformat()
+            placeholders = ",".join("?" for _ in memory_ids)
+            await self.db.execute(
+                f"UPDATE memories "
+                f"SET access_count = COALESCE(access_count, 0) + 1, "
+                f"last_accessed_at = ? "
+                f"WHERE id IN ({placeholders})",
+                tuple([now, *memory_ids]),
+            )
+        except Exception as e:
+            logger.debug(f"Failed to record memory access: {e}")
 
     def _expand_query(self, query: str) -> str:
         """쿼리 확장 (한영 번역 + Query Expander)"""

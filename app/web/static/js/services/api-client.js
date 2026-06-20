@@ -219,6 +219,34 @@ export class APIClient {
   }
   
   /**
+   * Analytics API methods (server-side aggregation)
+   */
+
+  async getDailyCounts(filters = {}) {
+    return this.get('/memories/daily-counts', filters);
+  }
+
+  async getProductivityAnalytics(filters = {}) {
+    return this.get('/analytics/productivity', filters);
+  }
+
+  async getTokenEconomics(filters = {}) {
+    return this.get('/analytics/token-economics', filters);
+  }
+
+  async getKbHealth(filters = {}) {
+    return this.get('/analytics/kb-health', filters);
+  }
+
+  async getRecallAnalytics(filters = {}) {
+    return this.get('/analytics/recall', filters);
+  }
+
+  async getActivityTrend(filters = {}) {
+    return this.get('/analytics/activity-trend', filters);
+  }
+
+  /**
    * Health check
    */
   async healthCheck() {

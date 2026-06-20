@@ -80,26 +80,45 @@ class AnalyticsPage extends HTMLElement {
     try {
       this.setLoading(true);
 
-      let searchResult;
+      const api = window.app.apiClient;
+      const days = this.getRangeDays();
+      const { start_date, end_date } = this.getServerDateFilters();
+      const dateFilter = { start_date, end_date };
 
-      searchResult = await window.app.apiClient.searchMemories('', { limit: 10000 });
+      // Fetch everything in parallel. Server-aggregated panels are resilient:
+      // a failing endpoint (e.g. embedding model not ready) resolves to null
+      // and its panel is skipped rather than breaking the whole page.
+      const [
+        searchResult, serverStats, serverDaily,
+        productivity, token, kbHealth, recall, clientTrend,
+      ] = await Promise.all([
+        api.searchMemories('', { limit: 10000 }).catch(e => { console.warn('memories load failed:', e); return null; }),
+        api.getStats(dateFilter).catch(e => { console.warn('stats failed:', e); return null; }),
+        api.getDailyCounts({ days }).catch(e => { console.warn('daily-counts failed:', e); return null; }),
+        api.getProductivityAnalytics({ days: Math.min(days, 30), weeks: 8 }).catch(e => { console.warn('productivity failed:', e); return null; }),
+        api.getTokenEconomics(dateFilter).catch(e => { console.warn('token economics failed:', e); return null; }),
+        api.getKbHealth().catch(e => { console.warn('kb-health failed:', e); return null; }),
+        api.getRecallAnalytics({ limit: 8 }).catch(e => { console.warn('recall failed:', e); return null; }),
+        api.getActivityTrend({ days, dimension: 'client' }).catch(e => { console.warn('activity-trend failed:', e); return null; }),
+      ]);
 
-      if (searchResult && searchResult.results) {
-        this.memories = searchResult.results;
-        this.totalMemoriesCount = searchResult.total || this.memories.length; // Use actual total from API
-        console.log(`Loaded ${this.memories.length} of ${this.totalMemoriesCount} total memories for analytics`);
-        this.processAnalytics();
-        this.renderAnalytics();
-        this.renderCharts();
-      } else {
-        console.warn('No results found in analytics search response:', searchResult);
-        this.memories = [];
-        this.totalMemoriesCount = 0;
-        this.processAnalytics();
-        this.renderAnalytics();
-        this.renderCharts();
-      }
+      // Server-side aggregates (full DB, not capped by the 10k sample).
+      this.serverStats = serverStats;
+      this.serverDaily = serverDaily;
+      this.serverData = { productivity, token, kbHealth, recall, clientTrend };
 
+      // Client-side sample (used only for content-derived charts: hourly, tags, words).
+      this.memories = (searchResult && searchResult.results) ? searchResult.results : [];
+      this.totalMemoriesCount =
+        (serverStats && serverStats.total_memories) ||
+        (searchResult && searchResult.total) ||
+        this.memories.length;
+
+      console.log(`Analytics: ${this.memories.length} sampled / ${this.totalMemoriesCount} total memories`);
+
+      this.processAnalytics();
+      this.renderAnalytics();
+      this.renderCharts();
     } catch (error) {
       console.error('Failed to load analytics:', error);
       this.showError('Failed to load analytics: ' + error.message);
@@ -131,6 +150,30 @@ class AnalyticsPage extends HTMLElement {
       timeDistribution: this.calculateTimeDistribution(filteredMemories),
       topTags: this.calculateTopTags(filteredMemories)
     };
+
+    // ── Server-side aggregation transition ──
+    // The category and trend charts are the most distorted by the 10k client
+    // sample, so prefer SQL-aggregated server data (full DB) when available.
+    // Hourly / tags / avg-words stay client-side (content-derived, sample is fine).
+    if (this.serverStats && this.serverStats.categories_breakdown) {
+      const entries = Object.entries(this.serverStats.categories_breakdown)
+        .sort((a, b) => b[1] - a[1]);
+      if (entries.length) {
+        this.analytics.categories = {
+          ...this.analytics.categories,
+          labels: entries.map(e => e[0]),
+          counts: entries.map(e => e[1]),
+        };
+      }
+    }
+    if (this.serverDaily && Array.isArray(this.serverDaily.daily_counts)) {
+      const dc = this.serverDaily.daily_counts;
+      this.analytics.trends = {
+        ...this.analytics.trends,
+        dates: dc.map(d => d.date),
+        counts: dc.map(d => d.count),
+      };
+    }
   }
 
   /**
@@ -390,6 +433,42 @@ class AnalyticsPage extends HTMLElement {
     }
   }
 
+  /** Selected range as a day count (for server-side aggregation params). */
+  getRangeDays() {
+    switch (this.selectedTimeRange) {
+      case '7d': return 7;
+      case '90d': return 90;
+      case '1y': return 365;
+      case '30d':
+      default: return 30;
+    }
+  }
+
+  /** Selected range as {start_date, end_date} YYYY-MM-DD for server filters. */
+  getServerDateFilters() {
+    const days = this.getRangeDays();
+    const end = new Date();
+    const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
+    const fmt = d => d.toISOString().split('T')[0];
+    return { start_date: fmt(start), end_date: fmt(end) };
+  }
+
+  /** Compact integer formatting: 1234 -> 1.2k, 1500000 -> 1.5M. */
+  fmtCompact(n) {
+    const v = Number(n) || 0;
+    if (Math.abs(v) >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (Math.abs(v) >= 1e3) return (v / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+    return String(Math.round(v));
+  }
+
+  /** Hours -> human duration: 0.5h, 3.2h, 1.4d. */
+  fmtDuration(hours) {
+    const h = Number(hours);
+    if (!h || h <= 0) return '—';
+    if (h < 24) return `${h.toFixed(1)}h`;
+    return `${(h / 24).toFixed(1)}d`;
+  }
+
   /**
    * Handle time range change
    */
@@ -435,6 +514,7 @@ class AnalyticsPage extends HTMLElement {
    */
   renderAnalytics() {
     this.renderOverview();
+    this.renderServerPanels();
     this.renderInsights();
   }
 
@@ -445,10 +525,12 @@ class AnalyticsPage extends HTMLElement {
     const overview = this.analytics.overview;
     if (!overview) return;
 
+    // Prefer the server's full-DB project count over the sampled one.
+    const serverProjects = this.serverStats && this.serverStats.unique_projects;
     const stats = [
       { id: 'stat-total', value: overview.totalMemories.toLocaleString() },
       { id: 'stat-growth', value: null }, // handled specially
-      { id: 'stat-projects', value: overview.uniqueProjects },
+      { id: 'stat-projects', value: serverProjects != null ? serverProjects : overview.uniqueProjects },
       { id: 'stat-avgwords', value: overview.avgWordsPerMemory },
     ];
 
@@ -567,6 +649,12 @@ class AnalyticsPage extends HTMLElement {
     this.renderCategoryChart();
     this.renderProductivityChart();
     this.renderTagsChart();
+    // Server-driven panels (null-safe; skip if their fetch failed).
+    this.renderCompletionsChart();
+    this.renderTokenChart();
+    this.renderKbHealthChart();
+    this.renderRecallChart();
+    this.renderActivityTrendChart();
   }
 
   /**
@@ -842,6 +930,230 @@ class AnalyticsPage extends HTMLElement {
     this.charts.set('tags', chart);
   }
 
+  // ── Server-driven analytics panels ──
+
+  escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+
+  /** Shared bar/line scale options matching the theme. */
+  baseScaleOptions(stacked = false) {
+    const { textMuted, borderColor } = this.getChartDefaults();
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(0,0,0,0.8)', titleFont: { size: 11 },
+          bodyFont: { size: 11 }, padding: 8, cornerRadius: 4,
+        },
+      },
+      scales: {
+        x: {
+          stacked, grid: { display: false },
+          ticks: { color: textMuted, font: { size: 10 }, maxTicksLimit: 8 },
+          border: { color: borderColor },
+        },
+        y: {
+          stacked, beginAtZero: true, grid: { color: borderColor + '40' },
+          ticks: { color: textMuted, font: { size: 10 }, precision: 0 },
+          border: { display: false },
+        },
+      },
+    };
+  }
+
+  getSeriesPalette() {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    return isDark
+      ? ['#e0e0e0', '#b0b0b0', '#888888', '#666666', '#4a4a4a', '#9aa7b3', '#7d8a99']
+      : ['#1a1a1a', '#555555', '#878787', '#b0b0b0', '#d0d0d0', '#6b7d8f', '#9aa7b3'];
+  }
+
+  /** Fill stat cards + lists for the server-aggregated panels (null-safe). */
+  renderServerPanels() {
+    const d = this.serverData || {};
+    const setText = (id, val) => {
+      const el = this.querySelector('#' + id);
+      if (el) el.textContent = val;
+    };
+    const listRow = (key, val, title) =>
+      `<li class="analytics-list-row"><span class="analytics-list-key"${title ? ` title="${this.escapeHtml(title)}"` : ''}>${this.escapeHtml(key)}</span><span class="analytics-list-val">${this.escapeHtml(val)}</span></li>`;
+
+    // Productivity (pins / sessions)
+    const prod = d.productivity;
+    if (prod) {
+      const pins = prod.pins || {};
+      const sessions = prod.sessions || {};
+      setText('prod-throughput', this.fmtCompact(pins.completed_pins || 0));
+      setText('prod-wip', this.fmtCompact(pins.in_progress_pins || 0));
+      setText('prod-leadtime', this.fmtDuration(pins.avg_lead_time_hours));
+      setText('prod-sessions', this.fmtCompact(sessions.total_sessions || 0));
+    }
+
+    // Token economics — by-operation savings
+    const token = d.token;
+    if (token) {
+      setText('token-saved', this.fmtCompact(token.tokens_saved || 0));
+      setText('token-savings-rate', Math.round((token.savings_rate || 0) * 100) + '%');
+      setText('token-optrate', Math.round((token.optimization_rate || 0) * 100) + '%');
+      setText('token-avgsave', this.fmtCompact(token.avg_saved_per_op || 0));
+      const byop = this.querySelector('#token-byop');
+      if (byop) {
+        const rows = (token.by_operation || []).slice(0, 6);
+        byop.innerHTML = rows.length
+          ? rows.map(o => listRow(o.operation_type || 'unknown', `${this.fmtCompact(o.tokens_saved)} saved`)).join('')
+          : '<li class="analytics-list-empty">No token data yet</li>';
+      }
+    }
+
+    // KB health — most connected nodes
+    const kb = d.kbHealth;
+    if (kb) {
+      setText('kb-stale', `${kb.stale_count || 0} (${Math.round((kb.stale_ratio || 0) * 100)}%)`);
+      setText('kb-orphan', `${kb.orphan_count || 0} (${Math.round((kb.orphan_ratio || 0) * 100)}%)`);
+      setText('kb-density', (kb.graph_density || 0).toFixed(2));
+      setText('kb-relations', this.fmtCompact(kb.total_relations || 0));
+      const tc = this.querySelector('#kb-topconnected');
+      if (tc) {
+        const rows = (kb.top_connected || []).slice(0, 6);
+        tc.innerHTML = rows.length
+          ? rows.map(n => listRow((n.snippet || '').slice(0, 42), `${n.degree} links`, n.snippet)).join('')
+          : '<li class="analytics-list-empty">No relations yet</li>';
+      }
+    }
+
+    // Recall — most recalled memories
+    const recall = d.recall;
+    if (recall) {
+      setText('recall-rate', Math.round((recall.recall_ratio || 0) * 100) + '%');
+      setText('recall-dead', `${recall.dead_count || 0} (${Math.round((recall.dead_ratio || 0) * 100)}%)`);
+      setText('recall-avg', (recall.avg_access || 0).toFixed(1));
+      setText('recall-total', this.fmtCompact(recall.total_accesses || 0));
+      const top = this.querySelector('#recall-top');
+      if (top) {
+        const rows = (recall.most_recalled || []).slice(0, 6);
+        top.innerHTML = rows.length
+          ? rows.map(m => listRow((m.snippet || '').slice(0, 42), `${m.access_count}×`, m.snippet)).join('')
+          : '<li class="analytics-list-empty">No recalls yet</li>';
+      }
+    }
+  }
+
+  /** Daily pin completions (work throughput). */
+  renderCompletionsChart() {
+    const data = this.serverData && this.serverData.productivity;
+    const canvas = this.querySelector('#completions-chart');
+    if (!canvas || !window.Chart) return;
+    this.destroyChart('completions');
+    const daily = (data && data.daily_completions) ? [...data.daily_completions].reverse() : [];
+    if (!daily.length) return;
+    const { accentGray } = this.getChartDefaults();
+    const chart = new window.Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: daily.map(d => { const p = d.date.split('-'); return `${parseInt(p[1])}/${parseInt(p[2])}`; }),
+        datasets: [{ label: 'Completed', data: daily.map(d => d.completed_count), backgroundColor: accentGray, borderRadius: 3, maxBarThickness: 22 }],
+      },
+      options: this.baseScaleOptions(false),
+    });
+    this.charts.set('completions', chart);
+  }
+
+  /** Daily tokens saved (token economics). */
+  renderTokenChart() {
+    const token = this.serverData && this.serverData.token;
+    const canvas = this.querySelector('#token-chart');
+    if (!canvas || !window.Chart) return;
+    this.destroyChart('token');
+    const daily = (token && token.daily) ? token.daily : [];
+    if (!daily.length) return;
+    const { accentGray, accentGrayAlpha } = this.getChartDefaults();
+    const chart = new window.Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: daily.map(d => { const p = d.date.split('-'); return `${parseInt(p[1])}/${parseInt(p[2])}`; }),
+        datasets: [{ label: 'Tokens saved', data: daily.map(d => d.tokens_saved), borderColor: accentGray, backgroundColor: accentGrayAlpha, borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4 }],
+      },
+      options: this.baseScaleOptions(false),
+    });
+    this.charts.set('token', chart);
+  }
+
+  /** Memory age distribution (KB health). */
+  renderKbHealthChart() {
+    const kb = this.serverData && this.serverData.kbHealth;
+    const canvas = this.querySelector('#kb-age-chart');
+    if (!canvas || !window.Chart) return;
+    this.destroyChart('kbage');
+    const a = kb && kb.age_distribution;
+    if (!a) return;
+    const labels = ['≤1d', '≤7d', '≤30d', '≤90d', '90d+'];
+    const values = [a.le_1d, a.le_7d, a.le_30d, a.le_90d, a.older].map(v => v || 0);
+    if (values.every(v => !v)) return;
+    const { accentGray } = this.getChartDefaults();
+    const chart = new window.Chart(canvas, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'Memories', data: values, backgroundColor: accentGray, borderRadius: 3, maxBarThickness: 36 }] },
+      options: this.baseScaleOptions(false),
+    });
+    this.charts.set('kbage', chart);
+  }
+
+  /** Access-count distribution; "Never" (dead memories) muted. */
+  renderRecallChart() {
+    const recall = this.serverData && this.serverData.recall;
+    const canvas = this.querySelector('#recall-dist-chart');
+    if (!canvas || !window.Chart) return;
+    this.destroyChart('recalldist');
+    const dist = recall && recall.distribution;
+    if (!dist) return;
+    const labels = ['Never', '1–2', '3–5', '6–10', '10+'];
+    const values = [dist.never, dist['1_2'], dist['3_5'], dist['6_10'], dist.gt_10].map(v => v || 0);
+    if (values.every(v => !v)) return;
+    const { accentGray } = this.getChartDefaults();
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const deadColor = isDark ? '#7a7a7a' : '#cfcfcf';
+    const bg = [deadColor, accentGray, accentGray, accentGray, accentGray];
+    const chart = new window.Chart(canvas, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'Memories', data: values, backgroundColor: bg, borderRadius: 3, maxBarThickness: 36 }] },
+      options: this.baseScaleOptions(false),
+    });
+    this.charts.set('recalldist', chart);
+  }
+
+  /** Daily activity stacked by client tool (activity trend). */
+  renderActivityTrendChart() {
+    const trend = this.serverData && this.serverData.clientTrend;
+    const canvas = this.querySelector('#activity-trend-chart');
+    if (!canvas || !window.Chart) return;
+    this.destroyChart('activitytrend');
+    if (!trend || !trend.dates || !trend.dates.length) return;
+    const keys = Object.keys(trend.series || {});
+    if (!keys.length) return;
+    const palette = this.getSeriesPalette();
+    const labels = trend.dates.map(d => { const p = d.split('-'); return `${parseInt(p[1])}/${parseInt(p[2])}`; });
+    const datasets = keys.map((key, i) => ({
+      label: key,
+      data: trend.series[key],
+      backgroundColor: palette[i % palette.length],
+      borderRadius: 2,
+      stack: 'activity',
+      maxBarThickness: 22,
+    }));
+    const opts = this.baseScaleOptions(true);
+    opts.plugins.legend = {
+      display: true, position: 'bottom',
+      labels: { boxWidth: 10, font: { size: 10 }, color: this.getChartDefaults().textSecondary, usePointStyle: true, pointStyle: 'rectRounded' },
+    };
+    const chart = new window.Chart(canvas, { type: 'bar', data: { labels, datasets }, options: opts });
+    this.charts.set('activitytrend', chart);
+  }
+
   // ── Render ──
 
   render() {
@@ -906,6 +1218,135 @@ class AnalyticsPage extends HTMLElement {
           <div class="analytics-chart-card">
             <span class="analytics-chart-title">Top Tags</span>
             <div class="analytics-chart-body"><canvas id="tags-chart"></canvas></div>
+          </div>
+        </div>
+
+        <!-- ── Work Productivity (pins / sessions) ── -->
+        <div class="analytics-section-title">Work Productivity</div>
+        <div class="analytics-stats">
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Completed Pins</span>
+            <span class="analytics-stat-value" id="prod-throughput">0</span>
+          </div>
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">In Progress</span>
+            <span class="analytics-stat-value" id="prod-wip">0</span>
+          </div>
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Avg Lead Time</span>
+            <span class="analytics-stat-value" id="prod-leadtime">—</span>
+          </div>
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Sessions</span>
+            <span class="analytics-stat-value" id="prod-sessions">0</span>
+          </div>
+        </div>
+        <div class="analytics-charts analytics-charts--full">
+          <div class="analytics-chart-card">
+            <span class="analytics-chart-title">Daily Pin Completions</span>
+            <div class="analytics-chart-body"><canvas id="completions-chart"></canvas></div>
+          </div>
+        </div>
+
+        <!-- ── Token Savings (token economics) ── -->
+        <div class="analytics-section-title">Token Savings</div>
+        <div class="analytics-stats">
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Tokens Saved</span>
+            <span class="analytics-stat-value" id="token-saved">0</span>
+          </div>
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Savings Rate</span>
+            <span class="analytics-stat-value" id="token-savings-rate">0%</span>
+          </div>
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Optimized Ops</span>
+            <span class="analytics-stat-value" id="token-optrate">0%</span>
+          </div>
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Avg Saved / Op</span>
+            <span class="analytics-stat-value" id="token-avgsave">0</span>
+          </div>
+        </div>
+        <div class="analytics-charts">
+          <div class="analytics-chart-card">
+            <span class="analytics-chart-title">Tokens Saved (daily)</span>
+            <div class="analytics-chart-body"><canvas id="token-chart"></canvas></div>
+          </div>
+          <div class="analytics-list-card">
+            <span class="analytics-chart-title">Savings by Operation</span>
+            <ul class="analytics-list" id="token-byop"></ul>
+          </div>
+        </div>
+
+        <!-- ── Knowledge Base Health ── -->
+        <div class="analytics-section-title">Knowledge Base Health</div>
+        <div class="analytics-stats">
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Stale (90d+)</span>
+            <span class="analytics-stat-value" id="kb-stale">0</span>
+          </div>
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Orphans</span>
+            <span class="analytics-stat-value" id="kb-orphan">0</span>
+          </div>
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Graph Density</span>
+            <span class="analytics-stat-value" id="kb-density">0</span>
+          </div>
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Relations</span>
+            <span class="analytics-stat-value" id="kb-relations">0</span>
+          </div>
+        </div>
+        <div class="analytics-charts">
+          <div class="analytics-chart-card">
+            <span class="analytics-chart-title">Memory Age Distribution</span>
+            <div class="analytics-chart-body"><canvas id="kb-age-chart"></canvas></div>
+          </div>
+          <div class="analytics-list-card">
+            <span class="analytics-chart-title">Most Connected</span>
+            <ul class="analytics-list" id="kb-topconnected"></ul>
+          </div>
+        </div>
+
+        <!-- ── Recall & Usage ── -->
+        <div class="analytics-section-title">Recall &amp; Usage</div>
+        <div class="analytics-stats">
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Recall Rate</span>
+            <span class="analytics-stat-value" id="recall-rate">0%</span>
+          </div>
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Dead Memories</span>
+            <span class="analytics-stat-value" id="recall-dead">0</span>
+          </div>
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Avg Access</span>
+            <span class="analytics-stat-value" id="recall-avg">0</span>
+          </div>
+          <div class="analytics-stat-card">
+            <span class="analytics-stat-label">Total Recalls</span>
+            <span class="analytics-stat-value" id="recall-total">0</span>
+          </div>
+        </div>
+        <div class="analytics-charts">
+          <div class="analytics-chart-card">
+            <span class="analytics-chart-title">Access Distribution</span>
+            <div class="analytics-chart-body"><canvas id="recall-dist-chart"></canvas></div>
+          </div>
+          <div class="analytics-list-card">
+            <span class="analytics-chart-title">Most Recalled</span>
+            <ul class="analytics-list" id="recall-top"></ul>
+          </div>
+        </div>
+
+        <!-- ── Activity by Client ── -->
+        <div class="analytics-section-title">Activity by Client</div>
+        <div class="analytics-charts analytics-charts--full">
+          <div class="analytics-chart-card">
+            <span class="analytics-chart-title">Daily Activity by Client Tool</span>
+            <div class="analytics-chart-body"><canvas id="activity-trend-chart"></canvas></div>
           </div>
         </div>
 
@@ -1079,6 +1520,75 @@ style.textContent = `
   grid-template-columns: 1fr 1fr;
   gap: var(--space-3);
   padding: var(--space-2) 0;
+}
+
+.analytics-charts--full {
+  grid-template-columns: 1fr;
+}
+
+/* ── Section divider ── */
+.analytics-section-title {
+  margin-top: var(--space-5);
+  padding: var(--space-3) 0 var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  border-top: 1px solid var(--border-color);
+}
+
+/* ── List card (top connected / most recalled / by operation) ── */
+.analytics-list-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.analytics-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.analytics-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+}
+
+.analytics-list-row:nth-child(odd) {
+  background: var(--bg-primary);
+}
+
+.analytics-list-key {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analytics-list-val {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.analytics-list-empty {
+  padding: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-align: center;
 }
 
 .analytics-chart-card {
