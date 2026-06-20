@@ -318,4 +318,6 @@ class SchemaMigrator:
             await self.connection.execute(
                 "UPDATE memories SET access_count = 0 WHERE access_count IS NULL"
             )
-            logger.info("Added access_count/last_accessed_at on memories via migration v10")
+            logger.info(
+                "Added access_count/last_accessed_at on memories via migration v10"
+            )

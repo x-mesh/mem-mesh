@@ -834,9 +834,7 @@ class StatsService:
             logger.error(f"Failed to get token economics: {e}")
             raise
 
-    async def get_kb_health(
-        self, project_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def get_kb_health(self, project_id: Optional[str] = None) -> Dict[str, Any]:
         """지식베이스 건강도 (나이 분포 / stale / 고아 / 그래프 밀도)."""
         try:
             where, params = self._memory_filters(project_id, None, None)
@@ -1000,9 +998,7 @@ class StatsService:
                 "dead_count": dead,
                 "dead_ratio": (round(dead / total, 4) if total else 0.0),
                 "recall_ratio": (round(recalled / total, 4) if total else 0.0),
-                "total_accesses": (
-                    summary_row["total_accesses"] if summary_row else 0
-                ),
+                "total_accesses": (summary_row["total_accesses"] if summary_row else 0),
                 "avg_access": (
                     round(summary_row["avg_access"], 2) if summary_row else 0.0
                 ),
@@ -1071,9 +1067,7 @@ class StatsService:
                     keys.append(k)
 
             dates = sorted(counts.keys())
-            series = {
-                k: [counts[d].get(k, 0) for d in dates] for k in keys
-            }
+            series = {k: [counts[d].get(k, 0) for d in dates] for k in keys}
 
             return {
                 "dimension": col,
