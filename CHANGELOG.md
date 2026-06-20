@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-06-20
+
+분석 플랫폼 도입 — recall 추적 · 지식베이스(KB) 헬스 · 토큰 이코노믹스 대시보드. 더불어 프로덕션 Docker 로깅을 호스트에서 직접 tail 가능하도록 정비.
+
+> 참고: 1.10.0은 버전 bump · CHANGELOG · 릴리스 커밋까지 준비됐으나 태그/푸시가 완료되지 않아 발행되지 않았다. 본 1.11.0이 v1.9.0 이후 작업 전체를 발행하며, 1.10.0 섹션은 당시 준비된 내용으로 그대로 보존한다.
+
+### Added
+- Analytics 플랫폼 — 토큰 이코노믹스, KB 헬스 메트릭, recall 통계, 활동 추세를 한 번에 보여주는 분석 스위트. recall 분석을 뒷받침하기 위해 schema migration **v10**으로 `access_count`·`last_accessed_at` 컬럼을 추가하고, 검색 서비스에서 best-effort 접근 추적을 수행한 뒤 대시보드 API로 분석 엔드포인트를 노출한다. WHY: 어떤 메모리가 실제로 재호출되는지, KB가 건강하게 유지되는지를 수치로 관찰할 수 없어 품질 개선의 근거가 부족했다. 접근 추적은 검색 경로에 부하/실패를 전가하지 않도록 best-effort(실패 무시)로 처리한다. `app/core/database/schema_migrator.py`, `app/core/services/stats.py`, `app/core/services/unified_search.py`, `app/web/dashboard/route_modules/stats.py`, `app/web/static/js/pages/analytics.js`, `app/web/static/js/services/api-client.js`
+
+### Changed
+- 프로덕션 Docker 로깅 정비 — 1.10.0의 named-volume 방식을 개선해, `data`·`model-cache`는 named volume으로 유지(컨테이너 recreate에도 DB/모델 보존)하되 `./logs`만 호스트로 bind mount해 직접 tail 가능하게 했다. 파일 로깅을 켜고(`LOG_OUTPUT=both` + `LOG_FILE`), `user: ${HOST_UID:-1000}:${HOST_GID:-1000}`로 컨테이너를 호스트 사용자로 실행한다(ubuntu root 서버는 `.env`에 `HOST_UID=0`). `HOME=/home/memmesh`를 설정해 numeric user에서도 캐시된 모델을 재사용한다. WHY: 비-root 이미지 사용자(UID 1000)가 root 소유 `./logs`에 쓰지 못하면 uvicorn의 access_file 핸들러가 치명적으로 동작해 crash loop에 빠진다. `docker-compose.yml`
+- dev compose 환경변수 표준화 — `DATABASE_PATH`/`LOG_LEVEL`/`LOG_FORMAT`에 `MEM_MESH_` 접두사 부여(pydantic `env_prefix`가 비-접두 변수를 조용히 무시하던 문제) 및 파일 로깅 활성화. `docker-compose.dev.yml`
+- 컨테이너 포트 8000을 모든 인터페이스에 노출. `docker-compose.yml`
+
+### Fixed
+- `codex_config` ↔ `hooks` 순환 import — `codex_config`가 모듈 최상단에서 `app.cli.hooks.json_ops`를 import해 `hooks/__init__` → `status` eager import → `CODEX_CONFIG` 정의 전 `codex_config` 재진입을 유발했다. isort(profile=black) 재정렬이 기존 import 순서가 가리던 이 문제를 테스트 수집 단계의 ImportError로 드러냈다. `json_ops` import를 두 writer 함수 안으로 옮겨 `codex_config`를 어떤 순서에서도 안전한 leaf 모듈로 유지한다. `app/cli/codex_config.py`
+
 ## [1.10.0] - 2026-06-17
 
 웹 온보딩 UX 개선 — 셸 접근 없이 브라우저에서 대시보드 인증을 최초 설정하는 first-run setup token.
