@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-06-23
+
+기본 임베딩 모델을 한국어 검색 SOTA급인 `dragonkue/snowflake-arctic-embed-l-v2.0-ko`로 전환 — 신규 설치·온보딩 추천이 KURE-v1 대신 arctic-ko를 기본으로 사용한다.
+
+### Changed
+- 기본/추천 임베딩 모델 `nlpai-lab/KURE-v1` → `dragonkue/snowflake-arctic-embed-l-v2.0-ko`. config 기본값, 온보딩 추천 플래그(`recommended`)·CLI 첫 선택지·compose 기본값, README 기본 모델 표기, `.env.example` 주석을 일괄 전환했다. WHY: ko-embedding-leaderboard 기준 arctic-ko는 평균 82.14(2위)로 KURE-v1 80.76(5위)을 상회하며, 자체 측정에서도 한국어 메모리 검색 품질이 가장 우수했다. 차원은 1024로 동일하고 인프라는 이미 arctic을 지원한다 — `MODEL_SIMILARITY_BASELINE`에 arctic=0.37을 등록해 KURE(0.45) 기준으로 튜닝된 코사인 threshold(conflict·auto-link·dup detection)를 모델별로 자동 보정하고, arctic의 비대칭 prefix(쿼리에만 `query: `, passage 무접두)를 적용한다. 568M·query당 ~0.5s로 점수 대비 효율이 최상이며, CPU 운영 제약(CLAUDE.md L1·L2)상 더 상위인 4B급 모델보다 현실적이다. KURE-v1·BGE-m3-ko·E5 등은 여전히 선택 가능한 모델로 남는다. `app/core/config.py`, `app/core/embeddings/service.py`, `app/cli/onboarding.py`, `README.md`, `.env.example`
+
+### Upgrade Notes
+- 기존 배포가 모델을 전환하려면 저장된 벡터를 재임베딩해야 한다(임베딩 공간 비호환 — 차원은 1024로 같지만 KURE 벡터와 arctic 쿼리를 섞으면 검색이 깨진다). `MEM_MESH_EMBEDDING_MODEL`을 바꾼 뒤 서버가 모델 불일치(`needs_migration`)를 감지하면 `POST /api/embeddings/migrate`(또는 대시보드 마이그레이션)로 전량 재임베딩한다. CPU 환경에서는 무거우므로 백그라운드 단일 작업으로 수행한다. KURE-v1을 유지하려면 `MEM_MESH_EMBEDDING_MODEL=nlpai-lab/KURE-v1`로 고정하면 된다.
+
 ## [1.11.1] - 2026-06-23
 
 문서 정비 — 1.10.0에 도입된 first-run setup token 온보딩 흐름을 README에 문서화하고, 직전 릴리스에서 누락된 lint/format 정합성을 마저 맞춘다.
