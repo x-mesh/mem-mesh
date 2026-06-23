@@ -160,9 +160,14 @@ def _prompt_choice(prompt: str, options: list[str], default: str = "") -> str:
 # Embedding model choices for onboarding (first entry is the default)
 EMBEDDING_MODELS = [
     (
+        "dragonkue/snowflake-arctic-embed-l-v2.0-ko",
+        1024,
+        "Recommended. Korean retrieval SOTA (MTEB-ko #1, NDCG@10 0.740), ~2.2GB",
+    ),
+    (
         "nlpai-lab/KURE-v1",
         1024,
-        "Recommended. Korean retrieval SOTA (BGE-M3 fine-tune), ~2.2GB",
+        "Korean retrieval (BGE-M3 fine-tune), ~2.2GB",
     ),
     (
         "intfloat/multilingual-e5-large",
@@ -245,7 +250,7 @@ def _prompt_docker_options() -> dict:
 
 def _generate_compose_file(
     port: int = 8000,
-    model_name: str = "nlpai-lab/KURE-v1",
+    model_name: str = "dragonkue/snowflake-arctic-embed-l-v2.0-ko",
     embedding_dim: int = 1024,
     use_local_volume: bool = False,
 ) -> Path:

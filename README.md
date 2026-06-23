@@ -199,7 +199,7 @@ For web clients or when multiple tools share one process. Requires `mem-mesh ser
 
 mem-mesh runs two retrieval engines in parallel and merges results with Reciprocal Rank Fusion:
 
-- **Vector** — `nlpai-lab/KURE-v1` (1024-dim, Korean-tuned BGE-M3) by default; E5 and MiniLM models supported
+- **Vector** — `dragonkue/snowflake-arctic-embed-l-v2.0-ko` (1024-dim, Korean retrieval SOTA, MTEB-ko #1) by default; KURE, E5 and MiniLM models supported
 - **FTS5** — SQLite full-text search with n-gram tokenization for CJK languages
 - **RRF fusion** — balances semantic similarity and keyword precision
 - **Quality filters** — noise removal, intent analysis, vector pre-filter overfetch to improve recall
@@ -276,7 +276,7 @@ Seven relation types: `related` | `parent` | `child` | `supersedes` | `reference
 | Variable | Description | Default |
 |---|---|---|
 | `MEM_MESH_DATABASE_PATH` | SQLite database path | XDG per-user path (see `app/core/config.py` `_default_db_path`) |
-| `MEM_MESH_EMBEDDING_MODEL` | Embedding model name | `nlpai-lab/KURE-v1` |
+| `MEM_MESH_EMBEDDING_MODEL` | Embedding model name | `dragonkue/snowflake-arctic-embed-l-v2.0-ko` |
 | `MEM_MESH_EMBEDDING_DIM` | Vector dimensions | `1024` |
 | `MEM_MESH_SERVER_PORT` | Web server port | `8000` |
 | `MEM_MESH_SEARCH_THRESHOLD` | Minimum similarity score | `0.5` |

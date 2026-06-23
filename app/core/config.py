@@ -88,10 +88,11 @@ class Settings(BaseSettings):
 
     # Embedding configuration
     embedding_model: str = Field(
-        default="nlpai-lab/KURE-v1",
+        default="dragonkue/snowflake-arctic-embed-l-v2.0-ko",
         description=(
-            "Sentence-transformers model name. Default: nlpai-lab/KURE-v1 "
-            "(Korean-tuned BGE-M3, 1024-dim). Override via MEM_MESH_EMBEDDING_MODEL."
+            "Sentence-transformers model name. Default: "
+            "dragonkue/snowflake-arctic-embed-l-v2.0-ko (Korean retrieval SOTA, "
+            "MTEB-ko #1, 1024-dim). Override via MEM_MESH_EMBEDDING_MODEL."
         ),
     )
     embedding_dim: int = Field(default=1024, description="Embedding vector dimensions")
