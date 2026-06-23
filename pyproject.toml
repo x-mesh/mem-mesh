@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mem-mesh"
-version = "1.14.0"
+version = "1.15.0"
 description = "Centralized memory system for AI development tools"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -29,6 +29,9 @@ dependencies = [
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
     "python-dotenv>=1.0.0",
+    # CLI rendering — syntax-highlighted JSON / line numbers for `-v`.
+    # Pure-Python, no native build; degrades gracefully if import ever fails.
+    "rich>=13.0.0",
 ]
 
 [project.urls]

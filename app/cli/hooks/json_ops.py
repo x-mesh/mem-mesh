@@ -4,8 +4,28 @@ import json
 import os
 import shutil
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+def timestamped_backup(path: Path) -> Optional[Path]:
+    """Copy ``path`` to ``<name>.<YYYYMMDD_HHMMSS>.bak`` before it is modified.
+
+    Returns the backup path, or None if the source is absent / uncopyable. Uses
+    :meth:`Path.with_name` (not ``with_suffix``) so the original extension is
+    preserved — e.g. ``~/.claude.json`` backs up to ``~/.claude.json.<ts>.bak``,
+    not ``~/.claude.<ts>.bak``. Single source of truth for config backups.
+    """
+    if not path.exists():
+        return None
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup = path.with_name(path.name + f".{ts}.bak")
+    try:
+        shutil.copy2(path, backup)
+    except OSError:
+        return None
+    return backup
 
 
 class MalformedSettingsError(RuntimeError):
@@ -136,8 +156,11 @@ def _merge_json_settings(
 
     If the existing file is malformed it is backed up to ``<path>.bak`` and
     :class:`MalformedSettingsError` is raised (unless ``force=True``), instead
-    of silently discarding the user's settings. The write itself is atomic.
+    of silently discarding the user's settings. The write itself is atomic, and
+    a timestamped backup is taken before any change so the prior settings can
+    always be recovered. A no-op merge writes nothing (and makes no backup).
     """
+    original_text = path.read_text(encoding="utf-8") if path.exists() else None
     existing: Dict[str, Any] = _load_settings_or_raise(path, force=force)
 
     # Deep-merge hooks section only; preserve everything else.
@@ -162,10 +185,12 @@ def _merge_json_settings(
         else:
             existing[key] = value
 
-    _atomic_write_text(
-        path,
-        json.dumps(existing, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-    )
+    new_text = json.dumps(existing, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+    if original_text == new_text:
+        return  # nothing changed — no write, no backup churn
+    if original_text is not None:
+        timestamped_backup(path)  # preserve prior settings before modifying
+    _atomic_write_text(path, new_text)
 
 
 def _remove_json_key(path: Path, key: str) -> None:

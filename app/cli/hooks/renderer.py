@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
+from app.cli.hooks.hook_log import HOOK_LOG_BLOCK
 from app.cli.hooks.json_ops import _atomic_write_text
 from app.cli.hooks.keywords import KEYWORD_MATCHER_BLOCK
 from app.cli.prompts.behaviors import REFLECT_CONFIG
@@ -137,6 +138,8 @@ def _render_template(
     result = result.replace("__ENHANCED_PROMPT__", render_enhanced_stop_prompt())
     # Keyword matcher block (single source of truth)
     result = result.replace("__KEYWORD_MATCHER__", KEYWORD_MATCHER_BLOCK)
+    # Opt-in hook logging block (single source of truth)
+    result = result.replace("__HOOK_LOG__", HOOK_LOG_BLOCK)
     return result
 
 
@@ -163,6 +166,8 @@ def _render_local_template(
     result = result.replace("__ENHANCED_PROMPT__", render_enhanced_stop_prompt())
     # Keyword matcher block (single source of truth)
     result = result.replace("__KEYWORD_MATCHER__", KEYWORD_MATCHER_BLOCK)
+    # Opt-in hook logging block (single source of truth)
+    result = result.replace("__HOOK_LOG__", HOOK_LOG_BLOCK)
     return result
 
 

@@ -5,6 +5,11 @@ import json
 import pytest
 
 from app.cli import onboarding
+from app.cli.hooks.status import ApiProbe
+
+
+def _unreachable_probe(url, timeout=5):
+    return ApiProbe("unreachable", None, "unreachable: test")
 
 
 def test_resolve_hook_targets_auto_uses_detected_only(monkeypatch) -> None:
@@ -30,11 +35,7 @@ def test_onboarding_yes_uses_uvx_and_skips_hooks_when_server_missing(
 ) -> None:
     calls = {"install": 0, "mcp_mode": None, "warmed": 0}
 
-    monkeypatch.setattr(
-        onboarding,
-        "check_connectivity",
-        lambda url: (False, "unreachable: test"),
-    )
+    monkeypatch.setattr(onboarding, "probe_api", _unreachable_probe)
     monkeypatch.setattr(onboarding, "_has_uvx", lambda: True)
     monkeypatch.setattr(
         onboarding,
@@ -71,9 +72,7 @@ def test_onboarding_yes_uses_uvx_and_skips_hooks_when_server_missing(
 
 def _stub_steps_for_uvx(monkeypatch) -> None:
     """Stub external effects so onboarding runs offline with no side effects."""
-    monkeypatch.setattr(
-        onboarding, "check_connectivity", lambda url: (False, "unreachable: test")
-    )
+    monkeypatch.setattr(onboarding, "probe_api", _unreachable_probe)
     monkeypatch.setattr(onboarding, "_has_uvx", lambda: True)
     monkeypatch.setattr(onboarding, "_warm_uvx_cache", lambda: True)
     monkeypatch.setattr(onboarding, "_detect_targets", lambda: ["codex"])
@@ -154,7 +153,9 @@ def test_onboarding_json_guides_setup_token_when_file_only(monkeypatch, capsys) 
 def test_onboarding_json_reports_hook_failure(monkeypatch, capsys) -> None:
     # Server reachable → hooks attempted; force failure to exercise error path.
     monkeypatch.setattr(
-        onboarding, "check_connectivity", lambda url: (True, "reachable")
+        onboarding,
+        "probe_api",
+        lambda url, timeout=5: ApiProbe("ok", 200, "reachable"),
     )
     monkeypatch.setattr(onboarding, "_detect_targets", lambda: ["claude"])
 
@@ -240,3 +241,64 @@ def test_main_json_flag_routes_noninteractive(monkeypatch) -> None:
 
     assert captured.get("json_mode") is True
     assert captured.get("yes") is True
+
+
+# ── interactive URL/token helpers (the install wizard) ──
+
+
+def test_prompt_token_enter_keeps_current_masked(monkeypatch) -> None:
+    """Enter keeps the current token; it is shown masked, never in full."""
+    captured = {}
+
+    def fake_input(prompt=""):
+        captured["prompt"] = prompt
+        return ""
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    out = onboarding._prompt_token("5-jWabcdefghTESTq7JY")
+    assert out == "5-jWabcdefghTESTq7JY"  # Enter → keep current
+    assert "q7JY" in captured["prompt"] and "TEST" not in captured["prompt"]  # masked
+
+
+def test_prompt_token_paste_replaces(monkeypatch) -> None:
+    monkeypatch.setattr("builtins.input", lambda prompt="": "new-remote-token")
+    assert onboarding._prompt_token("old") == "new-remote-token"
+
+
+def test_prompt_token_none_shows_none(monkeypatch) -> None:
+    captured = {}
+
+    def fake_input(prompt=""):
+        captured["prompt"] = prompt
+        return ""
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert onboarding._prompt_token(None) is None
+    assert "none" in captured["prompt"]
+
+
+def test_auth_probe_sends_token_and_returns_code(monkeypatch) -> None:
+    seen = {}
+
+    def fake_http(method, url, headers=None, data=None, timeout=5.0):
+        seen["url"] = url
+        seen["auth"] = (headers or {}).get("Authorization")
+        return 200, b"{}"
+
+    monkeypatch.setattr("app.cli.hooks.doctor._http", fake_http)
+    code = onboarding._auth_probe("https://remote.example/", "tok123")
+    assert code == 200
+    assert seen["url"].endswith("/api/hooks/claude/session-start")
+    assert seen["auth"] == "Bearer tok123"
+
+
+def test_auth_probe_no_token_omits_header(monkeypatch) -> None:
+    seen = {}
+
+    def fake_http(method, url, headers=None, data=None, timeout=5.0):
+        seen["auth"] = (headers or {}).get("Authorization")
+        return 401, b""
+
+    monkeypatch.setattr("app.cli.hooks.doctor._http", fake_http)
+    assert onboarding._auth_probe("http://x", None) == 401
+    assert seen["auth"] is None

@@ -121,6 +121,28 @@ def main(argv: Optional[List[str]] = None) -> None:
     hooks_sub.add_parser("status", help="Show hook status")
     hooks_sub.add_parser("doctor", help="Run hook diagnostics")
 
+    hooks_token = hooks_sub.add_parser(
+        "setup-token",
+        help="Export MEM_MESH_HOOK_TOKEN in your shell rc (needed for HTTP hooks / MCP)",
+    )
+    hooks_token.add_argument(
+        "--print",
+        dest="print_only",
+        action="store_true",
+        help="Print the export block instead of editing the rc file",
+    )
+    hooks_token.add_argument(
+        "--api-url", default=None, help="Also write ~/.mem-mesh/api_url (URL SSOT)"
+    )
+    hooks_token.add_argument(
+        "--no-test", action="store_true", help="Skip the post-setup auth test"
+    )
+    hooks_token.add_argument(
+        "--rc",
+        default=None,
+        help="Shell rc file to edit (default: auto-detect from $SHELL)",
+    )
+
     hooks_sync = hooks_sub.add_parser("sync-project", help="Sync project-local hooks")
     hooks_sync.add_argument(
         "--target", choices=["claude", "kiro", "cursor", "all"], default="all"
@@ -140,10 +162,51 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
 
     # --- mem-mesh config ---
-    sub.add_parser("config", help="Show configuration and environment variables")
+    config_parser = sub.add_parser(
+        "config", help="Show configuration and environment variables"
+    )
+    config_parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Show installed MCP config JSON with line numbers + syntax highlighting",
+    )
 
     # --- mem-mesh status ---
-    sub.add_parser("status", help="Full system status (server + hooks + MCP)")
+    status_parser = sub.add_parser(
+        "status", help="Full system status (server + hooks + MCP)"
+    )
+    status_parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Show installed MCP config JSON with line numbers + syntax highlighting",
+    )
+
+    # --- mem-mesh doctor (top-level full diagnostics) ---
+    doctor_parser = sub.add_parser(
+        "doctor", help="Full diagnostics: API + MCP + token + hooks, with fixes"
+    )
+    doctor_parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Show installed config JSON"
+    )
+
+    # --- mem-mesh restore (recover a config from a timestamped backup) ---
+    restore_parser = sub.add_parser(
+        "restore", help="Restore an MCP / hooks config file from a backup"
+    )
+    restore_parser.add_argument(
+        "--list", dest="list_only", action="store_true", help="List backups and exit"
+    )
+    restore_parser.add_argument(
+        "--from",
+        dest="from_backup",
+        default=None,
+        help="Restore a specific backup file",
+    )
+    restore_parser.add_argument(
+        "-y", "--yes", action="store_true", help="Skip the overwrite confirmation"
+    )
 
     # --- mem-mesh mcp ---
     mcp_parser = sub.add_parser("mcp", help="MCP server management")
@@ -155,7 +218,40 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
     mcp_config_parser.add_argument("--url", default=None, help="API server URL")
     mcp_config_parser.add_argument(
+        "--token",
+        default=None,
+        help="Hook auth token — write to ~/.mem-mesh/hook_token (SSOT) and enable "
+        "the MCP auth header",
+    )
+    mcp_config_parser.add_argument(
         "-y", "--yes", action="store_true", help="Non-interactive mode"
+    )
+    mcp_config_parser.add_argument(
+        "--auth",
+        action="store_true",
+        help="Add an Authorization: Bearer ${MEM_MESH_HOOK_TOKEN} header (http mode, "
+        "for servers that enforce MCP auth)",
+    )
+    mcp_verify_parser = mcp_sub.add_parser(
+        "verify", help="Verify mem-mesh MCP config across all detected dev tools"
+    )
+    mcp_verify_parser.add_argument("--url", default=None, help="API server URL")
+    mcp_verify_parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Show each tool's config JSON"
+    )
+    mcp_clean_parser = mcp_sub.add_parser(
+        "clean", help="Remove project-scoped MCP overrides that shadow the global entry"
+    )
+    mcp_clean_parser.add_argument(
+        "--list", dest="list_only", action="store_true", help="List overrides and exit"
+    )
+    mcp_clean_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be removed, change nothing",
+    )
+    mcp_clean_parser.add_argument(
+        "-y", "--yes", action="store_true", help="Skip the confirmation"
     )
 
     args = parser.parse_args(argv)
@@ -229,12 +325,28 @@ def main(argv: Optional[List[str]] = None) -> None:
     elif args.command == "config":
         from app.cli.config_cmd import cmd_config
 
-        cmd_config()
+        cmd_config(verbose=args.verbose)
 
     elif args.command == "status":
         from app.cli.system_status import cmd_system_status
 
-        cmd_system_status()
+        cmd_system_status(verbose=args.verbose)
+
+    elif args.command == "doctor":
+        from app.cli.system_doctor import cmd_system_doctor
+
+        sys.exit(cmd_system_doctor(verbose=args.verbose))
+
+    elif args.command == "restore":
+        from app.cli.restore import cmd_restore
+
+        sys.exit(
+            cmd_restore(
+                list_only=args.list_only,
+                from_backup=args.from_backup,
+                yes=args.yes,
+            )
+        )
 
     elif args.command == "mcp":
         if args.mcp_command == "stdio":
@@ -254,11 +366,44 @@ def main(argv: Optional[List[str]] = None) -> None:
                 sys.exit(1)
             mcp_pure_main()
         elif args.mcp_command == "config":
-            from app.cli.hooks.constants import DEFAULT_URL
+            from app.cli.hooks.status import resolve_api_url
             from app.cli.mcp_config import run_mcp_setup
 
-            url = args.url or DEFAULT_URL
-            run_mcp_setup(url=url, yes=args.yes)
+            # Explicit --url wins; otherwise resolve via env > ~/.mem-mesh/api_url
+            # > default. (run_mcp_setup no longer re-applies the env override, so
+            # an explicit --url is honored instead of being silently shadowed.)
+            url = args.url or resolve_api_url()[0]
+            with_auth = args.auth
+            if args.url:
+                # Align the hook channel too: write the URL SSOT so hooks and MCP
+                # point at the same server. Without this, `mcp config --url` only
+                # moves MCP and leaves hooks on whatever the env/file said — a
+                # split-brain doctor then reports two different URLs.
+                from app.cli.install_hooks import API_URL_FILE, _ensure_api_url
+
+                _ensure_api_url(args.url)
+                print(f"  API URL written to {API_URL_FILE} (hook SSOT)")
+            if args.token:
+                from app.cli.install_hooks import HOOK_TOKEN_FILE, _write_hook_token
+
+                _write_hook_token(args.token)
+                with_auth = True  # a supplied token implies authenticated MCP
+                print(f"  Hook token written to {HOOK_TOKEN_FILE}")
+            run_mcp_setup(url=url, yes=args.yes, with_auth=with_auth)
+        elif args.mcp_command == "verify":
+            from app.cli.hooks.status import resolve_api_url
+            from app.cli.mcp_verify import cmd_mcp_verify
+
+            url = args.url or resolve_api_url()[0]
+            sys.exit(cmd_mcp_verify(url=url, verbose=args.verbose))
+        elif args.mcp_command == "clean":
+            from app.cli.mcp_clean import cmd_mcp_clean
+
+            sys.exit(
+                cmd_mcp_clean(
+                    list_only=args.list_only, yes=args.yes, dry_run=args.dry_run
+                )
+            )
         else:
             sub.choices["mcp"].print_help()
 
@@ -268,7 +413,10 @@ def _dispatch_hooks(args: argparse.Namespace) -> None:
     from app.cli.hooks.constants import DEFAULT_URL
 
     if args.hooks_command is None:
-        print("Usage: mem-mesh hooks {install|uninstall|status|doctor|sync-project}")
+        print(
+            "Usage: mem-mesh hooks "
+            "{install|uninstall|status|doctor|setup-token|sync-project}"
+        )
         return
 
     if args.hooks_command == "install":
@@ -305,6 +453,16 @@ def _dispatch_hooks(args: argparse.Namespace) -> None:
         from app.cli.hooks.doctor import cmd_doctor
 
         cmd_doctor()
+
+    elif args.hooks_command == "setup-token":
+        from app.cli.hooks.token_setup import cmd_setup_token
+
+        cmd_setup_token(
+            print_only=args.print_only,
+            api_url=args.api_url,
+            no_test=args.no_test,
+            rc_path=args.rc,
+        )
 
     elif args.hooks_command == "sync-project":
         from app.cli.install_hooks import cmd_sync_project

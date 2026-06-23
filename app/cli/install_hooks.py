@@ -39,6 +39,7 @@ from app.cli.hooks.json_ops import (
     _atomic_write_text,
     _load_settings_or_raise,
 )
+from app.cli.hooks.hook_log import HOOK_LOG_BLOCK
 from app.cli.hooks.keywords import KEYWORD_MATCHER_BLOCK
 from app.cli.hooks.netcheck import check_http_hook_url
 from app.cli.hooks.renderer import (
@@ -159,6 +160,51 @@ _WRITE_TOOL_MATCHER = "Edit|Write|MultiEdit|NotebookEdit"
 # Resolution mirrors app.core.config.resolve_hook_token (env first, then file).
 HOOK_TOKEN_ENV_VAR = "MEM_MESH_HOOK_TOKEN"
 
+# The file SSOT for the API URL. Generated .sh hooks resolve the URL as
+# ``${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url)}`` (see app/cli/hooks/shell/*),
+# so this file is what every tool's hook reads when no env override is set —
+# reachable from GUI- and terminal-launched tools alike.
+API_URL_FILE = Path.home() / ".mem-mesh" / "api_url"
+
+
+def _ensure_api_url(url: str) -> None:
+    """Mirror the install URL into ``~/.mem-mesh/api_url`` (the URL file SSOT).
+
+    Companion to :func:`_ensure_hook_token`. Without this, a user who never
+    exports ``MEM_MESH_API_URL`` falls through the hook's runtime resolution to
+    the baked default, and the on-disk single source (``~/.mem-mesh/api_url``)
+    stays unwritten — the gap that forces manual file edits. Writing it at
+    install time makes the file authoritative for every tool's hook regardless
+    of shell-vs-GUI launch. Not a secret (0644). Idempotent: write only when
+    missing or changed.
+    """
+    normalized = url.rstrip("/")
+    try:
+        current: Optional[str] = API_URL_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        current = None
+    if current == normalized:
+        return
+    _atomic_write_text(API_URL_FILE, normalized + "\n", mode=0o644)
+
+
+def _write_hook_token(token: str) -> None:
+    """Write an explicit hook token to ``~/.mem-mesh/hook_token`` (0600 SSOT).
+
+    Unlike :func:`_ensure_hook_token` (which mirrors whatever the server already
+    resolves), this stores a caller-supplied value — e.g. ``mcp config --token``
+    pointing the install at a different server whose token differs. 0600 because
+    it is a secret. Idempotent: no rewrite when the file already matches.
+    """
+    normalized = token.strip()
+    if not normalized:
+        return
+    from app.core.config import _read_token_file
+
+    if _read_token_file(HOOK_TOKEN_FILE) == normalized:
+        return
+    _atomic_write_text(HOOK_TOKEN_FILE, normalized + "\n", mode=0o600)
+
 
 def _ensure_hook_token() -> str:
     """Return the hook auth token, generating ~/.mem-mesh/hook_token if absent.
@@ -174,10 +220,17 @@ def _ensure_hook_token() -> str:
     # auto-generated a data-dir token would reject hooks authenticated with a
     # freshly written ~/.mem-mesh token. Only when nothing resolves do we create
     # a new legacy-file token here.
-    from app.core.config import resolve_hook_token
+    from app.core.config import _read_token_file, resolve_hook_token
 
     existing = resolve_hook_token()
     if existing:
+        # MIRROR the resolved token into ~/.mem-mesh/hook_token. The generated
+        # .sh hooks only fall back to this legacy path (env -> ~/.mem-mesh) and
+        # do NOT know the data-dir token the server may be using; without the
+        # mirror they send no/old token and the server answers 401. Idempotent:
+        # write only when the legacy file is missing or differs.
+        if _read_token_file(HOOK_TOKEN_FILE) != existing:
+            _atomic_write_text(HOOK_TOKEN_FILE, existing + "\n", mode=0o600)
         return existing
     token = secrets.token_urlsafe(32)
     _atomic_write_text(HOOK_TOKEN_FILE, token + "\n", mode=0o600)
@@ -412,6 +465,8 @@ def _render_template(
     result = result.replace("__ENHANCED_PROMPT__", render_enhanced_stop_prompt())
     # Keyword matcher block (single source of truth)
     result = result.replace("__KEYWORD_MATCHER__", KEYWORD_MATCHER_BLOCK)
+    # Opt-in hook logging block (single source of truth)
+    result = result.replace("__HOOK_LOG__", HOOK_LOG_BLOCK)
     return result
 
 
@@ -438,6 +493,8 @@ def _render_local_template(
     result = result.replace("__ENHANCED_PROMPT__", render_enhanced_stop_prompt())
     # Keyword matcher block (single source of truth)
     result = result.replace("__KEYWORD_MATCHER__", KEYWORD_MATCHER_BLOCK)
+    # Opt-in hook logging block (single source of truth)
+    result = result.replace("__HOOK_LOG__", HOOK_LOG_BLOCK)
     return result
 
 
@@ -2127,6 +2184,10 @@ def cmd_install(
         # HTTP hooks while Kiro/Cursor fall back to command hooks.
         resolved = ""
         print(f"Installing mem-mesh hooks (mode: {mode}, url: {url})")
+        # Mirror the URL into the file SSOT so every tool's hook resolves it
+        # from one place (~/.mem-mesh/api_url) instead of relying on a per-tool
+        # env export. Local mode renders a path, not a URL, so it is skipped.
+        _ensure_api_url(url)
 
     if base_dir is not None:
         print(f"Scope: project ({base_dir})")
@@ -2378,7 +2439,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         help="Print the export block instead of editing the rc file",
     )
     token_parser.add_argument(
-        "--api-url", default=None, help="Also export MEM_MESH_API_URL"
+        "--api-url", default=None, help="Also write ~/.mem-mesh/api_url (URL SSOT)"
     )
     token_parser.add_argument(
         "--no-test", action="store_true", help="Skip the post-setup auth test"

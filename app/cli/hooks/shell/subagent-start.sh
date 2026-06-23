@@ -5,23 +5,28 @@ __VERSION_MARKER__
 # Output: {hookSpecificOutput: {hookEventName: "SubagentStart", additionalContext: "..."}}
 
 set -euo pipefail
-command -v jq >/dev/null 2>&1 || exit 0
-command -v curl >/dev/null 2>&1 || exit 0
+__HOOK_LOG__
+mem_mesh_log "subagent-start" "fired" "cwd=$PWD"
+command -v jq >/dev/null 2>&1 || { mem_mesh_log "subagent-start" "abort" "jq not found"; exit 0; }
+command -v curl >/dev/null 2>&1 || { mem_mesh_log "subagent-start" "abort" "curl not found"; exit 0; }
 
 API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)}"
 HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
 AUTH=()
-if [ -n "$HOOK_TOKEN" ]; then AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}"); fi
+AUTH_STATE=absent
+if [ -n "$HOOK_TOKEN" ]; then AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}"); AUTH_STATE=present; fi
 
 INPUT=$(cat)
 AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // empty')
 
 # Skip for lightweight agents
 case "$AGENT_TYPE" in
-  Explore|Glob|Grep|Read) exit 0 ;;
+  Explore|Glob|Grep|Read) mem_mesh_log "subagent-start" "skip" "lightweight agent=$AGENT_TYPE"; exit 0 ;;
 esac
 
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+
+mem_mesh_logv "subagent-start" "config" "url=$API_URL auth=$AUTH_STATE agent=$AGENT_TYPE"
 
 # Fetch key decisions/rules (lightweight: limit=5, category=decision)
 RESPONSE=$(curl -s --max-time 3 \
@@ -31,7 +36,8 @@ RESPONSE=$(curl -s --max-time 3 \
   --data-urlencode "category=decision" \
   --data-urlencode "limit=5" \
   ${AUTH[@]+"${AUTH[@]}"} \
-  2>/dev/null) || exit 0
+  2>/dev/null) || { mem_mesh_log "subagent-start" "abort" "search request failed"; exit 0; }
+mem_mesh_log "subagent-start" "sent" "search bytes=${#RESPONSE} project=$PROJECT_DIR"
 
 CONTEXT=$(python3 -c "
 import sys, json

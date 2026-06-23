@@ -8,7 +8,6 @@ import json
 import os
 import shutil
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.error import URLError
@@ -22,6 +21,7 @@ from app.cli.codex_config import (
     remove_codex_mcp_config,
 )
 from app.cli.hooks.colors import bold, dim, err, info, ok, warn
+from app.cli.hooks.json_ops import timestamped_backup
 
 
 def has_uvx() -> bool:
@@ -122,16 +122,11 @@ def detect_tools() -> list[dict]:
 def backup_config(config_path: Path) -> Optional[Path]:
     """Create a timestamped backup of a config file before modification.
 
-    Returns the backup path, or None if the file doesn't exist.
+    Returns the backup path, or None if the file doesn't exist. Delegates to the
+    shared :func:`timestamped_backup` so the backup keeps the original extension
+    (``.claude.json`` -> ``.claude.json.<ts>.bak``).
     """
-    if not config_path.exists():
-        return None
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = config_path.with_suffix(f".{timestamp}.bak")
-
-    shutil.copy2(config_path, backup_path)
-    return backup_path
+    return timestamped_backup(config_path)
 
 
 def generate_mcp_entry(
@@ -139,6 +134,7 @@ def generate_mcp_entry(
     url: str = "http://localhost:8000",
     auto_approve: bool = True,
     tool_key: str = "",
+    with_auth: bool = False,
 ) -> dict:
     """Generate a mem-mesh MCP server entry.
 
@@ -147,6 +143,10 @@ def generate_mcp_entry(
         url: API server URL (used for http mode)
         auto_approve: Whether to add autoApprove list for common tools
         tool_key: Tool registry key (e.g. 'claude-code', 'cursor') for MEM_MESH_CLIENT env
+        with_auth: For http mode, add an ``Authorization: Bearer
+            ${MEM_MESH_HOOK_TOKEN}`` header (a reference, never the literal
+            secret) for servers that enforce MCP auth. Requires the MCP client
+            to expand ``${ENV}`` in headers.
     """
     approve_list = [
         "add",
@@ -176,6 +176,10 @@ def generate_mcp_entry(
             "url": f"{url.rstrip('/')}/mcp/sse",
             "type": "http",
         }
+        if with_auth:
+            # Reference, not the literal token, so the secret never lands in the
+            # config file. Only useful where the client expands ${ENV} headers.
+            entry["headers"] = {"Authorization": "Bearer ${MEM_MESH_HOOK_TOKEN}"}
     elif mode == "uvx":
         # uvx mode — each MCP client spawns an isolated, cached mem-mesh install.
         # No pre-install needed; uvx downloads on first run, reuses cache after.
@@ -191,10 +195,19 @@ def generate_mcp_entry(
             "args": ["-m", "app.mcp_stdio"],
         }
 
-    # Inject MEM_MESH_CLIENT env so server auto-tags memories with source tool
+    # Build the env block. MEM_MESH_CLIENT lets the server tag memories with the
+    # source tool. For local backends (stdio/uvx), propagate an *explicitly set*
+    # MEM_MESH_DATABASE_PATH so a GUI-launched client — which does not inherit
+    # the shell env — still uses the same database. Never guess a path.
+    env: Dict[str, str] = {}
     if tool_key:
-        client_name = tool_key.replace("-", "_")
-        entry["env"] = {"MEM_MESH_CLIENT": client_name}
+        env["MEM_MESH_CLIENT"] = tool_key.replace("-", "_")
+    if mode in ("uvx", "stdio"):
+        db_path = os.environ.get("MEM_MESH_DATABASE_PATH")
+        if db_path:
+            env["MEM_MESH_DATABASE_PATH"] = db_path
+    if env:
+        entry["env"] = env
 
     if auto_approve:
         entry["autoApprove"] = approve_list
@@ -253,18 +266,18 @@ def configure_tool(
             msg += f" (backup: {backup_path.name})"
         return True, msg
 
-    # Backup existing config
-    backup_path = None
-    if do_backup and config_path.exists():
-        backup_path = backup_config(config_path)
-
     # Read existing config
     data = read_config(config_path)
 
-    # Check if already configured with same settings
+    # No-op when already identical — return before backing up to avoid churn.
     existing = data["mcpServers"].get(MCP_SERVER_KEY)
     if existing == mcp_entry:
         return True, "already up to date"
+
+    # Back up only when the entry actually changes.
+    backup_path = None
+    if do_backup and config_path.exists():
+        backup_path = backup_config(config_path)
 
     # Update only the mem-mesh entry
     action = "updated" if existing else "added"
@@ -435,10 +448,52 @@ def _prompt_choice(prompt: str, options: list[str], default: str = "") -> str:
         print(f"    Enter 1-{len(options)}")
 
 
+def _existing_mem_mesh_entry(tool: dict) -> Optional[Any]:
+    """Return the tool's current mem-mesh MCP entry, or None if absent.
+
+    Used to guard against silently rewriting a working entry under ``--yes``.
+    For Codex (TOML, different shape) a truthy sentinel is returned when an
+    entry exists so the guard preserves it rather than comparing dicts.
+    """
+    config_path: Path = tool["config_path"]
+    if not config_path.exists():
+        return None
+    if tool["key"] == "codex":
+        return {"__codex__": True} if codex_config_has_mem_mesh(config_path) else None
+    data = read_config(config_path)
+    return data.get("mcpServers", {}).get(MCP_SERVER_KEY)
+
+
+def _entry_mode(entry: Optional[Any]) -> Optional[str]:
+    """Classify an existing entry's transport: 'http' | 'uvx' | 'stdio' | None.
+
+    Inverse of :func:`generate_mcp_entry`. Used to keep an entry on its current
+    backend during a non-interactive fix (so http stays http) rather than
+    flipping it. Returns None for an unrecognized shape (e.g. the Codex
+    sentinel), which means "no opinion — use the chosen mode".
+    """
+    if not isinstance(entry, dict):
+        return None
+    if "url" in entry:
+        return "http"
+    command = str(entry.get("command", ""))
+    args = entry.get("args", []) or []
+    if command == "uvx" or any("uvx" in str(a) for a in args):
+        return "uvx"
+    if any("app.mcp_stdio" in str(a) or "mem-mesh-mcp-stdio" in str(a) for a in args):
+        return "stdio"
+    if "command" in entry:
+        return "stdio"
+    return None
+
+
 def run_mcp_setup(
     url: str = "http://localhost:8000",
     yes: bool = False,
     preferred_mode: Optional[str] = None,
+    server_reachable: bool = False,
+    with_auth: bool = False,
+    step_label: str = "[3/3]",
 ) -> Dict[str, Any]:
     """Interactive MCP configuration step for onboarding.
 
@@ -446,6 +501,9 @@ def run_mcp_setup(
         url: API URL for http mode
         yes: Non-interactive (auto-pick best mode)
         preferred_mode: If set ('uvx'|'stdio'|'http'|'sse'), skip mode prompt
+        server_reachable: When True (server is up — possibly auth-gated), the
+            non-interactive auto-pick prefers ``http`` over ``uvx`` so a working
+            HTTP deployment is not flipped to an isolated local uvx install.
 
     Returns:
         A summary dict for machine consumption (the onboarding ``--json``
@@ -453,16 +511,14 @@ def run_mcp_setup(
         Shape: ``{"status": "configured"|"skipped"|"no_tools", "mode": str,
         "detected_tools": [keys], "configured": [...], "verification": [...]}``.
     """
-    print(bold("[3/3] MCP Configuration"))
+    print(bold(f"{step_label} MCP Configuration"))
     print()
 
-    # Show API URL
-    env_url = os.getenv("MEM_MESH_API_URL", "")
-    if env_url:
-        print(f"  API URL: {info(env_url)} {dim('(from MEM_MESH_API_URL)')}")
-        url = env_url
-    else:
-        print(f"  API URL: {info(url)}")
+    # Show the API URL exactly as resolved by the caller. The caller owns
+    # precedence (explicit --url > MEM_MESH_API_URL env > ~/.mem-mesh/api_url >
+    # default); re-applying the env override here silently ignored an explicit
+    # --url, the same shadowing trap the file SSOT was meant to kill.
+    print(f"  API URL: {info(url)}")
     print()
 
     # Detect tools
@@ -511,8 +567,14 @@ def run_mcp_setup(
         print(f"  {bold('Connection mode:')} {info(mode)} {dim('(pre-selected)')}")
         print()
     elif yes:
-        # Non-interactive: prefer uvx if available, else streamable HTTP
-        mode = "uvx" if uvx_available else "http"
+        # Non-interactive auto-pick. If the server is reachable (even when
+        # auth-gated), prefer HTTP so an existing working deployment is not
+        # flipped to an isolated local uvx install. Only fall back to uvx when
+        # there is no reachable server to talk to.
+        if server_reachable:
+            mode = "http"
+        else:
+            mode = "uvx" if uvx_available else "http"
         targets = installed_tools
     else:
         # Choose connection mode — uvx first if available (recommended)
@@ -591,17 +653,36 @@ def run_mcp_setup(
         return {"status": "skipped", "mode": mode, "detected_tools": detected_keys}
 
     # Show sample MCP entry
-    sample_entry = generate_mcp_entry(mode=mode, url=url, tool_key=targets[0]["key"])
+    sample_entry = generate_mcp_entry(
+        mode=mode, url=url, tool_key=targets[0]["key"], with_auth=with_auth
+    )
     print(f"  {bold('MCP entry')} ({mode} mode):")
     entry_json = json.dumps({"mem-mesh": sample_entry}, indent=2)
     for line in entry_json.splitlines():
         print(f"    {dim(line)}")
     print()
 
+    # Under non-interactive auto mode (no explicit preferred_mode) we must NOT
+    # silently FLIP an existing entry to a different backend — that is the
+    # footgun where `install --yes` turned a working HTTP entry into a local uvx
+    # one (separate DB). But a same-transport fix (correcting a legacy
+    # `transport` key, refreshing the URL) MUST still apply, or a misconfigured
+    # entry could never be repaired non-interactively. So for an existing entry
+    # we regenerate in its CURRENT transport; only an explicit mode choice
+    # (preferred_mode / interactive selection) may change the backend.
+    auto_mode = yes and not preferred_mode
+
     # Configure each tool (with tool-specific MEM_MESH_CLIENT env)
     configured: List[Dict[str, Any]] = []
     for t in targets:
-        mcp_entry = generate_mcp_entry(mode=mode, url=url, tool_key=t["key"])
+        entry_mode = mode
+        if auto_mode:
+            existing_mode = _entry_mode(_existing_mem_mesh_entry(t))
+            if existing_mode and existing_mode != mode:
+                entry_mode = existing_mode  # keep the backend, fix the contents
+        mcp_entry = generate_mcp_entry(
+            mode=entry_mode, url=url, tool_key=t["key"], with_auth=with_auth
+        )
         success, msg = configure_tool(t, mcp_entry, do_backup=True)
         configured.append(
             {"tool": t["name"], "key": t["key"], "ok": success, "result": msg}

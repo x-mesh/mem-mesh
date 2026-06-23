@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] - 2026-06-24
+
+mem-mesh 연결 설정(`api_url` + `hook_token`)을 **단일 출처(SSOT)** 로 정리하고, 어디에 설정이 흩어져 있고 무엇이 무엇을 덮어쓰는지 보이지 않아 401 디버깅이 길어지던 문제를 구조적으로 막는다. WHY: env(`MEM_MESH_API_URL`/settings.json/셸)가 파일·CLI 인자를 조용히 override(silent shadowing)하면서, "설정은 했는데 동작 안 함"·"설치는 됐는데 401" 같은 추적 어려운 상태가 반복됐다. 이제 `~/.mem-mesh/{api_url,hook_token}` 파일이 GUI·터미널 실행 모든 도구의 공통 출처가 되고, install/doctor가 이를 명시·검증·fail-fast 처리한다.
+
+### Added
+- **Config SSOT** — `~/.mem-mesh/api_url`·`~/.mem-mesh/hook_token`을 모든 도구 hook이 읽는 정식 단일 출처로 확정. install 시 `_ensure_api_url()`이 URL 파일도 기록(기존엔 token만 기록)하고, `_write_hook_token()`으로 명시 토큰을 저장한다. `app/cli/install_hooks.py`
+- **인터랙티브 install** — `mem-mesh install`이 API URL과 hook token을 현재값을 기본으로 채운 프롬프트로 받고(Enter로 유지·표시), 설치 *전에* 서버 인증을 테스트한다. 401이면 토큰을 최대 5회 재입력받고, 끝내 인증 실패면 hook 설치를 건너뛴다(설치-후-401 방지). `app/cli/onboarding.py`
+- **doctor 진단 강화** — `[SSOT]`(정본 파일 값·active/shadowed), `[Config Conflicts]`(우선순위 체인에서 가려진 값 surface), MCP↔hook URL 불일치 경고를 추가. `app/cli/system_doctor.py`
+- **`mcp config --token`** + `--url`이 hook URL SSOT(`~/.mem-mesh/api_url`)도 함께 기록 — MCP와 hook이 한 서버를 가리키도록 통일. `app/cli/main.py`, `app/cli/mcp_config.py`
+- **`MEM_MESH_HOOK_LOG`** opt-in 셸 hook 관측성(레벨 1/2) — hook이 실제 fired/sent/exit됐는지 `~/.mem-mesh/hooks.log`로 추적. `app/cli/hooks/hook_log.py`
+- `mcp clean`(프로젝트 override 정리)·`restore`(백업 복구) 커맨드, verbose 모드 MCP 엔트리 `file:line` 표시, 3-state API probe(auth gate vs 네트워크 구분). `app/cli/mcp_clean.py`, `app/cli/hooks/diagnostics.py`
+
+### Changed
+- **`mcp config --url` 우선순위 수정** — 명시적 `--url` 인자가 `MEM_MESH_API_URL` env보다 우선(기존엔 env가 인자를 silent override). `app/cli/mcp_config.py`
+- **`setup-token` 토큰 전용화** — rc에 토큰만 파일-source로 export하고, `--api-url`은 env 리터럴 대신 `~/.mem-mesh/api_url`(SSOT)에 기록. `app/cli/hooks/token_setup.py`
+- README onboarding 안내를 env var 중심에서 파일 SSOT 중심으로 재정리. `README.md`
+
+### Fixed
+- `test_hook_logging` 격리 버그 — 테스트가 `HOME`만 격리하고 실제 `MEM_MESH_HOOK_TOKEN` env를 상속해 `auth=absent` 단언이 토큰 있는 환경에서 깨지던 문제(`_base_env` 헬퍼로 제어 변수 제거). `tests/test_hook_logging.py`
+
 ## [1.14.0] - 2026-06-23
 
 세션 시작 시 저장된 메모리가 거의 재호출되지 않던(운영 dead_ratio ≈0.999) 읽기 격차를 메운다 — `session_resume`/`SessionStart`가 그동안 pins만 반환했으나, 이제 열린 작업과 관련된 큐레이션 메모리를 자동으로 surface한다.

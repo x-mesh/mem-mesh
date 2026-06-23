@@ -44,12 +44,10 @@ _HOOK_ENDPOINT = "/api/hooks/claude/{event}"
 
 
 def _mask(token: str) -> str:
-    """Mask a secret to ``Ab12●●●●●●●●wX9z`` form (first/last 4, fixed middle)."""
-    if not token:
-        return ""
-    if len(token) <= 8:
-        return "●" * len(token)
-    return f"{token[:4]}{'●' * 8}{token[-4:]}"
+    """Mask a secret for display. Delegates to the single core masker (tail-only)."""
+    from app.core.redaction import mask_secret
+
+    return mask_secret(token)
 
 
 def _web_auth_enforced() -> bool:

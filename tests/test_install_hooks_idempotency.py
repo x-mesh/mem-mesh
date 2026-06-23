@@ -795,3 +795,74 @@ def test_mcp_config_configures_codex_toml(tmp_path: Path) -> None:
     assert removed is True
     assert remove_msg == "removed"
     assert "[mcp_servers.mem-mesh]" not in config_path.read_text(encoding="utf-8")
+
+
+def test_ensure_api_url_writes_file_ssot(tmp_path: Path, monkeypatch) -> None:
+    """_ensure_api_url mirrors the install URL into the ~/.mem-mesh/api_url SSOT."""
+    api_file = tmp_path / ".mem-mesh" / "api_url"
+    monkeypatch.setattr(install_hooks, "API_URL_FILE", api_file)
+
+    # Trailing slash is normalized away so the file matches resolve_api_url().
+    install_hooks._ensure_api_url("http://localhost:8000/")
+    assert api_file.read_text(encoding="utf-8").strip() == "http://localhost:8000"
+    # World-readable (not a secret) — token file stays 0600, this one 0644.
+    assert stat.S_IMODE(api_file.stat().st_mode) == 0o644
+
+
+def test_ensure_api_url_is_idempotent(tmp_path: Path, monkeypatch) -> None:
+    """Re-running with the same URL leaves the file (and its mtime) untouched."""
+    api_file = tmp_path / ".mem-mesh" / "api_url"
+    monkeypatch.setattr(install_hooks, "API_URL_FILE", api_file)
+
+    install_hooks._ensure_api_url("http://localhost:8000")
+    first_mtime = api_file.stat().st_mtime_ns
+    install_hooks._ensure_api_url("http://localhost:8000")  # no-op
+    assert api_file.stat().st_mtime_ns == first_mtime
+    # A changed URL rewrites it.
+    install_hooks._ensure_api_url("http://localhost:9999")
+    assert api_file.read_text(encoding="utf-8").strip() == "http://localhost:9999"
+
+
+def test_setup_token_export_block_is_token_only() -> None:
+    """The rc export block carries only the file-sourced token — never a literal
+    MEM_MESH_API_URL (that would shadow the ~/.mem-mesh/api_url SSOT)."""
+    from app.cli.hooks.token_setup import _export_block
+
+    for shell in ("zsh", "bash", "fish"):
+        block = _export_block(shell)
+        assert "MEM_MESH_HOOK_TOKEN" in block
+        assert "MEM_MESH_API_URL" not in block
+        # Token is sourced from the file, not written as a plaintext literal.
+        assert "hook_token" in block
+
+
+def test_write_hook_token_explicit(tmp_path: Path, monkeypatch) -> None:
+    """_write_hook_token stores a caller-supplied token at 0600, idempotently."""
+    tok_file = tmp_path / ".mem-mesh" / "hook_token"
+    monkeypatch.setattr(install_hooks, "HOOK_TOKEN_FILE", tok_file)
+    monkeypatch.setattr("app.core.config.HOOK_TOKEN_FILE", tok_file, raising=False)
+
+    install_hooks._write_hook_token("  remote-token-abc  ")  # trimmed
+    assert tok_file.read_text(encoding="utf-8").strip() == "remote-token-abc"
+    assert stat.S_IMODE(tok_file.stat().st_mode) == 0o600
+
+    first = tok_file.stat().st_mtime_ns
+    install_hooks._write_hook_token("remote-token-abc")  # unchanged → no rewrite
+    assert tok_file.stat().st_mtime_ns == first
+    install_hooks._write_hook_token("")  # blank → no-op, value preserved
+    assert tok_file.read_text(encoding="utf-8").strip() == "remote-token-abc"
+
+
+def test_run_mcp_setup_honors_explicit_url_over_env(monkeypatch, capsys) -> None:
+    """Regression: an explicit url is no longer shadowed by MEM_MESH_API_URL env."""
+    from app.cli import mcp_config
+
+    # env points elsewhere; the passed url must still win.
+    monkeypatch.setenv("MEM_MESH_API_URL", "http://localhost:8000")
+    monkeypatch.setattr(mcp_config, "detect_tools", lambda: [])  # short-circuit
+
+    result = mcp_config.run_mcp_setup(url="https://remote.example", yes=True)
+    out = capsys.readouterr().out
+    assert "https://remote.example" in out
+    assert "localhost:8000" not in out
+    assert result["status"] == "no_tools"

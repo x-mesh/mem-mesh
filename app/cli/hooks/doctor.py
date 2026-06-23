@@ -168,12 +168,10 @@ def _check_env_vars(profile: str) -> List[str]:
 
 
 def _mask_token(token: str) -> str:
-    """Mask a secret to ``Ab12●●●●wX9z`` (first/last 4)."""
-    if not token:
-        return ""
-    if len(token) <= 8:
-        return "●" * len(token)
-    return f"{token[:4]}●●●●{token[-4:]}"
+    """Mask a token for display. Delegates to the single core masker (tail-only)."""
+    from app.core.redaction import mask_secret
+
+    return mask_secret(token)
 
 
 def _http(method: str, url: str, headers=None, data=None, timeout: float = 5.0):

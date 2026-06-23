@@ -5,6 +5,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -206,25 +207,92 @@ def resolve_api_url(baked_url: Optional[str] = None) -> Tuple[str, str]:
     return DEFAULT_URL.rstrip("/"), "default"
 
 
-def check_connectivity(url: str, timeout: int = 5) -> Tuple[bool, str]:
-    """Check API connectivity by hitting /health endpoint.
+@dataclass
+class ApiProbe:
+    """3-state result of probing the API ``/health`` endpoint.
 
-    Returns (reachable, message).
+    Distinguishes a server that *responded* with an auth challenge
+    (``auth_required`` — e.g. behind a reverse proxy that gates ``/health``)
+    from one that could not be reached at all (``unreachable`` — connection
+    refused / DNS / timeout). The old 2-state ``check_connectivity`` collapsed
+    both into "not reachable", which made an auth-gated but running deployment
+    look like *no server* and pushed onboarding toward reinstall/uvx fallbacks.
+    """
+
+    state: str  # "ok" | "auth_required" | "unreachable"
+    status: Optional[int]
+    message: str
+    latency_ms: Optional[int] = None
+
+    @property
+    def ok(self) -> bool:
+        """True only for a 2xx /health response."""
+        return self.state == "ok"
+
+    @property
+    def alive(self) -> bool:
+        """True when the server responded at all (2xx or an auth challenge)."""
+        return self.state in ("ok", "auth_required")
+
+    @property
+    def auth_required(self) -> bool:
+        """True when /health answered with 401/403/407 (server up, auth gated)."""
+        return self.state == "auth_required"
+
+
+def probe_api(url: str, timeout: int = 5) -> ApiProbe:
+    """Probe ``{url}/health`` and classify the outcome into 3 states.
+
+    - 2xx  -> ``ok``           (reachable)
+    - 401/403/407 -> ``auth_required`` (server alive, gated by auth — e.g. proxy)
+    - connection failure / other HTTP status -> ``unreachable``
     """
     health_url = f"{url.rstrip('/')}/health"
+    start = time.monotonic()
     try:
-        start = time.monotonic()
         req = urllib.request.Request(health_url, method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             elapsed_ms = int((time.monotonic() - start) * 1000)
-            return True, f"reachable ({resp.status}, {elapsed_ms}ms)"
+            return ApiProbe(
+                "ok",
+                resp.status,
+                f"reachable ({resp.status}, {elapsed_ms}ms)",
+                elapsed_ms,
+            )
     except urllib.error.HTTPError as e:
-        return False, f"HTTP {e.code}"
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        if e.code in (401, 403, 407):
+            return ApiProbe(
+                "auth_required",
+                e.code,
+                f"alive but authentication required (HTTP {e.code})",
+                elapsed_ms,
+            )
+        # Any other HTTP status (404/5xx) means the server answered but /health
+        # is misbehaving — treat as not usable, matching the old behavior.
+        return ApiProbe("unreachable", e.code, f"HTTP {e.code}", elapsed_ms)
     except urllib.error.URLError as e:
         reason = str(e.reason) if hasattr(e, "reason") else str(e)
-        return False, f"unreachable: {reason}"
+        return ApiProbe("unreachable", None, f"unreachable: {reason}")
     except Exception as e:
-        return False, f"error: {e}"
+        return ApiProbe("unreachable", None, f"error: {e}")
+
+
+def check_connectivity(url: str, timeout: int = 5) -> Tuple[bool, str]:
+    """Check API connectivity by hitting /health endpoint.
+
+    Returns (reachable, message). Thin wrapper over :func:`probe_api` that
+    preserves the historical 2-state contract: ``reachable`` is True only for a
+    2xx response, and the message keeps the legacy ``HTTP {code}`` /
+    ``unreachable: ...`` wording so existing callers and tests are unaffected.
+    """
+    probe = probe_api(url, timeout=timeout)
+    if probe.ok:
+        return True, probe.message
+    if probe.auth_required:
+        # Legacy callers expect the bare "HTTP {code}" form here.
+        return False, f"HTTP {probe.status}"
+    return False, probe.message
 
 
 def cmd_status() -> None:
@@ -291,7 +359,7 @@ def cmd_status() -> None:
     # Hook auth token. HTTP hooks / MCP read $MEM_MESH_HOOK_TOKEN from the SHELL
     # (no file fallback), so distinguish "exported in shell" from "file only": a
     # file-only token authenticates command (.sh) hooks but leaves HTTP hooks and
-    # MCP unauthenticated until exported (run `mem-mesh-hooks setup-token`).
+    # MCP unauthenticated until exported (run `mem-mesh hooks setup-token`).
     env_token = os.environ.get("MEM_MESH_HOOK_TOKEN")
     try:
         from app.core.config import resolve_hook_token
@@ -306,7 +374,7 @@ def cmd_status() -> None:
     elif file_token:
         print(
             f"  MEM_MESH_HOOK_TOKEN: {warn('file only')} "
-            f"{dim('(.sh hooks ok; HTTP/MCP need: mem-mesh-hooks setup-token)')}"
+            f"{dim('(.sh hooks ok; HTTP/MCP need: mem-mesh hooks setup-token)')}"
         )
     else:
         print(f"  MEM_MESH_HOOK_TOKEN: {_colorize_status('not set')}")

@@ -18,7 +18,7 @@ from typing import Any, Dict, Optional, Union
 
 from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
 from app.cli.hooks.constants import CLAUDE_HOOKS_DIR, DEFAULT_URL
-from app.cli.hooks.status import check_connectivity, resolve_api_url
+from app.cli.hooks.status import check_connectivity, probe_api, resolve_api_url
 
 TARGET_LABELS = {
     "claude": "Claude Code",
@@ -28,6 +28,10 @@ TARGET_LABELS = {
 }
 
 TARGET_ORDER = ["claude", "kiro", "cursor", "codex"]
+
+# How many times the interactive installer re-prompts for the hook token after a
+# 401 before giving up and skipping hook install (fail-fast on a wrong token).
+AUTH_TOKEN_RETRIES = 5
 
 
 def _detect_targets() -> list[str]:
@@ -200,6 +204,41 @@ def _prompt_value(prompt: str, default: str) -> str:
     """Prompt for a value with a default."""
     raw = input(f"  {prompt} [{bold(default)}]: ").strip()
     return raw if raw else default
+
+
+def _prompt_token(current: Optional[str]) -> Optional[str]:
+    """Prompt for the hook token, showing the current one masked as the default.
+
+    Enter keeps the current value (still displayed, masked, so the operator sees
+    what is in effect); a pasted value replaces it. The secret itself is never
+    echoed in full.
+    """
+    from app.core.redaction import mask_secret
+
+    shown = mask_secret(current) if current else "none"
+    raw = input(f"  Hook token [{bold(shown)}]: ").strip()
+    return raw if raw else current
+
+
+def _auth_probe(url: str, token: Optional[str]) -> Optional[int]:
+    """POST the hook endpoint with an explicit token; return the HTTP status.
+
+    Returns the status code (200 = token accepted, 401 = rejected/mismatch) or
+    ``None`` when the server is unreachable. Tests the *given* token directly so
+    the interactive retry loop does not depend on resolution order/env shadowing.
+    """
+    from app.cli.hooks.doctor import _http
+
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    code, _ = _http(
+        "POST",
+        f"{url.rstrip('/')}/api/hooks/claude/session-start",
+        headers=headers,
+        data=b"{}",
+    )
+    return code
 
 
 def _prompt_docker_options() -> dict:
@@ -543,18 +582,43 @@ def _onboarding_steps(
     else:
         resolved_url, source = resolve_api_url()
 
+    # Interactive URL: pre-fill the current value as the default so Enter keeps
+    # it (and still shows it). An explicit --url or --yes skips the prompt.
+    if not yes and not url:
+        print(f"  {dim(f'current: {resolved_url} (from {source})')}")
+        resolved_url = _prompt_value("API server URL", resolved_url).rstrip("/")
+        source = "entered"
+
+    # Persist the chosen URL to the file SSOT now so hooks + MCP resolve the same
+    # server (no split-brain). Local mode renders a path, not a URL, so skip it.
+    from app.cli.install_hooks import _ensure_api_url
+
+    _ensure_api_url(resolved_url)
+
     server["url"] = resolved_url
     server["url_source"] = source
     print(f"  URL: {info(resolved_url)} {dim(f'(from {source})')}")
 
-    reachable, message = check_connectivity(resolved_url)
+    probe = probe_api(resolved_url)
+    reachable = probe.ok
+    message = probe.message
     preferred_mcp_mode: Optional[str] = None
     server["message"] = message
 
-    if reachable:
+    if probe.ok:
         server["status"] = "reachable"
         server["reachable"] = True
         print(f"  Status: {ok(message)}")
+    elif probe.auth_required:
+        # The server is UP but gated by auth (e.g. behind a reverse proxy that
+        # also guards /health). Treating this as "no server" used to push the
+        # wizard into reinstall/uvx fallbacks and silently flip a working HTTP
+        # MCP entry to a local uvx one. Instead: keep going against this server.
+        server["status"] = "auth_required"
+        print(f"  Status: {warn(message)}")
+        print(
+            f"  {dim('Server is up — export MEM_MESH_HOOK_TOKEN (mem-mesh hooks setup-token) or check your proxy auth.')}"
+        )
     else:
         server["status"] = "unreachable"
         print(f"  Status: {err(message)}")
@@ -636,9 +700,56 @@ def _onboarding_steps(
 
     server["mcp_mode"] = preferred_mcp_mode
 
-    # Auth token (MEM_MESH_HOOK_TOKEN): detect + surface before install so the
-    # operator knows whether HTTP hooks / authenticated MCP are covered. The
-    # value itself is never printed.
+    # Auth token: prompt interactively (pre-filled masked), persist to the file
+    # SSOT, then verify against the server. On a 401 mismatch, re-prompt up to
+    # AUTH_TOKEN_RETRIES times; if it never authenticates, block hook install so
+    # we never leave installed-but-401 hooks behind (fail fast — the trap this
+    # whole flow fixes).
+    from app.cli.install_hooks import _write_hook_token
+    from app.core.config import resolve_hook_token
+
+    auth_blocked = False
+    current_token = resolve_hook_token()
+
+    if not yes:
+        chosen = _prompt_token(current_token)
+        if chosen and chosen != current_token:
+            _write_hook_token(chosen)
+            os.environ["MEM_MESH_HOOK_TOKEN"] = chosen  # effective for this run
+        current_token = chosen
+
+        # Verify only when the server is actually up (reachable or auth-gated).
+        if probe.ok or probe.auth_required:
+            for attempt in range(AUTH_TOKEN_RETRIES):
+                code = _auth_probe(resolved_url, current_token)
+                if code is None:
+                    print(f"  Auth test: {dim('server unreachable — skipped')}")
+                    break
+                if code == 200:
+                    print(f"  Auth test: {ok('200 — token accepted')}")
+                    break
+                if code == 401:
+                    print(f"  Auth test: {err('401 — token rejected by server')}")
+                    if attempt == AUTH_TOKEN_RETRIES - 1:
+                        auth_blocked = True
+                        break
+                    retry = _prompt_token(current_token)
+                    if retry and retry != current_token:
+                        _write_hook_token(retry)
+                        os.environ["MEM_MESH_HOOK_TOKEN"] = retry
+                    current_token = retry
+                else:
+                    print(f"  Auth test: {dim(f'HTTP {code}')}")
+                    break
+
+        if auth_blocked:
+            print(
+                f"  {warn('Token never authenticated — hooks will be skipped (they would 401).')}"
+            )
+            print(
+                f"  {dim('Fix the token (remote dashboard → Security & Tokens), then re-run install.')}"
+            )
+
     token_info = _hook_token_status()
     result["hook_token"] = token_info
     if token_info["status"] == "env":
@@ -658,8 +769,25 @@ def _onboarding_steps(
         )
     print()
 
-    # --- Step 2: Hook installation ---
-    print(bold("[2/3] Hook Installation"))
+    # --- Step 2: MCP config ---
+    # MCP is the primary integration (the memory tools) and can work via uvx
+    # without a running server, so it is configured before the optional hooks.
+    from app.cli.mcp_config import run_mcp_setup
+
+    mcp_summary = (
+        run_mcp_setup(
+            url=resolved_url,
+            yes=yes,
+            preferred_mode=preferred_mcp_mode,
+            server_reachable=probe.ok or probe.auth_required,
+            step_label="[2/3]",
+        )
+        or {}
+    )
+    result["steps"]["mcp"] = mcp_summary
+
+    # --- Step 3: Hook installation ---
+    print(bold("[3/3] Hook Installation"))
     hooks = result["steps"]["hooks"]
 
     hook_targets, hook_target_label = _resolve_hook_targets(target, yes)
@@ -681,7 +809,13 @@ def _onboarding_steps(
             dim("  (--yes: skipping hooks because uvx mode has no running API server)")
         )
 
-    if not yes:
+    # Auth gate: a token that never authenticated (Step 1) means HTTP/auth hooks
+    # would 401 on every call — skip install rather than leave broken hooks.
+    if auth_blocked:
+        skip_hooks = True
+        print(dim("  Skipping hooks: token failed authentication (see above)."))
+
+    if not yes and not auth_blocked:
         prompt_label = (
             f"  Install hooks for {hook_target_label}? [{hook_default}/n] "
             if hook_default == "Y"
@@ -715,15 +849,6 @@ def _onboarding_steps(
             result["errors"].append(f"Hook installation failed: {e}")
             _fail(f"Hook installation failed: {e}", force, json_mode)
         print()
-
-    # --- Step 3: MCP config ---
-    from app.cli.mcp_config import run_mcp_setup
-
-    mcp_summary = (
-        run_mcp_setup(url=resolved_url, yes=yes, preferred_mode=preferred_mcp_mode)
-        or {}
-    )
-    result["steps"]["mcp"] = mcp_summary
 
     # --- Summary (human mode only; json mode emits the result dict instead) ---
     if not json_mode:

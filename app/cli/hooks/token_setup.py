@@ -49,18 +49,20 @@ def _token_file_ref() -> str:
     return p.replace(home, "$HOME", 1) if p.startswith(home) else p
 
 
-def _export_block(shell: str, api_url: Optional[str]) -> str:
-    """An idempotent, file-sourced export block for ``shell``."""
+def _export_block(shell: str) -> str:
+    """An idempotent, file-sourced export block for ``shell`` (token only).
+
+    Only the token is exported, and it is *sourced from the file* so the secret
+    lives in the one 0600 file. The API URL is deliberately NOT exported here:
+    it is resolved from the ``~/.mem-mesh/api_url`` SSOT (which install /
+    ``--api-url`` writes), so pinning it as a literal env would shadow that file.
+    """
     ref = _token_file_ref()
     out = [_BLOCK_START]
     if shell == "fish":
         out.append(f"test -r {ref}; and set -gx MEM_MESH_HOOK_TOKEN (cat {ref})")
-        if api_url:
-            out.append(f'set -gx MEM_MESH_API_URL "{api_url}"')
     else:
         out.append(f'export MEM_MESH_HOOK_TOKEN="$(cat {ref} 2>/dev/null)"')
-        if api_url:
-            out.append(f'export MEM_MESH_API_URL="{api_url}"')
     out.append(_BLOCK_END)
     return "\n".join(out)
 
@@ -131,9 +133,17 @@ def cmd_setup_token(
         + (ok("already exported") if in_shell else warn("not set in this shell yet"))
     )
 
+    # --api-url writes the URL SSOT (~/.mem-mesh/api_url), not a shell export:
+    # hooks read that file directly, so an env pin would only shadow it.
+    if api_url:
+        from app.cli.install_hooks import API_URL_FILE, _ensure_api_url
+
+        _ensure_api_url(api_url)
+        print(f"  api_url:     {ok('written')} {dim(str(API_URL_FILE))}")
+
     shell, detected_rc = _detect_shell_rc()
     target_rc = Path(rc_path).expanduser() if rc_path else detected_rc
-    block = _export_block(shell, api_url)
+    block = _export_block(shell)
 
     if print_only:
         print(dim(f"\n  Add to {target_rc}  ({shell}):\n"))

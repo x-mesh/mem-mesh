@@ -7,6 +7,12 @@ import os
 
 from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
 from app.cli.hooks.constants import CLAUDE_HOOKS_DIR, DEFAULT_URL
+from app.cli.hooks.diagnostics import (
+    collect_mcp_status,
+    collect_token_status,
+    entry_json,
+)
+from app.cli.hooks.render import render_entry_source
 from app.cli.hooks.status import (
     _extract_url_from_script,
     check_connectivity,
@@ -28,7 +34,7 @@ ENV_VARS = [
 ]
 
 
-def cmd_config() -> None:
+def cmd_config(verbose: bool = False) -> None:
     """Display current configuration."""
     print()
     print(header("=== mem-mesh configuration ==="))
@@ -70,6 +76,28 @@ def cmd_config() -> None:
         print(f"  {' ' * 30} {dim(description)}")
     print()
 
+    # Hook auth token — resolved the way the server does (env > data dir >
+    # ~/.mem-mesh). HTTP hooks / MCP only read the SHELL env, so a file-only
+    # token still leaves them unauthenticated. The raw value is never printed.
+    print(header("[Hook Token]"))
+    token = collect_token_status()
+    if token.source == "env":
+        print(
+            f"  Source: {ok('shell env (MEM_MESH_HOOK_TOKEN)')}  {info(token.masked)}"
+        )
+        print(dim("  HTTP hooks / MCP are authenticated."))
+    elif token.present:
+        label = {
+            "data_file": "data dir hook_token",
+            "legacy_file": "~/.mem-mesh/hook_token",
+        }.get(token.source, token.source)
+        print(f"  Source: {warn(f'file only ({label})')}  {info(token.masked)}")
+        print(dim("  .sh hooks ok; export for HTTP/MCP: mem-mesh hooks setup-token"))
+    else:
+        print(f"  Source: {dim('not set')}")
+        print(dim("  Only needed when the server enforces authentication."))
+    print()
+
     # Installed hook URL (baked)
     print(header("[Installed Hook URL]"))
     if baked_url:
@@ -87,6 +115,27 @@ def cmd_config() -> None:
         print(f"  API server: {ok(message)}")
     else:
         print(f"  API server: {err(message)}")
+    print()
+
+    # MCP clients — every detected dev tool, not just Claude.
+    print(header("[MCP Clients]"))
+    tools = collect_mcp_status(url)
+    installed = [t for t in tools if t.installed]
+    if not installed:
+        print(f"  {dim('No supported dev tools detected.')}")
+    else:
+        for t in installed:
+            mode = t.mode or "-"
+            if t.configured:
+                state = ok("configured") if t.verified else warn("needs attention")
+                print(f"  {t.name:<15} {info(mode):<14} {state}")
+                if verbose:
+                    render_entry_source(
+                        t.config_path, t.entry_lines, entry_json(t.entry)
+                    )
+            else:
+                print(f"  {t.name:<15} {dim('not configured')}")
+    print(dim("  Full MCP verification: mem-mesh mcp verify"))
     print()
 
     # Docker status

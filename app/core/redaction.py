@@ -14,6 +14,7 @@ path can share one implementation.
 """
 
 import re
+from typing import Optional
 
 REDACTED = "<REDACTED>"
 
@@ -105,3 +106,25 @@ def redact_secrets(text: str) -> str:
     out = _KV_SECRET.sub(lambda m: f"{m.group(1)}{m.group(2)}{REDACTED}", out)
     out = _EMAIL.sub(REDACTED, out)
     return out
+
+
+# Fixed-width mask body so the real secret length is never implied.
+_MASK_BODY = "•" * 8  # ••••••••
+
+
+def mask_secret(value: Optional[str], show: int = 4) -> str:
+    """Mask a secret for *display*, revealing only the last ``show`` chars.
+
+    Unlike :func:`redact_secrets` (which scrubs content before storage), this is
+    a one-line preview so an operator can *identify* which token is configured
+    without leaking it. mem-mesh hook tokens are random with no ``gho_``/
+    ``sk_live_`` style key-type prefix, so the leading characters are raw secret
+    and are never shown — only a short tail plus a fixed-width body. Returns
+    ``""`` for an empty value. Single source of truth for every CLI/web surface
+    that prints a masked token.
+    """
+    if not value:
+        return ""
+    if len(value) <= show:
+        return "•" * len(value)
+    return f"{_MASK_BODY}{value[-show:]}"

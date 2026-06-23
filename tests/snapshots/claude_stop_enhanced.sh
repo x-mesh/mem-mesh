@@ -1,16 +1,49 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 17
+# mem-mesh-hooks prompt-version: 19
 # Stop hook (enhanced): Haiku API decides save/skip, then saves via mem-mesh API
 # Requires ANTHROPIC_API_KEY env var
 # stdin: {"stop_hook_active":bool,"last_assistant_message":"..."} JSON
 
 set -euo pipefail
-command -v jq >/dev/null 2>&1 || exit 0
+# --- mem-mesh hook logging (opt-in: MEM_MESH_HOOK_LOG) -------------------------
+# Append a per-stage trace to ~/.mem-mesh/hooks.log so you can tell whether this
+# shell hook actually fired and where it exited — surfacing the otherwise-silent
+# failure modes (jq/curl missing, server down, auth 401, timeout). Levels:
+#   unset / 0 / false  -> off (no-op, zero overhead)
+#   1 / on / true      -> concise: fired / abort / sent (http) / output
+#   2 / debug / verbose-> + a "config" line per request: url, auth present?,
+#                          curl time + exit code (metadata only, never content)
+case "${MEM_MESH_HOOK_LOG:-}" in
+  ""|0|false|no|off|FALSE|NO|OFF) _MM_LOG=0 ;;
+  2|3|debug|DEBUG|verbose|VERBOSE|trace|TRACE) _MM_LOG=2 ;;
+  *) _MM_LOG=1 ;;
+esac
+mem_mesh_log() {
+  [ "${_MM_LOG:-0}" -ge 1 ] 2>/dev/null || return 0
+  _mm_hook="${1:-?}"; _mm_stage="${2:-?}"
+  if [ "$#" -gt 2 ]; then shift 2; _mm_detail=" $*"; else _mm_detail=""; fi
+  _mm_ts="$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo '-')"
+  mkdir -p "${HOME}/.mem-mesh" 2>/dev/null || true
+  printf '%s [%s] pid=%s %s%s\n' \
+    "$_mm_ts" "$_mm_hook" "$$" "$_mm_stage" "$_mm_detail" \
+    >>"${HOME}/.mem-mesh/hooks.log" 2>/dev/null || true
+}
+# Verbose channel: only emits at level >= 2. Detail is connection metadata
+# (url / auth-present / timing / curl exit) — never request or response bodies.
+mem_mesh_logv() {
+  [ "${_MM_LOG:-0}" -ge 2 ] 2>/dev/null || return 0
+  mem_mesh_log "$@"
+}
+mem_mesh_log "enhanced-stop" "fired" "cwd=$PWD"
+command -v jq >/dev/null 2>&1 || { mem_mesh_log "enhanced-stop" "abort" "jq not found"; exit 0; }
 
-[ -z "${ANTHROPIC_API_KEY:-}" ] && exit 0
+[ -z "${ANTHROPIC_API_KEY:-}" ] && { mem_mesh_log "enhanced-stop" "abort" "ANTHROPIC_API_KEY unset"; exit 0; }
 
 API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://meme.24x365.online)}"
 HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
+AUTH_STATE=absent
+if [ -n "$HOOK_TOKEN" ]; then AUTH_STATE=present; fi
+mem_mesh_logv "enhanced-stop" "config" "url=$API_URL auth=$AUTH_STATE"
 
 INPUT=$(cat)
 
