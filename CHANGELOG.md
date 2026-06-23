@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.1] - 2026-06-23
+
+웹 대시보드 버그 수정 — Security 페이지에서 admin 비밀번호 입력 중 onboarding으로 강제 이동되던 문제.
+
+### Fixed
+- `checkEmbeddingStatus()`가 임베딩 모델이 준비되지 않았을 때(`not_loaded`·`error`·timeout) `router.navigate('/onboarding')`로 현재 페이지를 교체하면서, Security 페이지(`/security`)에서 admin 비밀번호를 입력하던 사용자가 onboarding으로 튕겨 입력이 소실되던 문제. 예외 경로가 `/onboarding` 하나뿐이었다. WHY: v1.12.0의 기본 임베딩 모델 전환(KURE → arctic)으로 모델이 로딩/마이그레이션 상태가 되자 이 모델-상태 폴링이 활성화돼 표면화됐다. 보호 경로 목록(`/onboarding`, `/security`)을 두어 해당 페이지에 있는 동안에는 redirect를 억제하되, 폴링은 3초 간격으로 유지해 사용자가 페이지를 떠나면 모델 미준비 안내가 정상 재개되도록 했다. `app/web/static/js/main.js`
+
 ## [1.12.0] - 2026-06-23
 
 기본 임베딩 모델을 한국어 검색 SOTA급인 `dragonkue/snowflake-arctic-embed-l-v2.0-ko`로 전환 — 신규 설치·온보딩 추천이 KURE-v1 대신 arctic-ko를 기본으로 사용한다.
