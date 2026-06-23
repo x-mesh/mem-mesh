@@ -11,7 +11,7 @@
 
 ## 목차
 
-- [mem-mesh란?](#mem-mesh란) · [Quick Start](#quick-start) · [MCP 설정](#mcp-설정) · [MCP 도구](#mcp-도구) · [검색](#검색) · [세션 & 핀](#세션--핀) · [메모리 관계](#메모리-관계) · [웹 대시보드](#웹-대시보드) · [설정](#설정) · [Docker](#docker) · [개발](#개발) · [아키텍처](#아키텍처) · [문서](#문서)
+- [mem-mesh란?](#mem-mesh란) · [Quick Start](#quick-start) · [MCP 설정](#mcp-설정) · [MCP 도구](#mcp-도구) · [검색](#검색) · [세션 & 핀](#세션--핀) · [메모리 관계](#메모리-관계) · [웹 대시보드](#웹-대시보드) · [설정](#설정) · [Docker](#docker) · [최초 실행 설정](#최초-실행-설정-대시보드-인증) · [개발](#개발) · [아키텍처](#아키텍처) · [문서](#문서)
 
 ---
 
@@ -247,6 +247,44 @@ make quickstart
 # 또는: make docker-build && make docker-up
 
 # 접속: http://localhost:8000
+```
+
+---
+
+## 최초 실행 설정 (대시보드 인증)
+
+대시보드 인증이 **설정되지 않은 상태**로 서버가 뜨면 포트에 접근 가능한 누구나 모든 메모리를 읽기/쓰기/삭제할 수 있다. 셸 없이 브라우저에서 바로 잠글 수 있도록, mem-mesh는 첫 기동 시 **일회용 setup token**을 발급해 서버 콘솔에 출력한다:
+
+```
+============================================================
+  FIRST-RUN SETUP  —  dashboard auth is NOT configured
+============================================================
+  Open : /setup
+  Token: <one-time-token>
+  (one-time — consumed the moment you finish setup)
+============================================================
+```
+
+`Open`은 기본적으로 경로 `/setup`만 출력한다 — 서버를 바인딩한 host:port로 접속하면 된다. `MEM_MESH_PUBLIC_URL`을 설정하면 배너에 전체 URL(예: `https://your-host/setup`)이 출력된다.
+
+토큰은 DB 옆(`/app/data/setup_token`)에도 기록되어 온보딩 도중 재시작에도 살아남는다. 언제든 확인:
+
+```bash
+docker exec mem-mesh-prod cat /app/data/setup_token
+# 또는 로그에서
+docker compose logs mem-mesh | grep -A1 "Token:"
+```
+
+`/setup`에 접속해 토큰 + 관리자 **username**(기본 `admin`) + **password**(8자 이상)를 입력한다. 제출하면 자격증명을 저장하고 Basic Auth를 켠 뒤 **토큰을 소비**(1회용)하고 대시보드로 자동 로그인시킨다. 새 서버의 첫 페이지 로드는 `/setup`으로 자동 리다이렉트된다.
+
+인증이 설정된 뒤에는 매 기동 시 토큰이 삭제되므로, 남아있는 토큰으로 이미 잠긴 서버를 다시 설정하는 일은 불가능하다.
+
+**토큰 리셋** (분실했고 아직 인증 미설정인 경우) — `ensure_setup_token()`은 idempotent라 그냥 재시작하면 같은 값이 유지되므로, 파일을 지우고 재시작해야 새 토큰이 발급된다:
+
+```bash
+docker exec mem-mesh-prod rm -f /app/data/setup_token
+docker restart mem-mesh-prod
+docker logs mem-mesh-prod 2>&1 | grep -A1 "Token:"
 ```
 
 ---

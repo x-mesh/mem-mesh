@@ -385,6 +385,44 @@ make docker-build && make docker-up
 
 ---
 
+## First-run setup (dashboard auth)
+
+When the server starts with **no dashboard auth configured**, anyone who can reach the port can read/write/delete all memories. To let you close this from the browser (no shell-only config), mem-mesh mints a **one-time setup token** on first boot and prints it to the server console:
+
+```
+============================================================
+  FIRST-RUN SETUP  —  dashboard auth is NOT configured
+============================================================
+  Open : /setup
+  Token: <one-time-token>
+  (one-time — consumed the moment you finish setup)
+============================================================
+```
+
+`Open` shows the bare path `/setup` by default — open it on whatever host:port you bound the server to. Set `MEM_MESH_PUBLIC_URL` to have the banner print a full URL (e.g. `https://your-host/setup`).
+
+The token is also written next to the DB (`/app/data/setup_token`), so it survives a mid-onboarding restart. Retrieve it any time:
+
+```bash
+docker exec mem-mesh-prod cat /app/data/setup_token
+# or scan the logs
+docker compose logs mem-mesh | grep -A1 "Token:"
+```
+
+Open `/setup`, enter the token plus an admin **username** (default `admin`) and **password** (≥ 8 chars). On submit mem-mesh saves the credential, enables Basic Auth, **consumes the token** (single-use), and logs you straight into the dashboard. On a fresh server the first page load auto-redirects to `/setup`.
+
+Once auth is configured the token is deleted on every startup, so a leftover token can never reconfigure an already-secured server.
+
+**Reset the token** (lost it, and auth is not configured yet) — delete the file and restart; `ensure_setup_token()` is idempotent, so a plain restart keeps the same value:
+
+```bash
+docker exec mem-mesh-prod rm -f /app/data/setup_token
+docker restart mem-mesh-prod
+docker logs mem-mesh-prod 2>&1 | grep -A1 "Token:"
+```
+
+---
+
 ## Development
 
 ```bash
