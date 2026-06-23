@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.1] - 2026-06-23
+
+`uvx mem-mesh` 단일 진입점 온보딩 + 에이전트용 `--json` 출력. 두 환경변수(`MEM_MESH_API_URL`·`MEM_MESH_HOOK_TOKEN`)로 온보딩을 비대화 구동 가능.
+
+> 참고: 1.13.0은 `git-kit ship`이 version bump 없이 tag-only로 발행돼(pyproject가 1.12.1에 머묾) PyPI publish가 `skip-existing`으로 no-op 처리됐다 — 동일 코드가 PyPI에 올라가지 않았다. 본 1.13.1이 pyproject·태그·PyPI를 정렬해 1.13.0의 내용을 실제 발행한다. (Docker `xmesh/mem-mesh:1.13.0` 이미지는 git 태그 기반이라 발행됐으나 내부 `__VERSION__`은 1.12.1이었다.)
+
+### Added
+- `uvx mem-mesh`(서브커맨드 없음) 온보딩 진입점 — `--from "mem-mesh[server]"` 없이 base 패키지만으로 온보딩 마법사를 구동한다(설치 경로는 server extra 불필요; 작성되는 MCP config는 런타임용으로 계속 `[server]`를 가리킨다). TTY면 대화형, 비-TTY(파이프/에이전트)면 자동 비대화로 프롬프트가 멈추지 않는다. WHY: 기존 `uvx --from "mem-mesh[server]" mem-mesh install`이 길고, LLM 에이전트가 떨굴 파일 없이 한 줄로 온보딩할 진입점이 필요했다. `app/cli/main.py`
+- 온보딩 `--json` 머신 출력 — `mem-mesh --json` / `mem-mesh install --json`이 단계별 상태(server/hooks/mcp/hook_token) + `next_actions` + `errors`를 단일 JSON으로 emit하고 종료코드로 성공/실패를 알린다(`--json`은 비대화 함의). 사람용 진행 출력은 redirect로 억제해 stdout을 깨끗한 JSON 1건으로 유지. `app/cli/onboarding.py`
+- 온보딩이 `MEM_MESH_HOOK_TOKEN`을 감지·표시 — env export / file-only(`~/.mem-mesh/hook_token`) / none을 구분해 출력하고(시크릿 값은 비노출), file-only일 때만 `mem-mesh hooks setup-token` 안내를 `next_actions`에 추가한다. `MEM_MESH_API_URL`은 기존대로 기본값으로 사용하고 출처를 출력한다. WHY: 두 환경변수로 온보딩을 비대화 구성하려면 토큰 상태가 보여야 했는데, 기존 온보딩은 토큰을 조용히 파일로만 생성했다. `app/cli/onboarding.py`
+
+### Changed
+- `run_mcp_setup`이 `None` 대신 구조화 요약 dict(`status`·`mode`·`detected_tools`·`configured`·`verification`)를 반환(순수 additive, 기존 출력 유지) — 온보딩 `--json`의 `steps.mcp`를 채운다. `app/cli/mcp_config.py`
+- README 온보딩 명령을 `uvx mem-mesh`로 단축하고 에이전트/CI용 `--json` + 두 환경변수 사용법을 문서화. `serve`/MCP 런타임의 `mem-mesh[server]` extra 표기는 유지. `README.md`
+
 ## [1.12.1] - 2026-06-23
 
 웹 대시보드 버그 수정 — Security 페이지에서 admin 비밀번호 입력 중 onboarding으로 강제 이동되던 문제.
