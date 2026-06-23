@@ -10,7 +10,7 @@ import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from urllib.error import URLError
 from urllib.request import urlopen
 
@@ -439,13 +439,19 @@ def run_mcp_setup(
     url: str = "http://localhost:8000",
     yes: bool = False,
     preferred_mode: Optional[str] = None,
-) -> None:
+) -> Dict[str, Any]:
     """Interactive MCP configuration step for onboarding.
 
     Args:
         url: API URL for http mode
         yes: Non-interactive (auto-pick best mode)
         preferred_mode: If set ('uvx'|'stdio'|'http'|'sse'), skip mode prompt
+
+    Returns:
+        A summary dict for machine consumption (the onboarding ``--json``
+        output). Always returned; human-readable progress is still printed.
+        Shape: ``{"status": "configured"|"skipped"|"no_tools", "mode": str,
+        "detected_tools": [keys], "configured": [...], "verification": [...]}``.
     """
     print(bold("[3/3] MCP Configuration"))
     print()
@@ -462,6 +468,7 @@ def run_mcp_setup(
     # Detect tools
     tools = detect_tools()
     installed_tools = [t for t in tools if t["installed"]]
+    detected_keys = [t["key"] for t in installed_tools]
 
     if not installed_tools:
         print(f"  {warn('No supported dev tools detected.')}")
@@ -471,7 +478,7 @@ def run_mcp_setup(
             )
         )
         print()
-        return
+        return {"status": "no_tools", "detected_tools": []}
 
     # Show detected tools
     print(f"  {bold('Detected tools:')}")
@@ -535,7 +542,7 @@ def run_mcp_setup(
         if mode == "skip":
             print(f"  {dim('Skipping MCP configuration.')}")
             print()
-            return
+            return {"status": "skipped", "mode": mode, "detected_tools": detected_keys}
         print()
 
         # Choose which tools to configure
@@ -558,7 +565,11 @@ def run_mcp_setup(
             if target_idx == 2:
                 print(f"  {dim('Skipping MCP configuration.')}")
                 print()
-                return
+                return {
+                    "status": "skipped",
+                    "mode": mode,
+                    "detected_tools": detected_keys,
+                }
             elif target_idx == 0:
                 targets = installed_tools
             else:
@@ -577,7 +588,7 @@ def run_mcp_setup(
     if not targets:
         print(f"  {dim('No tools selected.')}")
         print()
-        return
+        return {"status": "skipped", "mode": mode, "detected_tools": detected_keys}
 
     # Show sample MCP entry
     sample_entry = generate_mcp_entry(mode=mode, url=url, tool_key=targets[0]["key"])
@@ -588,9 +599,13 @@ def run_mcp_setup(
     print()
 
     # Configure each tool (with tool-specific MEM_MESH_CLIENT env)
+    configured: List[Dict[str, Any]] = []
     for t in targets:
         mcp_entry = generate_mcp_entry(mode=mode, url=url, tool_key=t["key"])
         success, msg = configure_tool(t, mcp_entry, do_backup=True)
+        configured.append(
+            {"tool": t["name"], "key": t["key"], "ok": success, "result": msg}
+        )
         if success:
             print(f"  {ok('✓')} {t['name']}: {msg}")
         else:
@@ -598,11 +613,23 @@ def run_mcp_setup(
     print()
 
     # Verify configuration
+    verification: List[Dict[str, Any]] = []
     print(f"  {bold('Verification:')}")
     for t in targets:
         _ok, vmsg = verify_tool_config(t, url=url)
+        verification.append(
+            {"tool": t["name"], "key": t["key"], "ok": _ok, "message": vmsg}
+        )
         if _ok:
             print(f"  {ok('✓')} {t['name']}: {vmsg}")
         else:
             print(f"  {warn('!')} {t['name']}: {vmsg}")
     print()
+
+    return {
+        "status": "configured",
+        "mode": mode,
+        "detected_tools": detected_keys,
+        "configured": configured,
+        "verification": verification,
+    }

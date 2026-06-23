@@ -6,11 +6,15 @@ Performs 3-step setup:
 3. MCP configuration check
 """
 
+import contextlib
+import io
+import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
 from app.cli.hooks.constants import CLAUDE_HOOKS_DIR, DEFAULT_URL
@@ -364,14 +368,86 @@ def _setup_server_source() -> tuple[bool, str]:
     return False, DEFAULT_URL  # Not running yet, user must start manually
 
 
-def _fail(message: str, force: bool) -> None:
+class _OnboardingAbort(Exception):
+    """Raised by ``_fail`` under json mode so the JSON result is still emitted.
+
+    In human mode ``_fail`` keeps the historical ``sys.exit(1)`` behavior; in
+    json mode it raises this instead, letting ``cmd_onboarding`` catch it and
+    still print the structured result before exiting non-zero.
+    """
+
+
+def _fail(message: str, force: bool, json_mode: bool = False) -> None:
     """Print error and exit unless --force is set."""
     print(f"  {err(message)}")
     if force:
         print(f"  {dim('--force: continuing despite error')}")
+        return
+    if json_mode:
+        raise _OnboardingAbort(message)
+    print(f"  {dim('Use --force to continue despite errors.')}")
+    sys.exit(1)
+
+
+def _pkg_version() -> str:
+    """Best-effort installed package version for json output."""
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            return version("mem-mesh")
+        except PackageNotFoundError:
+            return "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _hook_token_status() -> Dict[str, Any]:
+    """Detect the hook auth token for onboarding display/JSON (no secret leaked).
+
+    Mirrors ``mem-mesh hooks status``: a token exported in the *shell* env
+    (``MEM_MESH_HOOK_TOKEN``) authenticates HTTP hooks + MCP; a file-only token
+    (``~/.mem-mesh/hook_token``) only covers command (.sh) hooks. Returns the
+    status without exposing the secret value.
+    """
+    in_env = bool(os.environ.get("MEM_MESH_HOOK_TOKEN"))
+    try:
+        from app.core.config import resolve_hook_token
+
+        resolved = bool(resolve_hook_token())
+    except Exception:
+        resolved = in_env
+    if in_env:
+        status = "env"
+    elif resolved:
+        status = "file"
     else:
-        print(f"  {dim('Use --force to continue despite errors.')}")
-        sys.exit(1)
+        status = "none"
+    return {"status": status, "in_shell_env": in_env}
+
+
+def _build_next_actions(result: Dict[str, Any]) -> None:
+    """Populate result['next_actions'] mirroring _print_summary hints."""
+    actions = result["next_actions"]
+    server = result["steps"]["server"]
+    serve_cmd = 'uvx --from "mem-mesh[server]" mem-mesh serve'
+    if server.get("mcp_mode") == "uvx":
+        actions.append(
+            "Restart your MCP client (Codex / Cursor / Claude Desktop / Kiro). "
+            "First MCP call downloads mem-mesh[server] from the uv cache."
+        )
+        actions.append(f"Run `{serve_cmd}` to enable the dashboard + hooks.")
+    elif not server.get("reachable"):
+        actions.append(f"Start the server: `{serve_cmd}` (or `docker compose up -d`).")
+    # A file-only token authenticates .sh hooks but leaves HTTP hooks / MCP
+    # unauthenticated until it is exported into the shell.
+    if result.get("hook_token", {}).get("status") == "file":
+        actions.append(
+            "Export the hook token for HTTP hooks / authenticated MCP: "
+            "`mem-mesh hooks setup-token`."
+        )
+    actions.append("Run `mem-mesh status` for a full system check.")
+    actions.append("Run `mem-mesh hooks doctor` for hook diagnostics.")
 
 
 def cmd_onboarding(
@@ -380,14 +456,86 @@ def cmd_onboarding(
     profile: str = "standard",
     yes: bool = False,
     force: bool = False,
+    json_mode: bool = False,
 ) -> None:
-    """Run the onboarding wizard."""
+    """Run the onboarding wizard.
+
+    With ``json_mode`` the wizard runs non-interactively (implies ``yes``),
+    suppresses the human-readable progress, and emits a single JSON document
+    describing each step's outcome — the machine entry point for LLM agents
+    (``mem-mesh --json`` / ``mem-mesh install --json``).
+    """
+    if json_mode:
+        yes = True
+
+    result: Dict[str, Any] = {
+        "tool": "mem-mesh",
+        "command": "onboarding",
+        "version": _pkg_version(),
+        "ok": True,
+        "interactive": not yes,
+        "steps": {
+            "server": {
+                "status": "unknown",
+                "url": None,
+                "url_source": None,
+                "reachable": False,
+                "mcp_mode": None,
+                "message": None,
+            },
+            "hooks": {
+                "status": "skipped",
+                "targets": [],
+                "target_label": None,
+                "profile": profile,
+                "installed": False,
+                "error": None,
+            },
+            "mcp": {"status": "skipped"},
+        },
+        "hook_token": {"status": "none", "in_shell_env": False},
+        "next_actions": [],
+        "errors": [],
+    }
+
+    # In json mode, swallow the human-readable progress so stdout stays a clean
+    # single JSON document, but always emit the result (even on a fatal step
+    # error, surfaced as _OnboardingAbort) via the post-try block below.
+    sink = io.StringIO()
+    ctx: Any = (
+        contextlib.redirect_stdout(sink) if json_mode else contextlib.nullcontext()
+    )
+    aborted = False
+    try:
+        with ctx:
+            _onboarding_steps(url, target, profile, yes, force, json_mode, result)
+    except _OnboardingAbort:
+        aborted = True
+
+    if json_mode:
+        result["ok"] = (not aborted) and not result["errors"]
+        _build_next_actions(result)
+        print(json.dumps(result, indent=2))
+        sys.exit(0 if result["ok"] else 1)
+
+
+def _onboarding_steps(
+    url: Optional[str],
+    target: str,
+    profile: str,
+    yes: bool,
+    force: bool,
+    json_mode: bool,
+    result: Dict[str, Any],
+) -> None:
+    """Run the 3 onboarding steps, recording outcomes into ``result``."""
     print()
     print(header("=== mem-mesh setup ==="))
     print()
 
     # --- Step 1: Server setup ---
     print(bold("[1/3] API Server"))
+    server = result["steps"]["server"]
 
     if url:
         resolved_url = url.rstrip("/")
@@ -395,21 +543,31 @@ def cmd_onboarding(
     else:
         resolved_url, source = resolve_api_url()
 
+    server["url"] = resolved_url
+    server["url_source"] = source
     print(f"  URL: {info(resolved_url)} {dim(f'(from {source})')}")
 
     reachable, message = check_connectivity(resolved_url)
     preferred_mcp_mode: Optional[str] = None
+    server["message"] = message
 
     if reachable:
+        server["status"] = "reachable"
+        server["reachable"] = True
         print(f"  Status: {ok(message)}")
     else:
+        server["status"] = "unreachable"
         print(f"  Status: {err(message)}")
         print()
 
         if yes:
+            server["status"] = "skipped"
             if _has_uvx():
                 print(dim("  (--yes: using uvx for MCP; skipping API server setup)"))
-                _warm_uvx_cache()
+                # Skip the (up to 600s) cache warm-up under json mode so agent
+                # calls stay fast; the first real MCP call will download it.
+                if not json_mode:
+                    _warm_uvx_cache()
                 preferred_mcp_mode = "uvx"
             else:
                 print(dim("  (--yes: skipping server setup)"))
@@ -457,22 +615,56 @@ def cmd_onboarding(
             if chosen_key == "uvx":
                 _warm_uvx_cache()
                 preferred_mcp_mode = "uvx"
+                server["status"] = "skipped"
                 # uvx mode does not require a standing server for MCP,
                 # but hooks + dashboard still do. Reachable stays False.
             elif chosen_key == "docker":
                 reachable, resolved_url = _setup_server_docker(resolved_url)
-                if not reachable:
-                    _fail("Server setup failed.", force)
+                if reachable:
+                    server["status"] = "installed"
+                    server["reachable"] = True
+                    server["url"] = resolved_url
+                else:
+                    result["errors"].append("Server setup failed.")
+                    _fail("Server setup failed.", force, json_mode)
             elif chosen_key == "source":
                 reachable, resolved_url = _setup_server_source()
+                server["status"] = "installed"
                 # Source install doesn't start server, not a failure
-            # else: skip
+            else:
+                server["status"] = "skipped"
+
+    server["mcp_mode"] = preferred_mcp_mode
+
+    # Auth token (MEM_MESH_HOOK_TOKEN): detect + surface before install so the
+    # operator knows whether HTTP hooks / authenticated MCP are covered. The
+    # value itself is never printed.
+    token_info = _hook_token_status()
+    result["hook_token"] = token_info
+    if token_info["status"] == "env":
+        print(
+            f"  Auth token: {ok('MEM_MESH_HOOK_TOKEN set')} "
+            f"{dim('(shell env — HTTP hooks/MCP authenticated)')}"
+        )
+    elif token_info["status"] == "file":
+        print(
+            f"  Auth token: {warn('file only')} "
+            f"{dim('(.sh hooks ok; HTTP/MCP need: mem-mesh hooks setup-token)')}"
+        )
+    else:
+        print(
+            f"  Auth token: {dim('not set')} "
+            f"{dim('(only needed for an authenticated server)')}"
+        )
     print()
 
     # --- Step 2: Hook installation ---
     print(bold("[2/3] Hook Installation"))
+    hooks = result["steps"]["hooks"]
 
     hook_targets, hook_target_label = _resolve_hook_targets(target, yes)
+    hooks["targets"] = hook_targets
+    hooks["target_label"] = hook_target_label
     print(f"  Target:       {info(hook_target_label)}")
     print(f"  Profile:      {info(profile)}")
 
@@ -500,40 +692,49 @@ def cmd_onboarding(
             skip_hooks = raw in ("n", "no")
         else:
             skip_hooks = raw not in ("y", "yes")
+
+    hooks_installed = False
     if skip_hooks:
         print(dim("  Skipping hook installation."))
         print()
-        from app.cli.mcp_config import run_mcp_setup
+        hooks["status"] = "skipped"
+    else:
+        install_url = resolved_url if resolved_url else DEFAULT_URL
+        try:
+            from app.cli.install_hooks import cmd_install
 
-        run_mcp_setup(url=resolved_url, yes=yes, preferred_mode=preferred_mcp_mode)
-        _print_summary(
-            resolved_url, reachable, False, hook_target_label, preferred_mcp_mode
-        )
-        return
-
-    install_url = resolved_url if resolved_url else DEFAULT_URL
-    hooks_installed = False
-
-    try:
-        from app.cli.install_hooks import cmd_install
-
-        for hook_target in hook_targets:
-            cmd_install(hook_target, install_url, "api", "", profile)
-        hooks_installed = True
-        print(f"  {ok('Hooks installed successfully.')}")
-    except Exception as e:
-        _fail(f"Hook installation failed: {e}", force)
-    print()
+            for hook_target in hook_targets:
+                cmd_install(hook_target, install_url, "api", "", profile)
+            hooks_installed = True
+            hooks["installed"] = True
+            hooks["status"] = "installed"
+            print(f"  {ok('Hooks installed successfully.')}")
+        except Exception as e:
+            hooks["status"] = "failed"
+            hooks["error"] = str(e)
+            result["errors"].append(f"Hook installation failed: {e}")
+            _fail(f"Hook installation failed: {e}", force, json_mode)
+        print()
 
     # --- Step 3: MCP config ---
     from app.cli.mcp_config import run_mcp_setup
 
-    run_mcp_setup(url=resolved_url, yes=yes, preferred_mode=preferred_mcp_mode)
-
-    # --- Summary ---
-    _print_summary(
-        resolved_url, reachable, hooks_installed, hook_target_label, preferred_mcp_mode
+    mcp_summary = (
+        run_mcp_setup(url=resolved_url, yes=yes, preferred_mode=preferred_mcp_mode)
+        or {}
     )
+    result["steps"]["mcp"] = mcp_summary
+
+    # --- Summary (human mode only; json mode emits the result dict instead) ---
+    if not json_mode:
+        _print_summary(
+            resolved_url,
+            reachable,
+            hooks_installed,
+            hook_target_label,
+            preferred_mcp_mode,
+            token_status=token_info.get("status"),
+        )
 
 
 def _print_summary(
@@ -542,6 +743,7 @@ def _print_summary(
     hooks_ok: bool,
     target: str,
     mcp_mode: Optional[str] = None,
+    token_status: Optional[str] = None,
 ) -> None:
     """Print onboarding summary."""
     print(header("=== Setup Complete ==="))
@@ -564,6 +766,12 @@ def _print_summary(
     print(
         f"  Hooks:       {ok(f'installed ({target})') if hooks_ok else warn('not installed')}"
     )
+    token_label = {
+        "env": ok("MEM_MESH_HOOK_TOKEN (shell env)"),
+        "file": warn("file only (run: mem-mesh hooks setup-token)"),
+        "none": dim("not set"),
+    }.get(token_status or "none")
+    print(f"  Auth token:  {token_label}")
     print()
     if mcp_mode == "uvx":
         print(

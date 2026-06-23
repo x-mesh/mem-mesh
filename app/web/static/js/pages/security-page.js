@@ -91,20 +91,32 @@ export class SecurityPage extends HTMLElement {
 
   async loadOverview() {
     try {
-      const [overview, config] = await Promise.all([
+      const [overview, config, connectCfg] = await Promise.all([
         this.fetchJSON('/api/security/overview'),
         this.fetchJSON('/api/security/config'),
+        // The URL the operator actually reaches (public_url > request origin),
+        // NOT the server's bind address — mirrors the Connect page.
+        this.fetchJSON('/api/connect/config').catch(() => null),
       ]);
       this.overview = overview;
       this.config = config;
+      this.serverUrl =
+        (connectCfg && (connectCfg.public_url || connectCfg.origin)) ||
+        window.location.origin;
+      // Reveal the plaintext token up front (for an authorized operator: loopback
+      // / logged-in / OAuth) BEFORE the first render, so the token field and the
+      // install snippet show the real value with no masked flash. It's
+      // server-stored, so this never needs a regenerate. Mirrors Connect.
+      if (overview.hook && overview.hook.can_reveal && !this.revealedToken) {
+        try {
+          const data = await this.fetchJSON('/api/security/hook/reveal');
+          this.revealedToken = data.token;
+        } catch {
+          /* not allowed for this request — fall back to masked display */
+        }
+      }
       this.renderHookPanel();
       this.renderWebPanel();
-      // Auto-reveal for an authorized operator (loopback / logged-in / OAuth) so
-      // the token is always visible and recoverable — it's server-stored, so
-      // losing it never needs a regenerate. Mirrors Connect's behavior.
-      if (this.overview.hook && this.overview.hook.can_reveal && !this.revealedToken) {
-        this.toggleReveal();
-      }
     } catch (error) {
       const msg = `<div class="error-message">Failed to load security status: ${this.escapeHtml(error.message)}</div>`;
       const hp = this.querySelector('#panel-hook');
@@ -128,7 +140,6 @@ export class SecurityPage extends HTMLElement {
     const panel = this.querySelector('#panel-hook');
     if (!panel || !this.overview) return;
     const hook = this.overview.hook;
-    const bind = this.overview.bind;
     const tokenDisplay = this.revealedToken || hook.masked || '(none)';
     const sourceLabel = {
       env: 'Environment (.env)',
@@ -137,7 +148,7 @@ export class SecurityPage extends HTMLElement {
       none: 'Not configured',
     }[hook.source] || hook.source;
 
-    const host = bind.is_loopback ? 'localhost' : (bind.effective_host || 'your-host');
+    const serverUrl = this.serverUrl || window.location.origin;
     const snippetToken = this.revealedToken || '<HOOK_TOKEN>';
 
     panel.innerHTML = `
@@ -175,7 +186,7 @@ export class SecurityPage extends HTMLElement {
         <div class="card-body info-content">
           <p class="muted">Claude Code HTTP hooks authenticate with this token:</p>
           <pre class="snippet"><code>curl -H "Authorization: Bearer ${this.escapeHtml(snippetToken)}" \\
-  -X POST http://${this.escapeHtml(host)}:8000/api/hooks/claude/stop</code></pre>
+  -X POST ${this.escapeHtml(serverUrl)}/api/hooks/claude/stop</code></pre>
           <p class="hint">The installer (<code>install_hooks</code>) wires this automatically via the <code>MEM_MESH_HOOK_TOKEN</code> env var; the secret is never written into settings.json.</p>
         </div>
       </div>

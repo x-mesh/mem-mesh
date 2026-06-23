@@ -1,6 +1,8 @@
 """Unified CLI entry point for mem-mesh.
 
 Usage:
+    mem-mesh                  # Onboarding wizard (bare = `mem-mesh install`)
+    mem-mesh --json           # Onboarding, machine-readable JSON (for agents)
     mem-mesh install          # Onboarding wizard
     mem-mesh serve            # Start API server
     mem-mesh hooks install    # Install hooks
@@ -19,15 +21,29 @@ from typing import List, Optional
 
 def main(argv: Optional[List[str]] = None) -> None:
     """Unified CLI entry point."""
+    # Shared flags usable both bare (`mem-mesh --json`) and on the install
+    # subcommand (`mem-mesh install --json`). The mixed order
+    # `mem-mesh --json install` is NOT guaranteed (the subparser resets the
+    # shared default) — use one of the two documented forms.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON, run non-interactively (implies --yes)",
+    )
+
     parser = argparse.ArgumentParser(
         prog="mem-mesh",
         description="mem-mesh: Centralized memory system for AI development tools.",
+        parents=[common],
     )
     sub = parser.add_subparsers(dest="command", help="Available commands")
 
     # --- mem-mesh install ---
     install_parser = sub.add_parser(
-        "install", help="Onboarding wizard (hooks + server check + MCP config)"
+        "install",
+        parents=[common],
+        help="Onboarding wizard (hooks + server check + MCP config)",
     )
     install_parser.add_argument(
         "--url",
@@ -144,8 +160,23 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     args = parser.parse_args(argv)
 
+    # Bare `mem-mesh` (no subcommand) runs onboarding — the simple entry point
+    # for `uvx mem-mesh`. Interactive on a TTY; auto non-interactive when piped
+    # or run by an agent (no stdin/stdout TTY) so prompts never hang.
+    # `mem-mesh --help` is consumed by argparse before this, so help still works.
     if args.command is None:
-        parser.print_help()
+        from app.cli.onboarding import cmd_onboarding
+
+        json_mode = getattr(args, "json", False)
+        interactive = sys.stdin.isatty() and sys.stdout.isatty() and not json_mode
+        cmd_onboarding(
+            url=None,
+            target="auto",
+            profile="standard",
+            yes=not interactive,
+            force=False,
+            json_mode=json_mode,
+        )
         return
 
     # --- Dispatch ---
@@ -156,8 +187,9 @@ def main(argv: Optional[List[str]] = None) -> None:
             url=args.url,
             target=args.target,
             profile=args.profile,
-            yes=args.yes,
+            yes=args.yes or args.json,
             force=args.force,
+            json_mode=args.json,
         )
 
     elif args.command == "serve":
