@@ -210,10 +210,14 @@ async def system_info():
     import sys
     from datetime import datetime, timezone
 
+    from app.core.config import get_settings
     from app.core.version import __VERSION__, MCP_PROTOCOL_VERSION
 
-    # DB file size
-    db_path = os.environ.get("MEM_MESH_DB_PATH", "data/mem_mesh.db")
+    # DB file size — use the canonical settings path (honors MEM_MESH_DATABASE_PATH
+    # and the XDG default). A prior one-off os.environ read used the wrong var name
+    # (MEM_MESH_DB_PATH) and wrong filename (mem_mesh.db vs memories.db), so it always
+    # fell back to a non-existent relative path and reported db_size 0 in containers.
+    db_path = get_settings().database_path
     db_size = 0
     try:
         if os.path.exists(db_path):

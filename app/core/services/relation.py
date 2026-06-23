@@ -252,7 +252,7 @@ class RelationService:
 
         주어진 메모리와 유사한 메모리를 벡터 검색으로 찾아
         ``RelationType.SIMILAR`` 관계를 생성한다. 이미 존재하는 관계는
-        ``get_or_create_relation`` 을 통해 중복 생성하지 않는다.
+        ``find_or_create_relation`` 을 통해 중복 생성하지 않는다.
 
         Args:
             memory_id: 기준 메모리 ID
@@ -293,7 +293,7 @@ class RelationService:
             if similarity < threshold:
                 continue
 
-            relation, created = await self.get_or_create_relation(
+            relation, created = await self.find_or_create_relation(
                 RelationCreate(
                     source_id=memory_id,
                     target_id=target_id,
