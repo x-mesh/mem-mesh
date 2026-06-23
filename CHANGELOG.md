@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] - 2026-06-23
+
+세션 시작 시 저장된 메모리가 거의 재호출되지 않던(운영 dead_ratio ≈0.999) 읽기 격차를 메운다 — `session_resume`/`SessionStart`가 그동안 pins만 반환했으나, 이제 열린 작업과 관련된 큐레이션 메모리를 자동으로 surface한다.
+
+### Added
+- 세션 재개 시 관련 메모리 자동 surface — `SessionStart` 훅과 `session_resume` MCP 툴이 열린 pin 맥락을 쿼리로 큐레이션 메모리(`decision`/`code_snippet`/`incident`)를 검색해 컨텍스트에 함께 노출한다. 공유 헬퍼는 **read-only**로 동작해(`search(record_access=False)`) `access_count`를 올리지 않는다 — 자동 surface가 recall 지표를 부풀리면 안 되기 때문이며, 실제 recall은 에이전트가 직접 `search`할 때만 집계된다. WHY: 운영 분석 결과 17k+ 메모리의 ~99.9%가 한 번도 재호출되지 않았다. 정규 세션 루프가 `SessionContext`에 pins만 담아 memories 테이블을 전혀 읽지 않아 코퍼스가 "쓰기 전용 싱크"로 전락한 것이 원인이었다. `app/core/services/recall.py`, `app/web/dashboard/route_modules/hooks.py`, `app/mcp_common/tools.py`
+- `UnifiedSearchService.search`에 `record_access` 플래그(기본 `True`) — `False`면 `_record_access`를 건너뛰어 read-only 검색이 가능하다. surface 경로가 이를 사용한다. `app/core/services/unified_search.py`
+- `SessionContext.relevant_memories` 필드 — surface된 메모리(`id`/`category`/`content`/`created_at`/`score`)를 담아 MCP·HTTP 응답에 함께 반환한다. `app/core/schemas/sessions.py`
+
+### Fixed
+- `/api/system/info`의 `db_size_bytes`가 컨테이너에서 항상 `0`으로 보고되던 문제 — 비정규 환경변수(`MEM_MESH_DB_PATH`)를 읽고 존재하지 않는 상대 경로 기본값(`data/mem_mesh.db`)으로 폴백했다. 정규 `get_settings().database_path`(절대 경로, `MEM_MESH_DATABASE_PATH` 존중)를 사용하도록 수정. `app/web/dashboard/routes.py`
+- `RelationService.auto_link_similar`의 잠복 `AttributeError` — 존재하지 않는 `self.get_or_create_relation`을 호출하고 있었다(실제 메서드: `find_or_create_relation`). 호출처가 없어 표면화되지 않았으나 쓰기 경로에 자동 링크를 배선하는 순간 터질 버그였다. `app/core/services/relation.py`
+
 ## [1.13.1] - 2026-06-23
 
 `uvx mem-mesh` 단일 진입점 온보딩 + 에이전트용 `--json` 출력. 두 환경변수(`MEM_MESH_API_URL`·`MEM_MESH_HOOK_TOKEN`)로 온보딩을 비대화 구동 가능.
