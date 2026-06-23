@@ -72,6 +72,14 @@ class SessionContext(BaseModel):
         default_factory=list,
         description="is_staging=true인 스테이징 핀 목록",
     )
+    relevant_memories: List[dict] = Field(
+        default_factory=list,
+        description=(
+            "열린 작업(pin) 맥락으로 surface된 큐레이션 메모리"
+            "(decision/code_snippet/incident). read-only — access_count를 "
+            "올리지 않아 recall 지표를 부풀리지 않는다. 비면 미지원/비활성."
+        ),
+    )
 
 
 class SessionResumeParams(BaseModel):

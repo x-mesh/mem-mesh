@@ -920,6 +920,26 @@ class MCPToolHandlers:
                     client_type=client_type,
                 )
 
+            # Close the read loop on the explicit tool path too: surface curated
+            # memories for the open work (read-only — does not bump access_count,
+            # so auto-surfacing never inflates recall analytics). Best-effort.
+            try:
+                search_svc = getattr(self._storage, "unified_search_service", None)
+                pins = getattr(session_context, "pins", None) or []
+                open_texts: list[str] = []
+                for p in pins:
+                    pd = p if isinstance(p, dict) else p.dict()
+                    if pd.get("status") in ("open", "in_progress"):
+                        open_texts.append(str(pd.get("content", ""))[:100])
+                if search_svc is not None and open_texts:
+                    from ..core.services.recall import surface_relevant_memories
+
+                    session_context.relevant_memories = await surface_relevant_memories(
+                        search_svc, project_id, query=" ".join(open_texts)
+                    )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("relevant-memory surfacing skipped", error=str(e))
+
             # 세션 컨텍스트와 토큰 정보를 함께 반환
             response = session_context.model_dump()
             response["token_info"] = token_info

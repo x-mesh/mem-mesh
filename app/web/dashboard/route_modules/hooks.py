@@ -283,6 +283,7 @@ async def session_start(
 
     # Resume session context + correlate the IDE session id.
     summary_lines: list[str] = []
+    open_pin_texts: list[str] = []
     try:
         context = await session_service.resume_last_session(
             project_id=project_id, expand="smart", limit=10
@@ -299,11 +300,39 @@ async def session_start(
                 pin = p if isinstance(p, dict) else p.dict()
                 if pin.get("status") in ("open", "in_progress"):
                     content = str(pin.get("content", "?"))[:100]
+                    open_pin_texts.append(content)
                     client = pin.get("client") or ""
                     prefix = f"({client}) " if client else ""
                     summary_lines.append(f"- [pin] {prefix}{content}")
     except Exception as e:  # noqa: BLE001
         logger.warning(f"session resume failed: {e}")
+
+    # Close the read loop: surface curated memories relevant to open work.
+    # resume_last_session returns pins only, so without this the stored-memory
+    # corpus is never read back into the agent's context at session start
+    # (prod dead_ratio ~0.999 — a write-only sink). Read-only: surfacing does
+    # NOT bump access_count, so the recall metric stays an honest signal of
+    # genuine reuse. Best-effort — never blocks the SessionStart response.
+    memory_lines: list[str] = []
+    if open_pin_texts:
+        try:
+            from app.core.services.recall import surface_relevant_memories
+
+            services = get_services()
+            search_service = services.get("search_service")
+            embedding_service = services.get("embedding_service")
+            if search_service is not None and getattr(
+                embedding_service, "is_ready", False
+            ):
+                mems = await surface_relevant_memories(
+                    search_service, project_id, query=" ".join(open_pin_texts)
+                )
+                for m in mems:
+                    memory_lines.append(
+                        f"- [{m['category']}] ({m['created_at']}) {m['content']}"
+                    )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"relevant-memory surfacing failed: {e}")
 
     if not summary_lines:
         summary_lines.append("No recent activity.")
@@ -330,6 +359,12 @@ async def session_start(
         f"{continuation_block}\n"
         f"### Recent Activity ({project_id})\n"
         + "\n".join(summary_lines)
+        + (
+            "\n\n### Relevant Memories (auto-surfaced, read-only)\n"
+            + "\n".join(memory_lines)
+            if memory_lines
+            else ""
+        )
         + (f"\n\n### Rules\n{rules_text}" if rules_text else "")
     )
 

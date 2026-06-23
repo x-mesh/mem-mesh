@@ -229,6 +229,7 @@ class UnifiedSearchService:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         temporal_mode: str = "boost",
+        record_access: bool = True,
     ) -> SearchResponse:
         """
         통합 검색 수행
@@ -298,7 +299,10 @@ class UnifiedSearchService:
                 )
                 # Recall tracking must run on cache hits too, else frequently
                 # searched (cached) memories would look "dead" in analytics.
-                await self._record_access(cached_results)
+                # Skipped when record_access=False (read-only surfacing, e.g.
+                # the session-resume auto-surface, must not inflate recall stats).
+                if record_access:
+                    await self._record_access(cached_results)
                 return cached_results
 
         # 4. Build filter conditions
@@ -455,7 +459,11 @@ class UnifiedSearchService:
         )
 
         # Recall tracking (best-effort): bump access_count for surfaced memories.
-        await self._record_access(result)
+        # record_access=False makes the search read-only (e.g. session-resume
+        # auto-surfacing) so surfaced-but-not-genuinely-recalled memories don't
+        # game the dead_ratio metric.
+        if record_access:
+            await self._record_access(result)
 
         return result
 
