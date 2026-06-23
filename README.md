@@ -51,12 +51,16 @@ One tool to install — [uv](https://github.com/astral-sh/uv) — and mem-mesh h
 # 1. Install uv (one-time, ~15 seconds)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2. Run the interactive installer — writes MCP config for detected tools,
+# 2. Run the onboarding wizard — writes MCP config for detected tools,
 #    offers to install hooks, warms the uv cache.
-uvx --from "mem-mesh[server]" mem-mesh install
+uvx mem-mesh
 ```
 
 That's it. Restart Cursor / Claude Desktop / Kiro and mem-mesh MCP tools are live.
+
+> `uvx mem-mesh` (bare) runs onboarding — no `--from "mem-mesh[server]"` needed, since the lightweight base package is all the wizard requires (it still *writes* config that runs the server via the `[server]` extra). `uvx mem-mesh install` is the explicit equivalent.
+
+**For agents / CI:** `uvx mem-mesh --json` runs onboarding non-interactively and prints a single JSON result (per-step status + `next_actions`). Non-TTY invocations (pipes, agents) auto-run non-interactively even without `--json`. Two env vars drive most of the config: `MEM_MESH_API_URL` (server URL — used as the default and echoed as `url_source`) and `MEM_MESH_HOOK_TOKEN` (auth token — surfaced in `hook_token`; export it for HTTP hooks / authenticated MCP). Example: `MEM_MESH_API_URL=https://memory.example.com MEM_MESH_HOOK_TOKEN=… uvx mem-mesh --json`.
 
 Want the web dashboard too? `uvx --from "mem-mesh[server]" mem-mesh serve` — open http://localhost:8000.
 
@@ -66,7 +70,7 @@ If you prefer managing Python environments yourself:
 
 ```bash
 pip install "mem-mesh[server]"
-mem-mesh install           # same interactive installer
+mem-mesh                    # onboarding wizard (or: mem-mesh install)
 mem-mesh serve             # web server + SSE MCP at localhost:8000
 ```
 
