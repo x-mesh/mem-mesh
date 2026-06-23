@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.1] - 2026-06-23
+
+문서 정비 — 1.10.0에 도입된 first-run setup token 온보딩 흐름을 README에 문서화하고, 직전 릴리스에서 누락된 lint/format 정합성을 마저 맞춘다.
+
+### Added
+- README first-run setup 섹션 — dashboard 인증 미설정 상태에서 부팅 시 출력되는 일회용 setup token 흐름(콘솔 배너 · `<data dir>/setup_token` 영속 · `/setup` 온보딩)을 영문·국문 README에 문서화했다. WHY: 기능은 1.10.0에 들어갔으나 운영자가 노출된 대시보드를 브라우저에서 잠그는 절차가 문서에 없어 발견성이 낮았다. 콘솔 배너 예시는 실제 출력(기본 `Open : /setup` bare path + 일회성 소비 캡션)과 일치시키고, `MEM_MESH_PUBLIC_URL` 설정 시 전체 URL이 출력됨을 명시. 국문 README 목차에도 누락된 섹션 링크를 보강했다. `README.md`, `README.ko.md`
+
+### Changed
+- analytics stats · schema migrator Black 포맷 적용, ruff 위반(미사용 import · 빈 f-string) 해소. `app/core/services/stats.py`, `app/core/database/schema_migrator.py`
+
 ## [1.11.0] - 2026-06-20
 
 분석 플랫폼 도입 — recall 추적 · 지식베이스(KB) 헬스 · 토큰 이코노믹스 대시보드. 더불어 프로덕션 Docker 로깅을 호스트에서 직접 tail 가능하도록 정비.
