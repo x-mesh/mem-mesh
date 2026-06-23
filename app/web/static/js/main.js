@@ -171,8 +171,16 @@ class App {
   async checkEmbeddingStatus(retryCount = 0) {
     const MAX_RETRIES = 90; // 최대 3분 (2초 × 90)
 
-    // Don't redirect if already on onboarding
-    if (window.location.pathname === '/onboarding') return;
+    // Don't yank the user away while they're mid-task on an auth/setup page —
+    // the onboarding model picker, or the Security page where they may be
+    // typing the admin password. A redirect here would discard their input.
+    // Keep polling (so a still-unready model routes to onboarding once they
+    // leave) but never navigate over a protected page.
+    const PROTECTED_PATHS = ['/onboarding', '/security'];
+    if (PROTECTED_PATHS.includes(window.location.pathname)) {
+      setTimeout(() => this.checkEmbeddingStatus(retryCount), 3000);
+      return;
+    }
 
     try {
       const res = await fetch('/api/embeddings/loading-status');
