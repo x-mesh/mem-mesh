@@ -440,13 +440,13 @@ export class SettingsPage extends HTMLElement {
     }
 
     async toggleAuth(key, nextVal) {
-        // Same backend as the Security page (/api/security/config); the server
+        // Same backend as the Security page (PUT /api/security/auth); the server
         // enforces env-pinned skips and lockout guards (Basic Auth password,
         // OAuth-without-Basic-Auth). On rejection we surface the detail so the
         // user knows to set a password / enable Basic Auth on the Security page.
         try {
-            const res = await fetch('/api/security/config', {
-                method: 'POST',
+            const res = await fetch('/api/security/auth', {
+                method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ [key]: nextVal }),
             });
