@@ -97,6 +97,20 @@ class Settings(BaseSettings):
     )
     embedding_dim: int = Field(default=1024, description="Embedding vector dimensions")
 
+    # Minimum assistant-message length for a SubagentStop hook to attempt a save.
+    # Below this the turn is treated as too thin to be worth persisting. Runtime-
+    # overridable from the dashboard (see runtime_config). Env:
+    # MEM_MESH_HOOK_MIN_MESSAGE_LENGTH.
+    hook_min_message_length: int = Field(
+        default=100,
+        ge=0,
+        description=(
+            "Minimum assistant-message length (chars) for the SubagentStop hook "
+            "to save a memory. Lower it to capture shorter subagent results. "
+            "Override via MEM_MESH_HOOK_MIN_MESSAGE_LENGTH."
+        ),
+    )
+
     # Display timezone for API/MCP output. Storage stays UTC everywhere; only
     # the response boundary localizes timestamps. Runtime-overridable from the
     # dashboard (see runtime_config). Env: MEM_MESH_DISPLAY_TIMEZONE.

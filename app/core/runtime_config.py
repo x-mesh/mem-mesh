@@ -78,10 +78,17 @@ MANAGED_DISPLAY_KEYS = {
     "public_url": "str",
 }
 
-# All runtime-managed keys (auth + display), public so callers can validate
-# "is this a known managed key?" (e.g. the security route). effective()/
-# _to_stored() resolve a key's kind from this merged view.
-MANAGED_KEYS = {**MANAGED_AUTH_KEYS, **MANAGED_DISPLAY_KEYS}
+# Hook-tuning runtime settings. 'int' kind = parsed back to int by
+# effective_int(); stored verbatim like 'str'. Kept separate so a hook-config
+# change never touches auth or display keys.
+MANAGED_HOOK_KEYS = {
+    "hook_min_message_length": "int",
+}
+
+# All runtime-managed keys (auth + display + hook), public so callers can
+# validate "is this a known managed key?" (e.g. the security route).
+# effective()/_to_stored() resolve a key's kind from this merged view.
+MANAGED_KEYS = {**MANAGED_AUTH_KEYS, **MANAGED_DISPLAY_KEYS, **MANAGED_HOOK_KEYS}
 
 # Keys that may be set from the dashboard AND honored from the DB. Single source
 # of truth shared with the security route's WRITABLE_KEYS, and the ONLY keys
@@ -99,6 +106,7 @@ DB_OVERRIDABLE_KEYS = {
     "auth_enabled",
     "mcp_auth_enabled",
     "web_auth_enabled",
+    "hook_min_message_length",
 }
 
 _ENV_PREFIX = "MEM_MESH_"
@@ -210,6 +218,19 @@ def effective_str(key: str) -> str:
     """Effective value of a plain string key (e.g. ``display_timezone``)."""
     val, _ = effective(key)
     return "" if val is None else str(val)
+
+
+def effective_int(key: str) -> int:
+    """Effective value of an 'int' key (e.g. ``hook_min_message_length``).
+
+    DB overrides are stored as strings; parse back to int, falling back to the
+    code default if a stored value is somehow non-numeric.
+    """
+    val, _ = effective(key)
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return int(_settings_value(key) or 0)
 
 
 def effective_tribool(key: str) -> bool:
