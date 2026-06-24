@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 21
+# mem-mesh-hooks prompt-version: 22
 # Claude Code Stop hook (decide variant) → mem-mesh /api/hooks/claude/stop
 #
 # Thin forwarder: the server keyword-matches the finished turn, pairs the

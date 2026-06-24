@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import app.cli.install_hooks as install_hooks
 import app.cli.main as cli_main
 from app.cli.install_hooks import _sync_claude_rules
@@ -100,3 +102,30 @@ def test_local_cli_hooks_rules_omits_version_banner() -> None:
     )
 
     assert result.stdout == render_rules_text("demo-project") + "\n"
+
+
+def test_dashboard_hook_rules_render_matches_cli_plain() -> None:
+    from app.web.dashboard.routes import _render_hook_rules
+
+    payload = _render_hook_rules("DemoProject", "plain")
+
+    assert payload["source"] == "mem-mesh-hooks"
+    assert payload["prompt_version"] == PROMPT_VERSION
+    assert payload["project_id"] == "demo-project"
+    assert payload["content"] == render_rules_text("demo-project")
+
+
+def test_dashboard_hook_rules_render_matches_cli_claude() -> None:
+    from app.web.dashboard.routes import _render_hook_rules
+
+    payload = _render_hook_rules("demo-project", "claude")
+
+    assert payload["format"] == "claude"
+    assert payload["content"] == render_claude_project_rules("demo-project")
+
+
+def test_dashboard_hook_rules_render_rejects_unknown_format() -> None:
+    from app.web.dashboard.routes import _render_hook_rules
+
+    with pytest.raises(ValueError, match="format"):
+        _render_hook_rules("demo-project", "cursor")
