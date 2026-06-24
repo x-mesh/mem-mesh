@@ -14,8 +14,8 @@ API/token/MCP view on top.
 import os
 from typing import List, Optional
 
-from app.cli.hooks.colors import dim, err, header, info, ok, warn
 from app.cli.codex_config import CODEX_HOOKS_DIR
+from app.cli.hooks.colors import dim, err, header, info, ok, warn
 from app.cli.hooks.constants import (
     CLAUDE_HOOKS_DIR,
     CLAUDE_SETTINGS,

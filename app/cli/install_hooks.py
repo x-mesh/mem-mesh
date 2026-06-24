@@ -34,12 +34,12 @@ from app.cli.hooks.cursor_adapters import (
     adapt_cursor_subagent_start,
     adapt_cursor_subagent_stop,
 )
+from app.cli.hooks.hook_log import HOOK_LOG_BLOCK
 from app.cli.hooks.json_ops import (
     MalformedSettingsError,
     _atomic_write_text,
     _load_settings_or_raise,
 )
-from app.cli.hooks.hook_log import HOOK_LOG_BLOCK
 from app.cli.hooks.keywords import KEYWORD_MATCHER_BLOCK
 from app.cli.hooks.netcheck import check_http_hook_url
 from app.cli.hooks.renderer import (
