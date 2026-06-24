@@ -217,6 +217,30 @@ export class APIClient {
   async deleteMemory(memoryId) {
     return this.delete(`/memories/${memoryId}`);
   }
+
+  /**
+   * Relay API methods
+   */
+
+  async getRelayOverview(limit = 10) {
+    return this.get('/relay/v1/admin/overview', { limit });
+  }
+
+  async getRelaySettings() {
+    return this.get('/relay/v1/admin/settings');
+  }
+
+  async updateRelaySettings(payload) {
+    return this.put('/relay/v1/admin/settings', payload);
+  }
+
+  async createRelayIdentity(payload) {
+    return this.post('/relay/v1/admin/identities', payload);
+  }
+
+  async shareRelayMemory(memoryId, payload) {
+    return this.post(`/relay/v1/outbox/share/${encodeURIComponent(memoryId)}`, payload);
+  }
   
   /**
    * Analytics API methods (server-side aggregation)

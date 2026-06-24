@@ -19,6 +19,9 @@ class ErrorCode:
     INVALID_STATUS_TRANSITION = "INVALID_STATUS_TRANSITION"
     MEMORY_CONTENT_TOO_SHORT = "MEMORY_CONTENT_TOO_SHORT"
     MEMORY_LOW_QUALITY = "MEMORY_LOW_QUALITY"
+    RELAY_SECRET_BLOCKED = "RELAY_SECRET_BLOCKED"
+    RELAY_TYPE_GATE_BLOCKED = "RELAY_TYPE_GATE_BLOCKED"
+    RELAY_UNAUTHORIZED = "RELAY_UNAUTHORIZED"
 
     # 404 Not Found
     MEMORY_NOT_FOUND = "MEMORY_NOT_FOUND"
@@ -31,6 +34,8 @@ class ErrorCode:
     # 409 Conflict
     DUPLICATE_MEMORY = "DUPLICATE_MEMORY"
     DUPLICATE_PROMOTION = "DUPLICATE_PROMOTION"
+    RELAY_IDEMPOTENCY_CONFLICT = "RELAY_IDEMPOTENCY_CONFLICT"
+    RELAY_DELIVERY_CONFLICT = "RELAY_DELIVERY_CONFLICT"
 
     # 429 Too Many Requests
     TOKEN_LIMIT_EXCEEDED = "TOKEN_LIMIT_EXCEEDED"
@@ -50,6 +55,9 @@ ERROR_HTTP_STATUS = {
     ErrorCode.INVALID_STATUS_TRANSITION: 400,
     ErrorCode.MEMORY_CONTENT_TOO_SHORT: 422,
     ErrorCode.MEMORY_LOW_QUALITY: 422,
+    ErrorCode.RELAY_SECRET_BLOCKED: 400,
+    ErrorCode.RELAY_TYPE_GATE_BLOCKED: 403,
+    ErrorCode.RELAY_UNAUTHORIZED: 401,
     ErrorCode.MEMORY_NOT_FOUND: 404,
     ErrorCode.PIN_NOT_FOUND: 404,
     ErrorCode.SESSION_NOT_FOUND: 404,
@@ -58,6 +66,8 @@ ERROR_HTTP_STATUS = {
     ErrorCode.RELATION_NOT_FOUND: 404,
     ErrorCode.DUPLICATE_MEMORY: 409,
     ErrorCode.DUPLICATE_PROMOTION: 409,
+    ErrorCode.RELAY_IDEMPOTENCY_CONFLICT: 409,
+    ErrorCode.RELAY_DELIVERY_CONFLICT: 409,
     ErrorCode.TOKEN_LIMIT_EXCEEDED: 429,
     ErrorCode.DATABASE_ERROR: 500,
     ErrorCode.EMBEDDING_ERROR: 500,
@@ -73,6 +83,9 @@ ERROR_JSONRPC_CODE = {
     ErrorCode.INVALID_STATUS_TRANSITION: -32602,
     ErrorCode.MEMORY_CONTENT_TOO_SHORT: -32602,
     ErrorCode.MEMORY_LOW_QUALITY: -32602,
+    ErrorCode.RELAY_SECRET_BLOCKED: -32602,
+    ErrorCode.RELAY_TYPE_GATE_BLOCKED: -32602,
+    ErrorCode.RELAY_UNAUTHORIZED: -32603,
     ErrorCode.MEMORY_NOT_FOUND: -32602,
     ErrorCode.PIN_NOT_FOUND: -32602,
     ErrorCode.SESSION_NOT_FOUND: -32602,
@@ -81,6 +94,8 @@ ERROR_JSONRPC_CODE = {
     ErrorCode.RELATION_NOT_FOUND: -32602,
     ErrorCode.DUPLICATE_MEMORY: -32602,
     ErrorCode.DUPLICATE_PROMOTION: -32602,
+    ErrorCode.RELAY_IDEMPOTENCY_CONFLICT: -32602,
+    ErrorCode.RELAY_DELIVERY_CONFLICT: -32602,
     ErrorCode.TOKEN_LIMIT_EXCEEDED: -32603,
     ErrorCode.DATABASE_ERROR: -32603,  # Internal error
     ErrorCode.EMBEDDING_ERROR: -32603,
@@ -181,6 +196,28 @@ class ValidationError(MemMeshError):
     error_code = ErrorCode.VALIDATION_ERROR
 
 
+class RelayError(MemMeshError):
+    """Base relay service error."""
+
+
+class RelayUnauthorized(RelayError):
+    """Bearer token is missing, invalid, or revoked."""
+
+    error_code = ErrorCode.RELAY_UNAUTHORIZED
+
+
+class RelaySecretBlocked(RelayError):
+    """High-confidence secret guard blocked a relay payload."""
+
+    error_code = ErrorCode.RELAY_SECRET_BLOCKED
+
+
+class RelayTypeGateBlocked(RelayError):
+    """Memory kind/status is not allowed to flow to team scope."""
+
+    error_code = ErrorCode.RELAY_TYPE_GATE_BLOCKED
+
+
 class InvalidImportanceError(MemMeshError):
     error_code = ErrorCode.INVALID_IMPORTANCE
 
@@ -214,6 +251,18 @@ class DuplicatePromotionError(MemMeshError):
             pin_id=pin_id,
             memory_id=memory_id,
         )
+
+
+class RelayIdempotencyConflict(RelayError):
+    """The same idempotency key was reused with a different payload hash."""
+
+    error_code = ErrorCode.RELAY_IDEMPOTENCY_CONFLICT
+
+
+class RelayDeliveryConflict(RelayError):
+    """Hub rejected an outbox delivery as a permanent idempotency conflict."""
+
+    error_code = ErrorCode.RELAY_DELIVERY_CONFLICT
 
 
 # ---------------------------------------------------------------------------

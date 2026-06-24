@@ -82,6 +82,33 @@ def main(argv: Optional[List[str]] = None) -> None:
         "--reload", action="store_true", help="Enable auto-reload"
     )
 
+    # --- mem-mesh relay ---
+    relay_parser = sub.add_parser("relay", help="Relay layer utilities")
+    relay_sub = relay_parser.add_subparsers(
+        dest="relay_command", help="Relay commands"
+    )
+    relay_worker = relay_sub.add_parser("worker", help="Run relay background worker")
+    relay_worker.add_argument(
+        "--once",
+        action="store_true",
+        help="Process at most one job per enabled queue and exit",
+    )
+    relay_worker.add_argument(
+        "--tasks",
+        default="outbox,item,aggregate",
+        help="Comma-separated relay tasks: outbox,item,aggregate",
+    )
+    relay_worker.add_argument(
+        "--interval",
+        type=float,
+        default=1.0,
+        help="Idle polling interval in seconds for continuous mode",
+    )
+    relay_worker.add_argument("--worker-id", default=None, help="Stable worker id")
+    relay_worker.add_argument(
+        "--json", action="store_true", help="Emit machine-readable JSON"
+    )
+
     # --- mem-mesh hooks (delegate to install_hooks.py) ---
     hooks_parser = sub.add_parser("hooks", help="Hook management")
     hooks_sub = hooks_parser.add_subparsers(dest="hooks_command", help="Hook commands")
@@ -314,6 +341,22 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     elif args.command == "hooks":
         _dispatch_hooks(args)
+
+    elif args.command == "relay":
+        if args.relay_command == "worker":
+            from app.cli.relay import cmd_relay_worker
+
+            sys.exit(
+                cmd_relay_worker(
+                    once=args.once,
+                    json_mode=args.json,
+                    tasks=args.tasks,
+                    interval=args.interval,
+                    worker_id=args.worker_id,
+                )
+            )
+        else:
+            sub.choices["relay"].print_help()
 
     elif args.command == "config":
         from app.cli.config_cmd import cmd_config

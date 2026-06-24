@@ -10,6 +10,7 @@ from .connect import router as connect_router
 from .hooks import router as hooks_router
 from .memories import router as memories_router
 from .oauth import router as oauth_router
+from .relay import router as relay_router
 from .relations import router as relations_router
 from .search import router as search_router
 from .security import router as security_router
@@ -21,6 +22,7 @@ router.include_router(stats_router)
 router.include_router(search_router)
 router.include_router(memories_router)
 router.include_router(oauth_router)
+router.include_router(relay_router)
 router.include_router(relations_router)
 router.include_router(hooks_router)
 router.include_router(security_router)
@@ -32,6 +34,7 @@ __all__ = [
     "search_router",
     "stats_router",
     "oauth_router",
+    "relay_router",
     "relations_router",
     "hooks_router",
     "security_router",
