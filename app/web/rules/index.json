@@ -2,11 +2,11 @@
   "version": 1,
   "rules": [
     {
-      "id": "all-tools-full",
-      "title": "All Tools Full Rules",
-      "path": "docs/rules/all-tools-full.md",
-      "kind": "full",
-      "tags": ["all", "full", "rules"]
+      "id": "default-prompt",
+      "title": "Default Prompt Rules",
+      "path": "DEFAULT_PROMPT.md",
+      "kind": "prompt",
+      "tags": ["default", "prompt", "mcp"]
     },
     {
       "id": "core",
@@ -56,41 +56,6 @@
       "path": "docs/rules/modules/security.md",
       "kind": "module",
       "tags": ["security", "privacy"]
-    },
-    {
-      "id": "minimal",
-      "title": "Minimal Prompt",
-      "path": "docs/rules/modules/minimal.md",
-      "kind": "module",
-      "tags": ["minimal", "simple", "compact"]
-    },
-    {
-      "id": "quick-start",
-      "title": "Quick Start Guide",
-      "path": "docs/rules/modules/quick-start.md",
-      "kind": "module",
-      "tags": ["quick-start", "guide", "onboarding"]
-    },
-    {
-      "id": "api-usage",
-      "title": "API Usage Rules",
-      "path": "docs/rules/modules/api-usage.md",
-      "kind": "module",
-      "tags": ["api", "integration"]
-    },
-    {
-      "id": "team-context",
-      "title": "Team Context Rules",
-      "path": "docs/rules/modules/team-context.md",
-      "kind": "module",
-      "tags": ["team", "collaboration"]
-    },
-    {
-      "id": "mcp-helper",
-      "title": "MCP Helper Prompt",
-      "path": "docs/rules/modules/mcp-helper.md",
-      "kind": "module",
-      "tags": ["mcp", "helper", "api"]
     }
   ]
 }

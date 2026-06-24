@@ -368,15 +368,19 @@ mem-mesh/
 - [CLAUDE.md](./CLAUDE.md) — AI 도구 Checklist (MUST/SHOULD/MAY 규칙, 보안 정책)
 - [AGENTS.md](./AGENTS.md) — 프로젝트 컨텍스트, Golden Rules, Context Map, 세션 관리 상세
 
-### AI 에이전트 규칙 (docs/rules/)
+### AI 에이전트 규칙
 
 | 문서 | 용도 |
 |------|------|
-| [DEFAULT_PROMPT.md](./docs/rules/DEFAULT_PROMPT.md) | **기본 행동 규칙** — 프로젝트 CLAUDE.md/Cursor rules에 복사하여 사용 |
-| [all-tools-full.md](./docs/rules/all-tools-full.md) | 전체 규칙 (15개 도구, 검색/저장/세션/관계/배치) |
-| [mem-mesh-ide-prompt.md](./docs/rules/mem-mesh-ide-prompt.md) | IDE용 컴팩트 프롬프트 (~300 토큰) |
-| [modules/quick-start.md](./docs/rules/modules/quick-start.md) | 5분 빠른 시작 |
-| [modules/](./docs/rules/modules/) | 기능별 모듈 (core, search, pins, relations 등) |
+| [DEFAULT_PROMPT.md](./app/web/rules/DEFAULT_PROMPT.md) | 설치 hook 없이 MCP만 쓸 때 복사하는 기본 행동 규칙 |
+| [modules/](./app/web/rules/modules/) | Rule Manager 보조 모듈: core, search, memory-log, pins, relations, batch, security |
+
+설치 hook과 같은 버전의 규칙은 CLI로 출력:
+
+```bash
+mem-mesh hooks rules --project-id <project-id> --format plain
+mem-mesh hooks rules --project-id <project-id> --format claude
+```
 
 ### 아키텍처 문서
 

@@ -1,6 +1,7 @@
 # MCP mem-mesh 검색 최적화 가이드
 
-> **Note**: 이 문서는 레거시입니다. 통합 가이드는 `docs/rules/mem-mesh-mcp-guide.md`를 참조하세요.
+> **Note**: This is a legacy note. Use `app/web/rules/DEFAULT_PROMPT.md` or
+> `mem-mesh hooks rules --project-id <project-id> --format plain` for current rules.
 
 ## 🎯 노이즈 감소를 위한 검색 전략
 

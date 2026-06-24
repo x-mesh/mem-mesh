@@ -1,41 +1,62 @@
-# Core Rules — 핵심 워크플로우
+# Core Rules
 
-mem-mesh MCP 사용의 기본 사이클.
+Use this module as the baseline when building a custom mem-mesh prompt.
 
----
+## Project ID
 
-## 검색 → 작업 → 저장 사이클
+- Use the repository directory name as `project_id` unless the project defines another value.
+- Normalize names to kebab-case.
+- Example: `/Users/dev/work/MyProject` -> `project_id="my-project"`.
 
+## Session Gate
+
+At the start of a new session:
+
+```text
+session_resume(project_id="<project_id>", expand="smart")
 ```
-1. search(query, project_id, limit=5)     # 작업 시작/전환 시
-2. [작업 수행]
-3. add(content, category, project_id, tags) # 트리거 발생 시
+
+Report only useful counts: `pins_count`, `in_progress_pins`, `open_pins`, and `completed_pins`.
+If no active session exists, continue with the task.
+
+## Pin Gate
+
+Create a pin before work that changes files, implements features, fixes bugs,
+refactors code, runs migrations, or requires multi-step investigation.
+
+Do not create a pin for simple questions, read-only status checks, or hook/rule
+discussion.
+
+```text
+pin_add(content="<one-line task summary>", project_id="<project_id>", importance=3)
 ```
 
----
+State one marker: `Pin created: <id>` or `No pin created: <reason>`.
+Complete created pins before the final response.
 
-## 필수 규칙
+## Search Gate
 
-1. **작업 시작/전환 전** `search(query, project_id, limit=3~5)` 호출
-2. **필요할 때만** `context(memory_id, depth=2)` — 검색 결과가 실제 작업에 중요할 때
-3. **저장 트리거** 발생 시 즉시 `add(...)` 호출
-4. **중복 방지**: 대체 시 `update(memory_id, ...)` 사용
+Search before coding when prior decisions, previous bugs, conventions, or
+unfinished work may affect the answer.
 
----
+```text
+search(query="auth hook decision", project_id="<project_id>", limit=5)
+```
 
-## 프로젝트 감지
+Use specific phrases, not one-word queries.
 
-- 디렉토리명 → `project_id`: `/path/to/my-app` → `project_id="my-app"`
-- 명시적 지정: `project_id="custom-project"`
+## Permanent Memory Gate
 
----
+Use `add()` only for durable knowledge: decisions, meaningful bugs, incidents,
+ideas, and reusable code patterns. Routine task state belongs in pins.
 
-## 핵심 도구 5개
+## Core Tools
 
-| 도구 | 용도 |
-|------|------|
-| `search` | 관련 기억 검색 |
-| `add` | 기억 저장 |
-| `context` | 메모리 연관 컨텍스트 확장 |
-| `update` | 기존 메모리 수정 |
-| `session_resume` | 세션 맥락 로드 |
+| Tool | Use |
+| --- | --- |
+| `session_resume` | Restore session context |
+| `pin_add` / `pin_complete` | Track active work |
+| `search` | Find prior context |
+| `add` | Save durable memory |
+| `context` | Expand one important search result |
+| `update` | Correct or replace an existing memory |

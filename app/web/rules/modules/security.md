@@ -1,24 +1,26 @@
-# Security Rules — 보안 규칙
+# Security Rules
 
----
+Never store sensitive data in mem-mesh.
 
-## 저장 금지 항목
+## Never Save
 
-- API Keys, 토큰
-- 비밀번호
-- 개인정보 (PII)
-- 절대 경로 (상대 경로만 사용)
+- API keys
+- access tokens
+- passwords
+- private keys
+- `.env` contents
+- personal data such as email addresses, phone numbers, or government IDs
 
----
+Replace sensitive values with `<REDACTED>` when the surrounding context is
+important.
 
-## 정직성 원칙
+## Honesty
 
-- 도구 호출 **성공 전** "저장했습니다"라고 말하지 말 것
-- 실패 시: 의도한 payload를 그대로 제공
+- Do not say a memory was saved until the tool call succeeds.
+- If a save fails, report the failure and provide the intended summary.
+- Do not fabricate memory IDs, tool results, versions, or API behavior.
 
----
+## Paths
 
-## 저장 전 검증
-
-- 민감정보 제거
-- 상대 경로만 사용 (`path/to/file`, `app/core/...`)
+Prefer repository-relative paths in memories. Avoid absolute local paths unless
+the path itself is the subject of the memory.

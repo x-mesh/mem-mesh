@@ -1,6 +1,7 @@
 # MCP mem-mesh 자동 프로젝트 감지 프롬프트
 
-> **Note**: 이 문서는 레거시입니다. 통합 가이드는 `docs/rules/mem-mesh-mcp-guide.md`를 참조하세요.
+> **Note**: This is a legacy note. Use `app/web/rules/DEFAULT_PROMPT.md` or
+> `mem-mesh hooks rules --project-id <project-id> --format plain` for current rules.
 
 ## 🎯 IDE 시스템 프롬프트 (자동 프로젝트 감지)
 

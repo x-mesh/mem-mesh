@@ -1,39 +1,24 @@
-# Batch Rules — 배치 작업
+# Batch Rules
 
-여러 작업을 한 번에 처리하여 토큰을 절약.
+Use `batch_operations` when several memory calls are needed in one turn.
 
----
+## When to Batch
 
-## batch_operations
+- multiple related searches
+- search followed by a memory save
+- creating several pins or memories from one workflow
 
-```
+## Example
+
+```text
 batch_operations(operations=[
-  {"type": "add", "content": "...", "project_id": "...", "category": "task", "tags": [...]},
-  {"type": "search", "query": "...", "project_id": "...", "limit": 5}
+  {"type": "search", "query": "oauth hook token decision", "project_id": "mem-mesh", "limit": 5},
+  {"type": "pin_add", "content": "Update hook token docs", "project_id": "mem-mesh", "importance": 3}
 ])
 ```
 
----
+## Rules
 
-## 지원 작업 타입
-
-- **add**: 메모리 저장 (content, project_id, category, tags)
-- **search**: 메모리 검색 (query, project_id, limit)
-
----
-
-## 토큰 절약
-
-- add + search 조합 시 **30~50% 토큰 절약**
-- 여러 검색/저장을 한 요청으로 처리
-
----
-
-## 예시
-
-```
-batch_operations(operations=[
-  {"type": "search", "query": "이전 버그 수정", "project_id": "my-app", "limit": 3},
-  {"type": "add", "content": "## 버그 수정\n\n### 배경\n...", "project_id": "my-app", "category": "bug", "tags": ["Fix", "API"]}
-])
-```
+- Keep each operation explicit.
+- Do not batch unrelated work just to reduce calls.
+- Do not use batch operations to hide failures. If one result matters, inspect it.

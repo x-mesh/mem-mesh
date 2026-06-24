@@ -451,15 +451,19 @@ python scripts/migrate_embeddings.py --check-only
 - [CLAUDE.md](./CLAUDE.md) — AI tool checklist (MUST/SHOULD/MAY rules, security policy)
 - [AGENTS.md](./AGENTS.md) — Project context, Golden Rules, Context Map, session management details
 
-### AI agent rule modules (`docs/rules/`)
+### AI agent rules
 
 | File | Purpose |
 |---|---|
-| [DEFAULT_PROMPT.md](./docs/rules/DEFAULT_PROMPT.md) | **Default behavior rules** — copy into your project's CLAUDE.md or Cursor rules |
-| [all-tools-full.md](./docs/rules/all-tools-full.md) | Full rules for all 15 tools |
-| [mem-mesh-ide-prompt.md](./docs/rules/mem-mesh-ide-prompt.md) | Compact IDE prompt (~300 tokens) |
-| [modules/quick-start.md](./docs/rules/modules/quick-start.md) | 5-minute quick start |
-| [modules/](./docs/rules/modules/) | Feature modules: core, search, pins, relations, batch |
+| [DEFAULT_PROMPT.md](./app/web/rules/DEFAULT_PROMPT.md) | Standalone behavior rules for projects without installed hooks |
+| [modules/](./app/web/rules/modules/) | Optional Rule Manager modules: core, search, memory-log, pins, relations, batch, security |
+
+Generated hook rules share the installed hook prompt version:
+
+```bash
+mem-mesh hooks rules --project-id <project-id> --format plain
+mem-mesh hooks rules --project-id <project-id> --format claude
+```
 
 ### Architecture docs
 

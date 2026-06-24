@@ -1,59 +1,30 @@
-# Relations Rules — 메모리 관계 관리
+# Relation Rules
 
-메모리 간 관계 생성, 조회, 삭제 가이드.
+Relations are useful when memory links will help future search and context
+reconstruction. Do not link everything.
 
----
+## Relation Types
 
-## 관계 타입 (7종)
+| Type | Use |
+| --- | --- |
+| `related` | General connection |
+| `parent` | Broader concept |
+| `child` | Narrower concept |
+| `supersedes` | New decision replaces an older one |
+| `references` | Bug fix or note cites another memory |
+| `depends_on` | One item depends on another |
+| `similar` | Similar pattern or duplicate candidate |
 
-| 타입 | 용도 |
-|------|------|
-| `related` | 일반 연관 (기본) |
-| `parent` | 상위 개념 |
-| `child` | 하위 개념 |
-| `supersedes` | 이전 내용 대체 |
-| `references` | 참조/인용 |
-| `depends_on` | 의존성 |
-| `similar` | 유사 내용 |
+## Commands
 
----
-
-## link — 관계 생성
-
-```
-link(source_id, target_id, relation_type="related", strength=1.0, metadata={})
-```
-
-- `strength`: 0.0~1.0 (기본 1.0)
-- `metadata`: 선택적 메타데이터
-- 이미 존재하면 `created: false` 반환
-
----
-
-## get_links — 관계 조회
-
-```
-get_links(memory_id, relation_type, direction, limit=20)
+```text
+link(source_id="<id>", target_id="<id>", relation_type="references")
+get_links(memory_id="<id>", direction="both", limit=20)
+unlink(source_id="<id>", target_id="<id>", relation_type="references")
 ```
 
-- `direction`: `outgoing` | `incoming` | `both` (기본)
-- `relation_type`: 특정 타입만 필터
+## Use Cases
 
----
-
-## unlink — 관계 삭제
-
-```
-unlink(source_id, target_id, relation_type)
-```
-
-- `relation_type` 생략 시 두 메모리 간 모든 관계 삭제
-
----
-
-## 사용 시나리오
-
-- **버그 수정**: 원인 메모리와 `references` 연결
-- **결정 업데이트**: 이전 결정과 `supersedes` 연결
-- **의존성**: `depends_on` 연결
-- **유사 패턴**: `similar` 연결
+- Link a bug fix to the root-cause memory with `references`.
+- Link a replacement decision to the older decision with `supersedes`.
+- Link dependent architecture notes with `depends_on`.
