@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-06-24
+
+mem-mesh의 **프롬프트/rules 시스템을 단일 정본으로 통합**하고, 적용 중인 rules를 대시보드에서 조회할 수 있게 노출한다. 부수적으로 HTTP hook에 인증 토큰을 조건부로 baking하고 신규 클라이언트를 지원한다. WHY: rules·prompt가 `all-tools-full.md`·`mem-mesh-ide-prompt.md`·`mem-mesh-mcp-guide.md`·`session-rules.md`와 8개 모듈로 흩어져 같은 규칙이 파일마다 제각각 드리프트했고, 사용자가 실제로 어떤 rules가 주입되는지 확인할 길이 없었다. 이를 `DEFAULT_PROMPT.md` + 핵심 모듈로 통합하고 API·settings 페이지로 노출해 정본화한다.
+
+### Added
+- **Rules 조회 API + UI** — `list_rules()`/`_resolve_rule_path()`로 적용 중인 rules를 노출하고, settings 페이지에서 모듈별로 펼쳐 볼 수 있게 했다. `app/web/dashboard/routes.py`, `app/web/static/js/pages/settings-page.js`, `tests/test_prompt_rules.py`
+- **HTTP hook 토큰 조건부 baking** — 인증이 필요한 경우에만 HTTP hook 설치 시 Bearer 토큰을 리터럴로 baking. `app/web/dashboard/route_modules/connect.py`, `tests/test_connect_install.py`
+- **신규 클라이언트 지원/색상** — 대시보드 client 색상 팔레트에 새 클라이언트(kiro 등)를 추가. `app/web/static/js/pages/dashboard.js`, `app/web/static/css/modules/dashboard.css`, `app/web/static/js/pages/connect-page.js`
+
+### Changed
+- **Rules/prompt 정본 통합** — `DEFAULT_PROMPT.md` 재작성 + `modules/{core,pins,search,relations,batch,memory-log,security}.md` 정비로 중복 규칙을 단일화. `render_rules_text`/`behaviors.py`(`CORE_RULES`)와 `index.json`을 통합 구조에 맞춰 정리하고 `PROMPT_VERSION`을 22로 상향(재설치 유도). `app/cli/prompts/behaviors.py`, `app/cli/prompts/renderers.py`, `app/web/rules/`
+- README(ko/en) onboarding/rules 안내를 통합 구조로 갱신. `README.md`, `README.ko.md`
+
+### Removed
+- 중복·구식 rules 파일 정리 — `all-tools-full.md`, `mem-mesh-ide-prompt.md`, `mem-mesh-mcp-guide.md`, `mem-mesh-session-rules.md`, `modules/{api-usage,mcp-helper,minimal,quick-start,team-context}.md`를 삭제하고 정본 모듈로 흡수. `app/web/rules/`
+
 ## [1.17.0] - 2026-06-24
 
 여러 AI 클라이언트(claude/cursor/codex/claude-desktop)에서 동시에 들어오는 hook 이벤트의 **출처 관측성**을 확보하고, mem-mesh를 **reverse proxy 뒤에 배포**할 수 있게 한다. WHY: (1) hook 이벤트가 어느 클라이언트·프로젝트에서 발생했는지 페이로드에 실리지 않아 대시보드에서 출처를 추적할 수 없었고, 빈/노이즈 이벤트가 메모리로 저장돼 코퍼스를 오염시켰다. (2) 프록시(nginx 등) 뒤에 두면 OAuth issuer가 내부 호스트(`127.0.0.1:8000`)로 잡혀 MCP 클라이언트의 인증 메타데이터가 외부 URL과 어긋났다. 이 릴리스는 셸 hook이 `project_id`를, 서버가 client/source를 이벤트에 태깅하고, `X-Forwarded-*` 헤더로 외부 origin을 해석한다.
