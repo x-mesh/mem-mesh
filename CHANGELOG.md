@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.1] - 2026-06-24
+
+1.18.0에서 유입된 회귀를 수정하는 patch 릴리스. `uvx mem-mesh` onboarding이 `ModuleNotFoundError: No module named 'httpx'`로 즉시 실패하던 문제를 해결한다. WHY: 1.18.0의 autoApprove SSOT 변경(`app/cli/mcp_config.py`가 `app.mcp_common.schemas`를 import)이 패키지 `__init__`의 eager `storage` import를 경유해 `core.storage.api`의 `httpx`까지 끌어왔고, base 의존성(httpx 미포함)으로 설치되는 `uvx mem-mesh` onboarding 경로가 import 시점에 깨졌다.
+
+### Fixed
+- **uvx onboarding httpx ModuleNotFoundError 회귀** — `app/mcp_common/__init__.py`를 PEP 562 lazy export(`__getattr__`)로 전환해 `StorageManager`/`MCPToolHandlers`를 실제 접근 시점에만 import. 가벼운 `schemas` import가 더는 `storage`→`httpx` 체인을 끌어오지 않아, httpx 없는 base 환경의 onboarding이 정상 동작한다. `app/mcp_common/__init__.py`
+
 ## [1.18.0] - 2026-06-24
 
 mem-mesh의 **프롬프트/rules 시스템을 단일 정본으로 통합**하고, 적용 중인 rules를 대시보드에서 조회할 수 있게 노출한다. 부수적으로 HTTP hook에 인증 토큰을 조건부로 baking하고 신규 클라이언트를 지원한다. WHY: rules·prompt가 `all-tools-full.md`·`mem-mesh-ide-prompt.md`·`mem-mesh-mcp-guide.md`·`session-rules.md`와 8개 모듈로 흩어져 같은 규칙이 파일마다 제각각 드리프트했고, 사용자가 실제로 어떤 rules가 주입되는지 확인할 길이 없었다. 이를 `DEFAULT_PROMPT.md` + 핵심 모듈로 통합하고 API·settings 페이지로 노출해 정본화한다.
