@@ -31,14 +31,19 @@ PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 PAYLOAD=$(printf '%s' "$INPUT" | jq -c --arg pid "$PROJECT_DIR" '. + {project_id: $pid}' 2>/dev/null) || PAYLOAD="$INPUT"
 
 CURL_EXIT=0
-HTTP_META=$(curl -s -o /dev/null --max-time 8 -w '%{http_code} %{time_total}' \
+HTTP_META=$(curl -s -o /dev/null --max-time 8 \
+  -w '%{http_code} %{time_total} %header{x-mem-mesh-hook-status}' \
   -X POST "${API_URL}/api/hooks/claude/subagent-stop" \
   -H "Content-Type: application/json" \
   ${AUTH[@]+"${AUTH[@]}"} \
   -d "$PAYLOAD" 2>/dev/null) || CURL_EXIT=$?
 HTTP_CODE="${HTTP_META%% *}"
 [ -n "$HTTP_CODE" ] || HTTP_CODE="000"
-mem_mesh_log "subagent-stop" "sent" "http=$HTTP_CODE project=$PROJECT_DIR"
-mem_mesh_logv "subagent-stop" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN") time=${HTTP_META#* }s curl_exit=$CURL_EXIT"
+# Split "<code> <time> <status...>" — status (server's save/skip reason from the
+# X-Mem-Mesh-Hook-Status header) may contain spaces, so it takes the remainder.
+_REST="${HTTP_META#* }"; TIME_TOTAL="${_REST%% *}"; HOOK_STATUS="${_REST#* }"
+[ "$HOOK_STATUS" = "$TIME_TOTAL" ] && HOOK_STATUS=""
+mem_mesh_log "subagent-stop" "sent" "http=$HTTP_CODE status=${HOOK_STATUS:-?} project=$PROJECT_DIR"
+mem_mesh_logv "subagent-stop" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN") time=${TIME_TOTAL}s curl_exit=$CURL_EXIT"
 
 exit 0

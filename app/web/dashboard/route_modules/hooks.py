@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 
 from app.cli.hooks.keywords import match_category
+from app.core import runtime_config as rc
 from app.core.redaction import redact_secrets
 from app.core.schemas.hooks import (
     PostToolUsePayload,
@@ -107,10 +108,16 @@ def _ok(status: str) -> Response:
     """An empty 200 — the valid "do nothing" reply for a hook.
 
     Claude Code rejects unknown root keys in hook output JSON, so the status
-    string is logged for observability and never put on the wire.
+    string is never put in the body. It is exposed two ways instead: the server
+    ``logger.debug`` line, and an ``X-Mem-Mesh-Hook-Status`` response header that
+    the shell hooks capture into ``~/.mem-mesh/hooks.log`` — so a gate skip
+    (e.g. "no keyword match") is debuggable client-side instead of looking like
+    a silent success behind a bare 200. The header is metadata only (no content)
+    and is collapsed to a single line so it stays a valid HTTP header value.
     """
     logger.debug("claude hook: %s", status)
-    return Response(status_code=200)
+    safe_status = " ".join(status.split())
+    return Response(status_code=200, headers={"X-Mem-Mesh-Hook-Status": safe_status})
 
 
 def _context(event_name: str, additional_context: str) -> JSONResponse:
@@ -623,8 +630,11 @@ async def subagent_stop(
         assistant_message=message,
     )
 
-    if len(message) < 100 or _save_marker_present(message) or _is_noise(message):
-        return _ok("subagent-stop: skip")
+    min_len = rc.effective_int("hook_min_message_length")
+    if len(message) < min_len:
+        return _ok(f"subagent-stop: skip (message {len(message)} < {min_len} chars)")
+    if _save_marker_present(message) or _is_noise(message):
+        return _ok("subagent-stop: skip (save-marker or noise)")
 
     category = match_category(message, os.getenv("MEM_MESH_HOOK_EXTRA_KEYWORDS", ""))
     if category not in _SAVE_CATEGORIES:

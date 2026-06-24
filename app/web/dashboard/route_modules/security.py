@@ -355,3 +355,83 @@ async def update_auth_config(
         "warnings": warnings,
         "notices": notices,
     }
+
+
+# ───────────────────────── hook tuning config ──────────────────────────
+
+
+@router.get("/hook-config")
+async def hook_config(request: Request, response: Response):
+    """Effective hook-tuning runtime config (e.g. the SubagentStop save
+    threshold). Each entry reports the active ``value``, its ``source``
+    (env/db/default) and whether it is ``env_pinned`` (read-only)."""
+    response.headers["Cache-Control"] = "no-store"
+    items = {}
+    for key, kind in rc.MANAGED_HOOK_KEYS.items():
+        items[key] = {
+            "value": rc.effective_int(key),
+            "kind": kind,
+            "source": rc.source_of(key),
+            "env_pinned": rc.is_env_pinned(key),
+            "env_var": rc.env_var_name(key),
+        }
+    return {"hook": items}
+
+
+@router.put("/hook-config")
+async def update_hook_config(
+    request: Request, response: Response, payload: dict = Body(...)
+):
+    """Set/clear hook-tuning overrides (DB). Pass ``null`` (or ``""``) to clear a
+    key back to env/default. Gated by the same policy as the auth config — an
+    authenticated dashboard or a local request — so an exposed, unauthenticated
+    server cannot be retuned remotely."""
+    if not _can_reveal(request):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Changing hook settings requires an authenticated dashboard "
+                "(Basic Auth / OAuth web auth) or a local request."
+            ),
+        )
+    db = getattr(request.app.state, "db", None)
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not ready")
+    if not isinstance(payload, dict) or not payload:
+        raise HTTPException(status_code=400, detail="Expected a non-empty object")
+
+    response.headers["Cache-Control"] = "no-store"
+    warnings = []
+    if get_settings().server_workers > 1:
+        warnings.append(
+            "Multiple workers are configured; this change applies to one worker "
+            "until all are restarted. Run a single worker for runtime changes."
+        )
+    applied, skipped = {}, {}
+    for key, value in payload.items():
+        if key not in rc.MANAGED_HOOK_KEYS:
+            skipped[key] = "unknown or non-hook key"
+            continue
+        if rc.is_env_pinned(key):
+            skipped[key] = f"env-pinned ({rc.env_var_name(key)})"
+            continue
+        try:
+            if value is None or value == "":
+                await rc.clear_override(db, key)
+                applied[key] = "cleared"
+            else:
+                iv = int(value)
+                if iv < 0:
+                    skipped[key] = "must be >= 0"
+                    continue
+                await rc.set_override(db, key, iv)
+                applied[key] = iv
+        except (ValueError, TypeError):
+            skipped[key] = "not an integer"
+        except PermissionError:
+            skipped[key] = "env-pinned"
+        except Exception as e:  # pragma: no cover - defensive
+            logger.error("Failed to set hook override %s: %s", key, e)
+            skipped[key] = "error"
+    logger.info("Hook config updated via dashboard: applied=%s", list(applied))
+    return {"applied": applied, "skipped": skipped, "warnings": warnings}
