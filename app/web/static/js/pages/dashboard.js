@@ -50,6 +50,9 @@ class DashboardPage extends HTMLElement {
     this._vizMode = localStorage.getItem('mem-mesh-client-viz') || 'orbit';
     this._vizEvents = []; // recent events for pulse/ticker
     this._orbitAnim = null; // orbit animation frame id
+    this._liveMemoryCache = new Map();
+    this._deletedMemoryIds = new Set();
+    this._liveMemoryCacheLimit = 100;
   }
 
   connectedCallback() {
@@ -99,12 +102,17 @@ class DashboardPage extends HTMLElement {
     wsClient.on('pin_completed', this._bh.pcomp);
     wsClient.on('pin_promoted', this._bh.pprom);
     wsClient.on('reconnected', this._bh.r);
+
+    wsClient.connect().catch(err => {
+      console.warn('Dashboard WebSocket connection failed:', err);
+    });
   }
 
   onMemoryCreated({ memory }) {
     if (!memory) return;
-    if (this.memories.some(m => m.id === memory.id)) return;
-    this.memories.unshift(memory);
+    if (!this.memoryMatchesCurrentFilters(memory)) return;
+    this.rememberLiveMemory(memory);
+    this.upsertMemory(memory);
     this.renderMemoryList();
     this.refreshStats();
     // Push viz event
@@ -112,14 +120,81 @@ class DashboardPage extends HTMLElement {
   }
 
   onMemoryUpdated({ memory_id, memory }) {
-    const idx = this.memories.findIndex(m => m.id === memory_id);
-    if (idx !== -1) { this.memories[idx] = memory; this.renderMemoryList(); }
+    if (!memory) return;
+    if (this.memoryMatchesCurrentFilters(memory)) {
+      this.rememberLiveMemory(memory);
+      this.upsertMemory(memory);
+    } else {
+      this._liveMemoryCache.delete(memory_id);
+      this.memories = this.memories.filter(m => m.id !== memory_id);
+    }
+    this.renderMemoryList();
   }
 
   onMemoryDeleted({ memory_id }) {
+    this._deletedMemoryIds.add(memory_id);
+    this._liveMemoryCache.delete(memory_id);
     this.memories = this.memories.filter(m => m.id !== memory_id);
     this.renderMemoryList();
     this.refreshStats();
+  }
+
+  rememberLiveMemory(memory) {
+    if (!memory?.id) return;
+    this._deletedMemoryIds.delete(memory.id);
+    this._liveMemoryCache.set(memory.id, memory);
+
+    while (this._liveMemoryCache.size > this._liveMemoryCacheLimit) {
+      const oldestKey = this._liveMemoryCache.keys().next().value;
+      this._liveMemoryCache.delete(oldestKey);
+    }
+  }
+
+  upsertMemory(memory) {
+    const idx = this.memories.findIndex(m => m.id === memory.id);
+    if (idx === -1) {
+      this.memories.unshift(memory);
+    } else {
+      this.memories[idx] = { ...this.memories[idx], ...memory };
+    }
+    this.memories = this.sortMemoriesByRecency(this.memories);
+  }
+
+  mergeLiveMemories(results) {
+    const merged = new Map();
+    for (const memory of results || []) {
+      if (!memory?.id || this._deletedMemoryIds.has(memory.id)) continue;
+      if (!this.memoryMatchesCurrentFilters(memory)) continue;
+      merged.set(memory.id, memory);
+    }
+    for (const memory of this._liveMemoryCache.values()) {
+      if (!memory?.id || this._deletedMemoryIds.has(memory.id)) continue;
+      if (!this.memoryMatchesCurrentFilters(memory)) continue;
+      merged.set(memory.id, memory);
+    }
+    return this.sortMemoriesByRecency(Array.from(merged.values()));
+  }
+
+  sortMemoriesByRecency(memories) {
+    return [...memories].sort((a, b) => {
+      const aTime = new Date(a.created_at || a.updated_at || 0).getTime();
+      const bTime = new Date(b.created_at || b.updated_at || 0).getTime();
+      return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+    });
+  }
+
+  memoryMatchesCurrentFilters(memory) {
+    if (!memory) return false;
+    if (this.filterCategory !== 'all' && memory.category !== this.filterCategory) {
+      return false;
+    }
+    if (!memory.created_at) return true;
+
+    const createdAt = new Date(memory.created_at).getTime();
+    if (!Number.isFinite(createdAt)) return true;
+
+    const cutoff = Date.now() - this.filterDays * 86400000;
+    return createdAt >= cutoff;
   }
 
   onPinCreated({ pin }) {
@@ -251,9 +326,11 @@ class DashboardPage extends HTMLElement {
       ]);
 
       this.stats = statsR.status === 'fulfilled' ? statsR.value : null;
-      const results = memR.status === 'fulfilled' ? (memR.value.results || []) : [];
+      const results = memR.status === 'fulfilled'
+        ? this.mergeLiveMemories(memR.value.results || [])
+        : this.mergeLiveMemories([]);
       if (this.page === 0) this.memories = results;
-      else this.memories = [...this.memories, ...results];
+      else this.memories = this.mergeLiveMemories([...this.memories, ...results]);
       this.hasMore = results.length >= this.pageSize;
       this.sessions = sessR.status === 'fulfilled' ? (sessR.value.sessions || []) : [];
       this.activePins = pinsR.status === 'fulfilled'
