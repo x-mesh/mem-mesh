@@ -5,6 +5,7 @@ __VERSION_MARKER__
 # Reuses keyword matching logic from stop-decide
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 command -v jq >/dev/null 2>&1 || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
 
@@ -34,7 +35,7 @@ AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // "unknown"')
 CONTENT="[${AGENT_TYPE} agent] ${MESSAGE}"
 CONTENT=$(printf '%s' "$CONTENT" | python3 -c 'import sys; print(sys.stdin.read()[:9500], end="")')
 
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+PROJECT_DIR="$(mem_mesh_project_id)"
 
 python3 - "$MEM_MESH_PATH" "$CONTENT" "$PROJECT_DIR" "$CATEGORY" <<'PY' 2>/dev/null || true
 import sys, asyncio, json

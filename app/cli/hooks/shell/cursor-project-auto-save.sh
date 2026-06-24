@@ -3,6 +3,7 @@ __VERSION_MARKER__
 # mem-mesh Auto-Save Hook for Cursor (stop event, project-local)
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 
 HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-__HOOK_OUTPUT_MODE__}"
 INPUT=$(cat)

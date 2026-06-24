@@ -89,6 +89,7 @@ from app.cli.prompts.renderers import (
     render_reflect_prompt,
     render_rules_text,
 )
+from app.cli.project_identity import SHELL_PROJECT_ID_RESOLVER
 from app.core.config import HOOK_TOKEN_FILE
 
 DEFAULT_URL = "http://localhost:8000"
@@ -474,6 +475,7 @@ def _render_template(
     result = result.replace("__HOOK_LOG__", HOOK_LOG_BLOCK)
     result = result.replace("__CLIENT_TAG__", client_tag)
     result = result.replace("__HOOK_OUTPUT_MODE__", hook_output_mode)
+    result = result.replace("__PROJECT_ID_RESOLVER__", SHELL_PROJECT_ID_RESOLVER)
     # Inject renderer-generated text
     result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
     result = result.replace("__FOLLOWUP_MSG__", render_cursor_followup(project_id))
@@ -505,6 +507,7 @@ def _render_local_template(
     )
     result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
     result = result.replace("__HOOK_OUTPUT_MODE__", hook_output_mode)
+    result = result.replace("__PROJECT_ID_RESOLVER__", SHELL_PROJECT_ID_RESOLVER)
     result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
     result = result.replace("__FOLLOWUP_MSG__", render_cursor_followup(project_id))
     # Reflect hook placeholders

@@ -5,6 +5,7 @@ __VERSION_MARKER__
 # Output: {hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: "..."}} or exit 0
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 command -v jq >/dev/null 2>&1 || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
 
@@ -77,7 +78,7 @@ if [ ${#PROMPT} -ge 30 ]; then
   fi
 
   if echo "$PROMPT" | grep -qiE "$KEYWORDS"; then
-    PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+    PROJECT_DIR="$(mem_mesh_project_id)"
     QUERY=$(printf '%s' "$PROMPT" | python3 -c 'import sys; print(sys.stdin.read()[:200], end="")')
     THRESHOLD="${MEM_MESH_SEARCH_THRESHOLD:-0.75}"
     LIMIT="${MEM_MESH_SEARCH_LIMIT:-3}"
@@ -185,7 +186,7 @@ if [ -n "$HOOK_TOKEN" ]; then
   AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}")
 fi
 if [ ${#PROMPT} -ge 15 ] && [ "$WORK_DONE" = "1" ]; then
-  PIN_PROJECT=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+  PIN_PROJECT="$(mem_mesh_project_id)"
   NO_TRACKED_PINS=1
   for PIN_STATUS in in_progress open; do
     PIN_COUNT=$(curl -s --max-time 2 \

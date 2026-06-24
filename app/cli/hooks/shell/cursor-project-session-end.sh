@@ -3,6 +3,7 @@ __VERSION_MARKER__
 # mem-mesh Session End Hook for Cursor (project-local)
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 
 INPUT=$(cat)
 

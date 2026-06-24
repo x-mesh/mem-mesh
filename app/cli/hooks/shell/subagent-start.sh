@@ -5,6 +5,7 @@ __VERSION_MARKER__
 # Output: {hookSpecificOutput: {hookEventName: "SubagentStart", additionalContext: "..."}}
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 __HOOK_LOG__
 mem_mesh_log "subagent-start" "fired" "cwd=$PWD"
 command -v jq >/dev/null 2>&1 || { mem_mesh_log "subagent-start" "abort" "jq not found"; exit 0; }
@@ -25,7 +26,7 @@ case "$AGENT_TYPE" in
   Explore|Glob|Grep|Read) mem_mesh_log "subagent-start" "skip" "lightweight agent=$AGENT_TYPE"; exit 0 ;;
 esac
 
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+PROJECT_DIR="$(mem_mesh_project_id)"
 
 mem_mesh_logv "subagent-start" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN") agent=$AGENT_TYPE"
 

@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from app.cli.hooks.hook_log import HOOK_LOG_BLOCK
 from app.cli.hooks.json_ops import _atomic_write_text
 from app.cli.hooks.keywords import KEYWORD_MATCHER_BLOCK
+from app.cli.project_identity import SHELL_PROJECT_ID_RESOLVER
 from app.cli.prompts.behaviors import REFLECT_CONFIG
 from app.cli.prompts.renderers import (
     VERSION_MARKER,
@@ -134,6 +135,7 @@ def _render_template(
     result = result.replace("__HOOK_LOG__", HOOK_LOG_BLOCK)
     result = result.replace("__CLIENT_TAG__", client_tag)
     result = result.replace("__HOOK_OUTPUT_MODE__", hook_output_mode)
+    result = result.replace("__PROJECT_ID_RESOLVER__", SHELL_PROJECT_ID_RESOLVER)
     # Inject renderer-generated text
     result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
     result = result.replace("__FOLLOWUP_MSG__", render_cursor_followup(project_id))
@@ -165,6 +167,7 @@ def _render_local_template(
     )
     result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
     result = result.replace("__HOOK_OUTPUT_MODE__", hook_output_mode)
+    result = result.replace("__PROJECT_ID_RESOLVER__", SHELL_PROJECT_ID_RESOLVER)
     result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
     result = result.replace("__FOLLOWUP_MSG__", render_cursor_followup(project_id))
     # Reflect hook placeholders

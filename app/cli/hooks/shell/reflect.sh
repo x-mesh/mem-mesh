@@ -5,6 +5,7 @@ __VERSION_MARKER__
 # stdin: {"stop_hook_active":bool,"last_assistant_message":"..."} JSON
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 command -v jq >/dev/null 2>&1 || exit 0
 
 [ -z "${ANTHROPIC_API_KEY:-}" ] && exit 0
@@ -28,7 +29,7 @@ MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
 # Char-safe truncation: jq slices by Unicode codepoint (no UTF-8 byte corruption)
 CONVERSATION=$(printf '%s' "$MESSAGE" | jq -Rrs '.[0:6000]')
 
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+PROJECT_DIR="$(mem_mesh_project_id)"
 
 # Call Haiku for reflection analysis
 ANALYSIS=$(python3 -c "

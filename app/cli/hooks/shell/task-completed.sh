@@ -7,6 +7,7 @@ __VERSION_MARKER__
 # task_description / teammate_name (team-driven); forwarded as-is.
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 __HOOK_LOG__
 mem_mesh_log "task-completed" "fired" "cwd=$PWD"
 command -v jq >/dev/null 2>&1 || { mem_mesh_log "task-completed" "abort" "jq not found"; exit 0; }
@@ -22,7 +23,7 @@ if [ -n "$HOOK_TOKEN" ]; then
 fi
 
 INPUT=$(cat)
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+PROJECT_DIR="$(mem_mesh_project_id)"
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   --arg pid "$PROJECT_DIR" \

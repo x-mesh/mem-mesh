@@ -5,6 +5,7 @@ __VERSION_MARKER__
 # Non-blocking: exits 0 on failure to avoid disrupting the IDE
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 __HOOK_LOG__
 mem_mesh_log "session-end" "fired" "cwd=$PWD"
 command -v curl >/dev/null 2>&1 || { mem_mesh_log "session-end" "abort" "curl not found"; exit 0; }
@@ -15,8 +16,8 @@ AUTH=()
 AUTH_STATE=absent
 if [ -n "$HOOK_TOKEN" ]; then AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}"); AUTH_STATE=present; fi
 
-# Detect project from CWD
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+# Resolve the stable project id.
+PROJECT_DIR="$(mem_mesh_project_id)"
 [ -z "$PROJECT_DIR" ] && { mem_mesh_log "session-end" "abort" "no project dir"; exit 0; }
 
 # End the most recent active session for this project

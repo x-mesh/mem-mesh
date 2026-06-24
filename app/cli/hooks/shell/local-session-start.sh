@@ -9,6 +9,7 @@ __VERSION_MARKER__
 # 2. Context continuation detection (new)
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 command -v python3 >/dev/null 2>&1 || { echo '{}'; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo '{}'; exit 0; }
 
@@ -17,7 +18,7 @@ HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-__HOOK_OUTPUT_MODE__}"
 
 INPUT=$(cat)
 
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+PROJECT_DIR="$(mem_mesh_project_id)"
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 
 # ── Extract IDE session_id from hook stdin ──

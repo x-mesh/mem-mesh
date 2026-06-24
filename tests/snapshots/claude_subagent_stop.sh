@@ -6,6 +6,37 @@
 # notable ones (prefixing the agent type). Auth = shared hook token (~/.mem-mesh/hook_token).
 
 set -euo pipefail
+# --- mem-mesh project id resolution ------------------------------------------
+mem_mesh_project_id() {
+  if [ -n "${MEM_MESH_PROJECT_ID:-}" ]; then
+    printf '%s\n' "$MEM_MESH_PROJECT_ID"
+    return 0
+  fi
+
+  _mm_pid="$(git config --local --get mem-mesh.project-id 2>/dev/null || true)"
+  if [ -n "$_mm_pid" ]; then
+    printf '%s\n' "$_mm_pid"
+    return 0
+  fi
+
+  _mm_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  _mm_file="${_mm_root}/.mem-mesh/project-id"
+  if [ -f "$_mm_file" ]; then
+    _mm_pid="$(sed -n '1{s/[[:space:]]*$//;p;}' "$_mm_file" 2>/dev/null || true)"
+    if [ -n "$_mm_pid" ]; then
+      printf '%s\n' "$_mm_pid"
+      return 0
+    fi
+  fi
+
+  _mm_base="$(basename "$_mm_root" 2>/dev/null || true)"
+  if [ -n "$_mm_base" ]; then
+    printf '%s\n' "$_mm_base"
+  else
+    printf '%s\n' "unknown"
+  fi
+}
+
 # --- mem-mesh hook logging (opt-in: MEM_MESH_HOOK_LOG) -------------------------
 # Append a per-stage trace to ~/.mem-mesh/hooks.log so you can tell whether this
 # shell hook actually fired and where it exited — surfacing the otherwise-silent
@@ -70,7 +101,7 @@ INPUT=$(cat)
 ACTIVE=$(printf '%s' "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null) || ACTIVE="false"
 [ "$ACTIVE" = "true" ] && { mem_mesh_log "subagent-stop" "skip" "stop_hook_active"; exit 0; }
 
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+PROJECT_DIR="$(mem_mesh_project_id)"
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   --arg pid "$PROJECT_DIR" \

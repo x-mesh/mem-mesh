@@ -4,6 +4,7 @@ __VERSION_MARKER__
 # Injects mem-mesh usage instructions into the session context.
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 
 command -v jq >/dev/null 2>&1 || { echo '{}'; exit 0; }
 

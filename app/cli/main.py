@@ -3,6 +3,7 @@
 Usage:
     mem-mesh                  # Onboarding wizard (bare = `mem-mesh install`)
     mem-mesh --json           # Onboarding, machine-readable JSON (for agents)
+    mem-mesh init             # Initialize stable project identity
     mem-mesh install          # Onboarding wizard
     mem-mesh serve            # Start API server
     mem-mesh hooks install    # Install hooks
@@ -39,6 +40,31 @@ def main(argv: Optional[List[str]] = None) -> None:
         parents=[common],
     )
     sub = parser.add_subparsers(dest="command", help="Available commands")
+
+    # --- mem-mesh init ---
+    init_parser = sub.add_parser(
+        "init",
+        parents=[common],
+        help="Initialize stable project identity for hooks and MCP",
+    )
+    init_parser.add_argument(
+        "--project-id",
+        default=None,
+        help="Canonical project id to store (default: prompt or inferred repo name)",
+    )
+    init_parser.add_argument(
+        "--from-cwd",
+        action="store_true",
+        help="Use the current directory basename instead of the git root basename",
+    )
+    init_parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Show the currently resolved project id without changing config",
+    )
+    init_parser.add_argument(
+        "-y", "--yes", action="store_true", help="Non-interactive mode (use defaults)"
+    )
 
     # --- mem-mesh install ---
     install_parser = sub.add_parser(
@@ -269,7 +295,20 @@ def main(argv: Optional[List[str]] = None) -> None:
         return
 
     # --- Dispatch ---
-    if args.command == "install":
+    if args.command == "init":
+        from app.cli.project_identity import cmd_init
+
+        sys.exit(
+            cmd_init(
+                project_id=args.project_id,
+                yes=args.yes,
+                from_cwd=args.from_cwd,
+                show=args.show,
+                json_mode=getattr(args, "json", False),
+            )
+        )
+
+    elif args.command == "install":
         from app.cli.onboarding import cmd_onboarding
 
         cmd_onboarding(

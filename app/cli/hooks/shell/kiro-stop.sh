@@ -5,6 +5,7 @@ __VERSION_MARKER__
 # Category is set to code_snippet by default; Kiro's LLM handles filtering.
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 __HOOK_LOG__
 mem_mesh_log "response" "fired" "cwd=$PWD"
 command -v jq >/dev/null 2>&1 || { mem_mesh_log "response" "abort" "jq not found"; exit 0; }
@@ -24,7 +25,7 @@ if printf '%s' "$RESPONSE" | grep -qF -e '<task-notification>' -e '</task-notifi
   exit 0
 fi
 
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+PROJECT_DIR="$(mem_mesh_project_id)"
 
 # Char-safe truncation: jq slices by Unicode codepoint (no UTF-8 byte corruption)
 SUMMARY=$(printf '%s' "$RESPONSE" | jq -Rrs '.[0:9500]')

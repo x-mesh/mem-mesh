@@ -5,6 +5,7 @@ __VERSION_MARKER__
 # Writes directly to local SQLite via Python
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 command -v python3 >/dev/null 2>&1 || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 
@@ -17,7 +18,7 @@ MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
 [ ${#MESSAGE} -lt 100 ] && exit 0
 
 CONVERSATION=$(printf '%s' "$MESSAGE" | python3 -c 'import sys; print(sys.stdin.read()[:6000], end="")')
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+PROJECT_DIR="$(mem_mesh_project_id)"
 
 python3 - "$MEM_MESH_PATH" "$PROJECT_DIR" "$CONVERSATION" <<'PY' 2>/dev/null || true
 import sys, asyncio, json, urllib.request, urllib.error, os

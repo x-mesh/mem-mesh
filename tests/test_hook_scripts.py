@@ -44,6 +44,7 @@ def _run_hook(
     env: dict | None = None,
     *,
     api_url: str | None = None,
+    cwd: Path | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a hook script with JSON input on stdin.
 
@@ -71,6 +72,7 @@ def _run_hook(
         text=True,
         timeout=10,
         env=run_env,
+        cwd=str(cwd) if cwd else None,
     )
 
 
@@ -224,6 +226,32 @@ def test_session_start_forwards_server_context(tmp_path: Path, hook_api_server) 
     assert result.returncode == 0
     context = _extract_context(json.loads(result.stdout))
     assert "mem-mesh" in context
+
+
+def test_session_start_uses_git_config_project_id(
+    tmp_path: Path, hook_api_server
+) -> None:
+    if shutil.which("git") is None:
+        pytest.skip("git not installed")
+
+    state, url = hook_api_server
+    state["response"] = {}
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "--local", "mem-mesh.project-id", "canonical-project"],
+        cwd=repo,
+        check=True,
+    )
+    script = _render_and_write(
+        tmp_path, SESSION_START_HOOK_TEMPLATE, project_id="test-project"
+    )
+
+    result = _run_hook(script, {}, api_url=url, cwd=repo)
+
+    assert result.returncode == 0
+    assert state["last_payload"]["project_id"] == "canonical-project"
 
 
 def test_codex_session_start_compact_stdout_keeps_full_payload(

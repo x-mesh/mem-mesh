@@ -3,6 +3,7 @@ __VERSION_MARKER__
 # Stop hook: save conversation summary to mem-mesh (local mode)
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 command -v python3 >/dev/null 2>&1 || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 
@@ -13,7 +14,7 @@ MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
 [ ${#MESSAGE} -lt 50 ] && exit 0
 
 SUMMARY=$(printf '%s' "$MESSAGE" | python3 -c 'import sys; print(sys.stdin.read()[:9500], end="")')
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+PROJECT_DIR="$(mem_mesh_project_id)"
 
 python3 - "$MEM_MESH_PATH" "$PROJECT_DIR" "$SUMMARY" <<'PY' 2>/dev/null || true
 import sys, asyncio, json

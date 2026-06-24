@@ -5,6 +5,37 @@
 # stdin: {"stop_hook_active":bool,"last_assistant_message":"..."} JSON
 
 set -euo pipefail
+# --- mem-mesh project id resolution ------------------------------------------
+mem_mesh_project_id() {
+  if [ -n "${MEM_MESH_PROJECT_ID:-}" ]; then
+    printf '%s\n' "$MEM_MESH_PROJECT_ID"
+    return 0
+  fi
+
+  _mm_pid="$(git config --local --get mem-mesh.project-id 2>/dev/null || true)"
+  if [ -n "$_mm_pid" ]; then
+    printf '%s\n' "$_mm_pid"
+    return 0
+  fi
+
+  _mm_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  _mm_file="${_mm_root}/.mem-mesh/project-id"
+  if [ -f "$_mm_file" ]; then
+    _mm_pid="$(sed -n '1{s/[[:space:]]*$//;p;}' "$_mm_file" 2>/dev/null || true)"
+    if [ -n "$_mm_pid" ]; then
+      printf '%s\n' "$_mm_pid"
+      return 0
+    fi
+  fi
+
+  _mm_base="$(basename "$_mm_root" 2>/dev/null || true)"
+  if [ -n "$_mm_base" ]; then
+    printf '%s\n' "$_mm_base"
+  else
+    printf '%s\n' "unknown"
+  fi
+}
+
 # --- mem-mesh hook logging (opt-in: MEM_MESH_HOOK_LOG) -------------------------
 # Append a per-stage trace to ~/.mem-mesh/hooks.log so you can tell whether this
 # shell hook actually fired and where it exited — surfacing the otherwise-silent
@@ -78,7 +109,7 @@ echo "$MESSAGE" | grep -q 'mcp__mem-mesh__add' && exit 0
 # Char-safe truncation: jq slices by Unicode codepoint (no UTF-8 byte corruption)
 CONVERSATION=$(printf '%s' "$MESSAGE" | jq -Rrs '.[0:6000]')
 
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+PROJECT_DIR="$(mem_mesh_project_id)"
 
 # Call Haiku for save/skip decision, then save if needed
 python3 -c "

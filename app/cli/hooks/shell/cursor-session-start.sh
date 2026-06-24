@@ -8,6 +8,7 @@ __VERSION_MARKER__
 # (~/.mem-mesh/hook_token).
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 __HOOK_LOG__
 mem_mesh_log "session-start" "fired" "cwd=$PWD"
 command -v jq >/dev/null 2>&1 || { mem_mesh_log "session-start" "abort" "jq not found"; echo '{}'; exit 0; }
@@ -25,9 +26,8 @@ fi
 
 INPUT=$(cat)
 
-# Explicit project_id (git toplevel basename); the server falls back to
-# basename(cwd) but this is more accurate for worktrees.
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+# Explicit project_id from init/config, with basename fallback for compatibility.
+PROJECT_DIR="$(mem_mesh_project_id)"
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 
 # Normalize Cursor camelCase fields to snake_case and inject project_id.

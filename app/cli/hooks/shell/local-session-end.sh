@@ -5,12 +5,13 @@ __VERSION_MARKER__
 # Non-blocking: exits 0 on failure
 
 set -euo pipefail
+__PROJECT_ID_RESOLVER__
 command -v python3 >/dev/null 2>&1 || exit 0
 
 MEM_MESH_PATH=__MEM_MESH_PATH__
 
-# Detect project from CWD
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+# Resolve the stable project id.
+PROJECT_DIR="$(mem_mesh_project_id)"
 [ -z "$PROJECT_DIR" ] && exit 0
 
 python3 - "$MEM_MESH_PATH" "$PROJECT_DIR" <<'PY' 2>/dev/null || true

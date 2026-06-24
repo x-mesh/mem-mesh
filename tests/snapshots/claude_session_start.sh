@@ -9,6 +9,37 @@
 # client authenticates against verify_hook_token uniformly.
 
 set -euo pipefail
+# --- mem-mesh project id resolution ------------------------------------------
+mem_mesh_project_id() {
+  if [ -n "${MEM_MESH_PROJECT_ID:-}" ]; then
+    printf '%s\n' "$MEM_MESH_PROJECT_ID"
+    return 0
+  fi
+
+  _mm_pid="$(git config --local --get mem-mesh.project-id 2>/dev/null || true)"
+  if [ -n "$_mm_pid" ]; then
+    printf '%s\n' "$_mm_pid"
+    return 0
+  fi
+
+  _mm_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  _mm_file="${_mm_root}/.mem-mesh/project-id"
+  if [ -f "$_mm_file" ]; then
+    _mm_pid="$(sed -n '1{s/[[:space:]]*$//;p;}' "$_mm_file" 2>/dev/null || true)"
+    if [ -n "$_mm_pid" ]; then
+      printf '%s\n' "$_mm_pid"
+      return 0
+    fi
+  fi
+
+  _mm_base="$(basename "$_mm_root" 2>/dev/null || true)"
+  if [ -n "$_mm_base" ]; then
+    printf '%s\n' "$_mm_base"
+  else
+    printf '%s\n' "unknown"
+  fi
+}
+
 # --- mem-mesh hook logging (opt-in: MEM_MESH_HOOK_LOG) -------------------------
 # Append a per-stage trace to ~/.mem-mesh/hooks.log so you can tell whether this
 # shell hook actually fired and where it exited — surfacing the otherwise-silent
@@ -70,9 +101,8 @@ fi
 
 INPUT=$(cat)
 
-# Explicit project_id (git toplevel basename); the server falls back to
-# basename(cwd) but this is more accurate for worktrees.
-PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+# Explicit project_id from init/config, with basename fallback for compatibility.
+PROJECT_DIR="$(mem_mesh_project_id)"
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   --arg pid "$PROJECT_DIR" \
