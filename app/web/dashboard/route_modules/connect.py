@@ -739,9 +739,7 @@ async def connect_mcp(
     )
     # Resolve the literal token once — reveal-gated, so a non-loopback unauthorized
     # caller never receives it. Used for both the baked header and the response.
-    mcp_token = (
-        resolve_hook_token() if (mcp_auth_on and _can_reveal(request)) else None
-    )
+    mcp_token = resolve_hook_token() if (mcp_auth_on and _can_reveal(request)) else None
     if mcp_auth_on and mode in ("http", "sse") and mcp_token:
         # Static literal token header so the pasted block authenticates without
         # the interactive OAuth flow — the server accepts its hook token as an MCP

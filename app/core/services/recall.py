@@ -75,7 +75,11 @@ async def surface_relevant_memories(
         rid = getattr(r, "id", None) if not isinstance(r, dict) else r.get("id")
         if rid is None or rid in seen:
             continue
-        cat = getattr(r, "category", None) if not isinstance(r, dict) else r.get("category")
+        cat = (
+            getattr(r, "category", None)
+            if not isinstance(r, dict)
+            else r.get("category")
+        )
         if cats and cat not in cats:
             continue
         score = (
@@ -86,7 +90,9 @@ async def surface_relevant_memories(
         if float(score) < min_score:
             continue
         content = (
-            getattr(r, "content", "") if not isinstance(r, dict) else r.get("content", "")
+            getattr(r, "content", "")
+            if not isinstance(r, dict)
+            else r.get("content", "")
         ) or ""
         created = (
             getattr(r, "created_at", "")

@@ -387,9 +387,7 @@ def test_user_prompt_submit_reminds_when_no_tracked_pins(
     script = _render_and_write(
         tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
     )
-    result = _run_hook(
-        script, {"prompt": NO_KEYWORD_PROMPT}, api_url=url
-    )
+    result = _run_hook(script, {"prompt": NO_KEYWORD_PROMPT}, api_url=url)
     assert result.returncode == 0
     assert PIN_REMINDER_TEXT in result.stdout
 
@@ -407,9 +405,7 @@ def test_user_prompt_submit_silent_with_in_progress_pin(
     script = _render_and_write(
         tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
     )
-    result = _run_hook(
-        script, {"prompt": NO_KEYWORD_PROMPT}, api_url=url
-    )
+    result = _run_hook(script, {"prompt": NO_KEYWORD_PROMPT}, api_url=url)
     assert result.returncode == 0
     assert PIN_REMINDER_TEXT not in result.stdout
 
@@ -423,9 +419,7 @@ def test_user_prompt_submit_silent_with_open_pin(
     script = _render_and_write(
         tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
     )
-    result = _run_hook(
-        script, {"prompt": NO_KEYWORD_PROMPT}, api_url=url
-    )
+    result = _run_hook(script, {"prompt": NO_KEYWORD_PROMPT}, api_url=url)
     assert result.returncode == 0
     assert PIN_REMINDER_TEXT not in result.stdout
 

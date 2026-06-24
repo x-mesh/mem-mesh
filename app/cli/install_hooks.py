@@ -1669,9 +1669,7 @@ def _install_codex(
     codex_token = _ensure_hook_token() if mcp_mode == "http" else None
     merge_codex_mcp_config(
         config_path,
-        build_codex_mcp_block(
-            mode=mcp_mode, url=url, path=mcp_path, token=codex_token
-        ),
+        build_codex_mcp_block(mode=mcp_mode, url=url, path=mcp_path, token=codex_token),
     )
     print(f"  -> {config_path}")
 

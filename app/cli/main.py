@@ -395,10 +395,7 @@ def _dispatch_hooks(args: argparse.Namespace) -> None:
     from app.cli.hooks.constants import DEFAULT_URL
 
     if args.hooks_command is None:
-        print(
-            "Usage: mem-mesh hooks "
-            "{install|uninstall|status|doctor|sync-project}"
-        )
+        print("Usage: mem-mesh hooks " "{install|uninstall|status|doctor|sync-project}")
         return
 
     if args.hooks_command == "install":

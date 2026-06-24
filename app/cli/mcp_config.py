@@ -714,7 +714,11 @@ def run_mcp_setup(
             if existing_mode and existing_mode != mode:
                 entry_mode = existing_mode  # keep the backend, fix the contents
         mcp_entry = generate_mcp_entry(
-            mode=entry_mode, url=url, tool_key=t["key"], with_auth=with_auth, token=token
+            mode=entry_mode,
+            url=url,
+            tool_key=t["key"],
+            with_auth=with_auth,
+            token=token,
         )
         success, msg = configure_tool(t, mcp_entry, do_backup=True)
         configured.append(

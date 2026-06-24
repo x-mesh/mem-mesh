@@ -89,10 +89,7 @@ def _extract_url_from_script(path: Path) -> Optional[str]:
         # Match the API_URL assignment (no-env form) or any legacy
         # env-default form. Gate on `|| echo ` / `MEM_MESH_API_URL:-`
         # rather than the env var name so the no-env render still parses.
-        if not (
-            stripped.startswith("API_URL=")
-            or "MEM_MESH_API_URL:-" in line
-        ):
+        if not (stripped.startswith("API_URL=") or "MEM_MESH_API_URL:-" in line):
             continue
         # Config-file form: extract the URL after the `|| echo ` fallback.
         echo_idx = line.find("|| echo ")
