@@ -55,6 +55,12 @@ def mock_tool_handlers():
     handlers.session_end = AsyncMock(
         return_value={"status": "ended", "summary": "test"}
     )
+    handlers.pin_list = AsyncMock(
+        return_value={"pins": [], "count": 0, "project_id": "test"}
+    )
+    handlers.pin_get = AsyncMock(
+        return_value={"found": True, "pin": {"id": "pin-id", "status": "completed"}}
+    )
     return handlers
 
 
@@ -285,6 +291,58 @@ async def test_dispatch_pin_promote_tool(dispatcher, mock_tool_handlers):
 async def test_dispatch_pin_promote_missing_pin_id(dispatcher):
     """Test pin_promote with missing pin_id"""
     result = await dispatcher.dispatch("pin_promote", {})
+
+    assert result["isError"] is True
+    response_data = json.loads(result["content"][0]["text"])
+    assert response_data["success"] is False
+    assert "pin_id" in response_data["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_pin_list_tool(dispatcher, mock_tool_handlers):
+    """Test dispatching pin_list tool"""
+    result = await dispatcher.dispatch(
+        "pin_list", {"project_id": "test-project", "status": "completed"}
+    )
+
+    assert result["isError"] is False
+    mock_tool_handlers.pin_list.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_pin_list_missing_project_id(dispatcher):
+    """Test pin_list with missing project_id"""
+    result = await dispatcher.dispatch("pin_list", {"status": "open"})
+
+    assert result["isError"] is True
+    response_data = json.loads(result["content"][0]["text"])
+    assert response_data["success"] is False
+    assert "project_id" in response_data["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_pin_list_default_values(dispatcher, mock_tool_handlers):
+    """Test pin_list passes default limit/include_stats"""
+    await dispatcher.dispatch("pin_list", {"project_id": "test"})
+
+    call_kwargs = mock_tool_handlers.pin_list.call_args.kwargs
+    assert call_kwargs.get("limit") == 10
+    assert call_kwargs.get("include_stats") is False
+
+
+@pytest.mark.asyncio
+async def test_dispatch_pin_get_tool(dispatcher, mock_tool_handlers):
+    """Test dispatching pin_get tool"""
+    result = await dispatcher.dispatch("pin_get", {"pin_id": "test-pin"})
+
+    assert result["isError"] is False
+    mock_tool_handlers.pin_get.assert_called_once_with(pin_id="test-pin")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_pin_get_missing_pin_id(dispatcher):
+    """Test pin_get with missing pin_id"""
+    result = await dispatcher.dispatch("pin_get", {})
 
     assert result["isError"] is True
     response_data = json.loads(result["content"][0]["text"])

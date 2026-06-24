@@ -118,13 +118,23 @@ class WorkPage extends HTMLElement {
     try {
       const api = window.app?.apiClient;
       if (!api) return;
-      const [pinsData, projectsData, sessionsData] = await Promise.allSettled([
-        api.get('/work/pins', { limit: 100 }),
+      // Active pins are ranked by importance; completed pins are fetched
+      // separately ordered by recency. A single importance-sorted page would
+      // truncate low-importance recent completions below the limit, so a
+      // just-finished pin would silently never appear on the board.
+      const [activeData, doneData, projectsData, sessionsData] = await Promise.allSettled([
+        api.get('/work/pins', { limit: 200 }),
+        api.get('/work/pins', { status: 'completed', order_by_importance: false, limit: 100 }),
         api.get('/work/projects'),
         api.get('/work/sessions', { limit: 20 })
       ]);
 
-      this.pins = pinsData.status === 'fulfilled' ? (pinsData.value.pins || []) : [];
+      const activePins = (activeData.status === 'fulfilled' ? (activeData.value.pins || []) : [])
+        .filter(p => p.status !== 'completed');
+      const donePins = doneData.status === 'fulfilled' ? (doneData.value.pins || []) : [];
+      const byId = new Map();
+      [...activePins, ...donePins].forEach(p => byId.set(p.id, p));
+      this.pins = [...byId.values()];
       this.projects = projectsData.status === 'fulfilled' ? (projectsData.value.projects || []) : [];
       this.sessions = sessionsData.status === 'fulfilled' ? (sessionsData.value.sessions || []) : [];
       this.activeSession = this.sessions.find(s => s.status === 'active') || null;

@@ -143,19 +143,21 @@ def test_tools_registered():
     for tool in expected_memory_tools:
         assert tool in tool_names, f"Memory tool '{tool}' not found"
 
-    # Pin/Session tools (5)
+    # Pin/Session tools (7)
     expected_pin_tools = [
         "pin_add",
         "pin_complete",
         "pin_promote",
+        "pin_list",
+        "pin_get",
         "session_resume",
         "session_end",
     ]
     for tool in expected_pin_tools:
         assert tool in tool_names, f"Pin/Session tool '{tool}' not found"
 
-    # Total should be at least 11 (6 memory + 5 pin/session)
-    assert len(tool_names) >= 11
+    # Total should be at least 13 (6 memory + 7 pin/session)
+    assert len(tool_names) >= 13
 
 
 def test_tool_schemas_valid():
@@ -257,6 +259,54 @@ async def test_pin_add_tool(tool_handlers):
     assert "id" in result
     assert result["importance"] == 3
     assert result["status"] == "in_progress"
+
+
+@pytest.mark.asyncio
+async def test_pin_get_tool(tool_handlers):
+    """pin_get 도구 테스트 - 완료된 Pin까지 ID로 직접 조회"""
+    created = await tool_handlers.pin_add(
+        content="Pin to read back by id",
+        project_id="test-project",
+        importance=3,
+    )
+    pin_id = created["id"]
+
+    # 완료 처리 후에도 ID 직접 조회는 가능해야 한다 (session_resume은 미완료만 복원)
+    await tool_handlers.pin_complete(pin_id)
+
+    result = await tool_handlers.pin_get(pin_id)
+    assert result["found"] is True
+    assert result["pin"]["id"] == pin_id
+    assert result["pin"]["status"] == "completed"
+    assert result["pin"]["content"] == "Pin to read back by id"
+
+
+@pytest.mark.asyncio
+async def test_pin_get_not_found(tool_handlers):
+    """pin_get - 존재하지 않는 ID는 found=False"""
+    result = await tool_handlers.pin_get("00000000-0000-0000-0000-000000000000")
+    assert result["found"] is False
+    assert "message" in result
+
+
+@pytest.mark.asyncio
+async def test_pin_list_tool(tool_handlers):
+    """pin_list 도구 테스트 - status 필터로 완료 Pin 조회"""
+    created = await tool_handlers.pin_add(
+        content="Pin for list filtering",
+        project_id="test-project",
+        importance=4,
+        tags=["listme"],
+    )
+    await tool_handlers.pin_complete(created["id"])
+
+    result = await tool_handlers.pin_list(
+        project_id="test-project", status="completed", include_stats=True
+    )
+    ids = [p["id"] for p in result["pins"]]
+    assert created["id"] in ids
+    assert result["count"] >= 1
+    assert "stats" in result
 
 
 @pytest.mark.asyncio

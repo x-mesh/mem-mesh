@@ -69,6 +69,16 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "delete": "Permanently delete a memory by memory_id.",
     "stats": "Get memory count, category breakdown, and project distribution statistics.",
     "pin_promote": "Promote a completed pin to a permanent memory for long-term retention.",
+    "pin_list": (
+        "List pins for a project with filters (status, min_importance, tags, session_id). "
+        "Unlike session_resume (active pins of the latest session only), this reads any pin "
+        "including completed ones. Set include_stats=true for status counts."
+    ),
+    "pin_get": (
+        "Fetch a single pin by its full ID, including completed pins. "
+        "The only way to read a specific pin back once it has left the active set "
+        "(search/context cover memories, not pins). Returns {found, pin}."
+    ),
     "link": (
         "Create a typed relation (related, parent, child, supersedes, references, depends_on, similar) "
         "between two memories."

@@ -224,6 +224,34 @@ async def pin_promote(pin_id: str, category: str = "task") -> dict:
     return await _get_handlers().pin_promote(pin_id, category=category)
 
 
+@mcp.tool(description=TOOL_DESCRIPTIONS["pin_list"])
+async def pin_list(
+    project_id: str,
+    session_id: Optional[str] = None,
+    status: Optional[str] = None,
+    min_importance: Optional[int] = None,
+    tags: Optional[list[str]] = None,
+    limit: int = 10,
+    include_stats: bool = False,
+) -> dict:
+    """Internal handler for pin_list tool."""
+    return await _get_handlers().pin_list(
+        project_id,
+        session_id=session_id,
+        status=status,
+        min_importance=min_importance,
+        tags=tags,
+        limit=limit,
+        include_stats=include_stats,
+    )
+
+
+@mcp.tool(description=TOOL_DESCRIPTIONS["pin_get"])
+async def pin_get(pin_id: str) -> dict:
+    """Internal handler for pin_get tool."""
+    return await _get_handlers().pin_get(pin_id)
+
+
 @mcp.tool(description=TOOL_DESCRIPTIONS["session_resume"])
 async def session_resume(
     project_id: str,

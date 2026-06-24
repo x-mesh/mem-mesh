@@ -56,6 +56,10 @@ class MCPDispatcher:
                 return await self._dispatch_pin_complete(args)
             elif tool_name == "pin_promote":
                 return await self._dispatch_pin_promote(args)
+            elif tool_name == "pin_list":
+                return await self._dispatch_pin_list(args)
+            elif tool_name == "pin_get":
+                return await self._dispatch_pin_get(args)
             elif tool_name == "session_resume":
                 return await self._dispatch_session_resume(args)
             elif tool_name == "session_end":
@@ -184,6 +188,28 @@ class MCPDispatcher:
             pin_id=args["pin_id"],
             category=args.get("category", "task"),
         )
+        return format_tool_response(result)
+
+    async def _dispatch_pin_list(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if "project_id" not in args:
+            return format_tool_error("Missing required argument: project_id")
+
+        result = await self._tool_handlers.pin_list(
+            project_id=args["project_id"],
+            session_id=args.get("session_id"),
+            status=args.get("status"),
+            min_importance=args.get("min_importance"),
+            tags=args.get("tags"),
+            limit=args.get("limit", 10),
+            include_stats=args.get("include_stats", False),
+        )
+        return format_tool_response(result)
+
+    async def _dispatch_pin_get(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if "pin_id" not in args:
+            return format_tool_error("Missing required argument: pin_id")
+
+        result = await self._tool_handlers.pin_get(pin_id=args["pin_id"])
         return format_tool_response(result)
 
     async def _dispatch_session_resume(self, args: Dict[str, Any]) -> Dict[str, Any]:
