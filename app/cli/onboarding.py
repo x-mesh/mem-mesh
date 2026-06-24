@@ -21,7 +21,6 @@ from app.cli.hooks.status import (
     check_connectivity,
     probe_api,
     resolve_api_url,
-    server_enforces_auth,
 )
 
 TARGET_LABELS = {
@@ -703,13 +702,6 @@ def _onboarding_steps(
     auth_blocked = False
     current_token = resolve_hook_token()
 
-    # Does the server enforce MCP/OAuth auth? Drives the MCP Bearer header
-    # (Step 2) and the shell-env token bridge (after Step 2). Authoritative via
-    # the overview API so it holds even when /health is public.
-    mcp_auth_on = (probe.ok or probe.auth_required) and server_enforces_auth(
-        resolved_url
-    )
-
     if not yes:
         chosen = _prompt_token(current_token)
         if chosen and chosen != current_token:
@@ -772,7 +764,6 @@ def _onboarding_steps(
             yes=yes,
             preferred_mode=preferred_mcp_mode,
             server_reachable=probe.ok or probe.auth_required,
-            with_auth=mcp_auth_on,
             step_label="[2/3]",
         )
         or {}

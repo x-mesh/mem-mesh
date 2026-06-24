@@ -523,15 +523,21 @@ def run_mcp_setup(
     # config (Option 2). An explicit token (from `mcp config --token`) wins;
     # otherwise read the ~/.mem-mesh/hook_token SSOT. If auth is requested but no
     # token exists, drop auth with a warning rather than baking an empty header.
-    if with_auth and token is None:
+    # Always-auth (Option 2): bake the token whenever one is resolvable,
+    # regardless of whether the server enforces auth right now. The server
+    # ignores the Bearer header when auth is off, so it is harmless — and it
+    # avoids a re-install if auth is toggled on later, keeping every tool
+    # (including Codex, which already does this) consistent. The legacy
+    # `with_auth` gate based on a network probe is no longer consulted.
+    if token is None:
         from app.core.config import resolve_hook_token
 
         token = resolve_hook_token()
-    if with_auth and not token:
+    with_auth = bool(token)
+    if not token:
         print(
-            f"  {warn('No hook token (~/.mem-mesh/hook_token) — MCP auth header skipped.')}"
+            f"  {warn('No hook token (~/.mem-mesh/hook_token) — MCP configured without an auth header.')}"
         )
-        with_auth = False
 
     # Show the API URL exactly as resolved by the caller. The caller owns
     # precedence (explicit --url > MEM_MESH_API_URL env > ~/.mem-mesh/api_url >

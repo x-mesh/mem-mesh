@@ -87,7 +87,7 @@ export class SettingsPage extends HTMLElement {
             <div class="env-list" id="access-env-list">
               <div class="settings-loading"><div class="settings-spinner"></div><span>Loading status...</span></div>
             </div>
-            <p class="env-foot"><span class="env-src env-src-env">env</span> set via <code>.env</code> (read-only here) &middot; <span class="env-src env-src-db">db</span> set from dashboard &middot; <span class="env-src env-src-default">default</span> unset. These reflect this <strong>server's</strong> configuration, not a client setting — clients no longer read these env vars: the hook token is baked into each tool's config and lives in <code>~/.mem-mesh/hook_token</code>. Change auth on the <a href="/security" data-route="/security">Security</a> page.</p>
+            <p class="env-foot"><span class="env-src env-src-env">env</span> set via <code>.env</code> (read-only here) &middot; <span class="env-src env-src-db">db</span> set from dashboard &middot; <span class="env-src env-src-default">default</span> unset. These reflect this <strong>server's</strong> configuration, not a client setting — clients no longer read these env vars: the hook token is baked into each tool's config and lives in <code>~/.mem-mesh/hook_token</code>. Toggle <strong>On/Off</strong> below to change auth (env-pinned rows are read-only); passwords &amp; OAuth clients are managed on the <a href="/security" data-route="/security">Security</a> page.</p>
           </div>
         </div>
       </div>
@@ -390,7 +390,8 @@ export class SettingsPage extends HTMLElement {
               state: connectCfg && connectCfg.public_url ? textVal(connectCfg.public_url) : setUnset(false),
               src: srcBadge(connectCfg && connectCfg.source, connectCfg && connectCfg.env_pinned),
               desc: 'Shared URL used by Connect config' },
-            { name: 'MEM_MESH_WEB_BASIC_AUTH_ENABLED', state: onOff(a('web_basic_auth_enabled').value),
+            { name: 'MEM_MESH_WEB_BASIC_AUTH_ENABLED', key: 'web_basic_auth_enabled', toggle: true,
+              tval: !!a('web_basic_auth_enabled').value, pinned: !!a('web_basic_auth_enabled').env_pinned,
               src: srcBadge(a('web_basic_auth_enabled').source, a('web_basic_auth_enabled').env_pinned),
               desc: 'Dashboard login (Basic Auth)' },
             { name: 'MEM_MESH_ADMIN_USERNAME', state: textVal(a('admin_username').value),
@@ -399,13 +400,16 @@ export class SettingsPage extends HTMLElement {
             { name: 'MEM_MESH_ADMIN_PASSWORD', state: setUnset(a('admin_password').value),
               src: srcBadge(a('admin_password').source, a('admin_password').env_pinned),
               desc: 'Dashboard admin password' },
-            { name: 'MEM_MESH_AUTH_ENABLED', state: onOff(a('auth_enabled').value),
+            { name: 'MEM_MESH_AUTH_ENABLED', key: 'auth_enabled', toggle: true,
+              tval: !!a('auth_enabled').value, pinned: !!a('auth_enabled').env_pinned,
               src: srcBadge(a('auth_enabled').source, a('auth_enabled').env_pinned),
               desc: 'Global OAuth (api + mcp)' },
-            { name: 'MEM_MESH_MCP_AUTH_ENABLED', state: onOff(a('mcp_auth_enabled').value),
+            { name: 'MEM_MESH_MCP_AUTH_ENABLED', key: 'mcp_auth_enabled', toggle: true,
+              tval: !!a('mcp_auth_enabled').value, pinned: !!a('mcp_auth_enabled').env_pinned,
               src: srcBadge(a('mcp_auth_enabled').source, a('mcp_auth_enabled').env_pinned),
               desc: 'MCP SSE OAuth' },
-            { name: 'MEM_MESH_WEB_AUTH_ENABLED', state: onOff(a('web_auth_enabled').value),
+            { name: 'MEM_MESH_WEB_AUTH_ENABLED', key: 'web_auth_enabled', toggle: true,
+              tval: !!a('web_auth_enabled').value, pinned: !!a('web_auth_enabled').env_pinned,
               src: srcBadge(a('web_auth_enabled').source, a('web_auth_enabled').env_pinned),
               desc: 'Web API OAuth' },
         ];
@@ -416,13 +420,47 @@ export class SettingsPage extends HTMLElement {
             ? `<div class="env-warn">Dashboard is reachable on <code>${this.escapeHtml(bind.effective_host)}</code> without login. Enable Basic Auth on the <a href="/security" data-route="/security">Security</a> page, or restrict access with a firewall.</div>`
             : '';
 
-        el.innerHTML = warn + rows.map((r) => `
+        el.innerHTML = warn + rows.map((r) => {
+            const stateHtml = r.toggle
+                ? `<button class="env-toggle ${r.tval ? 'on' : 'off'}" data-key="${r.key}" data-next="${r.tval ? '0' : '1'}"${r.pinned ? ' disabled title="env-pinned — set via the environment, read-only here"' : ''}>${r.tval ? 'On' : 'Off'}</button>`
+                : (r.state || '');
+            return `
             <div class="env-item">
               <code>${r.name}</code>
-              ${r.state}
+              ${stateHtml}
               ${r.src}
               <span class="env-desc">${r.desc}</span>
-            </div>`).join('');
+            </div>`;
+        }).join('');
+
+        el.querySelectorAll('.env-toggle:not([disabled])').forEach((btn) => {
+            btn.addEventListener('click', () =>
+                this.toggleAuth(btn.dataset.key, btn.dataset.next === '1'));
+        });
+    }
+
+    async toggleAuth(key, nextVal) {
+        // Same backend as the Security page (/api/security/config); the server
+        // enforces env-pinned skips and lockout guards (Basic Auth password,
+        // OAuth-without-Basic-Auth). On rejection we surface the detail so the
+        // user knows to set a password / enable Basic Auth on the Security page.
+        try {
+            const res = await fetch('/api/security/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ [key]: nextVal }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                window.alert(data.detail || `Failed to update ${key} (HTTP ${res.status})`);
+                return;
+            }
+            const notices = data.notices || [];
+            if (notices.length) window.alert(notices.join('\n\n'));
+            this.loadAccessStatus();
+        } catch (e) {
+            window.alert('Request failed: ' + (e && e.message ? e.message : e));
+        }
     }
 
     escapeHtml(text) {
@@ -1395,6 +1433,34 @@ style.textContent = `
 
 .env-item span {
   color: var(--text-muted);
+}
+
+.env-item .env-toggle {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: var(--font-semibold);
+  padding: 1px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  font-family: inherit;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.env-item .env-toggle.on {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.env-item .env-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.env-item .env-toggle:not(:disabled):hover {
+  border-color: var(--text-secondary);
 }
 
 /* Access status — head / footer */
