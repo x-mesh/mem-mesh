@@ -131,8 +131,9 @@ async def reveal_hook_token(request: Request, response: Response):
                 "Revealing the hook token requires an authenticated dashboard "
                 "(enable Basic Auth or OAuth web auth) or a local request. "
                 "Under Docker the published port is NAT'd so requests appear "
-                "non-local; instead read it on the host with "
-                "`cat ./data/hook_token` (or `docker compose exec mem-mesh "
+                "non-local; use the server's MEM_MESH_HOOK_TOKEN value when set, "
+                "or read the server-generated fallback from the data volume "
+                "(`cat ./data/hook_token` or `docker compose exec mem-mesh "
                 "cat /app/data/hook_token`), or enable Basic Auth."
             ),
         )

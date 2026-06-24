@@ -12,6 +12,7 @@ command -v curl >/dev/null 2>&1 || { mem_mesh_log "subagent-start" "abort" "curl
 
 API_URL="$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)"
 HOOK_TOKEN="$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)"
+HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-__HOOK_OUTPUT_MODE__}"
 AUTH=()
 AUTH_STATE=absent
 if [ -n "$HOOK_TOKEN" ]; then AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}"); AUTH_STATE=present; fi
@@ -56,6 +57,15 @@ except Exception:
 " <<< "$RESPONSE" 2>/dev/null) || exit 0
 
 [ -z "$CONTEXT" ] && exit 0
+
+case "$HOOK_OUTPUT_MODE" in
+  quiet|none|off)
+    exit 0
+    ;;
+  compact)
+    CONTEXT=$(printf '%s' "$CONTEXT" | jq -Rrsr '.[0:1200]')
+    ;;
+esac
 
 jq -n --arg ctx "$CONTEXT" '{
   hookSpecificOutput: {

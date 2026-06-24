@@ -20,11 +20,23 @@ from app.cli.hooks.renderer import (
     _shell_safe_url,
 )
 from app.cli.hooks.templates import (
+    LOCAL_SUBAGENT_START_HOOK_TEMPLATE,
     LOCAL_STOP_HOOK_TEMPLATE,
     SESSION_END_HOOK_TEMPLATE,
 )
 
 _SHELL_DIR = Path(install_hooks.__file__).parent / "hooks" / "shell"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_materialized_mem_mesh_files(monkeypatch, tmp_path):
+    """Tests must not rewrite the developer's real ~/.mem-mesh config."""
+    from app.core import config as core_config
+
+    mem_dir = tmp_path / ".mem-mesh"
+    monkeypatch.setattr(install_hooks, "API_URL_FILE", mem_dir / "api_url")
+    monkeypatch.setattr(install_hooks, "HOOK_TOKEN_FILE", mem_dir / "hook_token")
+    monkeypatch.setattr(core_config, "HOOK_TOKEN_FILE", mem_dir / "hook_token")
 
 
 def _read_json(path: Path) -> dict:
@@ -236,9 +248,8 @@ def test_install_claude_http_skips_endpoint_scripts(
     monkeypatch.setattr(install_hooks, "CLAUDE_HOOKS_DIR", hooks_dir)
     monkeypatch.setattr(install_hooks, "CLAUDE_SETTINGS", settings_path)
     monkeypatch.setattr(install_hooks, "HOOK_TOKEN_FILE", token_file)
-    # Pin the token SSOT to tmp + seed a value so the baked HTTP-hook header is a
-    # deterministic, non-empty literal (Option 2) — and a real ~/.mem-mesh token
-    # can't leak in.
+    # Pin the materialized token file to tmp + seed a value so the baked HTTP-hook
+    # header is deterministic and a real ~/.mem-mesh token cannot leak in.
     monkeypatch.setattr("app.core.config.HOOK_TOKEN_FILE", token_file)
     monkeypatch.setattr(
         "app.core.config._data_dir_hook_token_file",
@@ -478,10 +489,9 @@ def test_render_template_rejects_url_injection() -> None:
 
 
 def test_claude_http_hook_entry_has_literal_auth_header() -> None:
-    """Option 2: the native HTTP hook header carries the LITERAL hook token
-    baked in at install time (read from ~/.mem-mesh/hook_token), not a
-    ``$MEM_MESH_HOOK_TOKEN`` env reference, and no ``allowedEnvVars`` (Claude
-    Code no longer interpolates an env var)."""
+    """The native HTTP hook header carries the literal hook token baked in at
+    install time, not a ``$MEM_MESH_HOOK_TOKEN`` env reference, and no
+    ``allowedEnvVars``."""
     settings = install_hooks._build_claude_hooks_settings(
         "standard", "http", "http://localhost:8000", token="real-tok-123"
     )
@@ -514,21 +524,26 @@ def test_ensure_hook_token_generates_0600_and_reuses(
 ) -> None:
     token_file = tmp_path / ".mem-mesh" / "hook_token"
     monkeypatch.setattr(install_hooks, "HOOK_TOKEN_FILE", token_file)
-    # _ensure_hook_token consults config.resolve_hook_token before writing, which
-    # reads config's own legacy HOOK_TOKEN_FILE plus the data-dir fallback. Point
-    # both at tmp so a real ~/.mem-mesh or ./data token can't leak in and defeat
-    # the reuse check.
-    monkeypatch.setattr("app.core.config.HOOK_TOKEN_FILE", token_file)
-    monkeypatch.setattr(
-        "app.core.config._data_dir_hook_token_file",
-        lambda: tmp_path / "data" / "hook_token",
-    )
     monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
 
     first = install_hooks._ensure_hook_token()
     assert first and token_file.exists()
     assert stat.S_IMODE(os.stat(token_file).st_mode) == 0o600
     assert install_hooks._ensure_hook_token() == first  # reused, not regenerated
+
+
+def test_ensure_hook_token_materializes_env(tmp_path: Path, monkeypatch) -> None:
+    token_file = tmp_path / ".mem-mesh" / "hook_token"
+    token_file.parent.mkdir(parents=True)
+    token_file.write_text("stale-file-token\n", encoding="utf-8")
+    monkeypatch.setattr(install_hooks, "HOOK_TOKEN_FILE", token_file)
+    monkeypatch.setenv("MEM_MESH_HOOK_TOKEN", "env-token-123")
+
+    token = install_hooks._ensure_hook_token()
+
+    assert token == "env-token-123"
+    assert token_file.read_text(encoding="utf-8").strip() == "env-token-123"
+    assert stat.S_IMODE(os.stat(token_file).st_mode) == 0o600
 
 
 # ---------------------------------------------------------------------------
@@ -577,6 +592,26 @@ def test_rendered_local_path_blocks_expansion(tmp_path: Path) -> None:
     line = next(ln for ln in rendered.splitlines() if ln.startswith("MEM_MESH_PATH="))
     assert not line.startswith('MEM_MESH_PATH="')  # never wrapped in dquotes
     assert "$(" not in line  # nothing expandable survives
+
+
+def test_render_local_subagent_start_output_mode(tmp_path: Path) -> None:
+    rendered = _render_local_template(
+        LOCAL_SUBAGENT_START_HOOK_TEMPLATE,
+        str(tmp_path),
+        hook_output_mode="compact",
+    )
+
+    assert 'HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-compact}"' in rendered
+    assert "jq -Rrsr '.[0:1200]'" in rendered
+
+
+def test_render_local_template_rejects_bad_output_mode(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="hook_output_mode"):
+        _render_local_template(
+            LOCAL_SUBAGENT_START_HOOK_TEMPLATE,
+            str(tmp_path),
+            hook_output_mode="verbose",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -670,6 +705,27 @@ def test_install_codex_api_writes_command_hooks_and_mcp_config(
     assert (hooks_dir / "mem-mesh-session-start.sh").exists()
     assert (hooks_dir / "mem-mesh-stop-decide.sh").exists()
     assert (hooks_dir / "mem-mesh-precompact.sh").exists()
+    session_script = (hooks_dir / "mem-mesh-session-start.sh").read_text(
+        encoding="utf-8"
+    )
+    prompt_script = (hooks_dir / "mem-mesh-user-prompt-submit.sh").read_text(
+        encoding="utf-8"
+    )
+    precompact_script = (hooks_dir / "mem-mesh-precompact.sh").read_text(
+        encoding="utf-8"
+    )
+    subagent_start_script = (hooks_dir / "mem-mesh-subagent-start.sh").read_text(
+        encoding="utf-8"
+    )
+    assert 'HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-compact}"' in session_script
+    assert 'HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-compact}"' in prompt_script
+    assert (
+        'HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-compact}"' in precompact_script
+    )
+    assert (
+        'HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-compact}"'
+        in subagent_start_script
+    )
 
     hooks = _read_json(hooks_path)["hooks"]
     all_handlers = [
@@ -690,7 +746,7 @@ def test_install_codex_api_writes_command_hooks_and_mcp_config(
     config_text = config_path.read_text(encoding="utf-8")
     assert "[mcp_servers.mem-mesh]" in config_text
     assert 'url = "https://mem.example.com/mcp/sse"' in config_text
-    # Option 2 dropped the env-var indirection: no named bearer_token_env_var.
+    # Generated config stamps a literal bearer header: no named env indirection.
     assert "bearer_token_env_var" not in config_text
     # Codex rejects env blocks for streamable_http/url transports; client
     # identity is carried by hook payloads and MCP clientInfo/User-Agent.
@@ -724,6 +780,17 @@ def test_install_codex_local_uses_stdio_mcp_and_no_post_tool_hook(
     )
 
     hooks = _read_json(tmp_path / ".codex" / "hooks.json")["hooks"]
+    hooks_dir = tmp_path / ".codex" / "hooks"
+    output_scripts = [
+        "mem-mesh-session-start.sh",
+        "mem-mesh-precompact.sh",
+        "mem-mesh-user-prompt-submit.sh",
+        "mem-mesh-subagent-start.sh",
+    ]
+    for name in output_scripts:
+        script = (hooks_dir / name).read_text(encoding="utf-8")
+        assert 'HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-compact}"' in script
+
     assert "PostToolUse" not in hooks
     stop_command = hooks["Stop"][0]["hooks"][0]["command"]
     assert stop_command.endswith("mem-mesh-stop.sh")
@@ -835,9 +902,9 @@ def test_mcp_config_configures_codex_toml(tmp_path: Path) -> None:
 
 
 def test_mcp_config_codex_bakes_literal_bearer_header(tmp_path: Path) -> None:
-    """Option 2: an auth-enabled Codex MCP entry carries the LITERAL bearer token
-    in an ``[mcp_servers.mem-mesh.http_headers]`` table — Codex has no inline
-    bearer field, but http_headers holds the static literal (no env indirection)."""
+    """An auth-enabled Codex MCP entry carries the literal bearer token in an
+    ``[mcp_servers.mem-mesh.http_headers]`` table. Codex has no inline bearer
+    field, but http_headers holds the static literal."""
     from app.cli import mcp_config
 
     config_path = tmp_path / ".codex" / "config.toml"
@@ -893,8 +960,10 @@ def test_mcp_config_claude_desktop_uses_mcp_remote_proxy() -> None:
     assert "headers" not in entry
 
 
-def test_ensure_api_url_writes_file_ssot(tmp_path: Path, monkeypatch) -> None:
-    """_ensure_api_url mirrors the install URL into the ~/.mem-mesh/api_url SSOT."""
+def test_ensure_api_url_writes_materialized_fallback(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """_ensure_api_url mirrors the effective URL into the ~/.mem-mesh fallback."""
     api_file = tmp_path / ".mem-mesh" / "api_url"
     monkeypatch.setattr(install_hooks, "API_URL_FILE", api_file)
 

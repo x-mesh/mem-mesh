@@ -51,7 +51,7 @@ def build_codex_mcp_block(
     For http mode with a ``token``, the literal bearer token is baked into a
     ``[mcp_servers.mem-mesh.http_headers]`` table — Codex has no inline
     ``bearer_token`` field, but ``http_headers`` carries literal static headers,
-    so the secret lives in the config (Option 2) with no env var indirection.
+    so the generated config does not rely on runtime env inheritance.
     """
     env = {"MEM_MESH_CLIENT": "codex", **(env or {})}
     lines = [_BEGIN, "[mcp_servers.mem-mesh]"]
@@ -88,8 +88,8 @@ def build_codex_mcp_block(
         lines.append("[mcp_servers.mem-mesh.env]")
         for key in sorted(env):
             lines.append(f"{key} = {_toml_string(env[key])}")
-    # Literal bearer header (Option 2): an auth-enforcing http server's token is
-    # baked here rather than referenced via an env var.
+    # Literal bearer header: generated config bakes the token here rather than
+    # referencing an env var.
     if is_remote and token:
         lines.extend(
             [

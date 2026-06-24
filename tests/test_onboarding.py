@@ -8,8 +8,24 @@ from app.cli import onboarding
 from app.cli.hooks.status import ApiProbe
 
 
+@pytest.fixture(autouse=True)
+def _isolate_materialized_mem_mesh_files(monkeypatch, tmp_path):
+    """Onboarding materializes ~/.mem-mesh files; keep tests in tmp_path."""
+    from app.cli import install_hooks
+    from app.core import config as core_config
+
+    mem_dir = tmp_path / ".mem-mesh"
+    monkeypatch.setattr(install_hooks, "API_URL_FILE", mem_dir / "api_url")
+    monkeypatch.setattr(install_hooks, "HOOK_TOKEN_FILE", mem_dir / "hook_token")
+    monkeypatch.setattr(core_config, "HOOK_TOKEN_FILE", mem_dir / "hook_token")
+
+
 def _unreachable_probe(url, timeout=5):
     return ApiProbe("unreachable", None, "unreachable: test")
+
+
+def _reachable_probe(url, timeout=5):
+    return ApiProbe("ok", 200, "reachable")
 
 
 def test_resolve_hook_targets_auto_uses_detected_only(monkeypatch) -> None:
@@ -78,11 +94,9 @@ def _stub_steps_for_uvx(monkeypatch) -> None:
     monkeypatch.setattr(onboarding, "_detect_targets", lambda: ["codex"])
 
     # Deterministic "no token" baseline; token-specific tests override after.
-    # The ~/.mem-mesh/hook_token file is the only token source (no env layer),
-    # so stubbing resolve_hook_token alone pins the baseline.
-    from app.core import config as core_config
-
-    monkeypatch.setattr(core_config, "resolve_hook_token", lambda: "")
+    monkeypatch.setattr(
+        onboarding, "_client_effective_hook_token", lambda: (None, "none")
+    )
 
     from app.cli import install_hooks, mcp_config
 
@@ -126,21 +140,18 @@ def test_onboarding_json_emits_structured_result(monkeypatch, capsys) -> None:
 
 def test_onboarding_json_reports_hook_token_from_file(monkeypatch, capsys) -> None:
     _stub_steps_for_uvx(monkeypatch)
-    from app.core import config as core_config
 
-    # The ~/.mem-mesh/hook_token file is the single source of truth (no env
-    # layer): a resolved token reports as the 2-state "file" status, with no
-    # shell-env marker.
-    monkeypatch.setattr(core_config, "resolve_hook_token", lambda: "file-token")
+    monkeypatch.setattr(
+        onboarding, "_client_effective_hook_token", lambda: ("file-token", "file")
+    )
 
     with pytest.raises(SystemExit):
         onboarding.cmd_onboarding(json_mode=True)
 
     data = json.loads(capsys.readouterr().out)
     assert data["hook_token"] == {"status": "file"}
-    # The file token is baked into every tool config as a literal bearer header
-    # at install time, so a "file" status is fully configured — no setup-token
-    # guidance is emitted.
+    # The materialized token is baked into every tool config as a literal bearer
+    # header at install time, so a "file" status is fully configured.
     assert not any("setup-token" in a for a in data["next_actions"])
 
 
@@ -170,6 +181,130 @@ def test_onboarding_json_reports_hook_failure(monkeypatch, capsys) -> None:
     assert data["steps"]["hooks"]["status"] == "failed"
     assert "hook boom" in data["steps"]["hooks"]["error"]
     assert any("hook boom" in e for e in data["errors"])
+
+
+@pytest.mark.parametrize(
+    ("token", "source"),
+    [("file-token", "file"), ("env-token", "env")],
+)
+def test_onboarding_yes_rejected_token_skips_hooks_without_prompt(
+    monkeypatch, capsys, token, source
+) -> None:
+    calls = {"install": 0, "auth_tokens": []}
+
+    monkeypatch.setattr(onboarding, "probe_api", _reachable_probe)
+    monkeypatch.setattr(onboarding, "_detect_targets", lambda: ["codex"])
+    monkeypatch.setattr(
+        onboarding, "_client_effective_hook_token", lambda: (token, source)
+    )
+    monkeypatch.setattr(
+        onboarding,
+        "_auth_probe",
+        lambda url, probe_token: calls["auth_tokens"].append(probe_token) or 401,
+    )
+    monkeypatch.setattr(
+        "builtins.input", lambda *a, **k: pytest.fail("input() called under --yes")
+    )
+
+    from app.cli import install_hooks, mcp_config
+
+    monkeypatch.setattr(
+        install_hooks,
+        "cmd_install",
+        lambda *a, **k: calls.__setitem__("install", calls["install"] + 1),
+    )
+    monkeypatch.setattr(mcp_config, "run_mcp_setup", lambda **k: {"status": "skipped"})
+
+    with pytest.raises(SystemExit) as exc:
+        onboarding.cmd_onboarding(
+            url="http://localhost:8000",
+            target="auto",
+            yes=True,
+            json_mode=True,
+        )
+
+    assert exc.value.code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert calls["auth_tokens"] == [token]
+    assert calls["install"] == 0
+    assert data["steps"]["hooks"]["status"] == "skipped"
+
+
+def test_onboarding_yes_env_token_materializes_and_configures_auth(
+    monkeypatch, tmp_path
+) -> None:
+    calls = {"install": 0, "mcp": None, "auth_tokens": []}
+    token_file = tmp_path / ".mem-mesh" / "hook_token"
+
+    monkeypatch.setattr(onboarding, "probe_api", _reachable_probe)
+    monkeypatch.setattr(onboarding, "_detect_targets", lambda: ["codex"])
+    monkeypatch.setattr(
+        onboarding, "_client_effective_hook_token", lambda: ("env-token", "env")
+    )
+    monkeypatch.setattr(
+        onboarding,
+        "_auth_probe",
+        lambda url, token: calls["auth_tokens"].append(token) or 200,
+    )
+    monkeypatch.setattr(
+        "builtins.input", lambda *a, **k: pytest.fail("input() called under --yes")
+    )
+
+    from app.cli import install_hooks, mcp_config
+
+    monkeypatch.setattr(
+        install_hooks,
+        "cmd_install",
+        lambda *a, **k: calls.__setitem__("install", calls["install"] + 1),
+    )
+    monkeypatch.setattr(
+        mcp_config,
+        "run_mcp_setup",
+        lambda **k: calls.__setitem__("mcp", k) or {"status": "configured"},
+    )
+
+    onboarding.cmd_onboarding(
+        url="http://localhost:8000",
+        target="auto",
+        yes=True,
+    )
+
+    assert calls["auth_tokens"] == ["env-token"]
+    assert calls["mcp"]["with_auth"] is True
+    assert calls["mcp"]["token"] == "env-token"
+    assert calls["install"] == 1
+    assert token_file.read_text(encoding="utf-8").strip() == "env-token"
+
+
+def test_client_effective_hook_token_prefers_env(monkeypatch, tmp_path) -> None:
+    from app.core import config as core_config
+
+    token_file = tmp_path / "hook_token"
+    token_file.write_text("file-token\n", encoding="utf-8")
+    monkeypatch.setattr(core_config, "HOOK_TOKEN_FILE", token_file)
+    monkeypatch.setenv("MEM_MESH_HOOK_TOKEN", "env-token")
+
+    assert onboarding._client_effective_hook_token() == ("env-token", "env")
+
+
+def test_client_effective_hook_token_uses_file(monkeypatch, tmp_path) -> None:
+    from app.core import config as core_config
+
+    token_file = tmp_path / "hook_token"
+    token_file.write_text("file-token\n", encoding="utf-8")
+    monkeypatch.setattr(core_config, "HOOK_TOKEN_FILE", token_file)
+    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
+
+    assert onboarding._client_effective_hook_token() == ("file-token", "file")
+
+
+def test_client_effective_hook_token_none(monkeypatch, tmp_path) -> None:
+    from app.core import config as core_config
+
+    monkeypatch.setattr(core_config, "HOOK_TOKEN_FILE", tmp_path / "missing")
+    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
+
+    assert onboarding._client_effective_hook_token() == (None, "none")
 
 
 class _FakeStream:

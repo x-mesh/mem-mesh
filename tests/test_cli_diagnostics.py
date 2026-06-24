@@ -13,6 +13,19 @@ from app.cli.hooks import diagnostics, render
 from app.cli.hooks.status import ApiProbe, check_connectivity, probe_api
 from app.core.redaction import mask_secret
 
+
+@pytest.fixture(autouse=True)
+def _isolate_materialized_mem_mesh_files(monkeypatch, tmp_path):
+    """Keep CLI materialization tests away from the real ~/.mem-mesh files."""
+    from app.cli import install_hooks
+    from app.core import config as core_config
+
+    mem_dir = tmp_path / ".mem-mesh"
+    monkeypatch.setattr(install_hooks, "API_URL_FILE", mem_dir / "api_url")
+    monkeypatch.setattr(install_hooks, "HOOK_TOKEN_FILE", mem_dir / "hook_token")
+    monkeypatch.setattr(core_config, "HOOK_TOKEN_FILE", mem_dir / "hook_token")
+
+
 # ── local HTTP server fixture (returns a fixed status on /health) ──
 
 
@@ -127,25 +140,74 @@ def test_classify_mode():
 # ── collect_token_status ──
 
 
-def test_collect_token_status_file(monkeypatch):
-    """Option 2: the ~/.mem-mesh file is the only token source (no env layer)."""
+def test_collect_token_status_env_first(monkeypatch, tmp_path):
+    """CLI diagnostics report the client-effective token: env first, file fallback."""
     from app.core import config as core_config
 
-    monkeypatch.setattr(core_config, "hook_token_source", lambda: "legacy_file")
-    monkeypatch.setattr(core_config, "resolve_hook_token", lambda: "supersecrettoken")
+    token_file = tmp_path / "hook_token"
+    token_file.write_text("filetoken", encoding="utf-8")
+    monkeypatch.setattr(core_config, "HOOK_TOKEN_FILE", token_file)
+    monkeypatch.setenv("MEM_MESH_HOOK_TOKEN", "supersecrettoken")
     t = diagnostics.collect_token_status()
-    assert t.source in ("legacy_file", "data_file") and t.present
-    assert not t.in_shell_env  # the token never comes from the shell env anymore
+    assert t.source == "env" and t.present
+    assert t.in_shell_env
     assert t.masked.endswith("oken") and "super" not in t.masked
 
 
-def test_collect_token_status_none(monkeypatch):
+def test_collect_token_status_file_fallback(monkeypatch, tmp_path):
     from app.core import config as core_config
 
-    monkeypatch.setattr(core_config, "hook_token_source", lambda: "none")
-    monkeypatch.setattr(core_config, "resolve_hook_token", lambda: None)
+    token_file = tmp_path / "hook_token"
+    token_file.write_text("materializedtoken", encoding="utf-8")
+    monkeypatch.setattr(core_config, "HOOK_TOKEN_FILE", token_file)
+    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
+    t = diagnostics.collect_token_status()
+    assert t.source == "materialized_file" and t.present
+    assert not t.in_shell_env
+    assert t.masked.endswith("oken") and "mater" not in t.masked
+
+
+def test_collect_token_status_none(monkeypatch, tmp_path):
+    from app.core import config as core_config
+
+    monkeypatch.setattr(core_config, "HOOK_TOKEN_FILE", tmp_path / "absent")
+    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
     t = diagnostics.collect_token_status()
     assert t.source == "none" and not t.present and t.masked == ""
+
+
+def test_hooks_doctor_client_hook_token_prefers_env(monkeypatch, tmp_path):
+    from app.cli.hooks import doctor
+    from app.core import config as core_config
+
+    token_file = tmp_path / "hook_token"
+    token_file.write_text("file-token\n", encoding="utf-8")
+    monkeypatch.setattr(core_config, "HOOK_TOKEN_FILE", token_file)
+    monkeypatch.setenv("MEM_MESH_HOOK_TOKEN", "env-token")
+
+    assert doctor._client_hook_token() == "env-token"
+
+
+def test_hooks_doctor_client_hook_token_uses_file(monkeypatch, tmp_path):
+    from app.cli.hooks import doctor
+    from app.core import config as core_config
+
+    token_file = tmp_path / "hook_token"
+    token_file.write_text("file-token\n", encoding="utf-8")
+    monkeypatch.setattr(core_config, "HOOK_TOKEN_FILE", token_file)
+    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
+
+    assert doctor._client_hook_token() == "file-token"
+
+
+def test_hooks_doctor_client_hook_token_none(monkeypatch, tmp_path):
+    from app.cli.hooks import doctor
+    from app.core import config as core_config
+
+    monkeypatch.setattr(core_config, "HOOK_TOKEN_FILE", tmp_path / "missing")
+    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
+
+    assert doctor._client_hook_token() == ""
 
 
 # ── uvx-overwrite guard (the #4 footgun) ──
@@ -323,20 +385,18 @@ def test_doctor_api_section_distinguishes_auth_from_network(monkeypatch, capsys)
 
 
 def test_doctor_conflicts_flags_tool_literal_drift(monkeypatch, capsys):
-    """Option 2: the ~/.mem-mesh files are canonical; a tool config carrying a
-    stale baked-literal token (a rotated SSOT not yet re-stamped) is the drift."""
+    """A stale generated literal is drift when it differs from the env SSOT."""
     from app.cli import system_doctor
     from app.cli.hooks.diagnostics import McpToolStatus
 
-    # No env layer under option 2 — keep residual env vars out of the picture.
-    monkeypatch.delenv("MEM_MESH_API_URL", raising=False)
+    monkeypatch.setenv("MEM_MESH_API_URL", "http://localhost:8000")
+    monkeypatch.setenv("MEM_MESH_HOOK_TOKEN", "tok-NEW")
     monkeypatch.delenv("API_URL", raising=False)
-    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
     monkeypatch.setattr(
         system_doctor, "_read_config_file_url", lambda: "http://localhost:8000"
     )
-    # The file SSOT carries the rotated token; the tool still bakes the old one.
-    monkeypatch.setattr(system_doctor, "_file_canonical_token", lambda: "tok-NEW")
+    monkeypatch.setattr(system_doctor, "_materialized_hook_token", lambda: "tok-NEW")
+    monkeypatch.setattr(system_doctor, "_server_private_hook_token", lambda: "tok-OLD")
 
     stale = McpToolStatus(
         "Cursor",
@@ -362,22 +422,24 @@ def test_doctor_conflicts_flags_tool_literal_drift(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "drift:" in out
     assert "stale" in out and "Cursor" in out
+    assert "MEM_MESH_HOOK_TOKEN env" in out
+    assert "/tmp/data/hook_token" not in out
     assert any("config drift" in i for i in issues)
 
 
-def test_doctor_conflicts_clean_when_tools_match_ssot(monkeypatch, capsys):
-    """Clean state under option 2: every baked literal equals the file SSOT and
-    no residual env var lingers."""
+def test_doctor_conflicts_clean_when_tools_match_effective_env(monkeypatch, capsys):
+    """Clean state: generated literals match the env-first effective config."""
     from app.cli import system_doctor
     from app.cli.hooks.diagnostics import McpToolStatus
 
-    monkeypatch.delenv("MEM_MESH_API_URL", raising=False)
+    monkeypatch.setenv("MEM_MESH_API_URL", "http://localhost:8000")
+    monkeypatch.setenv("MEM_MESH_HOOK_TOKEN", "tok-MATCH")
     monkeypatch.delenv("API_URL", raising=False)
-    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
     monkeypatch.setattr(
         system_doctor, "_read_config_file_url", lambda: "http://localhost:8000"
     )
-    monkeypatch.setattr(system_doctor, "_file_canonical_token", lambda: "tok-MATCH")
+    monkeypatch.setattr(system_doctor, "_materialized_hook_token", lambda: "tok-MATCH")
+    monkeypatch.setattr(system_doctor, "_server_private_hook_token", lambda: "old-data")
 
     aligned = McpToolStatus(
         "Cursor",
@@ -401,14 +463,46 @@ def test_doctor_conflicts_clean_when_tools_match_ssot(monkeypatch, capsys):
     issues = []
     system_doctor._render_conflicts("http://localhost:8000", issues)
     out = capsys.readouterr().out
-    assert "tool literals match the ~/.mem-mesh SSOT" in out
+    assert "generated configs match the env-first effective config" in out
     assert "drift:" not in out
     assert issues == []
 
 
 def test_doctor_ssot_shows_values_and_source(monkeypatch, capsys):
-    """Option 2: [SSOT] prints the ~/.mem-mesh/api_url value and the masked
-    hook_token as the canonical source — no '(env)' marking, raw token hidden."""
+    """[SSOT] prints env as canonical and ~/.mem-mesh as materialized state."""
+    from app.cli import system_doctor
+
+    monkeypatch.setenv("MEM_MESH_API_URL", "http://localhost:8000")
+    monkeypatch.setenv("MEM_MESH_HOOK_TOKEN", "5-jWabcdefghTESTq7JY")
+    monkeypatch.delenv("API_URL", raising=False)
+    monkeypatch.setattr(
+        system_doctor, "_read_config_file_url", lambda: "http://localhost:8000"
+    )
+    monkeypatch.setattr(
+        system_doctor, "_materialized_hook_token", lambda: "5-jWabcdefghTESTq7JY"
+    )
+    monkeypatch.setattr(system_doctor, "_server_private_hook_token", lambda: "old-data")
+    monkeypatch.setattr(
+        system_doctor,
+        "_server_private_hook_token_source",
+        lambda: "/tmp/data/hook_token",
+    )
+
+    issues = []
+    system_doctor._render_ssot(issues)
+    out = capsys.readouterr().out
+    assert "[SSOT]" in out
+    assert "http://localhost:8000" in out
+    assert "MEM_MESH_API_URL env SSOT" in out
+    assert "MEM_MESH_HOOK_TOKEN env SSOT" in out
+    assert "~/.mem-mesh/api_url in sync" in out
+    assert "~/.mem-mesh/hook_token in sync" in out
+    assert "/tmp/data/hook_token" in out
+    assert "q7JY" in out and "TEST" not in out  # token masked, tail only
+
+
+def test_doctor_ssot_file_fallback_does_not_claim_in_sync(monkeypatch, capsys):
+    """Fallback-only ~/.mem-mesh files are usable, but not an env sync state."""
     from app.cli import system_doctor
 
     monkeypatch.delenv("MEM_MESH_API_URL", raising=False)
@@ -417,19 +511,38 @@ def test_doctor_ssot_shows_values_and_source(monkeypatch, capsys):
     monkeypatch.setattr(
         system_doctor, "_read_config_file_url", lambda: "http://localhost:8000"
     )
-    monkeypatch.setattr(
-        system_doctor, "_file_canonical_token", lambda: "5-jWabcdefghTESTq7JY"
-    )
+    monkeypatch.setattr(system_doctor, "_materialized_hook_token", lambda: "file-token")
+    monkeypatch.setattr(system_doctor, "_server_private_hook_token", lambda: None)
 
     issues = []
     system_doctor._render_ssot(issues)
     out = capsys.readouterr().out
-    assert "[SSOT]" in out
-    assert "http://localhost:8000" in out
-    assert "(~/.mem-mesh/api_url)" in out  # the file is the canonical source
-    assert "file SSOT" in out
-    assert "q7JY" in out and "TEST" not in out  # token masked, tail only
-    assert "(env)" not in out  # no env source to mark under option 2
+
+    assert "(~/.mem-mesh fallback)" in out
+    assert "~/.mem-mesh/api_url in sync" not in out
+    assert "~/.mem-mesh/hook_token in sync" not in out
+    assert "~/.mem-mesh/api_url missing" not in out
+    assert "~/.mem-mesh/hook_token missing" not in out
+
+
+def test_doctor_ssot_unset_does_not_duplicate_missing(monkeypatch, capsys):
+    from app.cli import system_doctor
+
+    monkeypatch.delenv("MEM_MESH_API_URL", raising=False)
+    monkeypatch.delenv("API_URL", raising=False)
+    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
+    monkeypatch.setattr(system_doctor, "_read_config_file_url", lambda: None)
+    monkeypatch.setattr(system_doctor, "_materialized_hook_token", lambda: None)
+    monkeypatch.setattr(system_doctor, "_server_private_hook_token", lambda: None)
+
+    issues = []
+    system_doctor._render_ssot(issues)
+    out = capsys.readouterr().out
+
+    assert "api_url      not set" in out
+    assert "hook_token   not set" in out
+    assert "~/.mem-mesh/api_url missing" not in out
+    assert "~/.mem-mesh/hook_token missing" not in out
 
 
 # ── render fallback when rich is unavailable ──
@@ -537,8 +650,8 @@ def test_merge_json_settings_backs_up_on_change_and_skips_noop(tmp_path):
 def test_generate_mcp_entry_with_auth_header():
     from app.cli.mcp_config import generate_mcp_entry
 
-    # Option 2: mem-mesh owns the config file and bakes the LITERAL token in — no
-    # ${ENV} reference for the MCP client to expand (env reliance was removed).
+    # Generated MCP config stamps the literal token; GUI clients do not need to
+    # inherit MEM_MESH_HOOK_TOKEN at runtime.
     e = generate_mcp_entry(
         "http", url="https://x", tool_key="cursor", with_auth=True, token="real-tok-123"
     )
@@ -569,22 +682,23 @@ def test_generate_mcp_entry_no_db_path_when_unset(monkeypatch):
     assert "MEM_MESH_DATABASE_PATH" not in (e.get("env") or {})  # never guessed
 
 
-def test_ensure_hook_token_mirrors_resolved_to_legacy_path(monkeypatch, tmp_path):
-    # The .sh hooks read ~/.mem-mesh/hook_token directly; a server token that
-    # resolves from the data-dir must be mirrored there or hooks 401.
+def test_ensure_hook_token_materializes_env_and_ignores_server_data_dir(
+    monkeypatch, tmp_path
+):
+    # The .sh hooks read ~/.mem-mesh/hook_token directly. The CLI materializes the
+    # operator env token there and must not copy server-private data-dir state.
     import app.cli.install_hooks as ih
     from app.core import config as cc
 
-    legacy = tmp_path / "hook_token"
-    monkeypatch.setattr(ih, "HOOK_TOKEN_FILE", legacy)
+    materialized = tmp_path / "hook_token"
+    monkeypatch.setattr(ih, "HOOK_TOKEN_FILE", materialized)
     monkeypatch.setattr(cc, "resolve_hook_token", lambda: "SERVER-DATADIR-TOKEN")
-    monkeypatch.setattr(cc, "_read_token_file", lambda p: None)  # legacy absent
+    monkeypatch.setattr(cc, "_read_token_file", lambda p: None)
+    monkeypatch.setenv("MEM_MESH_HOOK_TOKEN", "ENV-TOKEN")
 
     tok = ih._ensure_hook_token()
-    assert tok == "SERVER-DATADIR-TOKEN"
-    assert (
-        legacy.read_text().strip() == "SERVER-DATADIR-TOKEN"
-    )  # mirrored for .sh hooks
+    assert tok == "ENV-TOKEN"
+    assert materialized.read_text().strip() == "ENV-TOKEN"
 
 
 def test_doctor_flags_missing_mcp_auth_token(monkeypatch, capsys):
@@ -610,8 +724,9 @@ def test_doctor_flags_missing_mcp_auth_token(monkeypatch, capsys):
     capsys.readouterr()
     assert any("no token" in i for i in issues)
 
-    # With a LITERAL token header present (option 2 bakes the secret in), no flag.
-    monkeypatch.setattr(sd, "_file_canonical_token", lambda: None)
+    # With a literal token header present, no missing-token flag.
+    monkeypatch.setattr(sd, "_effective_hook_token", lambda: None)
+    monkeypatch.setattr(sd, "_effective_hook_token_source", lambda: None)
     http_auth = McpToolStatus(
         "Cursor",
         "cursor",
@@ -632,42 +747,38 @@ def test_doctor_flags_missing_mcp_auth_token(monkeypatch, capsys):
     assert not any("no token" in i for i in issues2)
 
 
-# ── option 2 doctor helpers: file-canonical token + baked-literal extraction ──
+# ── doctor helpers: env-first effective token + baked-literal extraction ──
 
 
-def test_file_canonical_token_ignores_env(monkeypatch):
-    """Option 2: the canonical token comes from the file SSOT, never the env —
-    a residual MEM_MESH_HOOK_TOKEN must not shadow the on-disk value."""
+def test_effective_hook_token_prefers_env(monkeypatch):
     from app.cli import system_doctor
-    from app.core import config as cc
 
-    monkeypatch.setenv("MEM_MESH_HOOK_TOKEN", "ENV-SHADOW")
-    monkeypatch.setattr(cc, "_read_token_file", lambda p: "FILE-CANONICAL")
-    assert system_doctor._file_canonical_token() == "FILE-CANONICAL"
+    monkeypatch.setenv("MEM_MESH_HOOK_TOKEN", "ENV-CANONICAL")
+    monkeypatch.setattr(system_doctor, "_materialized_hook_token", lambda: "FILE")
+    assert system_doctor._effective_hook_token() == "ENV-CANONICAL"
+    assert system_doctor._effective_hook_token_source() == "MEM_MESH_HOOK_TOKEN env"
 
 
-def test_file_canonical_token_prefers_data_dir_over_legacy(monkeypatch):
-    """The data-dir token wins over the legacy ~/.mem-mesh/hook_token file."""
+def test_effective_hook_token_falls_back_to_materialized_file(monkeypatch):
     from app.cli import system_doctor
-    from app.core import config as cc
 
-    data_path = cc._data_dir_hook_token_file()
-    monkeypatch.setattr(
-        cc, "_read_token_file", lambda p: "DATA-DIR" if p == data_path else "LEGACY"
-    )
-    assert system_doctor._file_canonical_token() == "DATA-DIR"
+    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
+    monkeypatch.setattr(system_doctor, "_materialized_hook_token", lambda: "FILE")
+    assert system_doctor._effective_hook_token() == "FILE"
+    assert system_doctor._effective_hook_token_source()
 
 
-def test_file_canonical_token_none_when_absent(monkeypatch):
+def test_server_private_hook_token_is_not_effective(monkeypatch):
     from app.cli import system_doctor
-    from app.core import config as cc
 
-    monkeypatch.setattr(cc, "_read_token_file", lambda p: None)
-    assert system_doctor._file_canonical_token() is None
+    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
+    monkeypatch.setattr(system_doctor, "_materialized_hook_token", lambda: None)
+    monkeypatch.setattr(system_doctor, "_server_private_hook_token", lambda: "DATA")
+    assert system_doctor._effective_hook_token() is None
 
 
 def test_entry_literal_token_extracts_baked_literal():
-    """Option 2 bakes a literal Bearer token; only a real literal is returned."""
+    """Generated MCP config bakes a literal Bearer token; env refs are stale."""
     from app.cli.system_doctor import _entry_literal_token
 
     assert (
@@ -723,8 +834,7 @@ def test_main_routes_mcp_verify(monkeypatch):
 
 
 def test_hooks_setup_token_no_longer_routed():
-    """Option 2 removed the file->shell-env bridge: `hooks setup-token` (and the
-    token_setup module) are gone, so argparse rejects the subcommand."""
+    """The old file->shell-env bridge is gone, so argparse rejects the subcommand."""
     import app.cli.main as main_mod
 
     with pytest.raises(SystemExit) as exc:

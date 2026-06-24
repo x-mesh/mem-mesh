@@ -395,14 +395,15 @@ def cmd_status() -> None:
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     print(f"  ANTHROPIC_API_KEY: {_colorize_status('set' if api_key else 'not set')}")
 
-    # Hook auth token (Option 2). The token lives in ~/.mem-mesh/hook_token (file
-    # canonical) and is baked as a literal Bearer header into each tool's MCP /
-    # HTTP hook config at install time — no shell export is required — so we only
-    # report present/absent. The raw value is never printed.
+    # Hook auth token. Env is the operator SSOT; ~/.mem-mesh/hook_token is the
+    # materialized fallback/cache that shell hooks read and MCP configs stamp. The
+    # raw value is never printed.
     try:
-        from app.core.config import resolve_hook_token
+        from app.core.config import HOOK_TOKEN_FILE, _read_token_file
 
-        hook_token = resolve_hook_token()
+        hook_token = (os.environ.get("MEM_MESH_HOOK_TOKEN") or "").strip()
+        if not hook_token:
+            hook_token = _read_token_file(HOOK_TOKEN_FILE)
     except Exception:
         hook_token = os.environ.get("MEM_MESH_HOOK_TOKEN")
     if hook_token:

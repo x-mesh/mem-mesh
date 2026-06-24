@@ -174,6 +174,19 @@ def _mask_token(token: str) -> str:
     return mask_secret(token)
 
 
+def _client_hook_token() -> str:
+    """Token that generated shell hooks and MCP configs actually carry."""
+    env_token = (os.environ.get("MEM_MESH_HOOK_TOKEN") or "").strip()
+    if env_token:
+        return env_token
+    try:
+        from app.core.config import HOOK_TOKEN_FILE, _read_token_file
+
+        return _read_token_file(HOOK_TOKEN_FILE) or ""
+    except Exception:
+        return ""
+
+
 def _http(method: str, url: str, headers=None, data=None, timeout: float = 5.0):
     """Minimal HTTP probe. Returns (status_code|None, body_bytes). None = no connection."""
     import urllib.error
@@ -195,25 +208,26 @@ def _http(method: str, url: str, headers=None, data=None, timeout: float = 5.0):
 
 
 def _check_authentication(url: str) -> List[str]:
-    """[Authentication]: local hook token + server auth config (env/db/default)."""
+    """[Authentication]: server hook token source + server auth config."""
     issues: List[str] = []
     print(header("[Authentication]"))
 
-    # Hook token — resolved the same way the server does (env > data-dir > ~/.mem-mesh).
+    # Server token — resolved the same way the server does (env > data-dir >
+    # ~/.mem-mesh). Client-effective token sync is shown in top-level doctor.
     try:
         from app.core.config import hook_token_source, resolve_hook_token
 
         token = resolve_hook_token()
         source = hook_token_source()
         if token:
-            print(f"  Hook token:  {ok(source)}  {dim(_mask_token(token))}")
+            print(f"  Server token: {ok(source)}  {dim(_mask_token(token))}")
         else:
             print(
-                f"  Hook token:  {warn('not configured locally')} "
+                f"  Server token: {warn('not configured locally')} "
                 f"{dim('(server auto-generates one at startup)')}"
             )
     except Exception as e:  # pragma: no cover - defensive
-        print(f"  Hook token:  {err(f'resolve failed: {e}')}")
+        print(f"  Server token: {err(f'resolve failed: {e}')}")
 
     # Server auth config via GET /api/security/overview.
     status, body = _http("GET", f"{url.rstrip('/')}/api/security/overview")
@@ -285,13 +299,9 @@ def _test_hook_auth(url: str) -> List[str]:
     else:
         print(f"  hook POST no-token  -> {dim(str(s_no))}")
 
-    # Authenticated POST with the locally-resolved token.
-    try:
-        from app.core.config import resolve_hook_token
-
-        token = resolve_hook_token()
-    except Exception:
-        token = None
+    # Authenticated POST with the client-effective token carried by generated
+    # hooks/MCP configs, not the server-private data-dir fallback.
+    token = _client_hook_token()
     if not token:
         print(f"  hook POST w/ token  -> {dim('skipped (no local token)')}")
         print()

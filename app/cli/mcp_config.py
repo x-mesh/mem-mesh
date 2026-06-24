@@ -150,7 +150,7 @@ def generate_mcp_entry(
             bakes the secret in, so the MCP client needs no ``${ENV}`` expansion).
             When with_auth is set but ``token`` is falsy, no header is emitted.
         token: The literal hook token to bake into the auth header (resolved from
-            the ~/.mem-mesh/hook_token SSOT by the caller).
+            env-first materialized config by the caller).
     """
     # autoApprove 목록은 실제 노출 도구(get_all_tool_schemas SSOT)에서 도출한다.
     # 도구가 추가/제거돼도 자동 동기화되어 누락(예: pin_list/pin_get)이 재발하지 않는다.
@@ -517,26 +517,6 @@ def run_mcp_setup(
     print(bold(f"{step_label} MCP Configuration"))
     print()
 
-    # Resolve the literal hook token once — it gets baked into each tool's MCP
-    # config (Option 2). An explicit token (from `mcp config --token`) wins;
-    # otherwise read the ~/.mem-mesh/hook_token SSOT. If auth is requested but no
-    # token exists, drop auth with a warning rather than baking an empty header.
-    # Always-auth (Option 2): bake the token whenever one is resolvable,
-    # regardless of whether the server enforces auth right now. The server
-    # ignores the Bearer header when auth is off, so it is harmless — and it
-    # avoids a re-install if auth is toggled on later, keeping every tool
-    # (including Codex, which already does this) consistent. The legacy
-    # `with_auth` gate based on a network probe is no longer consulted.
-    if token is None:
-        from app.core.config import resolve_hook_token
-
-        token = resolve_hook_token()
-    with_auth = bool(token)
-    if not token:
-        print(
-            f"  {warn('No hook token (~/.mem-mesh/hook_token) — MCP configured without an auth header.')}"
-        )
-
     # Show the API URL exactly as resolved by the caller. The caller owns
     # precedence (explicit --url > MEM_MESH_API_URL env > ~/.mem-mesh/api_url >
     # default); re-applying the env override here would silently ignore an
@@ -676,11 +656,55 @@ def run_mcp_setup(
         print()
         return {"status": "skipped", "mode": mode, "detected_tools": detected_keys}
 
+    # Under non-interactive auto mode (no explicit preferred_mode) we must NOT
+    # silently FLIP an existing entry to a different backend — that is the
+    # footgun where `install --yes` turned a working HTTP entry into a local uvx
+    # one (separate DB). But a same-transport fix (correcting a legacy
+    # `transport` key, refreshing the URL) MUST still apply, or a misconfigured
+    # entry could never be repaired non-interactively. So for an existing entry
+    # we regenerate in its CURRENT transport; only an explicit mode choice
+    # (preferred_mode / interactive selection) may change the backend.
+    auto_mode = yes and not preferred_mode
+    target_modes: Dict[str, str] = {}
+    for t in targets:
+        entry_mode = mode
+        if auto_mode:
+            existing_mode = _entry_mode(_existing_mem_mesh_entry(t))
+            if existing_mode and existing_mode != mode:
+                entry_mode = existing_mode
+        target_modes[t["key"]] = entry_mode
+
+    http_targets = any(m in ("http", "sse") for m in target_modes.values())
+    if http_targets:
+        from app.cli.install_hooks import _ensure_api_url, _ensure_hook_token
+
+        _ensure_api_url(url)
+        if token is None:
+            token = _ensure_hook_token()
+        elif token:
+            # A caller-supplied token is now the effective operator value for
+            # this setup run. Materialize it so hooks and future MCP re-stamps
+            # use the same credential.
+            from app.cli.install_hooks import _write_hook_token
+
+            _write_hook_token(token)
+
+    with_auth = bool(token)
+    if http_targets and not token:
+        print(
+            f"  {warn('No hook token (MEM_MESH_HOOK_TOKEN or ~/.mem-mesh/hook_token) — MCP configured without an auth header.')}"
+        )
+
     # Show sample MCP entry
+    sample_mode = target_modes[targets[0]["key"]]
     sample_entry = generate_mcp_entry(
-        mode=mode, url=url, tool_key=targets[0]["key"], with_auth=with_auth, token=token
+        mode=sample_mode,
+        url=url,
+        tool_key=targets[0]["key"],
+        with_auth=with_auth,
+        token=token,
     )
-    print(f"  {bold('MCP entry')} ({mode} mode):")
+    print(f"  {bold('MCP entry')} ({sample_mode} mode):")
     # Mask the literal bearer token before printing to the console / --json log;
     # the real value still lands in the config file (the accepted tradeoff).
     display_entry = dict(sample_entry)
@@ -693,24 +717,10 @@ def run_mcp_setup(
         print(f"    {dim(line)}")
     print()
 
-    # Under non-interactive auto mode (no explicit preferred_mode) we must NOT
-    # silently FLIP an existing entry to a different backend — that is the
-    # footgun where `install --yes` turned a working HTTP entry into a local uvx
-    # one (separate DB). But a same-transport fix (correcting a legacy
-    # `transport` key, refreshing the URL) MUST still apply, or a misconfigured
-    # entry could never be repaired non-interactively. So for an existing entry
-    # we regenerate in its CURRENT transport; only an explicit mode choice
-    # (preferred_mode / interactive selection) may change the backend.
-    auto_mode = yes and not preferred_mode
-
     # Configure each tool (with tool-specific MEM_MESH_CLIENT env)
     configured: List[Dict[str, Any]] = []
     for t in targets:
-        entry_mode = mode
-        if auto_mode:
-            existing_mode = _entry_mode(_existing_mem_mesh_entry(t))
-            if existing_mode and existing_mode != mode:
-                entry_mode = existing_mode  # keep the backend, fix the contents
+        entry_mode = target_modes[t["key"]]
         mcp_entry = generate_mcp_entry(
             mode=entry_mode,
             url=url,

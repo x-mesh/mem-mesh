@@ -9,11 +9,12 @@ Performs 3-step setup:
 import contextlib
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
 from app.cli.hooks.constants import CLAUDE_HOOKS_DIR, DEFAULT_URL
@@ -35,6 +36,29 @@ TARGET_ORDER = ["claude", "kiro", "cursor", "codex"]
 # How many times the interactive installer re-prompts for the hook token after a
 # 401 before giving up and skipping hook install (fail-fast on a wrong token).
 AUTH_TOKEN_RETRIES = 5
+
+
+def _client_effective_hook_token() -> Tuple[Optional[str], str]:
+    """Return the env-first client token and its source.
+
+    The onboarding wizard uses this for prompts and JSON status. It intentionally
+    ignores the server-private data-dir token: MCP configs and shell hooks must
+    be stamped from the operator env token or the materialized ~/.mem-mesh file.
+    """
+    import os
+
+    env_token = (os.environ.get("MEM_MESH_HOOK_TOKEN") or "").strip()
+    if env_token:
+        return env_token, "env"
+    try:
+        from app.core.config import HOOK_TOKEN_FILE, _read_token_file
+
+        file_token = _read_token_file(HOOK_TOKEN_FILE)
+        if file_token:
+            return file_token, "file"
+    except Exception:
+        pass
+    return None, "none"
 
 
 def _detect_targets() -> list[str]:
@@ -447,18 +471,12 @@ def _pkg_version() -> str:
 def _hook_token_status() -> Dict[str, Any]:
     """Detect the hook auth token for onboarding display/JSON (no secret leaked).
 
-    The token file (``~/.mem-mesh/hook_token``) is the single source of truth:
-    its value is baked as a literal bearer header into each tool's config at
-    install time, so one file token authenticates command (.sh) hooks, HTTP
-    hooks, and MCP alike. Returns the status without exposing the secret value.
+    Env is the operator SSOT. ``~/.mem-mesh/hook_token`` is the materialized
+    fallback/cache used by shell hooks and MCP config stamping. Server-private
+    data-dir state is not reported here as client-ready auth.
     """
-    try:
-        from app.core.config import resolve_hook_token
-
-        resolved = bool(resolve_hook_token())
-    except Exception:
-        resolved = False
-    return {"status": "file" if resolved else "none"}
+    _, source = _client_effective_hook_token()
+    return {"status": source}
 
 
 def _build_next_actions(result: Dict[str, Any]) -> None:
@@ -580,8 +598,8 @@ def _onboarding_steps(
         resolved_url = _prompt_value("API server URL", resolved_url).rstrip("/")
         source = "entered"
 
-    # Persist the chosen URL to the file SSOT now so hooks + MCP resolve the same
-    # server (no split-brain). Local mode renders a path, not a URL, so skip it.
+    # Materialize the chosen URL now so hooks + MCP resolve the same server. Local
+    # mode renders a path, not a URL, so skip it.
     from app.cli.install_hooks import _ensure_api_url
 
     _ensure_api_url(resolved_url)
@@ -691,57 +709,76 @@ def _onboarding_steps(
 
     server["mcp_mode"] = preferred_mcp_mode
 
-    # Auth token: prompt interactively (pre-filled masked), persist to the file
-    # SSOT, then verify against the server. On a 401 mismatch, re-prompt up to
+    # Auth token: prompt interactively (pre-filled masked), persist to the
+    # materialized ~/.mem-mesh cache, then verify against the server. On a 401
+    # mismatch, re-prompt up to
     # AUTH_TOKEN_RETRIES times; if it never authenticates, block hook install so
     # we never leave installed-but-401 hooks behind (fail fast — the trap this
     # whole flow fixes).
     from app.cli.install_hooks import _write_hook_token
-    from app.core.config import resolve_hook_token
 
     auth_blocked = False
-    current_token = resolve_hook_token()
+    current_token, current_token_source = _client_effective_hook_token()
 
     if not yes:
         chosen = _prompt_token(current_token)
         if chosen and chosen != current_token:
             _write_hook_token(chosen)
+            # Keep the accepted interactive value authoritative for this
+            # process, even if the parent shell exported a stale env token.
+            os.environ["MEM_MESH_HOOK_TOKEN"] = chosen
+            current_token_source = "env"
         current_token = chosen
+    elif current_token and current_token_source == "env":
+        # Non-interactive first setup still materializes the operator env token so
+        # shell hooks and future MCP re-stamps have the same local fallback.
+        _write_hook_token(current_token)
 
-        # Verify only when the server is actually up (reachable or auth-gated).
-        if probe.ok or probe.auth_required:
-            for attempt in range(AUTH_TOKEN_RETRIES):
-                code = _auth_probe(resolved_url, current_token)
-                if code is None:
-                    print(f"  Auth test: {dim('server unreachable — skipped')}")
-                    break
-                if code == 200:
+    # Verify only when the server is actually up (reachable or auth-gated).
+    # Probe the hook endpoint with the exact client token that hooks/MCP will
+    # carry. Source does not matter: env and materialized file tokens can both be
+    # stale after rotation.
+    if probe.ok or probe.auth_required:
+        for attempt in range(AUTH_TOKEN_RETRIES):
+            code = _auth_probe(resolved_url, current_token)
+            if code is None:
+                print(f"  Auth test: {dim('server unreachable — skipped')}")
+                break
+            if code == 200:
+                if current_token:
                     print(f"  Auth test: {ok('200 — token accepted')}")
-                    break
-                if code == 401:
-                    print(f"  Auth test: {err('401 — token rejected by server')}")
-                    if attempt == AUTH_TOKEN_RETRIES - 1:
-                        auth_blocked = True
-                        break
-                    retry = _prompt_token(current_token)
-                    if retry and retry != current_token:
-                        _write_hook_token(retry)
-                    current_token = retry
                 else:
-                    print(f"  Auth test: {dim(f'HTTP {code}')}")
+                    print(f"  Auth test: {ok('200 — no token required')}")
+                break
+            if code == 401:
+                if current_token:
+                    print(f"  Auth test: {err('401 — token rejected by server')}")
+                else:
+                    print(f"  Auth test: {err('401 — hook token required')}")
+                if yes or attempt == AUTH_TOKEN_RETRIES - 1:
+                    auth_blocked = True
                     break
+                retry = _prompt_token(current_token)
+                if retry and retry != current_token:
+                    _write_hook_token(retry)
+                    os.environ["MEM_MESH_HOOK_TOKEN"] = retry
+                    current_token_source = "env"
+                current_token = retry
+                continue
+            print(f"  Auth test: {dim(f'HTTP {code}')}")
+            break
 
-        if auth_blocked:
-            print(
-                f"  {warn('Token never authenticated — hooks will be skipped (they would 401).')}"
-            )
-            print(
-                f"  {dim('Fix the token (remote dashboard → Security & Tokens), then re-run install.')}"
-            )
+    if auth_blocked:
+        print(
+            f"  {warn('Token never authenticated — hooks will be skipped (they would 401).')}"
+        )
+        print(
+            f"  {dim('Fix the token (remote dashboard → Security & Tokens), then re-run install.')}"
+        )
 
     token_info = _hook_token_status()
     result["hook_token"] = token_info
-    if token_info["status"] == "file":
+    if token_info["status"] in ("env", "file"):
         print(
             f"  Auth token: {ok('hook token ready')} "
             f"{dim('(baked into tool configs)')}"
@@ -764,16 +801,17 @@ def _onboarding_steps(
             yes=yes,
             preferred_mode=preferred_mcp_mode,
             server_reachable=probe.ok or probe.auth_required,
+            with_auth=bool(current_token) and not auth_blocked,
+            token=current_token if current_token and not auth_blocked else "",
             step_label="[2/3]",
         )
         or {}
     )
     result["steps"]["mcp"] = mcp_summary
 
-    # HTTP-mode MCP/hooks authenticate with the token baked into their config as
-    # a literal bearer header (run_mcp_setup for MCP, _install_claude for HTTP
-    # hooks, both reading the ~/.mem-mesh/hook_token SSOT). No shell rc bridge is
-    # written — re-running install re-stamps a rotated token.
+    # HTTP-mode MCP/hooks authenticate with the env-first effective token baked
+    # into their config as a literal bearer header. No shell rc bridge is written;
+    # re-running install materializes/re-stamps a rotated token.
 
     # --- Step 3: Hook installation ---
     print(bold("[3/3] Hook Installation"))
@@ -844,6 +882,8 @@ def _onboarding_steps(
             from app.cli.install_hooks import cmd_install
 
             for hook_target in hook_targets:
+                if current_token and not auth_blocked:
+                    _write_hook_token(current_token)
                 cmd_install(hook_target, install_url, "api", "", profile)
             hooks_installed = True
             hooks["installed"] = True
@@ -898,6 +938,7 @@ def _print_summary(
         f"  Hooks:       {ok(f'installed ({target})') if hooks_ok else warn('not installed')}"
     )
     token_label = {
+        "env": ok("hook token ready (baked into tool configs)"),
         "file": ok("hook token ready (baked into tool configs)"),
         "none": dim("not set"),
     }.get(token_status or "none")

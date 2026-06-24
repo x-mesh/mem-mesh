@@ -59,6 +59,7 @@ command -v curl >/dev/null 2>&1 || { mem_mesh_log "user-prompt-submit" "abort" "
 
 API_URL="$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://meme.24x365.online)"
 HOOK_TOKEN="$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)"
+HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-full}"
 AUTH=()
 AUTH_STATE=absent
 if [ -n "$HOOK_TOKEN" ]; then
@@ -96,8 +97,32 @@ mem_mesh_log "user-prompt-submit" "sent" "http=$HTTP_CODE bytes=${#RESP} project
 mem_mesh_logv "user-prompt-submit" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN") time=${META_LINE#* }s curl_exit=$CURL_EXIT"
 
 # Emit hookSpecificOutput JSON if the server returned any; stay silent otherwise.
+# The POST payload above is unchanged by this stdout mode.
 if printf '%s' "$RESP" | jq -e . >/dev/null 2>&1; then
   mem_mesh_log "user-prompt-submit" "output" "json bytes=${#RESP}"
-  printf '%s\n' "$RESP"
+  case "$HOOK_OUTPUT_MODE" in
+    quiet|none|off)
+      exit 0
+      ;;
+    compact)
+      COMPACT=$(printf '%s' "$RESP" | jq -c --arg event "UserPromptSubmit" '
+        (.hookSpecificOutput.additionalContext // .additional_context // "") as $ctx |
+        if ($ctx | length) > 0 then
+          {
+            hookSpecificOutput: {
+              hookEventName: $event,
+              additionalContext: ($ctx | .[0:1200])
+            }
+          }
+        else
+          empty
+        end
+      ' 2>/dev/null) || COMPACT=""
+      if [ -n "$COMPACT" ]; then printf '%s\n' "$COMPACT"; fi
+      ;;
+    *)
+      printf '%s\n' "$RESP"
+      ;;
+  esac
 fi
 exit 0

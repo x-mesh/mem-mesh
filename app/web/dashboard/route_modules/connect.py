@@ -70,9 +70,9 @@ def _json_b64(data: dict) -> str:
 
 
 def _with_mcp_auth(entry: dict, token_required: bool, token: Optional[str]) -> dict:
-    # Embed the literal token (Option 2). When auth is required but the reveal
-    # policy withheld the token (token is None), emit NO header — the bootstrap
-    # script must not bake a secret it isn't allowed to reveal.
+    # Embed the literal token. When auth is required but the reveal policy
+    # withheld the token (token is None), emit NO header — the bootstrap script
+    # must not bake a secret it isn't allowed to reveal.
     if token_required and token and "url" in entry:
         entry = dict(entry)
         entry["headers"] = {"Authorization": f"Bearer {token}"}

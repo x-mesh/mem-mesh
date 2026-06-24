@@ -60,6 +60,7 @@ command -v curl >/dev/null 2>&1 || { mem_mesh_log "session-start" "abort" "curl 
 
 API_URL="$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://meme.24x365.online)"
 HOOK_TOKEN="$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)"
+HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-full}"
 AUTH=()
 AUTH_STATE=absent
 if [ -n "$HOOK_TOKEN" ]; then
@@ -99,12 +100,39 @@ HTTP_CODE="${META_LINE%% *}"
 mem_mesh_log "session-start" "sent" "http=$HTTP_CODE bytes=${#RESP} project=$PROJECT_DIR"
 mem_mesh_logv "session-start" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN") time=${META_LINE#* }s curl_exit=$CURL_EXIT"
 
-# Server returns hookSpecificOutput JSON, or an empty body on no-op. Emit valid
-# JSON verbatim; fall back to {} so Claude Code's output schema check passes.
+# Server returns hookSpecificOutput JSON, or an empty body on no-op. The POST
+# payload above is always full fidelity; this mode only controls stdout shown by
+# the client.
 if printf '%s' "$RESP" | jq -e . >/dev/null 2>&1; then
   mem_mesh_log "session-start" "output" "json bytes=${#RESP}"
-  printf '%s\n' "$RESP"
+  case "$HOOK_OUTPUT_MODE" in
+    quiet|none|off)
+      exit 0
+      ;;
+    compact)
+      COMPACT=$(printf '%s' "$RESP" | jq -c --arg event "SessionStart" '
+        (.hookSpecificOutput.additionalContext // .additional_context // "") as $ctx |
+        if ($ctx | length) > 0 then
+          {
+            hookSpecificOutput: {
+              hookEventName: $event,
+              additionalContext: "mem-mesh session context available. Detailed hook output suppressed for Codex; use mem-mesh MCP tools when prior context is needed."
+            }
+          }
+        else
+          .
+        end
+      ' 2>/dev/null) || COMPACT=""
+      if [ -n "$COMPACT" ]; then printf '%s\n' "$COMPACT"; else printf '%s\n' "$RESP"; fi
+      ;;
+    *)
+      printf '%s\n' "$RESP"
+      ;;
+  esac
 else
   mem_mesh_log "session-start" "output" "fallback {} (resp not json)"
-  echo '{}'
+  case "$HOOK_OUTPUT_MODE" in
+    quiet|none|off) exit 0 ;;
+    *) echo '{}' ;;
+  esac
 fi

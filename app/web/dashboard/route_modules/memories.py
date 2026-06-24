@@ -171,10 +171,10 @@ async def delete_memory(
     try:
         # Get memory info before deletion (for project_id)
         try:
-            memory_info = await service.get_by_id(memory_id)
+            memory_info = await service.get(memory_id)
             project_id = memory_info.project_id if memory_info else None
         except Exception as e:
-            logger.error(f"Failed to delete memory: {e}")
+            logger.warning(f"Failed to load memory before delete: {e}")
             project_id = None
 
         result = await service.delete(memory_id)

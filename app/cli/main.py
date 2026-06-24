@@ -213,7 +213,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     mcp_config_parser.add_argument(
         "--token",
         default=None,
-        help="Hook auth token — write to ~/.mem-mesh/hook_token (SSOT) and bake it "
+        help="Hook auth token — materialize to ~/.mem-mesh/hook_token and bake it "
         "as a literal Bearer token into each tool's MCP config",
     )
     mcp_config_parser.add_argument(
@@ -223,7 +223,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         "--auth",
         action="store_true",
         help="Bake an Authorization: Bearer <token> header with the literal token "
-        "from ~/.mem-mesh/hook_token (http mode, for auth-enforcing servers)",
+        "from the env-first effective hook token (http mode, for auth-enforcing servers)",
     )
     mcp_verify_parser = mcp_sub.add_parser(
         "verify", help="Verify mem-mesh MCP config across all detected dev tools"
@@ -368,14 +368,13 @@ def main(argv: Optional[List[str]] = None) -> None:
             url = args.url or resolve_api_url()[0]
             with_auth = args.auth
             if args.url:
-                # Align the hook channel too: write the URL SSOT so hooks and MCP
+                # Align the hook channel too: materialize the URL so hooks and MCP
                 # point at the same server. Without this, `mcp config --url` only
-                # moves MCP and leaves hooks on whatever the env/file said — a
-                # split-brain doctor then reports two different URLs.
+                # moves MCP and leaves hooks on whatever the env/file said.
                 from app.cli.install_hooks import API_URL_FILE, _ensure_api_url
 
                 _ensure_api_url(args.url)
-                print(f"  API URL written to {API_URL_FILE} (hook SSOT)")
+                print(f"  API URL written to {API_URL_FILE} (materialized hook config)")
             explicit_token = None
             if args.token:
                 from app.cli.install_hooks import HOOK_TOKEN_FILE, _write_hook_token

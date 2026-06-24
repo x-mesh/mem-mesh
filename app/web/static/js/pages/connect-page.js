@@ -287,8 +287,8 @@ export class ConnectPage extends HTMLElement {
            Warning: HTTP hooks can't reach <code>${this.esc(h.server_url)}</code>: ${this.esc(h.http_hook_blocked)}
            <br>Switch <b>Hook mode → Command (api)</b> for this server.</p>`
       : '';
-    // Option 2: HTTP hooks read the token from ~/.mem-mesh/hook_token (the file is
-    // the single source of truth) — no shell env, so there's nothing to export.
+    // HTTP hooks include a literal token when the dashboard is allowed to reveal
+    // it. Re-run install after rotation so generated config is re-stamped.
     const tokenModeHint =
       h.mode === 'http'
         ? `<p class="hint">HTTP hooks include a literal bearer header in the JSON when the token can be revealed. Re-run install or regenerate this block after token rotation.</p>`

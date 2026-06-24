@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from app.core.config import Settings
+from app.core.notifier import HttpNotifier
 from app.core.storage.direct import DirectStorageBackend
 from app.core.utils.logger import get_logger
 from app.mcp_common.tools import MCPToolHandlers
@@ -21,6 +22,15 @@ logger = None
 
 # Global service instances
 mcp_storage: Optional[DirectStorageBackend] = None
+
+
+def _dashboard_notify_base_url(settings: Settings) -> str:
+    """Return the dashboard API base URL used for cross-process notifications."""
+    return (
+        os.getenv("MEM_MESH_API_URL")
+        or settings.api_base_url
+        or f"http://localhost:{settings.server_port}"
+    ).rstrip("/")
 
 
 @asynccontextmanager
@@ -85,9 +95,15 @@ async def mcp_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "BatchOperationHandler init failed, using fallback", error=str(e)
             )
 
-        # Configure MCP tool handler (without notifier)
+        # Configure MCP tool handler. The MCP-only server has no in-process
+        # WebSocket router, so bridge memory/pin events to the dashboard server.
+        notifier = HttpNotifier(_dashboard_notify_base_url(settings))
+        if batch_handler:
+            batch_handler._notifier = notifier
+
         sse.set_tool_handlers(
-            MCPToolHandlers(mcp_storage, notifier=None), batch_handler=batch_handler
+            MCPToolHandlers(mcp_storage, notifier=notifier),
+            batch_handler=batch_handler,
         )
 
         logger.info("MCP SSE Server initialized successfully")

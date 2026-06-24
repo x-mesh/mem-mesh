@@ -76,16 +76,15 @@ def cmd_config(verbose: bool = False) -> None:
         print(f"  {' ' * 30} {dim(description)}")
     print()
 
-    # Hook auth token (Option 2) — resolved from ~/.mem-mesh/hook_token (file
-    # canonical) and baked as a literal Bearer header into each tool's MCP /
-    # HTTP hook config at install time. The raw value is never printed.
+    # Hook auth token — env is the operator SSOT; ~/.mem-mesh/hook_token is the
+    # materialized fallback/cache used by shell hooks and MCP config stamping.
+    # The raw value is never printed.
     print(header("[Hook Token]"))
     token = collect_token_status()
     if token.present:
         label = {
-            "env": "shell env",
-            "data_file": "data dir hook_token",
-            "legacy_file": "~/.mem-mesh/hook_token",
+            "env": "MEM_MESH_HOOK_TOKEN env",
+            "materialized_file": "~/.mem-mesh/hook_token",
         }.get(token.source, token.source)
         print(f"  Source: {ok(f'set ({label})')}  {info(token.masked)}")
         print(

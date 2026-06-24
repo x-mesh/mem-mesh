@@ -9,6 +9,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
 
 MEM_MESH_PATH=__MEM_MESH_PATH__
+HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-__HOOK_OUTPUT_MODE__}"
 
 INPUT=$(cat)
 AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // empty')
@@ -51,6 +52,15 @@ PY
 ) || exit 0
 
 [ -z "$CONTEXT" ] && exit 0
+
+case "$HOOK_OUTPUT_MODE" in
+  quiet|none|off)
+    exit 0
+    ;;
+  compact)
+    CONTEXT=$(printf '%s' "$CONTEXT" | jq -Rrsr '.[0:1200]')
+    ;;
+esac
 
 jq -n --arg ctx "$CONTEXT" '{
   hookSpecificOutput: {

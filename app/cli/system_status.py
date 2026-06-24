@@ -41,16 +41,15 @@ def _count_installed_hooks(hooks_dir: Path) -> int:
 def _render_token_section() -> None:
     """[Hook Token]: source + masked preview (never the raw value).
 
-    Option 2: the token is the ~/.mem-mesh/hook_token file canonical, baked as a
-    literal Bearer header into each tool's config at install time.
+    Env is the operator SSOT; ~/.mem-mesh/hook_token is the materialized
+    fallback/cache read by shell hooks and used for MCP literal stamping.
     """
     print(header("[Hook Token]"))
     token = collect_token_status()
     if token.present:
         label = {
-            "env": "shell env",
-            "data_file": "data dir",
-            "legacy_file": "~/.mem-mesh",
+            "env": "MEM_MESH_HOOK_TOKEN env",
+            "materialized_file": "~/.mem-mesh",
         }.get(token.source, token.source)
         print(
             f"  hook token: {ok('set')} {info(token.masked)} "

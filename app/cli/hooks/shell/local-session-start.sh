@@ -13,6 +13,7 @@ command -v python3 >/dev/null 2>&1 || { echo '{}'; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo '{}'; exit 0; }
 
 MEM_MESH_PATH=__MEM_MESH_PATH__
+HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-__HOOK_OUTPUT_MODE__}"
 
 INPUT=$(cat)
 
@@ -102,8 +103,18 @@ ${RESUME_DATA}
 ### Rules
 ${RULES_TEXT}"
 
-python3 -c "
-import json, sys
-ctx = sys.stdin.read()
-print(json.dumps({'hookSpecificOutput': {'hookEventName': 'SessionStart', 'additionalContext': ctx}}))
-" <<< "$CONTEXT"
+case "$HOOK_OUTPUT_MODE" in
+  quiet|none|off)
+    exit 0
+    ;;
+  compact)
+    CONTEXT="mem-mesh session context available. Detailed hook output suppressed for Codex; use mem-mesh MCP tools when prior context is needed."
+    ;;
+esac
+
+jq -n --arg ctx "$CONTEXT" '{
+  hookSpecificOutput: {
+    hookEventName: "SessionStart",
+    additionalContext: $ctx
+  }
+}'

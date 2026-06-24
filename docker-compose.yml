@@ -63,6 +63,11 @@ services:
       # send it as `Authorization: Bearer <token>`; retrieve/rotate the
       # generated token from the dashboard Security page.
       - MEM_MESH_HOOK_TOKEN=${MEM_MESH_HOOK_TOKEN:-}
+      # CORS origins: set this to your public domain when running behind a reverse
+      # proxy (nginx/caddy). Default only allows localhost — WebSocket and API calls
+      # from a different origin will be blocked without this.
+      # Example: MEM_MESH_CORS_ORIGINS=https://your-domain.com
+      - MEM_MESH_CORS_ORIGINS=${MEM_MESH_CORS_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}
       # Embedding model: defaults to nlpai-lab/KURE-v1 (Korean-tuned, 1024-dim)
       # Override by uncommenting and setting MEM_MESH_EMBEDDING_MODEL below.
       # - MEM_MESH_EMBEDDING_MODEL=intfloat/multilingual-e5-large

@@ -118,9 +118,12 @@ def _render_template(
     ide_tag: str = "claude",
     client_tag: str = "claude_code",
     project_id: str = "mem-mesh",
+    hook_output_mode: str = "full",
 ) -> str:
     """Replace all placeholders in a template string."""
     project_id = _safe_project_id(project_id)
+    if hook_output_mode not in {"full", "compact", "quiet"}:
+        raise ValueError("hook_output_mode must be one of: full, compact, quiet")
     result = template.replace("__DEFAULT_URL__", _shell_safe_url(url))
     result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
     result = result.replace("__SOURCE_TAG__", source_tag)
@@ -130,6 +133,7 @@ def _render_template(
     # tag stamped on every log line) is substituted along with the template's.
     result = result.replace("__HOOK_LOG__", HOOK_LOG_BLOCK)
     result = result.replace("__CLIENT_TAG__", client_tag)
+    result = result.replace("__HOOK_OUTPUT_MODE__", hook_output_mode)
     # Inject renderer-generated text
     result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
     result = result.replace("__FOLLOWUP_MSG__", render_cursor_followup(project_id))
@@ -150,13 +154,17 @@ def _render_local_template(
     mem_mesh_path: str,
     *,
     project_id: str = "mem-mesh",
+    hook_output_mode: str = "full",
 ) -> str:
     """Replace placeholders for local mode templates."""
     project_id = _safe_project_id(project_id)
+    if hook_output_mode not in {"full", "compact", "quiet"}:
+        raise ValueError("hook_output_mode must be one of: full, compact, quiet")
     result = template.replace(
         "__MEM_MESH_PATH__", _shell_safe_local_path(mem_mesh_path)
     )
     result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
+    result = result.replace("__HOOK_OUTPUT_MODE__", hook_output_mode)
     result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
     result = result.replace("__FOLLOWUP_MSG__", render_cursor_followup(project_id))
     # Reflect hook placeholders

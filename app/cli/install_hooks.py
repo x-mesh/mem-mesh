@@ -157,29 +157,26 @@ _HTTP_HOOK_ENDPOINTS = {
 _WRITE_TOOL_MATCHER = "Edit|Write|MultiEdit|NotebookEdit"
 
 
-# The server-side env var name for the hook auth token. The CLI no longer
-# interpolates this into client configs (HTTP hook + MCP headers now carry the
-# token as a baked literal); it stays here because the *server* still resolves
-# its own token env-first via app.core.config.resolve_hook_token.
+# The operator-side env var name for the hook auth token. The CLI materializes
+# this value into ~/.mem-mesh/hook_token and bakes it into HTTP hook / MCP
+# configs as a literal bearer header.
 HOOK_TOKEN_ENV_VAR = "MEM_MESH_HOOK_TOKEN"
 
-# The on-disk source for the API URL, backing the MEM_MESH_API_URL env (the SSOT
-# clients read). Generated .sh hooks resolve the URL as
+# The on-disk materialized API URL, backing the MEM_MESH_API_URL env (the
+# operator SSOT). Generated .sh hooks resolve the URL as
 # ``${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url)}`` (see app/cli/hooks/shell/*):
-# the env wins, and this file is the fallback the hooks read when it is unset.
+# the env wins, and this file is the fallback/cache the hooks read when it is
+# unset or unavailable.
 API_URL_FILE = Path.home() / ".mem-mesh" / "api_url"
 
 
 def _ensure_api_url(url: str) -> None:
-    """Mirror the install URL into ``~/.mem-mesh/api_url`` (the URL file SSOT).
+    """Materialize the effective API URL into ``~/.mem-mesh/api_url``.
 
-    Companion to :func:`_ensure_hook_token`. Without this, a user who never
-    exports ``MEM_MESH_API_URL`` falls through the hook's runtime resolution to
-    the baked default, and the on-disk single source (``~/.mem-mesh/api_url``)
-    stays unwritten — the gap that forces manual file edits. Writing it at
-    install time makes the file authoritative for every tool's hook regardless
-    of shell-vs-GUI launch. Not a secret (0644). Idempotent: write only when
-    missing or changed.
+    ``MEM_MESH_API_URL`` is the operator SSOT, but Cursor/Kiro/Claude/Codex
+    hooks need a local fallback/cache. Writing the effective value at install
+    time keeps that materialized file in sync. Not a secret (0644). Idempotent:
+    write only when missing or changed.
     """
     normalized = url.rstrip("/")
     try:
@@ -192,11 +189,10 @@ def _ensure_api_url(url: str) -> None:
 
 
 def _write_hook_token(token: str) -> None:
-    """Write an explicit hook token to ``~/.mem-mesh/hook_token`` (0600 SSOT).
+    """Write an explicit hook token to ``~/.mem-mesh/hook_token`` (0600 cache).
 
-    Unlike :func:`_ensure_hook_token` (which mirrors whatever the server already
-    resolves), this stores a caller-supplied value — e.g. ``mcp config --token``
-    pointing the install at a different server whose token differs. 0600 because
+    This materializes a caller-supplied value — e.g. ``mcp config --token`` —
+    so hooks and generated MCP configs can use the same credential. 0600 because
     it is a secret. Idempotent: no rewrite when the file already matches.
     """
     normalized = token.strip()
@@ -210,31 +206,25 @@ def _write_hook_token(token: str) -> None:
 
 
 def _ensure_hook_token() -> str:
-    """Return the hook auth token, generating ~/.mem-mesh/hook_token if absent.
+    """Return the effective hook auth token, materializing the cache if needed.
 
-    The server (app.core.config.resolve_hook_token) reads MEM_MESH_HOOK_TOKEN
-    first and falls back to this file; the installer owns creating it. The file
-    is written 0600 via an atomic swap. An existing token is reused so repeated
-    installs stay idempotent.
+    Precedence is explicit operator policy: ``MEM_MESH_HOOK_TOKEN`` env wins,
+    then ``~/.mem-mesh/hook_token``, then a generated token. The server's
+    data-dir fallback is intentionally not consulted here: that file is
+    server-private bootstrap state and must not become the client/MCP SSOT.
     """
-    # Reuse whatever token the *server* already resolves (env -> data-dir ->
-    # ~/.mem-mesh, see app.core.config.resolve_hook_token) so the installer and
-    # the server never mint divergent tokens — otherwise a server that
-    # auto-generated a data-dir token would reject hooks authenticated with a
-    # freshly written ~/.mem-mesh token. Only when nothing resolves do we create
-    # a new legacy-file token here.
-    from app.core.config import _read_token_file, resolve_hook_token
+    from app.core.config import _read_token_file
 
-    existing = resolve_hook_token()
+    env_token = (os.environ.get(HOOK_TOKEN_ENV_VAR) or "").strip()
+    if env_token:
+        if _read_token_file(HOOK_TOKEN_FILE) != env_token:
+            _atomic_write_text(HOOK_TOKEN_FILE, env_token + "\n", mode=0o600)
+        return env_token
+
+    existing = _read_token_file(HOOK_TOKEN_FILE)
     if existing:
-        # MIRROR the resolved token into ~/.mem-mesh/hook_token. The generated
-        # .sh hooks only fall back to this legacy path (env -> ~/.mem-mesh) and
-        # do NOT know the data-dir token the server may be using; without the
-        # mirror they send no/old token and the server answers 401. Idempotent:
-        # write only when the legacy file is missing or differs.
-        if _read_token_file(HOOK_TOKEN_FILE) != existing:
-            _atomic_write_text(HOOK_TOKEN_FILE, existing + "\n", mode=0o600)
         return existing
+
     token = secrets.token_urlsafe(32)
     _atomic_write_text(HOOK_TOKEN_FILE, token + "\n", mode=0o600)
     return token
@@ -259,8 +249,8 @@ def _claude_hook_entry(
     command hooks. ``matcher`` (used by PostToolUse) scopes the entry to a
     tool-name regex; when set it is emitted alongside ``hooks`` so Claude Code
     only fires the hook for matching tools. ``token`` is the hook auth secret
-    baked directly into the Authorization header as a literal (read from the
-    ~/.mem-mesh/hook_token SSOT at install time); when ``None`` the header is
+    baked directly into the Authorization header as a literal (resolved from
+    env-first materialized config at install time); when ``None`` the header is
     omitted (unauthenticated server).
     """
     if mode == "http" and event in _HTTP_HOOK_ENDPOINTS:
@@ -468,9 +458,12 @@ def _render_template(
     ide_tag: str = "claude",
     client_tag: str = "claude_code",
     project_id: str = "mem-mesh",
+    hook_output_mode: str = "full",
 ) -> str:
     """Replace all placeholders in a template string."""
     project_id = _safe_project_id(project_id)
+    if hook_output_mode not in {"full", "compact", "quiet"}:
+        raise ValueError("hook_output_mode must be one of: full, compact, quiet")
     result = template.replace("__DEFAULT_URL__", _shell_safe_url(url))
     result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
     result = result.replace("__SOURCE_TAG__", source_tag)
@@ -480,6 +473,7 @@ def _render_template(
     # tag stamped on every log line) is substituted along with the template's.
     result = result.replace("__HOOK_LOG__", HOOK_LOG_BLOCK)
     result = result.replace("__CLIENT_TAG__", client_tag)
+    result = result.replace("__HOOK_OUTPUT_MODE__", hook_output_mode)
     # Inject renderer-generated text
     result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
     result = result.replace("__FOLLOWUP_MSG__", render_cursor_followup(project_id))
@@ -500,13 +494,17 @@ def _render_local_template(
     mem_mesh_path: str,
     *,
     project_id: str = "mem-mesh",
+    hook_output_mode: str = "full",
 ) -> str:
     """Replace placeholders for local mode templates."""
     project_id = _safe_project_id(project_id)
+    if hook_output_mode not in {"full", "compact", "quiet"}:
+        raise ValueError("hook_output_mode must be one of: full, compact, quiet")
     result = template.replace(
         "__MEM_MESH_PATH__", _shell_safe_local_path(mem_mesh_path)
     )
     result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
+    result = result.replace("__HOOK_OUTPUT_MODE__", hook_output_mode)
     result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
     result = result.replace("__FOLLOWUP_MSG__", render_cursor_followup(project_id))
     # Reflect hook placeholders
@@ -1212,9 +1210,9 @@ def _install_claude(
                 print(f"  removed {script} (replaced by HTTP hook)")
 
     # http hooks authenticate with a bearer token baked into settings.json as a
-    # literal. Read the token from the ~/.mem-mesh/hook_token SSOT (generating it
-    # if missing) and stamp it straight into each HTTP hook's Authorization
-    # header — no shell env bridge, so GUI-launched clients authenticate too.
+    # literal. Resolve it from env-first materialized config (generating the
+    # ~/.mem-mesh cache if missing) and stamp it straight into each HTTP hook's
+    # Authorization header so GUI-launched clients authenticate too.
     _hook_token: Optional[str] = None
     if _http:
         _hook_token = _ensure_hook_token()
@@ -1536,10 +1534,10 @@ def _install_codex(
     scripts: Dict[str, str] = {}
     if script_mode == "local":
         scripts["mem-mesh-session-start.sh"] = _render_local_template(
-            LOCAL_SESSION_START_HOOK_TEMPLATE, path
+            LOCAL_SESSION_START_HOOK_TEMPLATE, path, hook_output_mode="compact"
         )
         scripts["mem-mesh-precompact.sh"] = _render_local_template(
-            LOCAL_PRECOMPACT_HOOK_TEMPLATE, path
+            LOCAL_PRECOMPACT_HOOK_TEMPLATE, path, hook_output_mode="compact"
         )
         if profile == "enhanced":
             scripts["mem-mesh-stop-enhanced.sh"] = _render_local_template(
@@ -1551,10 +1549,14 @@ def _install_codex(
             )
         if profile != "minimal":
             scripts["mem-mesh-user-prompt-submit.sh"] = _render_local_template(
-                LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE, path
+                LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
+                path,
+                hook_output_mode="compact",
             )
             scripts["mem-mesh-subagent-start.sh"] = _render_local_template(
-                LOCAL_SUBAGENT_START_HOOK_TEMPLATE, path
+                LOCAL_SUBAGENT_START_HOOK_TEMPLATE,
+                path,
+                hook_output_mode="compact",
             )
             scripts["mem-mesh-subagent-stop.sh"] = _render_local_template(
                 LOCAL_SUBAGENT_STOP_HOOK_TEMPLATE, path
@@ -1566,6 +1568,7 @@ def _install_codex(
             source_tag="codex-hook",
             ide_tag="codex",
             client_tag="codex",
+            hook_output_mode="compact",
         )
         scripts["mem-mesh-precompact.sh"] = _render_template(
             PRECOMPACT_HOOK_TEMPLATE,
@@ -1573,6 +1576,7 @@ def _install_codex(
             source_tag="codex-hook",
             ide_tag="codex",
             client_tag="codex",
+            hook_output_mode="compact",
         )
         if profile == "enhanced":
             scripts["mem-mesh-stop-enhanced.sh"] = _render_template(
@@ -1605,6 +1609,7 @@ def _install_codex(
                 source_tag="codex-hook",
                 ide_tag="codex",
                 client_tag="codex",
+                hook_output_mode="compact",
             )
             scripts["mem-mesh-post-tool-use.sh"] = _render_template(
                 POST_TOOL_USE_HOOK_TEMPLATE,
@@ -1619,6 +1624,7 @@ def _install_codex(
                 source_tag="codex-hook",
                 ide_tag="codex",
                 client_tag="codex",
+                hook_output_mode="compact",
             )
             scripts["mem-mesh-subagent-stop.sh"] = _render_template(
                 SUBAGENT_STOP_HOOK_TEMPLATE,
@@ -1662,11 +1668,10 @@ def _install_codex(
     print("[codex] Updating config.toml MCP server...")
     mcp_mode = "local" if mode == "local" else "http"
     mcp_path = path or str(Path(__file__).resolve().parent.parent.parent)
-    # http mode bakes the literal hook token into config.toml's http_headers
-    # (option 2). Use _ensure_hook_token() (not resolve) so the file exists BEFORE
-    # we stamp it — the resolve-only path left the first install header-less (the
-    # token-generating _ensure_hook_token below ran afterwards), breaking
-    # idempotency. _ensure_hook_token is idempotent, so the later call is a no-op.
+    # http mode bakes the literal hook token into config.toml's http_headers.
+    # Use _ensure_hook_token() so the env-first effective token is materialized
+    # before we stamp it; _ensure_hook_token is idempotent, so the later call is
+    # a no-op.
     codex_token = _ensure_hook_token() if mcp_mode == "http" else None
     merge_codex_mcp_config(
         config_path,
@@ -2233,18 +2238,17 @@ def cmd_install(
         # HTTP hooks while Kiro/Cursor fall back to command hooks.
         resolved = ""
         print(f"Installing mem-mesh hooks (mode: {mode}, url: {url})")
-        # Mirror the URL into the file SSOT so every tool's hook resolves it
-        # from one place (~/.mem-mesh/api_url) instead of relying on a per-tool
-        # env export. Local mode renders a path, not a URL, so it is skipped.
+        # Materialize the URL so every tool's hook has a shared
+        # ~/.mem-mesh/api_url fallback/cache. Local mode renders a path, not a
+        # URL, so it is skipped.
         _ensure_api_url(url)
 
-        # Ensure the shared token FILE exists when the server enforces auth, so
-        # every client has a credential to present: .sh hooks (Kiro/Cursor) fall
-        # back to ~/.mem-mesh/hook_token, and native HTTP hooks/MCP get the token
-        # baked into their config as a literal bearer header. Without this,
-        # installing only Kiro/Cursor (whose _install_* never bootstrap a token)
-        # — or any direct cmd_install — against an auth-gated server leaves them
-        # 401. Mirrors onboarding's token step; the parallel path it never covered.
+        # Ensure the materialized token file exists when the server enforces
+        # auth, so every client has a credential to present: .sh hooks
+        # (Kiro/Cursor) fall back to ~/.mem-mesh/hook_token, and native HTTP
+        # hooks/MCP get the token baked into their config as a literal bearer
+        # header. Without this, installing only Kiro/Cursor — or any direct
+        # cmd_install — against an auth-gated server leaves them 401.
         from app.cli.hooks.status import server_enforces_auth
 
         if server_enforces_auth(url):

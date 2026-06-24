@@ -14,6 +14,7 @@ import pytest
 from app.cli.hooks.renderer import _render_template
 from app.cli.hooks.templates import (
     KIRO_STOP_HOOK_TEMPLATE,
+    PRECOMPACT_HOOK_TEMPLATE,
     SESSION_START_HOOK_TEMPLATE,
     STOP_DECIDE_HOOK_TEMPLATE,
     SUBAGENT_START_HOOK_TEMPLATE,
@@ -225,6 +226,42 @@ def test_session_start_forwards_server_context(tmp_path: Path, hook_api_server) 
     assert "mem-mesh" in context
 
 
+def test_codex_session_start_compact_stdout_keeps_full_payload(
+    tmp_path: Path, hook_api_server
+) -> None:
+    """Codex compact stdout suppresses noisy rules without trimming the POST body."""
+    state, url = hook_api_server
+    long_prompt = "retain-me-" + ("x" * 2000)
+    state["response"] = {
+        "hookSpecificOutput": {
+            "additionalContext": (
+                "## mem-mesh Session Context (Auto-injected)\n"
+                '**You MUST call `session_resume(project_id="mem-mesh", expand="smart")` immediately**\n'
+                "### Rules\n" + ("very noisy rule text\n" * 100)
+            )
+        }
+    }
+    script = _render_and_write(
+        tmp_path,
+        SESSION_START_HOOK_TEMPLATE,
+        source_tag="codex-hook",
+        client_tag="codex",
+        hook_output_mode="compact",
+        project_id="test-project",
+    )
+
+    result = _run_hook(script, {"prompt": long_prompt}, api_url=url)
+
+    assert result.returncode == 0
+    context = _extract_context(json.loads(result.stdout))
+    assert "mem-mesh session context available" in context
+    assert "MUST call" not in context
+    assert "very noisy rule text" not in context
+    assert len(context) < 240
+    assert state["last_payload"]["prompt"] == long_prompt
+    assert state["last_payload"]["client"] == "codex"
+
+
 # ---------------------------------------------------------------------------
 # kiro-stop tests
 # ---------------------------------------------------------------------------
@@ -327,7 +364,12 @@ def hook_api_server():
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):  # noqa: N802 — BaseHTTPRequestHandler contract
             length = int(self.headers.get("Content-Length", 0) or 0)
-            self.rfile.read(length)
+            raw = self.rfile.read(length)
+            state["last_body"] = raw.decode("utf-8")
+            try:
+                state["last_payload"] = json.loads(state["last_body"])
+            except json.JSONDecodeError:
+                state["last_payload"] = None
             # ensure_ascii=False to mirror FastAPI's UTF-8 JSON (so multibyte
             # context survives the round-trip through the hook to stdout).
             body = json.dumps(state["response"], ensure_ascii=False).encode("utf-8")
@@ -377,6 +419,68 @@ def pin_api_server():
     server.shutdown()
 
 
+@pytest.fixture()
+def memory_search_server():
+    """Mock memory search endpoint used by SubagentStart."""
+    state: dict = {"response": {"results": []}, "queries": []}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 — BaseHTTPRequestHandler contract
+            parsed = urlparse(self.path)
+            state["queries"].append(parsed)
+            if parsed.path != "/api/memories/search":
+                self.send_error(404)
+                return
+            body = json.dumps(state["response"], ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # silence request logging
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield state, f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+@pytest.fixture()
+def precompact_api_server():
+    """Mock PreCompact endpoints and record session-end side effects."""
+    state: dict = {"post_paths": []}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802 — BaseHTTPRequestHandler contract
+            state["post_paths"].append(self.path)
+            body = b"{}"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):  # noqa: N802 — BaseHTTPRequestHandler contract
+            body = json.dumps({"pins": []}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # silence request logging
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield state, f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
 def test_user_prompt_submit_reminds_when_no_tracked_pins(
     tmp_path: Path, hook_api_server
 ) -> None:
@@ -390,6 +494,33 @@ def test_user_prompt_submit_reminds_when_no_tracked_pins(
     result = _run_hook(script, {"prompt": NO_KEYWORD_PROMPT}, api_url=url)
     assert result.returncode == 0
     assert PIN_REMINDER_TEXT in result.stdout
+
+
+def test_codex_user_prompt_submit_compact_stdout_keeps_full_payload(
+    tmp_path: Path, hook_api_server
+) -> None:
+    state, url = hook_api_server
+    long_prompt = "이전에 결정한 내용을 다시 보고 싶습니다. " + ("가" * 2000)
+    long_context = "Related memory\n" + ("details\n" * 500)
+    state["response"] = {"hookSpecificOutput": {"additionalContext": long_context}}
+    script = _render_and_write(
+        tmp_path,
+        USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
+        source_tag="codex-hook",
+        client_tag="codex",
+        hook_output_mode="compact",
+        project_id="test-project",
+    )
+
+    result = _run_hook(script, {"prompt": long_prompt}, api_url=url)
+
+    assert result.returncode == 0
+    context = _extract_context(json.loads(result.stdout))
+    assert context.startswith("Related memory")
+    assert len(context) <= 1200
+    assert len(context) < len(long_context)
+    assert state["last_payload"]["prompt"] == long_prompt
+    assert state["last_payload"]["client"] == "codex"
 
 
 def test_user_prompt_submit_silent_with_in_progress_pin(
@@ -456,6 +587,63 @@ def test_subagent_start_plan_agent_exits_zero(tmp_path: Path) -> None:
     )
     result = _run_hook(script, {"agent_type": "Plan", "agent_id": "test-456"})
     assert result.returncode == 0
+
+
+def test_subagent_start_quiet_stdout_still_queries_context(
+    tmp_path: Path, memory_search_server
+) -> None:
+    state, url = memory_search_server
+    state["response"] = {
+        "results": [{"content": "architecture decision " + ("x" * 500)}]
+    }
+    script = _render_and_write(
+        tmp_path,
+        SUBAGENT_START_HOOK_TEMPLATE,
+        hook_output_mode="quiet",
+        project_id="test-project",
+    )
+
+    result = _run_hook(
+        script,
+        {"agent_type": "Plan", "agent_id": "test-456"},
+        api_url=url,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == ""
+    assert len(state["queries"]) == 1
+    assert state["queries"][0].path == "/api/memories/search"
+
+
+def test_precompact_quiet_stdout_still_ends_session(
+    tmp_path: Path, precompact_api_server
+) -> None:
+    state, url = precompact_api_server
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": "버그를 수정했습니다. error를 해결했습니다."},
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    script = _render_and_write(
+        tmp_path,
+        PRECOMPACT_HOOK_TEMPLATE,
+        hook_output_mode="quiet",
+        project_id="test-project",
+    )
+
+    result = _run_hook(script, {"transcript_path": str(transcript)}, api_url=url)
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == ""
+    assert len(state["post_paths"]) == 1
+    assert state["post_paths"][0].startswith("/api/work/sessions/end-by-project/")
 
 
 # ---------------------------------------------------------------------------

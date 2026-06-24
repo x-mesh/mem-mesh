@@ -4,10 +4,11 @@
 underlying facts. To keep those surfaces consistent, they collect their data
 here instead of each re-implementing detection. This module only *reads* state
 (it never mutates config) and reuses the already-tested primitives in
-``app.cli.mcp_config`` and ``app.core.config``.
+``app.cli.mcp_config`` and the env/materialized local config files.
 """
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,7 +36,7 @@ __all__ = [
 class TokenStatus:
     """Where the active hook token resolves from, plus a masked preview."""
 
-    source: str  # "env" | "data_file" | "legacy_file" | "none"
+    source: str  # "env" | "materialized_file" | "none"
     present: bool
     masked: str  # masked preview, or "" when absent
 
@@ -46,25 +47,32 @@ class TokenStatus:
 
 
 def collect_token_status() -> TokenStatus:
-    """Resolve the hook token the same way the server does, without leaking it.
+    """Resolve the client-effective hook token, without leaking it.
 
-    Reuses ``app.core.config.hook_token_source`` / ``resolve_hook_token`` so the
-    answer matches ``hooks status`` and ``doctor``. Only a masked preview is
-    ever exposed; the raw value never leaves this function.
+    ``MEM_MESH_HOOK_TOKEN`` is the operator SSOT. ``~/.mem-mesh/hook_token`` is
+    the CLI-managed materialized fallback/cache that shell hooks read and MCP
+    configs stamp. The server-private data-dir token is intentionally not a
+    client/MCP source of truth, so this collector does not report it as active.
     """
     try:
-        from app.core.config import hook_token_source, resolve_hook_token
+        from app.core.config import HOOK_TOKEN_FILE, _read_token_file
 
-        source = hook_token_source()
-        token = resolve_hook_token()
+        env_token = (os.environ.get("MEM_MESH_HOOK_TOKEN") or "").strip()
+        if env_token:
+            return TokenStatus(
+                source="env", present=True, masked=mask_secret(env_token)
+            )
+        file_token = _read_token_file(HOOK_TOKEN_FILE)
+        if file_token:
+            return TokenStatus(
+                source="materialized_file",
+                present=True,
+                masked=mask_secret(file_token),
+            )
     except Exception:
         return TokenStatus(source="none", present=False, masked="")
 
-    return TokenStatus(
-        source=source,
-        present=bool(token),
-        masked=mask_secret(token) if token else "",
-    )
+    return TokenStatus(source="none", present=False, masked="")
 
 
 # ── MCP config ──

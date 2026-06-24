@@ -5,6 +5,9 @@ __VERSION_MARKER__
 
 set -euo pipefail
 
+command -v jq >/dev/null 2>&1 || { echo '{}'; exit 0; }
+
+HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-__HOOK_OUTPUT_MODE__}"
 INPUT=$(cat)
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -43,8 +46,18 @@ ${RESUME_OUTPUT}
 ### 작업 규칙
 $RULES_TEXT"
 
-python3 -c "
-import json, sys
-ctx = sys.stdin.read()
-print(json.dumps({'hookSpecificOutput': {'hookEventName': 'SessionStart', 'additionalContext': ctx}}))
-" <<< "$CONTEXT"
+case "$HOOK_OUTPUT_MODE" in
+  quiet|none|off)
+    exit 0
+    ;;
+  compact)
+    CONTEXT="mem-mesh session context available. Detailed hook output suppressed; use mem-mesh MCP tools when prior context is needed."
+    ;;
+esac
+
+jq -n --arg ctx "$CONTEXT" '{
+  hookSpecificOutput: {
+    hookEventName: "SessionStart",
+    additionalContext: $ctx
+  }
+}'
