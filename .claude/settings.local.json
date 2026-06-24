@@ -29,7 +29,8 @@
       "Bash(ls:*)",
       "mcp__mem-mesh__pin_add",
       "Bash(docker volume *)",
-      "Bash(docker run *)"
+      "Bash(docker run *)",
+      "mcp__mem-mesh__pin_complete"
     ]
   }
 }

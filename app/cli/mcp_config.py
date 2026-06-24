@@ -22,6 +22,7 @@ from app.cli.codex_config import (
 )
 from app.cli.hooks.colors import bold, dim, err, info, ok, warn
 from app.cli.hooks.json_ops import timestamped_backup
+from app.mcp_common.schemas import get_all_tool_schemas
 
 
 def has_uvx() -> bool:
@@ -151,24 +152,9 @@ def generate_mcp_entry(
         token: The literal hook token to bake into the auth header (resolved from
             the ~/.mem-mesh/hook_token SSOT by the caller).
     """
-    approve_list = [
-        "add",
-        "search",
-        "context",
-        "update",
-        "delete",
-        "stats",
-        "pin_add",
-        "pin_complete",
-        "pin_promote",
-        "session_resume",
-        "session_end",
-        "link",
-        "unlink",
-        "get_links",
-        "batch_operations",
-        "weekly_review",
-    ]
+    # autoApprove 목록은 실제 노출 도구(get_all_tool_schemas SSOT)에서 도출한다.
+    # 도구가 추가/제거돼도 자동 동기화되어 누락(예: pin_list/pin_get)이 재발하지 않는다.
+    approve_list = [schema["name"] for schema in get_all_tool_schemas()]
 
     if mode in ("sse", "http"):
         # Streamable HTTP transport. "sse" is a backward-compatible alias; the
