@@ -2,7 +2,9 @@
 
 from types import SimpleNamespace
 
+import pytest
 from starlette.requests import Request
+from starlette.responses import Response
 
 from app.cli.mcp_config import MCP_SERVER_KEY
 from app.web.dashboard.route_modules import connect
@@ -71,3 +73,41 @@ def test_connect_installer_accepts_kiro_and_antigravity_targets() -> None:
     assert "hook rules: session_resume" in kiro_script
     assert "mem-mesh client install complete" in antigravity_script
     assert "hook rules: not installed for this MCP-only target" in antigravity_script
+
+
+@pytest.mark.asyncio
+async def test_connect_hooks_http_bakes_revealed_token(monkeypatch) -> None:
+    monkeypatch.setattr(connect, "resolve_hook_token", lambda: "route-http-token")
+    monkeypatch.setattr(connect, "_can_reveal", lambda request: True)
+
+    result = await connect.connect_hooks(
+        _request(),
+        Response(),
+        client="claude",
+        mode="http",
+        server_url="http://localhost:8000",
+    )
+
+    hook = result["settings"]["hooks"]["SessionStart"][0]["hooks"][0]
+    assert hook["type"] == "http"
+    assert hook["headers"]["Authorization"] == "Bearer route-http-token"
+    assert "literal Authorization header" in result["note"]
+
+
+@pytest.mark.asyncio
+async def test_connect_hooks_http_omits_unrevealed_token(monkeypatch) -> None:
+    monkeypatch.setattr(connect, "resolve_hook_token", lambda: "hidden-token")
+    monkeypatch.setattr(connect, "_can_reveal", lambda request: False)
+
+    result = await connect.connect_hooks(
+        _request(),
+        Response(),
+        client="claude",
+        mode="http",
+        server_url="http://localhost:8000",
+    )
+
+    hook = result["settings"]["hooks"]["SessionStart"][0]["hooks"][0]
+    assert "headers" not in hook
+    assert result["hook_token"] is None
+    assert result["hook_token_masked"].endswith("oken")

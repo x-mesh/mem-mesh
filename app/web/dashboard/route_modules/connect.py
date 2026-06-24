@@ -654,16 +654,22 @@ async def connect_hooks(
     """Render a paste-ready Claude Code hooks block for settings.json.
 
     ``mode=http`` emits native HTTP hooks pointing at this server, authenticated
-    with ``Authorization: Bearer ${MEM_MESH_HOOK_TOKEN}``; ``mode=api`` emits
-    bash+curl command hooks. The actual token is returned separately (subject to
-    the reveal policy) so the operator can set ``MEM_MESH_HOOK_TOKEN``.
+    with a literal ``Authorization: Bearer ...`` header when the reveal policy
+    allows it; ``mode=api`` emits bash+curl command hooks.
     """
     response.headers["Cache-Control"] = "no-store"
     url = _server_url(request, server_url)
 
     from app.cli.install_hooks import _build_claude_hooks_settings
 
-    settings = _build_claude_hooks_settings(profile, mode, url)
+    token = resolve_hook_token()
+    reveal = _can_reveal(request)
+    settings = _build_claude_hooks_settings(
+        profile,
+        mode,
+        url,
+        token=token if reveal and mode == "http" else None,
+    )
 
     # Claude Code's native HTTP hooks refuse private/link-local/CGNAT hosts
     # (Tailscale/VPN/LAN) as an SSRF guard — only loopback and public addresses
@@ -678,8 +684,19 @@ async def connect_hooks(
         except Exception:  # pragma: no cover - defensive
             http_hook_blocked = None
 
-    token = resolve_hook_token()
-    reveal = _can_reveal(request)
+    if mode == "http":
+        note = (
+            "HTTP-mode hooks (events with a server endpoint) work by paste alone "
+            "with a literal Authorization header baked into the JSON. Events "
+            "without an endpoint stay command hooks that also need the shell "
+            "scripts; for the complete set run `mem-mesh-hooks install`."
+        )
+    else:
+        note = (
+            "API-mode hooks use command scripts that read the token from "
+            "`~/.mem-mesh/hook_token`. Paste alone is partial unless those shell "
+            "scripts already exist; for the complete set run `mem-mesh-hooks install`."
+        )
     return {
         "client": client,
         "mode": mode,
@@ -691,13 +708,7 @@ async def connect_hooks(
         "hook_token": token if reveal else None,
         "hook_token_masked": _mask(token) if token else "",
         "hook_token_env": "MEM_MESH_HOOK_TOKEN",
-        "note": (
-            "HTTP-mode hooks (events with a server endpoint) work by paste alone "
-            "and read the token from MEM_MESH_HOOK_TOKEN (never stored in "
-            "settings.json — export it where the client runs). Events without an "
-            "endpoint stay command hooks that also need the shell scripts; for "
-            "the complete set run `mem-mesh-hooks install`."
-        ),
+        "note": note,
         "rules_note": (
             "Installed hook context tells the agent to run session_resume, create "
             "pins for file-changing or multi-step work, and call pin_complete "
