@@ -179,7 +179,12 @@ def _http(method: str, url: str, headers=None, data=None, timeout: float = 5.0):
     import urllib.error
     import urllib.request
 
-    req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
+    # Explicit UA — the default urllib agent ("Python-urllib") is blocked as a
+    # bot by some reverse proxies (Cloudflare), which made these auth probes
+    # falsely 403 while the real curl-based hooks passed.
+    hdrs = {"User-Agent": "mem-mesh-cli"}
+    hdrs.update(headers or {})
+    req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.read()

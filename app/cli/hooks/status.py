@@ -260,7 +260,12 @@ def probe_api(url: str, timeout: int = 5) -> ApiProbe:
     health_url = f"{url.rstrip('/')}/health"
     start = time.monotonic()
     try:
-        req = urllib.request.Request(health_url, method="GET")
+        # Some reverse proxies (e.g. Cloudflare) block the default urllib UA
+        # ("Python-urllib") as a bot, making doctor falsely report 403 while the
+        # real curl-based hooks pass. Send an explicit UA so the probe matches.
+        req = urllib.request.Request(
+            health_url, method="GET", headers={"User-Agent": "mem-mesh-cli"}
+        )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             elapsed_ms = int((time.monotonic() - start) * 1000)
             return ApiProbe(
