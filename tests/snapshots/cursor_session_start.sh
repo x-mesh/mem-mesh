@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 20
+# mem-mesh-hooks prompt-version: 21
 # Cursor SessionStart hook → mem-mesh /api/hooks/claude/session-start
 #
 # Thin forwarder: POST the Cursor hook event (camelCase fields normalized to
@@ -75,10 +75,16 @@ PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
 # Normalize Cursor camelCase fields to snake_case and inject project_id.
 # Cursor sends sessionId / transcriptPath; the server expects snake_case.
-PAYLOAD=$(printf '%s' "$INPUT" | jq -c --arg pid "$PROJECT_DIR" '. + {
+PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
+  --arg pid "$PROJECT_DIR" \
+  --arg source "cursor-hook" \
+  --arg client "cursor" \
+  '. + {
   session_id: (.session_id // .sessionId // null),
   transcript_path: (.transcript_path // .transcriptPath // null),
-  project_id: $pid
+  project_id: $pid,
+  hook_source: $source,
+  client: $client
 }' 2>/dev/null) || PAYLOAD="$INPUT"
 
 CURL_EXIT=0

@@ -7,6 +7,7 @@ those canonical definitions into each IDE's native format.
 
 Bump PROMPT_VERSION in behaviors.py when rules change, then re-run:
     mem-mesh-hooks install --target all
+    mem-mesh-hooks rules
     mem-mesh-hooks sync-project
 """
 
@@ -1934,6 +1935,18 @@ def cmd_sync_project(target: str = "all", project_id: str = "mem-mesh") -> None:
     print("\nSync complete.")
 
 
+def cmd_rules(project_id: str = "mem-mesh", output_format: str = "plain") -> None:
+    """Print hook rules to stdout without modifying files."""
+    project_id = _safe_project_id(project_id)
+    if output_format == "plain":
+        print(render_rules_text(project_id))
+        return
+    if output_format == "claude":
+        print(render_claude_project_rules(project_id))
+        return
+    raise ValueError(f"unknown rules format: {output_format}")
+
+
 _CLAUDE_RULES_BEGIN_RE = re.compile(
     r"<!-- mem-mesh-hooks:BEGIN v\d+ -->.*?<!-- mem-mesh-hooks:END v\d+ -->",
     re.DOTALL,
@@ -2479,6 +2492,23 @@ def main(argv: Optional[List[str]] = None) -> None:
     # doctor
     subparsers.add_parser("doctor", help="Run diagnostics and connectivity checks")
 
+    # rules
+    rules_parser = subparsers.add_parser(
+        "rules",
+        help="Print hook rules to stdout for copy/paste",
+    )
+    rules_parser.add_argument(
+        "--project-id",
+        default="mem-mesh",
+        help="Project ID to embed in the rendered rules (default: mem-mesh)",
+    )
+    rules_parser.add_argument(
+        "--format",
+        choices=["plain", "claude"],
+        default="plain",
+        help="Output format: plain rules or a CLAUDE.md managed block",
+    )
+
     # sync-project
     sync_parser = subparsers.add_parser(
         "sync-project",
@@ -2524,6 +2554,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         from app.cli.hooks.doctor import cmd_doctor
 
         cmd_doctor()
+    elif args.command == "rules":
+        cmd_rules(args.project_id, args.format)
     elif args.command == "sync-project":
         cmd_sync_project(args.target, args.project_id)
 

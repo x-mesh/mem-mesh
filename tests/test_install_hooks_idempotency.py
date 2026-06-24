@@ -692,7 +692,9 @@ def test_install_codex_api_writes_command_hooks_and_mcp_config(
     assert 'url = "https://mem.example.com/mcp/sse"' in config_text
     # Option 2 dropped the env-var indirection: no named bearer_token_env_var.
     assert "bearer_token_env_var" not in config_text
-    assert 'MEM_MESH_CLIENT = "codex"' in config_text
+    # Codex rejects env blocks for streamable_http/url transports; client
+    # identity is carried by hook payloads and MCP clientInfo/User-Agent.
+    assert 'MEM_MESH_CLIENT = "codex"' not in config_text
 
     first_hooks = hooks_path.read_text(encoding="utf-8")
     first_config = config_path.read_text(encoding="utf-8")
@@ -820,7 +822,7 @@ def test_mcp_config_configures_codex_toml(tmp_path: Path) -> None:
     text = config_path.read_text(encoding="utf-8")
     assert "[mcp_servers.mem-mesh]" in text
     assert 'url = "https://mem.example.com/mcp/sse"' in text
-    assert 'MEM_MESH_CLIENT = "codex"' in text
+    assert 'MEM_MESH_CLIENT = "codex"' not in text
 
     verified, verify_msg = mcp_config.verify_tool_config(tool)
     assert verified is True

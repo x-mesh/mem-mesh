@@ -29,7 +29,11 @@ INPUT=$(cat)
 # basename(cwd) but this is more accurate for worktrees.
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
-PAYLOAD=$(printf '%s' "$INPUT" | jq -c --arg pid "$PROJECT_DIR" '. + {project_id: $pid}' 2>/dev/null) || PAYLOAD="$INPUT"
+PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
+  --arg pid "$PROJECT_DIR" \
+  --arg source "__SOURCE_TAG__" \
+  --arg client "__CLIENT_TAG__" \
+  '. + {project_id: $pid, hook_source: $source, client: $client}' 2>/dev/null) || PAYLOAD="$INPUT"
 
 # Capture HTTP status + timing alongside the body (-w appends "\n<code> <time>")
 # so the log can distinguish a 401 (bad token) / 000 (server unreachable) from a

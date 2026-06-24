@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 20
+# mem-mesh-hooks prompt-version: 21
 # Claude Code SubagentStop hook → mem-mesh /api/hooks/claude/subagent-stop
 #
 # Thin forwarder: the server keyword-matches the subagent result and saves the
@@ -72,7 +72,11 @@ ACTIVE=$(printf '%s' "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null) 
 
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
-PAYLOAD=$(printf '%s' "$INPUT" | jq -c --arg pid "$PROJECT_DIR" '. + {project_id: $pid}' 2>/dev/null) || PAYLOAD="$INPUT"
+PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
+  --arg pid "$PROJECT_DIR" \
+  --arg source "claude-code-hook" \
+  --arg client "claude_code" \
+  '. + {project_id: $pid, hook_source: $source, client: $client}' 2>/dev/null) || PAYLOAD="$INPUT"
 
 CURL_EXIT=0
 HTTP_META=$(curl -s -o /dev/null --max-time 8 \

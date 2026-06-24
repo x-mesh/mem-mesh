@@ -14,7 +14,7 @@ from typing import List
 # Prompt schema version — bump on ANY behavioral rule change
 # ---------------------------------------------------------------------------
 
-PROMPT_VERSION: int = 20
+PROMPT_VERSION: int = 21
 
 
 # ---------------------------------------------------------------------------
@@ -66,47 +66,52 @@ class SessionConfig:
 CORE_RULES: List[Rule] = [
     Rule(
         key="coding_first",
-        title="코딩 응답 우선",
+        title="Answer with the work first",
         description=(
-            "코드와 답변을 먼저 출력. mem-mesh 호출은 답변 완료 후 수행. "
-            "응답 서두에 '메모리를 검색하겠습니다' 같은 안내를 넣지 않는다."
+            "Return the code or answer first. Perform mem-mesh calls after the "
+            "response work is complete. Do not start responses with status "
+            "announcements such as 'I will search memory first.'"
         ),
     ),
     Rule(
         key="pin_tracking",
-        title="Pin Gate로 작업 추적 (필수)",
+        title="Track work with Pin Gate (required)",
         description=(
-            "작업 시작 전 반드시 Pin Gate를 판단한다. 파일 변경, 구현, 버그 수정, "
-            "리팩토링, 마이그레이션, 다단계 조사, 다음 턴으로 이어질 수 있는 작업이면 "
-            '즉시 pin_add(content, project_id="{project_id}", importance=3). '
-            "단순 질문/설명/조회/read-only 분석은 pin 생성 X가 정답이다. 기존 "
-            "in_progress pin이 현재 요청과 무관하면 재사용하지 않는다. 응답에는 "
-            "`Pin created: <id>` 또는 `No pin created: <reason>` 중 하나를 남긴다. "
-            "완료 즉시 pin_complete 호출 — 활성 pin을 남긴 채 최종 응답하지 않는다. "
-            "(importance: 3=일반, 4=중요, 5=아키텍처)"
+            "Before starting task work, decide Pin Gate. If the request involves "
+            "file edits, implementation, bug fixes, refactoring, migrations, "
+            "multi-step investigation, or work that may continue into a later "
+            'turn, immediately call pin_add(content, project_id="{project_id}", '
+            "importance=3). For simple questions, explanations, lookups, "
+            "read-only analysis, or basic checks, do not create a pin. Do not "
+            "reuse an unrelated in_progress pin. State exactly one of "
+            "`Pin created: <id>` or `No pin created: <reason>`. When the work is "
+            "done, call pin_complete immediately; do not leave an active pin "
+            "before the final response. (importance: 3=normal, 4=important, "
+            "5=architecture)"
         ),
     ),
     Rule(
         key="selective_save",
-        title="영구 메모리는 선별적",
+        title="Save permanent memories selectively",
         description=(
-            "decision, bug, incident, idea, code_snippet만 add()로 저장. "
-            "일상적 작업 상태는 pin으로 충분."
+            "Use add() only for decision, bug, incident, idea, and code_snippet "
+            "memories. Routine task state belongs in pins."
         ),
     ),
     Rule(
         key="context_search",
-        title="맥락 검색 활용",
+        title="Use context search",
         description=(
-            "과거 결정/작업/설계가 언급되면 코드 작성 전에 search()로 기존 맥락 확인."
+            "When prior decisions, tasks, or design context are referenced, call "
+            "search() before writing code."
         ),
     ),
     Rule(
         key="session_end",
-        title="세션 종료",
+        title="End sessions when requested",
         description=(
-            "사용자가 완료를 명시하면 요청 처리 후 "
-            'session_end(project_id="{project_id}").'
+            "When the user explicitly says the session is done, finish the "
+            'request and then call session_end(project_id="{project_id}").'
         ),
     ),
 ]
@@ -135,15 +140,18 @@ SAVE_CRITERIA = SaveCriteria(
 
 PIN_CRITERIA = PinCriteria(
     create_when=(
-        "파일 변경, 구현, 버그 수정, 리팩토링, 마이그레이션, 다단계 조사, "
-        "다음 턴으로 이어질 수 있는 작업"
+        "file edits, implementation, bug fixes, refactoring, migrations, "
+        "multi-step investigation, or work that may continue into a later turn"
     ),
-    skip_when="질문, 설명 요청, 조회, read-only 분석, 단순 확인, hook 자체 논의",
+    skip_when=(
+        "questions, explanation requests, lookups, read-only analysis, simple "
+        "checks, or discussion about hooks themselves"
+    ),
     pin_format=(
-        'mcp_mem_mesh_pin_add(content="[1줄 요약]", '
+        'mcp_mem_mesh_pin_add(content="[one-line summary]", '
         'project_id="{project_id}", importance=3, tags=[...])\n'
-        '응답 표기: "Pin created: <id>" 또는 "No pin created: <reason>"\n'
-        '완료 시: mcp_mem_mesh_pin_complete(pin_id="...") — 생략 금지'
+        'Response marker: "Pin created: <id>" or "No pin created: <reason>"\n'
+        'On completion: mcp_mem_mesh_pin_complete(pin_id="...") - required'
     ),
 )
 

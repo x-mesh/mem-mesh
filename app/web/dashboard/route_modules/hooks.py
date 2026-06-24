@@ -21,6 +21,7 @@ Design rules:
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -31,6 +32,7 @@ from app.cli.hooks.keywords import match_category
 from app.core import runtime_config as rc
 from app.core.redaction import redact_secrets
 from app.core.schemas.hooks import (
+    HookEventBase,
     PostToolUsePayload,
     SessionStartPayload,
     StopPayload,
@@ -102,6 +104,11 @@ _NOISE_MARKERS = (
     "<tool-use-id>",
     "<system-reminder>",
 )
+
+_DEFAULT_HOOK_CLIENT = "claude_code"
+_DEFAULT_HOOK_SOURCE = "claude-code-http-hook"
+_CLIENT_RE = re.compile(r"[^a-z0-9_]+")
+_SOURCE_RE = re.compile(r"[^a-z0-9_.-]+")
 
 
 def _ok(status: str) -> Response:
@@ -194,6 +201,37 @@ def _is_noise(text: Optional[str]) -> bool:
     return any(marker in text for marker in _NOISE_MARKERS)
 
 
+def _clean_client(value: Optional[str], default: str = _DEFAULT_HOOK_CLIENT) -> str:
+    raw = (value or "").strip().lower().replace("-", "_")
+    cleaned = _CLIENT_RE.sub("_", raw).strip("_")
+    return cleaned[:64] if cleaned else default
+
+
+def _clean_source(value: Optional[str], default: str = _DEFAULT_HOOK_SOURCE) -> str:
+    raw = (value or "").strip().lower()
+    cleaned = _SOURCE_RE.sub("-", raw).strip("-._")
+    return cleaned[:96] if cleaned else default
+
+
+def _payload_extra(payload: HookEventBase, key: str) -> Optional[str]:
+    extra = getattr(payload, "model_extra", None) or {}
+    value = extra.get(key)
+    return str(value) if value is not None else None
+
+
+def _hook_client(payload: HookEventBase) -> str:
+    return _clean_client(payload.client or _payload_extra(payload, "client"))
+
+
+def _hook_source(payload: HookEventBase) -> str:
+    # Older Kiro/reflect command hooks sent "source"; SessionStart uses that
+    # field for lifecycle reason, so only treat it as hook metadata elsewhere.
+    legacy_source = None
+    if not isinstance(payload, SessionStartPayload):
+        legacy_source = _payload_extra(payload, "source")
+    return _clean_source(payload.hook_source or legacy_source)
+
+
 async def _record(
     hook_service: HookService,
     *,
@@ -221,7 +259,13 @@ async def _record(
 
 
 async def _save_memory(
-    project_id: str, content: str, category: str, *, tags: list[str]
+    project_id: str,
+    content: str,
+    category: str,
+    *,
+    tags: list[str],
+    source: str = _DEFAULT_HOOK_SOURCE,
+    client: str = _DEFAULT_HOOK_CLIENT,
 ) -> bool:
     """Save a memory via MemoryService if the embedding model is ready."""
     services = get_services()
@@ -245,8 +289,8 @@ async def _save_memory(
             content=safe_content,
             project_id=project_id,
             category=category,
-            source="claude-code-http-hook",
-            client="claude_code",
+            source=source,
+            client=client,
             tags=tags,
         )
         return True
@@ -272,6 +316,7 @@ async def session_start(
     """
     project_id = _project_id(payload.cwd, payload.project_id)
     ide_session_id = payload.session_id
+    client = _hook_client(payload)
 
     is_continuation = False
     if ide_session_id:
@@ -285,7 +330,7 @@ async def session_start(
         project_id=project_id,
         ide_session_id=ide_session_id,
         event_name="SessionStart",
-        client_type="claude-ai",
+        client_type=client,
     )
 
     # Resume session context + correlate the IDE session id.
@@ -299,7 +344,7 @@ async def session_start(
             await session_service.get_or_create_active_session(
                 project_id=project_id,
                 ide_session_id=ide_session_id,
-                client_type="claude-ai",
+                client_type=client,
             )
         if context is not None:
             pins = getattr(context, "pins", None) or []
@@ -394,6 +439,7 @@ async def user_prompt_submit(
     """
     project_id = _project_id(payload.cwd, payload.project_id)
     ide_session_id = payload.session_id
+    client = _hook_client(payload)
     prompt = payload.prompt or ""
 
     await _record(
@@ -401,7 +447,7 @@ async def user_prompt_submit(
         project_id=project_id,
         ide_session_id=ide_session_id,
         event_name="UserPromptSubmit",
-        client_type="claude-ai",
+        client_type=client,
         prompt=prompt,
     )
 
@@ -526,12 +572,13 @@ async def post_tool_use(
         return _ok("post-tool-use: skip (no session id)")
 
     project_id = _project_id(payload.cwd, payload.project_id)
+    client = _hook_client(payload)
     try:
         await hook_service.record_write(
             project_id=project_id,
             ide_session_id=ide_session_id,
             tool_name=tool_name,
-            client_type="claude-ai",
+            client_type=client,
         )
     except Exception as e:  # noqa: BLE001 — a hook must never raise into the caller
         logger.warning(f"post-tool-use record failed: {e}")
@@ -560,13 +607,15 @@ async def stop(
     message = payload.last_assistant_message or ""
     project_id = _project_id(payload.cwd, payload.project_id)
     ide_session_id = payload.session_id
+    client = _hook_client(payload)
+    source = _hook_source(payload)
 
     await _record(
         hook_service,
         project_id=project_id,
         ide_session_id=ide_session_id,
         event_name="Stop",
-        client_type="claude-ai",
+        client_type=client,
         assistant_message=message,
     )
 
@@ -598,6 +647,8 @@ async def stop(
         content,
         category,
         tags=["auto-save", "keyword", category],
+        source=source,
+        client=client,
     )
     return _ok(
         f"stop: saved memory as {category} (project={project_id})"
@@ -620,13 +671,15 @@ async def subagent_stop(
 
     message = payload.last_assistant_message or ""
     project_id = _project_id(payload.cwd, payload.project_id)
+    client = _hook_client(payload)
+    source = _hook_source(payload)
 
     await _record(
         hook_service,
         project_id=project_id,
         ide_session_id=payload.session_id,
         event_name="SubagentStop",
-        client_type="claude-ai",
+        client_type=client,
         assistant_message=message,
     )
 
@@ -646,6 +699,8 @@ async def subagent_stop(
         f"[{agent_type} agent] {message}",
         category,
         tags=["auto-save", "subagent", category],
+        source=source,
+        client=client,
     )
     return _ok("subagent-stop: saved" if saved else "subagent-stop: save skipped")
 
@@ -663,13 +718,15 @@ async def task_completed(
         return _ok("task-completed: skip (no task subject)")
 
     project_id = _project_id(payload.cwd, payload.project_id)
+    client = _hook_client(payload)
+    source = _hook_source(payload)
 
     await _record(
         hook_service,
         project_id=project_id,
         ide_session_id=payload.session_id,
         event_name="TaskCompleted",
-        client_type="claude-ai",
+        client_type=client,
     )
 
     lines = [f"## Task Completed: {payload.task_subject}"]
@@ -683,5 +740,7 @@ async def task_completed(
         "\n".join(lines)[:5000],
         "task",
         tags=["auto-save", "task-completed"],
+        source=source,
+        client=client,
     )
     return _ok("task-completed: saved" if saved else "task-completed: save skipped")

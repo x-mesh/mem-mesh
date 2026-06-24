@@ -285,7 +285,7 @@ def test_session_start_comparison() -> None:
                     line for line in ctx_lines if line.strip().startswith("- [")
                 ]
                 print(f"  Memories:  {len(memory_lines)} recent entries")
-                has_rules = "코딩 응답 우선" in ctx
+                has_rules = "Answer with the work first" in ctx
                 print(f"  Rules:     {'injected' if has_rules else 'missing'}")
                 print("  Compaction: context RE-INJECTED automatically")
                 print("\n  Preview:")

@@ -33,10 +33,16 @@ PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
 # Normalize Cursor camelCase fields to snake_case and inject project_id.
 # Cursor may send: stopHookActive, lastAssistantMessage (or assistant_message / result).
-PAYLOAD=$(printf '%s' "$INPUT" | jq -c --arg pid "$PROJECT_DIR" '. + {
+PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
+  --arg pid "$PROJECT_DIR" \
+  --arg source "__SOURCE_TAG__" \
+  --arg client "__CLIENT_TAG__" \
+  '. + {
   stop_hook_active: (.stop_hook_active // .stopHookActive // false),
   last_assistant_message: (.last_assistant_message // .lastAssistantMessage // .assistant_message // .result // null),
-  project_id: $pid
+  project_id: $pid,
+  hook_source: $source,
+  client: $client
 }' 2>/dev/null) || PAYLOAD="$INPUT"
 
 CURL_EXIT=0

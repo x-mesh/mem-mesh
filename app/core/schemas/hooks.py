@@ -37,6 +37,14 @@ class HookEventBase(BaseModel):
         default=None,
         description="Explicit project id; falls back to basename(cwd) when omitted",
     )
+    client: Optional[str] = Field(
+        default=None,
+        description="Client/tool tag stamped by command hooks, e.g. codex or cursor",
+    )
+    hook_source: Optional[str] = Field(
+        default=None,
+        description="Hook installer/source tag stamped by command hooks",
+    )
 
 
 class SessionStartPayload(HookEventBase):

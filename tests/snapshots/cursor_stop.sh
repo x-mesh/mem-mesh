@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 20
+# mem-mesh-hooks prompt-version: 21
 # Cursor Stop hook → mem-mesh /api/hooks/claude/stop
 #
 # Thin forwarder: the server keyword-matches the finished turn, redacts secrets,
@@ -77,10 +77,16 @@ PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
 # Normalize Cursor camelCase fields to snake_case and inject project_id.
 # Cursor may send: stopHookActive, lastAssistantMessage (or assistant_message / result).
-PAYLOAD=$(printf '%s' "$INPUT" | jq -c --arg pid "$PROJECT_DIR" '. + {
+PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
+  --arg pid "$PROJECT_DIR" \
+  --arg source "cursor-hook" \
+  --arg client "cursor" \
+  '. + {
   stop_hook_active: (.stop_hook_active // .stopHookActive // false),
   last_assistant_message: (.last_assistant_message // .lastAssistantMessage // .assistant_message // .result // null),
-  project_id: $pid
+  project_id: $pid,
+  hook_source: $source,
+  client: $client
 }' 2>/dev/null) || PAYLOAD="$INPUT"
 
 CURL_EXIT=0

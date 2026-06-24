@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 20
+# mem-mesh-hooks prompt-version: 21
 # Claude Code UserPromptSubmit hook → mem-mesh /api/hooks/claude/user-prompt-submit
 #
 # Thin forwarder: the server does keyword-matched memory search + save/pin
@@ -69,7 +69,11 @@ fi
 INPUT=$(cat)
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
-PAYLOAD=$(printf '%s' "$INPUT" | jq -c --arg pid "$PROJECT_DIR" '. + {project_id: $pid}' 2>/dev/null) || PAYLOAD="$INPUT"
+PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
+  --arg pid "$PROJECT_DIR" \
+  --arg source "claude-code-hook" \
+  --arg client "claude_code" \
+  '. + {project_id: $pid, hook_source: $source, client: $client}' 2>/dev/null) || PAYLOAD="$INPUT"
 
 # Capture HTTP status + timing alongside the body (-w appends "\n<code> <time>")
 # so the log distinguishes a 401 / 000 from a 200 with no reminder. Body =

@@ -42,6 +42,21 @@ def _render_stop_decide(tmp_path: Path) -> Path:
     return path
 
 
+def _render_codex_stop_decide(tmp_path: Path) -> Path:
+    script = _render_template(
+        STOP_DECIDE_HOOK_TEMPLATE,
+        "http://localhost:1",
+        source_tag="codex-hook",
+        ide_tag="codex",
+        client_tag="codex",
+        project_id="test-project",
+    )
+    path = tmp_path / "codex-stop-decide.sh"
+    path.write_text(script, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
 def _install_fake_git_and_curl(tmp_path: Path, *, toplevel: str) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -85,11 +100,12 @@ def _run_stop_decide(
     payload: dict[str, Any],
     *,
     toplevel: str = "/tmp/Mem.Mesh-wt-ABCDEF",
+    script_path: Path | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any] | None]:
     if not HAS_JQ or not HAS_BASH:
         pytest.skip("bash and jq are required to execute command hook contracts")
 
-    script = _render_stop_decide(tmp_path)
+    script = script_path or _render_stop_decide(tmp_path)
     capture_path = tmp_path / "curl-payload.json"
     bin_dir = _install_fake_git_and_curl(tmp_path, toplevel=toplevel)
     # The rendered hook reads its URL from ~/.mem-mesh/api_url (no env fallback),
@@ -121,6 +137,28 @@ def _run_stop_decide(
         else None
     )
     return result, captured
+
+
+def test_codex_command_stop_stamps_client_metadata(tmp_path: Path) -> None:
+    """Codex global command hooks must not be classified as Claude Code."""
+    result, command_payload = _run_stop_decide(
+        tmp_path,
+        {
+            "stop_hook_active": False,
+            "last_assistant_message": (
+                "버그 수정과 decision 기록이 필요한 충분히 긴 응답입니다. "
+                "Codex 전역 훅에서 저장될 때 client/source 메타데이터가 "
+                "claude_code가 아니라 codex로 전달되어야 합니다."
+            ),
+        },
+        toplevel="/repo/mem-mesh",
+        script_path=_render_codex_stop_decide(tmp_path),
+    )
+
+    assert result.returncode == 0
+    assert command_payload is not None, result.stdout + result.stderr
+    assert command_payload["client"] == "codex"
+    assert command_payload["hook_source"] == "codex-hook"
 
 
 def test_project_id_normalization_parity_between_http_and_command_paths(
@@ -236,6 +274,42 @@ async def test_http_save_memory_redacts_secrets_before_persisting(monkeypatch) -
     assert "sk-ant-1234567890abcdef" not in captured["content"]
     assert "Bearer abc.def.ghi" not in captured["content"]
     assert "user@example.com" not in captured["content"]
+
+
+@pytest.mark.asyncio
+async def test_http_save_memory_uses_hook_client_metadata(monkeypatch) -> None:
+    """Persisted hook memories should keep the originating tool identity."""
+    captured: dict[str, Any] = {}
+
+    class FakeEmbedding:
+        is_ready = True
+
+    class FakeMemoryService:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return {"id": "mem-1"}
+
+    monkeypatch.setattr(
+        http_hooks,
+        "get_services",
+        lambda: {
+            "memory_service": FakeMemoryService(),
+            "embedding_service": FakeEmbedding(),
+        },
+    )
+
+    saved = await http_hooks._save_memory(
+        "proj",
+        "Codex hook metadata should be preserved.",
+        "decision",
+        tags=["auto-save"],
+        source="codex-hook",
+        client="codex",
+    )
+
+    assert saved is True
+    assert captured["source"] == "codex-hook"
+    assert captured["client"] == "codex"
 
 
 @pytest.mark.asyncio

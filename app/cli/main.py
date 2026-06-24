@@ -8,6 +8,7 @@ Usage:
     mem-mesh hooks install    # Install hooks
     mem-mesh hooks status     # Hook status
     mem-mesh hooks doctor     # Hook diagnostics
+    mem-mesh hooks rules      # Print hook rules
     mem-mesh status           # Full system status
     mem-mesh mcp stdio        # FastMCP stdio server
     mem-mesh mcp pure         # Pure MCP stdio server
@@ -120,6 +121,20 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
     hooks_sub.add_parser("status", help="Show hook status")
     hooks_sub.add_parser("doctor", help="Run hook diagnostics")
+    hooks_rules = hooks_sub.add_parser(
+        "rules", help="Print hook rules to stdout for copy/paste"
+    )
+    hooks_rules.add_argument(
+        "--project-id",
+        default="mem-mesh",
+        help="Project ID to embed in the rendered rules",
+    )
+    hooks_rules.add_argument(
+        "--format",
+        choices=["plain", "claude"],
+        default="plain",
+        help="Output format: plain rules or a CLAUDE.md managed block",
+    )
 
     hooks_sync = hooks_sub.add_parser("sync-project", help="Sync project-local hooks")
     hooks_sync.add_argument(
@@ -395,7 +410,10 @@ def _dispatch_hooks(args: argparse.Namespace) -> None:
     from app.cli.hooks.constants import DEFAULT_URL
 
     if args.hooks_command is None:
-        print("Usage: mem-mesh hooks " "{install|uninstall|status|doctor|sync-project}")
+        print(
+            "Usage: mem-mesh hooks "
+            "{install|uninstall|status|doctor|rules|sync-project}"
+        )
         return
 
     if args.hooks_command == "install":
@@ -432,6 +450,11 @@ def _dispatch_hooks(args: argparse.Namespace) -> None:
         from app.cli.hooks.doctor import cmd_doctor
 
         cmd_doctor()
+
+    elif args.hooks_command == "rules":
+        from app.cli.install_hooks import cmd_rules
+
+        cmd_rules(args.project_id, args.format)
 
     elif args.hooks_command == "sync-project":
         from app.cli.install_hooks import cmd_sync_project
