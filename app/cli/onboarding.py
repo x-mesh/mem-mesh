@@ -792,6 +792,23 @@ def _onboarding_steps(
     hooks["targets"] = hook_targets
     hooks["target_label"] = hook_target_label
     print(f"  Target:       {info(hook_target_label)}")
+
+    # Stop-hook profile — how Claude/Codex decide what to save when a turn ends.
+    # (Kiro/Cursor use their own native stop hooks and ignore this.) Ask the user
+    # interactively; default standard. --yes keeps the passed-in profile.
+    if not yes and not auth_blocked:
+        print(
+            f"  {bold('Stop-hook profile')} "
+            f"{dim('— what Claude/Codex save when a turn ends:')}"
+        )
+        profile_opts = [
+            f"standard {dim('— server decides by keyword/rules (balanced, no LLM cost)')}",
+            f"minimal  {dim('— save every turn, no decision (lightest)')}",
+            f"enhanced {dim('— Haiku LLM decides save/skip + structure (needs ANTHROPIC_API_KEY)')}",
+        ]
+        profile_keys = ["standard", "minimal", "enhanced"]
+        chosen = _prompt_choice("  Choose [1]: ", profile_opts, default=profile_opts[0])
+        profile = profile_keys[profile_opts.index(chosen)]
     print(f"  Profile:      {info(profile)}")
 
     hook_default = "n" if preferred_mcp_mode == "uvx" else "Y"

@@ -417,13 +417,16 @@ def _render_conflicts(url: str, issues: List[str]) -> None:
 def _render_hooks_summary() -> None:
     """[Hooks]: compact per-tool summary; defer the deep checks to `hooks doctor`."""
     print(header("[Hooks]"))
-    for label, hooks_dir, settings_path in [
-        ("Claude Code", CLAUDE_HOOKS_DIR, CLAUDE_SETTINGS),
-        ("Kiro", KIRO_HOOKS_DIR, KIRO_SETTINGS),
-        ("Cursor", CURSOR_HOOKS_DIR, CURSOR_SETTINGS),
-        # Codex installs .sh lifecycle hooks under ~/.codex/hooks too; profile is
-        # detected from the scripts (no settings.json-style file to parse).
-        ("Codex", CODEX_HOOKS_DIR, None),
+    # The stop-hook profile (minimal/standard/enhanced) only applies to
+    # Claude/Codex, which install profile-specific stop scripts (stop /
+    # stop-decide / stop-enhanced). Kiro and Cursor use their OWN native stop
+    # hook (both written as mem-mesh-stop.sh), so the filename-based detector
+    # would mislabel them "minimal" — show "native stop hook" instead.
+    for label, hooks_dir, settings_path, has_profile in [
+        ("Claude Code", CLAUDE_HOOKS_DIR, CLAUDE_SETTINGS, True),
+        ("Kiro", KIRO_HOOKS_DIR, KIRO_SETTINGS, False),
+        ("Cursor", CURSOR_HOOKS_DIR, CURSOR_SETTINGS, False),
+        ("Codex", CODEX_HOOKS_DIR, None, True),
     ]:
         if not hooks_dir.exists():
             print(f"  {label:12s}  {dim('no hooks installed')}")
@@ -432,8 +435,12 @@ def _render_hooks_summary() -> None:
         if count == 0:
             print(f"  {label:12s}  {dim('no hooks installed')}")
             continue
-        profile = _detect_profile(hooks_dir, settings_path)
-        print(f"  {label:12s}  {ok(f'{count} hooks')} {dim(f'({profile} profile)')}")
+        if has_profile:
+            profile = _detect_profile(hooks_dir, settings_path)
+            note = f"({profile} profile)"
+        else:
+            note = "(native stop hook)"
+        print(f"  {label:12s}  {ok(f'{count} hooks')} {dim(note)}")
     print(f"  {dim('→ deep hook diagnostics + live auth test: mem-mesh hooks doctor')}")
     print()
 
