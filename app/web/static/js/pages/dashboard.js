@@ -17,11 +17,18 @@ const CAT_ICONS = {
 const DEFAULT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
 
 const CLIENT_COLORS = {
-  claude_code: '#d97706',
-  cursor: '#7c3aed',
-  kiro: '#059669',
-  web: '#2563eb',
-  unknown: '#6b7280',
+  claude_code: '#a5631c',
+  claude: '#a5631c',
+  claude_desktop: '#8a5a2b',
+  'claude-desktop': '#8a5a2b',
+  codex: '#2f5f9f',
+  cursor: '#6b579d',
+  kiro: '#2f7a5c',
+  web: '#2f6f87',
+  vscode: '#2f6f9f',
+  antigravity: '#92506f',
+  generic: '#56616f',
+  unknown: '#64748b',
 };
 
 const VIZ_MODES = ['pulse', 'orbit', 'ticker', 'heatmap', 'stats', 'timeline', 'flow', 'calendar', 'leaderboard'];

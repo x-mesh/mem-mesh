@@ -1231,10 +1231,18 @@
   color: var(--text-primary);
   white-space: nowrap;
 }
-.recent-item-client.client-claude_code { background: #d97706; color: #fff; }
-.recent-item-client.client-cursor { background: #7c3aed; color: #fff; }
-.recent-item-client.client-kiro { background: #059669; color: #fff; }
-.recent-item-client.client-web { background: #2563eb; color: #fff; }
+.recent-item-client.client-claude_code,
+.recent-item-client.client-claude { background: #a5631c; color: #f8fafc; }
+.recent-item-client.client-claude_desktop,
+.recent-item-client.client-claude-desktop { background: #8a5a2b; color: #f8fafc; }
+.recent-item-client.client-codex { background: #2f5f9f; color: #f8fafc; }
+.recent-item-client.client-cursor { background: #6b579d; color: #f8fafc; }
+.recent-item-client.client-kiro { background: #2f7a5c; color: #f8fafc; }
+.recent-item-client.client-web { background: #2f6f87; color: #f8fafc; }
+.recent-item-client.client-vscode { background: #2f6f9f; color: #f8fafc; }
+.recent-item-client.client-antigravity { background: #92506f; color: #f8fafc; }
+.recent-item-client.client-generic { background: #56616f; color: #f8fafc; }
+.recent-item-client.client-unknown { background: #64748b; color: #f8fafc; }
 
 .dash-peek-client {
   font-size: 11px;
@@ -1245,10 +1253,18 @@
   background: var(--bg-tertiary, #374151);
   color: var(--text-primary);
 }
-.dash-peek-client.client-claude_code { background: #d97706; color: #fff; }
-.dash-peek-client.client-cursor { background: #7c3aed; color: #fff; }
-.dash-peek-client.client-kiro { background: #059669; color: #fff; }
-.dash-peek-client.client-web { background: #2563eb; color: #fff; }
+.dash-peek-client.client-claude_code,
+.dash-peek-client.client-claude { background: #a5631c; color: #f8fafc; }
+.dash-peek-client.client-claude_desktop,
+.dash-peek-client.client-claude-desktop { background: #8a5a2b; color: #f8fafc; }
+.dash-peek-client.client-codex { background: #2f5f9f; color: #f8fafc; }
+.dash-peek-client.client-cursor { background: #6b579d; color: #f8fafc; }
+.dash-peek-client.client-kiro { background: #2f7a5c; color: #f8fafc; }
+.dash-peek-client.client-web { background: #2f6f87; color: #f8fafc; }
+.dash-peek-client.client-vscode { background: #2f6f9f; color: #f8fafc; }
+.dash-peek-client.client-antigravity { background: #92506f; color: #f8fafc; }
+.dash-peek-client.client-generic { background: #56616f; color: #f8fafc; }
+.dash-peek-client.client-unknown { background: #64748b; color: #f8fafc; }
 
 .recent-item-content {
   flex: 1;
