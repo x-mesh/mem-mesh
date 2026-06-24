@@ -728,24 +728,21 @@ async def connect_mcp(
 
     from app.cli.mcp_config import MCP_SERVER_KEY, generate_mcp_entry
 
-    entry = generate_mcp_entry(mode, url, tool_key=client)
-
-    # When MCP OAuth is on, an http-transport client must authenticate. Surface
-    # the OAuth endpoints so the page can offer one-click client registration.
+    # When MCP OAuth is on, an http-transport client must authenticate. Resolve
+    # the literal token (reveal-gated, so a non-loopback unauthorized caller never
+    # receives it) and let generate_mcp_entry bake it — as an http ``headers``
+    # block for direct clients, or as an ``mcp-remote --header`` arg for Claude
+    # Desktop (which only speaks stdio via the npx proxy and ignores ``headers``).
     # /mcp is guarded only when auth is enabled globally AND mcp auth resolves on
     # (matches BearerTokenMiddleware._requires_auth).
     mcp_auth_on = bool(
         rc.effective_bool("auth_enabled") and rc.effective_tribool("mcp_auth_enabled")
     )
-    # Resolve the literal token once — reveal-gated, so a non-loopback unauthorized
-    # caller never receives it. Used for both the baked header and the response.
     mcp_token = resolve_hook_token() if (mcp_auth_on and _can_reveal(request)) else None
-    if mcp_auth_on and mode in ("http", "sse") and mcp_token:
-        # Static literal token header so the pasted block authenticates without
-        # the interactive OAuth flow — the server accepts its hook token as an MCP
-        # API key on /mcp. Omitted when reveal is withheld (the page shows the
-        # masked token + OAuth instead of baking a secret it can't reveal).
-        entry["headers"] = {"Authorization": f"Bearer {mcp_token}"}
+
+    entry = generate_mcp_entry(
+        mode, url, tool_key=client, with_auth=mcp_auth_on, token=mcp_token
+    )
     oauth = None
     if mode in ("http", "sse"):
         # Always surface the EXISTING OAuth clients (registered in Security → MCP

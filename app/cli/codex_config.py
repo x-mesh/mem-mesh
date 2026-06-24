@@ -76,15 +76,21 @@ def build_codex_mcp_block(
             'default_tools_approval_mode = "prompt"',
             "startup_timeout_sec = 20",
             "tool_timeout_sec = 60",
-            "",
-            "[mcp_servers.mem-mesh.env]",
         ]
     )
-    for key in sorted(env):
-        lines.append(f"{key} = {_toml_string(env[key])}")
+    is_remote = mode in ("http", "api", "sse")
+    # [mcp_servers.mem-mesh.env]는 stdio(local) 전송에서만 유효하다. Codex는
+    # streamable_http(url) 전송에서 env 테이블을 거부한다
+    # ("env is not supported for streamable_http"). remote 모드에선 server가
+    # clientInfo/User-Agent로 client를 자동 감지하므로 env 블록을 생략한다.
+    if not is_remote and env:
+        lines.append("")
+        lines.append("[mcp_servers.mem-mesh.env]")
+        for key in sorted(env):
+            lines.append(f"{key} = {_toml_string(env[key])}")
     # Literal bearer header (Option 2): an auth-enforcing http server's token is
     # baked here rather than referenced via an env var.
-    if mode in ("http", "api", "sse") and token:
+    if is_remote and token:
         lines.extend(
             [
                 "",
