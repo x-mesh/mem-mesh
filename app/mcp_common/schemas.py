@@ -376,6 +376,74 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
             },
         },
         {
+            "name": "pin_list",
+            "description": TOOL_DESCRIPTIONS["pin_list"],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project identifier",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100,
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Filter by a specific session (optional)",
+                        "maxLength": 100,
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Filter by status",
+                        "enum": ["open", "in_progress", "completed"],
+                    },
+                    "min_importance": {
+                        "type": "integer",
+                        "description": "Minimum importance score (1-5)",
+                        "minimum": 1,
+                        "maximum": 5,
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1, "maxLength": 50},
+                        "description": "Filter by tags (AND condition)",
+                        "maxItems": 10,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of pins to return",
+                        "default": 10,
+                        "minimum": 1,
+                        "maximum": 100,
+                    },
+                    "include_stats": {
+                        "type": "boolean",
+                        "description": "Include pin statistics in the response",
+                        "default": False,
+                    },
+                },
+                "required": ["project_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "pin_get",
+            "description": TOOL_DESCRIPTIONS["pin_get"],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pin_id": {
+                        "type": "string",
+                        "description": "Full pin ID (36-char UUID) to retrieve",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100,
+                    },
+                },
+                "required": ["pin_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "session_resume",
             "description": TOOL_DESCRIPTIONS["session_resume"],
             "inputSchema": {

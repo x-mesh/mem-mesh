@@ -859,6 +859,42 @@ class MCPToolHandlers:
             logger.error("Error in pin_list", error=str(e))
             raise
 
+    async def pin_get(self, pin_id: str) -> Dict[str, Any]:
+        """Get a single pin by its full ID.
+
+        Unlike pin_list (filtered list) and session_resume (active pins only),
+        this resolves any pin — including completed ones — directly by id, which
+        is the only way to read a pin back once it has left the active set.
+
+        Args:
+            pin_id: Full pin ID (36-char UUID)
+
+        Returns:
+            dict: {found: True, pin: {...}} or {found: False, pin_id, message}
+        """
+        logger.info("Tool pin_get called", pin_id=pin_id)
+
+        try:
+            from ..core.services.pin import PinService
+
+            db = self._get_database()
+            pin_service = PinService(
+                db, getattr(self._storage, "embedding_service", None)
+            )
+
+            pin = await pin_service.get_pin(pin_id)
+            if pin is None:
+                return {
+                    "found": False,
+                    "pin_id": pin_id,
+                    "message": f"Pin not found: {pin_id}",
+                }
+
+            return {"found": True, "pin": pin.model_dump()}
+        except Exception as e:
+            logger.error("Error in pin_get", error=str(e))
+            raise
+
     async def session_resume(
         self,
         project_id: str,
