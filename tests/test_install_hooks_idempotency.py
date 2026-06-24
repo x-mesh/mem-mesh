@@ -864,6 +864,33 @@ def test_mcp_config_codex_bakes_literal_bearer_header(tmp_path: Path) -> None:
     assert "${" not in text
 
 
+def test_mcp_config_claude_desktop_uses_mcp_remote_proxy() -> None:
+    """Claude Desktop's claude_desktop_config.json cannot read a native
+    url/type:"http" entry — it only launches stdio servers. The http-mode entry
+    must therefore be an ``mcp-remote`` stdio proxy (npx) with the literal bearer
+    token passed as a ``--header`` arg, NOT a url/headers block (a bare http entry
+    silently fails to load in Claude Desktop)."""
+    from app.cli import mcp_config
+
+    entry = mcp_config.generate_mcp_entry(
+        mode="http",
+        url="https://remote.example",
+        tool_key="claude-desktop",
+        with_auth=True,
+        token="desktop-tok-789",
+    )
+
+    assert entry["command"] == "npx"
+    assert "mcp-remote" in entry["args"]
+    assert "https://remote.example/mcp/sse" in entry["args"]
+    assert "--header" in entry["args"]
+    assert "Authorization: Bearer desktop-tok-789" in entry["args"]
+    # Must NOT be a native http entry.
+    assert "url" not in entry
+    assert "type" not in entry
+    assert "headers" not in entry
+
+
 def test_ensure_api_url_writes_file_ssot(tmp_path: Path, monkeypatch) -> None:
     """_ensure_api_url mirrors the install URL into the ~/.mem-mesh/api_url SSOT."""
     api_file = tmp_path / ".mem-mesh" / "api_url"

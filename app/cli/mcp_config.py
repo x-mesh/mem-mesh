@@ -175,15 +175,27 @@ def generate_mcp_entry(
         # entry type is always "http" so the connection survives a server
         # restart — legacy type:"sse" connections hang after a restart because
         # their server-side SSE stream and session queue are gone.
-        entry: dict = {
-            "url": f"{url.rstrip('/')}/mcp/sse",
-            "type": "http",
-        }
-        if with_auth and token:
-            # Literal token: mem-mesh manages this config file, so the secret is
-            # baked in rather than referencing an env var the MCP client would
-            # have to expand. Falsy token -> header omitted (caller warns).
-            entry["headers"] = {"Authorization": f"Bearer {token}"}
+        remote_url = f"{url.rstrip('/')}/mcp/sse"
+        if tool_key == "claude-desktop":
+            # Claude Desktop's claude_desktop_config.json does NOT read a native
+            # url/type:"http" entry — it only launches stdio servers. Wrap the
+            # remote endpoint in the `mcp-remote` stdio proxy (npx), matching how
+            # every other remote MCP is configured there; a bare url/type:http
+            # entry silently fails to load in Claude Desktop.
+            proxy_args = ["-y", "mcp-remote", remote_url]
+            if with_auth and token:
+                proxy_args += ["--header", f"Authorization: Bearer {token}"]
+            entry: dict = {"command": "npx", "args": proxy_args}
+        else:
+            entry = {
+                "url": remote_url,
+                "type": "http",
+            }
+            if with_auth and token:
+                # Literal token: mem-mesh manages this config file, so the secret
+                # is baked in rather than referencing an env var the MCP client
+                # would have to expand. Falsy token -> header omitted (caller warns).
+                entry["headers"] = {"Authorization": f"Bearer {token}"}
     elif mode == "uvx":
         # uvx mode — each MCP client spawns an isolated, cached mem-mesh install.
         # No pre-install needed; uvx downloads on first run, reuses cache after.
