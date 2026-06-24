@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-06-24
+
+설정 모델을 **"파일 정본 + 리터럴 분배"**로 확정한다 — 환경변수(`MEM_MESH_API_URL`/`MEM_MESH_HOOK_TOKEN`)를 **완전히 제거**하고, `~/.mem-mesh/{api_url,hook_token}` 파일을 단일 정본으로 두고 mem-mesh CLI가 각 AI 툴(claude/cursor/kiro/codex/…) 설정에 실제 값을 **리터럴로 직접 박는다**. WHY: 1.15.0의 "파일 SSOT"가 MCP/HTTP 인증과 구조적으로 충돌했다 — MCP 클라이언트는 토큰을 헤더의 `${ENV}` 치환(또는 리터럴)으로만 받아 파일을 못 읽고, 셸 env에 의존하면 GUI 앱(launchd, env 미상속)에서 깨지며 env가 파일을 shadow하는 추적 어려운 상태("설정은 localhost인데 hook은 옛 원격으로 401")가 반복됐다. env를 빼고 mem-mesh가 정본 파일에서 각 툴에 리터럴을 stamp하면 그 모든 문제가 사라진다(토큰 평문이 각 설정 파일에 박히는 것은 수용된 트레이드오프).
+
+### Added
+- **doctor 옵션2 진단** — `[SSOT]`(파일 정본 + 각 툴의 stamped 리터럴), `[Config Conflicts]`(툴 리터럴 vs 파일 정본 stale + 잔존 env 경고), 헤더의 `${ENV}` 참조를 무조건 결함으로 검출하고 `mem-mesh mcp config --auth` 재-stamp를 안내. `_file_canonical_token()`/`_entry_literal_token()` 헬퍼 신설. `app/cli/system_doctor.py`
+- **Codex `http_headers` 리터럴** — Codex는 inline `bearer_token`을 지원하지 않아 `[mcp_servers.mem-mesh.http_headers]`의 리터럴 `Authorization`으로 토큰을 baking. `app/cli/codex_config.py`
+
+### Changed
+- **환경변수 완전 제거 → 파일 정본 + 리터럴 분배** — MCP 헤더(`mcp_config.py`/`connect.py`)와 HTTP hook 헤더(`install_hooks.py`)가 `Bearer ${MEM_MESH_HOOK_TOKEN}` 참조 대신 리터럴 토큰을 박고 `allowedEnvVars`를 제거. `mem-mesh mcp config --token/--auth`가 토큰을 각 툴 설정에 리터럴로 stamp.
+- **hook `.sh` env 참조 제거** — `${MEM_MESH_*:-$(cat ...)}` → `$(cat ~/.mem-mesh/...)` 직접. 잔존 env가 파일을 shadow하던 핵심 버그를 차단. `PROMPT_VERSION` bump로 재설치 유도. `app/cli/hooks/shell/*.sh`, `app/cli/hooks/status.py`
+- **`setup-token` 명령 제거** — 셸 env 다리가 불필요해져 `token_setup.py` 모듈과 CLI 서브커맨드를 삭제. 토큰 파일 보장은 `_ensure_hook_token`이 담당. `app/cli/hooks/token_setup.py`(삭제), `main.py`, `onboarding.py`
+- 대시보드 안내(settings/security/connect 페이지)를 "`MEM_MESH_HOOK_TOKEN` env export" → "각 툴 설정에 리터럴 baking"으로 정정. `app/web/dashboard/route_modules/security.py`, `app/web/static/js/pages/*.js`
+
+### Fixed
+- **doctor 거짓양성** — `${MEM_MESH_HOOK_TOKEN}` 참조 헤더를 healthy로 통과시켜 "doctor는 healthy인데 클라이언트는 연결 실패"가 숨던 모순을 결함으로 격상.
+- **codex install idempotency** — `_install_codex`가 토큰 생성(`_ensure_hook_token`)보다 먼저 헤더를 stamp해 첫 install에서 헤더가 누락되고 재실행 시 달라지던 버그.
+- **테스트 격리** — `get_settings`의 `_settings` 싱글톤이 테스트 간 `MEM_MESH_*` env를 캐시해 다음 테스트로 새던(예: 토큰 헤더에 ENV-SHADOW가 박힘) 누수를 conftest에서 매 테스트 리셋. `tests/conftest.py`
+
 ## [1.15.0] - 2026-06-24
 
 mem-mesh 연결 설정(`api_url` + `hook_token`)을 **단일 출처(SSOT)** 로 정리하고, 어디에 설정이 흩어져 있고 무엇이 무엇을 덮어쓰는지 보이지 않아 401 디버깅이 길어지던 문제를 구조적으로 막는다. WHY: env(`MEM_MESH_API_URL`/settings.json/셸)가 파일·CLI 인자를 조용히 override(silent shadowing)하면서, "설정은 했는데 동작 안 함"·"설치는 됐는데 401" 같은 추적 어려운 상태가 반복됐다. 이제 `~/.mem-mesh/{api_url,hook_token}` 파일이 GUI·터미널 실행 모든 도구의 공통 출처가 되고, install/doctor가 이를 명시·검증·fail-fast 처리한다.
