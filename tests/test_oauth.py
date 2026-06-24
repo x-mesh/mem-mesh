@@ -733,6 +733,27 @@ class TestOAuthEndpoints:
         assert "client_secret" in data
         assert data["client_name"] == "Test Client"
 
+    def test_oauth_register_public_client_omits_client_secret(self, app_client):
+        """RFC 7591: a public client (token_endpoint_auth_method 'none') must NOT
+        carry a client_secret. Emitting ``client_secret: null`` breaks MCP clients
+        (Claude Desktop/Code) whose schema requires a string — the entire MCP
+        connection then fails on every tool call (add/pin/etc.)."""
+        response = app_client.post(
+            "/oauth/register",
+            json={
+                "client_name": "mcp-public",
+                "redirect_uris": ["http://localhost:33418/callback"],
+                "token_endpoint_auth_method": "none",
+            },
+        )
+        assert response.status_code == 200
+
+        data = response.json()
+        assert "client_id" in data
+        # Omitted entirely, NOT present as null.
+        assert "client_secret" not in data
+        assert data["token_endpoint_auth_method"] == "none"
+
     def test_oauth_authorize_missing_params(self, app_client):
         """Test authorization endpoint with missing parameters."""
         # Missing required params should redirect with error

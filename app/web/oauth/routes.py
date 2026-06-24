@@ -181,7 +181,7 @@ async def register_client(
 
         client, plain_secret = await service.create_client(client_params)
 
-        return OAuthClientRegistrationResponse(
+        resp = OAuthClientRegistrationResponse(
             client_id=client.client_id,
             client_secret=(
                 plain_secret if client.client_type == "confidential" else None
@@ -194,6 +194,13 @@ async def register_client(
             token_endpoint_auth_method=registration.token_endpoint_auth_method,
             scope=" ".join(client.get_scopes()),
         )
+        # RFC 7591: a public client (token_endpoint_auth_method "none") has no
+        # client_secret, so OMIT the field rather than emitting ``null``. MCP
+        # clients (Claude Desktop/Code) validate client_secret as a string and
+        # reject ``null`` — that silently breaks the entire MCP connection (every
+        # tool call fails). exclude_none drops the null secret; populated fields
+        # (incl. client_secret_expires_at=0, which is not None) are kept.
+        return JSONResponse(content=resp.model_dump(exclude_none=True))
 
     except Exception as e:
         logger.error(f"Registration error: {e}")

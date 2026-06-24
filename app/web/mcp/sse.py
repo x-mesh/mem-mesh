@@ -51,6 +51,18 @@ def _create_session(session_id: str, client_info: Optional[Dict] = None) -> None
     }
 
 
+def _normalize_client_name(name: str) -> str:
+    """clientInfo.name 정규화 — 알려진 별칭을 표준 client 라벨로.
+
+    예) Codex가 initialize에서 보내는 clientInfo.name("codex-mcp-client" 등)을
+    "codex"로 통일. transport가 streamable_http여서 env로 client를 못 넘기는
+    경우에도 서버 측에서 안정적으로 라벨링하기 위함.
+    """
+    if name and "codex" in name.lower():
+        return "codex"
+    return name
+
+
 def _detect_client_from_request(request: Request) -> str:
     """User-Agent 헤더에서 MCP 클라이언트 감지 (fallback).
 
@@ -65,6 +77,8 @@ def _detect_client_from_request(request: Request) -> str:
     # Specific → general order
     _CLIENT_PATTERNS: list[tuple[list[str], str]] = [
         # AI coding agents
+        # codex는 openai/chatgpt 패턴보다 먼저 매칭해야 오탐 방지
+        (["codex"], "codex"),
         (["antigravity"], "antigravity"),
         (["kiro"], "kiro"),
         (["cline"], "cline"),
@@ -358,6 +372,7 @@ async def streamable_http_post(
             if client_name and mcp_session_id and mcp_session_id in _sessions:
                 _sessions[mcp_session_id]["client_info"]["name"] = client_name
         if client_name:
+            client_name = _normalize_client_name(client_name)
             params = body.get("params", {})
             args = params.get("arguments", {})
             if not args.get("client"):
