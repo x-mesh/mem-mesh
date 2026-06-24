@@ -9,6 +9,12 @@ argument-hint: [x.y.z]
 
 이 레포는 **git-kit driven**이고, 버전 단일 소스는 `pyproject.toml`이다(`app.core.version`이 런타임에 읽음). `make release`가 있지만 raw git을 쓰므로, 아래는 동일 흐름을 git-kit으로 수행한다. 항상 `export GK_AGENT=1` 후 `git-kit`(짧은 `gk` 아님)로 호출하고, 실패 시 `error.remedies[0]`를 따른다.
 
+## 출력 가드
+
+- `call`, `tool call`, `Bash call` 같은 tool-call placeholder를 단독 줄로 출력하지 않는다.
+- 도구가 필요하면 visible text에 placeholder를 쓰지 말고 즉시 도구를 호출한다.
+- 도구 호출 전후에는 사용자가 읽을 정상 문장만 남긴다.
+
 ## 0. 전제 확인 (먼저)
 
 ```bash
