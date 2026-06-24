@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] - 2026-06-24
+
+여러 AI 클라이언트(claude/cursor/codex/claude-desktop)에서 동시에 들어오는 hook 이벤트의 **출처 관측성**을 확보하고, mem-mesh를 **reverse proxy 뒤에 배포**할 수 있게 한다. WHY: (1) hook 이벤트가 어느 클라이언트·프로젝트에서 발생했는지 페이로드에 실리지 않아 대시보드에서 출처를 추적할 수 없었고, 빈/노이즈 이벤트가 메모리로 저장돼 코퍼스를 오염시켰다. (2) 프록시(nginx 등) 뒤에 두면 OAuth issuer가 내부 호스트(`127.0.0.1:8000`)로 잡혀 MCP 클라이언트의 인증 메타데이터가 외부 URL과 어긋났다. 이 릴리스는 셸 hook이 `project_id`를, 서버가 client/source를 이벤트에 태깅하고, `X-Forwarded-*` 헤더로 외부 origin을 해석한다.
+
+### Added
+- **Hook 이벤트 client/source/project 태깅** — 모든 셸 hook(`session-start.sh`/`stop.sh`/`post-tool-use.sh`/`user-prompt-submit.sh` 등)이 `PROJECT_DIR`(git toplevel basename)을 페이로드에 주입하고, `HookEventBase`에 client/source 필드를 추가해 대시보드가 출처별로 이벤트를 구분한다. `app/cli/hooks/shell/*.sh`, `app/core/schemas/hooks.py`, `app/web/dashboard/route_modules/hooks.py`
+- **`mem-mesh hooks rules` 커맨드** — 프로젝트 rules(managed block)를 렌더·동기화하는 CLI 서브커맨드. `render_claude_project_rules`/`render_rules_text` 기반. `app/cli/main.py`, `app/cli/install_hooks.py`(`cmd_sync_project`), `tests/test_prompt_rules.py`
+- **Reverse proxy issuer origin resolution** — OAuth 메타데이터/클라이언트 등록이 `X-Forwarded-*` 헤더로 외부 origin을 해석해, 프록시 뒤 배포에서도 issuer/endpoint URL이 외부에서 접근 가능한 주소로 발급된다. `app/web/oauth/routes.py`
+- **HTTP MCP 클라이언트 자동 감지** — `streamable_http` 요청에서 client를 추론(`_detect_client_from_request`)해 세션에 기록. `app/web/mcp/sse.py`
+- **대시보드 live memory 캐시 + 필터링** — 실시간 메모리 목록 캐시와 필터 UI. `app/web/static/js/pages/dashboard.js`
+
+### Changed
+- **MCP config/auth 핸들링 리팩토링** — `generate_mcp_entry`/`run_mcp_setup` 정리, claude-desktop 엔드포인트를 `mcp-remote` 프록시로 지원, codex client 정규화 및 null secret 생략, MCP approve 목록을 도구 스키마에서 도출. `app/cli/mcp_config.py`, `app/cli/codex_config.py`, `app/web/dashboard/route_modules/connect.py`
+- **Hook 노이즈 필터링** — 빈/노이즈 이벤트(`_is_noise`)를 메모리 저장 전에 걸러 코퍼스 오염 차단. `app/web/dashboard/route_modules/hooks.py`
+- **Prompt rules / PROMPT_VERSION bump** — Pin Gate·CORE_RULES 문구 정비로 `PROMPT_VERSION`을 21로 상향(재설치 유도). `app/cli/prompts/behaviors.py`
+
+### Fixed
+- **security auth endpoint/method 정정** — 잘못된 인증 엔드포인트·HTTP 메서드를 수정. `app/web/oauth/routes.py`, `app/cli/system_doctor.py`
+- **HTTP 저장 경로 secret 마스킹 검증** — hook 저장 시 민감 값 redaction이 영속화 전에 적용되는지 회귀 테스트 추가. `tests/test_hook_consistency.py`
+
 ## [1.16.0] - 2026-06-24
 
 설정 모델을 **"파일 정본 + 리터럴 분배"**로 확정한다 — 환경변수(`MEM_MESH_API_URL`/`MEM_MESH_HOOK_TOKEN`)를 **완전히 제거**하고, `~/.mem-mesh/{api_url,hook_token}` 파일을 단일 정본으로 두고 mem-mesh CLI가 각 AI 툴(claude/cursor/kiro/codex/…) 설정에 실제 값을 **리터럴로 직접 박는다**. WHY: 1.15.0의 "파일 SSOT"가 MCP/HTTP 인증과 구조적으로 충돌했다 — MCP 클라이언트는 토큰을 헤더의 `${ENV}` 치환(또는 리터럴)으로만 받아 파일을 못 읽고, 셸 env에 의존하면 GUI 앱(launchd, env 미상속)에서 깨지며 env가 파일을 shadow하는 추적 어려운 상태("설정은 localhost인데 hook은 옛 원격으로 401")가 반복됐다. env를 빼고 mem-mesh가 정본 파일에서 각 툴에 리터럴을 stamp하면 그 모든 문제가 사라진다(토큰 평문이 각 설정 파일에 박히는 것은 수용된 트레이드오프).
