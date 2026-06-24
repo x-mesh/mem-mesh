@@ -267,10 +267,13 @@ export class ConnectPage extends HTMLElement {
 
   hookCard(h) {
     const json = JSON.stringify(h.settings, null, 2);
+    const tokenHint = h.mode === 'http'
+      ? '(baked into the HTTP hook config automatically — no env export needed)'
+      : '(command hooks read this from ~/.mem-mesh/hook_token when installed)';
     const tokenRow = h.hook_token
       ? `<div class="cn-token">Hook token <code id="cn-tok">${this.esc(h.hook_token)}</code>
            <button class="btn btn-sm copy-token">Copy token</button>
-           <span class="hint">(baked into the hook config automatically — no env export needed)</span></div>`
+           <span class="hint">${this.esc(tokenHint)}</span></div>`
       : `<div class="cn-token">Hook token: <code>${this.esc(h.hook_token_masked)}</code>
            <span class="hint">(reveal requires dashboard login or local access)</span></div>`;
     const cliNote = h.paste_complete
@@ -286,9 +289,9 @@ export class ConnectPage extends HTMLElement {
       : '';
     // Option 2: HTTP hooks read the token from ~/.mem-mesh/hook_token (the file is
     // the single source of truth) — no shell env, so there's nothing to export.
-    const tokenHint =
+    const tokenModeHint =
       h.mode === 'http'
-        ? `<p class="hint">HTTP hooks read the token from <code>~/.mem-mesh/hook_token</code> — the installer writes it there and bakes it into the config, so there's no env var to export.</p>`
+        ? `<p class="hint">HTTP hooks include a literal bearer header in the JSON when the token can be revealed. Re-run install or regenerate this block after token rotation.</p>`
         : '';
     const rulesNote = h.rules_note
       ? `<p class="hint">${this.esc(h.rules_note)}</p>`
@@ -308,7 +311,7 @@ export class ConnectPage extends HTMLElement {
           ${rulesNote}
           ${cliNote}
           ${tokenRow}
-          ${tokenHint}
+          ${tokenModeHint}
           <div class="cn-test-result"></div>
           <pre class="snippet"><code>${this.esc(json)}</code></pre>
         </div>
