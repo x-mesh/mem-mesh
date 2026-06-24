@@ -9,8 +9,8 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 [ -z "${ANTHROPIC_API_KEY:-}" ] && exit 0
 
-API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)}"
-HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
+API_URL="$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)"
+HOOK_TOKEN="$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)"
 AUTH=()
 if [ -n "$HOOK_TOKEN" ]; then AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}"); fi
 

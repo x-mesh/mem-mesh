@@ -151,14 +151,23 @@ export class SecurityPage extends HTMLElement {
     const serverUrl = this.serverUrl || window.location.origin;
     const snippetToken = this.revealedToken || '<HOOK_TOKEN>';
 
+    // One-shot remediation banner after a rotate (consumed on render so it does
+    // not persist across later reveal/refresh re-renders).
+    const notices = this._pendingHookNotices || [];
+    this._pendingHookNotices = null;
+    const noticeBanner = notices
+      .map((n) => `<p class="hint warn">${this.escapeHtml(n)}</p>`)
+      .join('');
+
     panel.innerHTML = `
+      ${noticeBanner}
       <div class="card">
         <div class="card-header">
           <h2>API Token</h2>
           <span class="status-badge ${hook.configured ? 'active' : 'inactive'}">${hook.configured ? 'Configured' : 'Missing'}</span>
         </div>
         <div class="card-body">
-          <p class="muted">Single static Bearer token for <strong>all programmatic access</strong> — hooks (<code>/api/hooks/claude/*</code>), MCP (<code>/mcp</code>), and the REST API (<code>/api</code>). One token, set as <code>MEM_MESH_HOOK_TOKEN</code> where clients run.</p>
+          <p class="muted">Single static Bearer token for <strong>all programmatic access</strong> — hooks (<code>/api/hooks/claude/*</code>), MCP (<code>/mcp</code>), and the REST API (<code>/api</code>). One token, baked as a literal Bearer header into each tool's config (the <code>~/.mem-mesh/hook_token</code> file, mode <code>0600</code>, is the source of truth — no env var to export).</p>
           <p class="hint">Web dashboard login (password) and OAuth are separate — see the other tabs.</p>
           <p class="hint">Stored on the server — if you lose it, just reveal it here again. No need to regenerate (which would break every existing client).</p>
 
@@ -176,7 +185,7 @@ export class SecurityPage extends HTMLElement {
 
           <div class="actions">
             <button class="btn btn-danger" id="hook-regen-btn" ${hook.env_pinned ? 'disabled' : ''}>Regenerate</button>
-            ${hook.env_pinned ? '<span class="hint">Pinned via MEM_MESH_HOOK_TOKEN; edit .env and restart to change.</span>' : '<span class="hint">Rotating invalidates all existing hook clients — reinstall them afterwards.</span>'}
+            ${hook.env_pinned ? '<span class="hint">Pinned via <code>MEM_MESH_HOOK_TOKEN</code> in this server\'s <code>.env</code>; edit it and restart to change.</span>' : '<span class="hint">Rotating invalidates the token baked into every tool config — reinstall (re-bake) the clients afterwards.</span>'}
           </div>
         </div>
       </div>
@@ -187,7 +196,7 @@ export class SecurityPage extends HTMLElement {
           <p class="muted">Claude Code HTTP hooks authenticate with this token:</p>
           <pre class="snippet"><code>curl -H "Authorization: Bearer ${this.escapeHtml(snippetToken)}" \\
   -X POST ${this.escapeHtml(serverUrl)}/api/hooks/claude/stop</code></pre>
-          <p class="hint">The installer (<code>install_hooks</code>) wires this automatically via the <code>MEM_MESH_HOOK_TOKEN</code> env var; the secret is never written into settings.json.</p>
+          <p class="hint">The installer (<code>install_hooks</code>) bakes this token as a literal Bearer header into each tool's config (plaintext in the config file). The <code>~/.mem-mesh/hook_token</code> file (mode <code>0600</code>) stays the canonical source.</p>
         </div>
       </div>
     `;
@@ -232,9 +241,11 @@ export class SecurityPage extends HTMLElement {
         headers: { 'Content-Type': 'application/json' },
       });
       this.revealedToken = data.token || null; // present only when reveal is allowed
+      // Surface the server's per-surface remediation as a persistent banner on
+      // the re-rendered hook panel (loadOverview re-renders it).
+      this._pendingHookNotices = data.remediation || [];
       showToast('Hook token rotated. Reinstall hook clients.', 'success');
       await this.loadOverview();
-      if (this.revealedToken) this.renderHookPanel();
     } catch (error) {
       showToast(`Failed to rotate: ${error.message}`, 'error');
     }
@@ -279,7 +290,16 @@ export class SecurityPage extends HTMLElement {
         ? '<p class="hint">Some toggles are pinned via environment variables — read-only.</p>'
         : '';
 
+    // One-shot remediation banner after a save that turned auth on (consumed on
+    // render so it doesn't persist across later reloads).
+    const notices = this._pendingNotices || [];
+    this._pendingNotices = null;
+    const noticeBanner = notices
+      .map((n) => `<p class="hint warn">${this.escapeHtml(n)}</p>`)
+      .join('');
+
     panel.innerHTML = `
+      ${noticeBanner}
       <div class="card">
         <div class="card-header">
           <h2>Web Dashboard Login (Basic Auth)</h2>
@@ -369,6 +389,9 @@ export class SecurityPage extends HTMLElement {
       const skipped = r.skipped && Object.keys(r.skipped).length ? r.skipped : null;
       if (skipped) showToast('Some keys skipped: ' + JSON.stringify(skipped), 'warning');
       showToast('OAuth settings saved.', 'success');
+      // Surface server remediation notices (e.g. "MCP clients now need the
+      // token") as a persistent banner on the re-rendered panel, not a toast.
+      this._pendingNotices = r.notices || [];
       await this.loadOverview();
     } catch (error) {
       // The server's lockout guard returns 400 with a clear message.

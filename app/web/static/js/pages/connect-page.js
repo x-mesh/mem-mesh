@@ -268,8 +268,9 @@ export class ConnectPage extends HTMLElement {
   hookCard(h) {
     const json = JSON.stringify(h.settings, null, 2);
     const tokenRow = h.hook_token
-      ? `<div class="cn-token">Set <code>${this.esc(h.hook_token_env)}</code> = <code id="cn-tok">${this.esc(h.hook_token)}</code>
-           <button class="btn btn-sm copy-token">Copy token</button></div>`
+      ? `<div class="cn-token">Hook token <code id="cn-tok">${this.esc(h.hook_token)}</code>
+           <button class="btn btn-sm copy-token">Copy token</button>
+           <span class="hint">(baked into the hook config automatically — no env export needed)</span></div>`
       : `<div class="cn-token">Hook token: <code>${this.esc(h.hook_token_masked)}</code>
            <span class="hint">(reveal requires dashboard login or local access)</span></div>`;
     const cliNote = h.paste_complete
@@ -283,11 +284,11 @@ export class ConnectPage extends HTMLElement {
            Warning: HTTP hooks can't reach <code>${this.esc(h.server_url)}</code>: ${this.esc(h.http_hook_blocked)}
            <br>Switch <b>Hook mode → Command (api)</b> for this server.</p>`
       : '';
-    // HTTP hooks read $MEM_MESH_HOOK_TOKEN from the shell (no file fallback), so
-    // remind the user to export it or it is sent empty (401).
+    // Option 2: HTTP hooks read the token from ~/.mem-mesh/hook_token (the file is
+    // the single source of truth) — no shell env, so there's nothing to export.
     const tokenHint =
       h.mode === 'http'
-        ? `<p class="hint">HTTP hooks read the token from your shell — run <code>mem-mesh-hooks setup-token</code> so <code>${this.esc(h.hook_token_env)}</code> isn't sent empty.</p>`
+        ? `<p class="hint">HTTP hooks read the token from <code>~/.mem-mesh/hook_token</code> — the installer writes it there and bakes it into the config, so there's no env var to export.</p>`
         : '';
     const rulesNote = h.rules_note
       ? `<p class="hint">${this.esc(h.rules_note)}</p>`
@@ -361,14 +362,13 @@ export class ConnectPage extends HTMLElement {
          <div class="cn-token">authorize: <code>${this.esc(o.authorize_url || '')}</code></div>
          <div class="cn-token">token: <code>${this.esc(o.token_url || '')}</code></div>
        </details>`;
-    const env = (m && m.mcp_token_env) || 'MEM_MESH_HOOK_TOKEN';
     const tokenRow = m && m.mcp_token
-      ? `<div class="cn-token">Set <code>${this.esc(env)}</code> = <code id="cn-mcptok">${this.esc(m.mcp_token)}</code> <button class="btn btn-sm copy-mcptok">Copy token</button></div>`
+      ? `<div class="cn-token">MCP token <code id="cn-mcptok">${this.esc(m.mcp_token)}</code> <button class="btn btn-sm copy-mcptok">Copy token</button> <span class="hint">(already baked into the block above)</span></div>`
       : `<div class="cn-token">Token: <code>${this.esc((m && m.mcp_token_masked) || '')}</code> <span class="hint">(reveal requires dashboard login or local access)</span></div>`;
     return `<div class="cn-oauth">
-         <p class="hint warn">MCP auth is enabled — the block above already includes a <code>headers</code> Bearer token, so it works as-is once the env var is set:</p>
+         <p class="hint warn">MCP auth is enabled — the block above already includes a <code>headers</code> Bearer token with the literal secret baked in, so it works as-is (no env var to set):</p>
          ${tokenRow}
-         <p class="hint">The header reads <code>\${${this.esc(env)}}</code> — export that env where the client runs (jina-style), or paste the token inline. Prefer interactive OAuth instead? Remove the header and use Claude Code <code>/mcp</code> → Authenticate (endpoints below).</p>
+         <p class="hint">The token is written straight into the config file (mem-mesh owns it; <code>~/.mem-mesh/hook_token</code> stays the source of truth). Prefer interactive OAuth instead? Remove the header and use Claude Code <code>/mcp</code> → Authenticate (endpoints below).</p>
          ${clients.length ? clientList : ''}
          ${endpoints}
          <div class="cn-actions">

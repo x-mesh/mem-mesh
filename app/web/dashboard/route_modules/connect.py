@@ -69,10 +69,13 @@ def _json_b64(data: dict) -> str:
     return base64.b64encode(raw).decode("ascii")
 
 
-def _with_mcp_auth(entry: dict, token_required: bool) -> dict:
-    if token_required and "url" in entry:
+def _with_mcp_auth(entry: dict, token_required: bool, token: Optional[str]) -> dict:
+    # Embed the literal token (Option 2). When auth is required but the reveal
+    # policy withheld the token (token is None), emit NO header — the bootstrap
+    # script must not bake a secret it isn't allowed to reveal.
+    if token_required and token and "url" in entry:
         entry = dict(entry)
-        entry["headers"] = {"Authorization": "Bearer ${MEM_MESH_HOOK_TOKEN}"}
+        entry["headers"] = {"Authorization": f"Bearer {token}"}
     return entry
 
 
@@ -187,7 +190,7 @@ def _bootstrap_payload(
                 }
             )
         codex_entry = _with_mcp_auth(
-            generate_mcp_entry("http", url, tool_key="codex"), mcp_auth_on
+            generate_mcp_entry("http", url, tool_key="codex"), mcp_auth_on, token
         )
         clients["codex"] = {
             "hooks_dir": "~/.codex/hooks",
@@ -289,7 +292,7 @@ def _bootstrap_payload(
                 }
             )
         claude_entry = _with_mcp_auth(
-            generate_mcp_entry("http", url, tool_key="claude-code"), mcp_auth_on
+            generate_mcp_entry("http", url, tool_key="claude-code"), mcp_auth_on, token
         )
         clients["claude"] = {
             "hooks_dir": "~/.claude/hooks",
@@ -304,7 +307,7 @@ def _bootstrap_payload(
 
     if target in ("kiro", "all"):
         kiro_entry = _with_mcp_auth(
-            generate_mcp_entry("http", url, tool_key="kiro"), mcp_auth_on
+            generate_mcp_entry("http", url, tool_key="kiro"), mcp_auth_on, token
         )
         clients["kiro"] = {
             "hooks_dir": "~/.kiro/hooks",
@@ -341,7 +344,7 @@ def _bootstrap_payload(
 
     if target in ("antigravity", "all"):
         antigravity_entry = _with_mcp_auth(
-            generate_mcp_entry("http", url, tool_key="antigravity"), mcp_auth_on
+            generate_mcp_entry("http", url, tool_key="antigravity"), mcp_auth_on, token
         )
         clients["antigravity"] = {
             "mcp_json_path": "~/.antigravity/mcp.json",
@@ -734,11 +737,17 @@ async def connect_mcp(
     mcp_auth_on = bool(
         rc.effective_bool("auth_enabled") and rc.effective_tribool("mcp_auth_enabled")
     )
-    if mcp_auth_on and mode in ("http", "sse"):
-        # Static token header (jina-style) so the pasted block authenticates
-        # without the interactive OAuth flow — the server accepts its hook token
-        # as an MCP API key on /mcp. Env-ref form; the value is returned below.
-        entry["headers"] = {"Authorization": "Bearer ${MEM_MESH_HOOK_TOKEN}"}
+    # Resolve the literal token once — reveal-gated, so a non-loopback unauthorized
+    # caller never receives it. Used for both the baked header and the response.
+    mcp_token = (
+        resolve_hook_token() if (mcp_auth_on and _can_reveal(request)) else None
+    )
+    if mcp_auth_on and mode in ("http", "sse") and mcp_token:
+        # Static literal token header so the pasted block authenticates without
+        # the interactive OAuth flow — the server accepts its hook token as an MCP
+        # API key on /mcp. Omitted when reveal is withheld (the page shows the
+        # masked token + OAuth instead of baking a secret it can't reveal).
+        entry["headers"] = {"Authorization": f"Bearer {mcp_token}"}
     oauth = None
     if mode in ("http", "sse"):
         # Always surface the EXISTING OAuth clients (registered in Security → MCP
@@ -787,9 +796,6 @@ async def connect_mcp(
         "config_path": _MCP_CONFIG_PATH.get(client, "your MCP client's config file"),
         "oauth_required": mcp_auth_on,
         "oauth": oauth,
-        "mcp_token": (
-            resolve_hook_token() if (mcp_auth_on and _can_reveal(request)) else None
-        ),
+        "mcp_token": mcp_token,
         "mcp_token_masked": _mask(resolve_hook_token()) if mcp_auth_on else "",
-        "mcp_token_env": "MEM_MESH_HOOK_TOKEN",
     }

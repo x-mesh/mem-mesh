@@ -11,11 +11,11 @@ command -v jq >/dev/null 2>&1 || { mem_mesh_log "enhanced-stop" "abort" "jq not 
 
 [ -z "${ANTHROPIC_API_KEY:-}" ] && { mem_mesh_log "enhanced-stop" "abort" "ANTHROPIC_API_KEY unset"; exit 0; }
 
-API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)}"
-HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
+API_URL="$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)"
+HOOK_TOKEN="$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)"
 AUTH_STATE=absent
 if [ -n "$HOOK_TOKEN" ]; then AUTH_STATE=present; fi
-mem_mesh_logv "enhanced-stop" "config" "url=$API_URL auth=$AUTH_STATE"
+mem_mesh_logv "enhanced-stop" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN")"
 
 INPUT=$(cat)
 
@@ -96,13 +96,12 @@ save_payload = json.dumps({
 })
 
 # Save via mem-mesh API
-_hook_token = os.environ.get('MEM_MESH_HOOK_TOKEN', '')
-if not _hook_token:
-    try:
-        with open(os.path.expanduser('~/.mem-mesh/hook_token')) as _tf:
-            _hook_token = _tf.read().strip()
-    except Exception:
-        pass
+_hook_token = ''
+try:
+    with open(os.path.expanduser('~/.mem-mesh/hook_token')) as _tf:
+        _hook_token = _tf.read().strip()
+except Exception:
+    pass
 _save_headers = {'Content-Type': 'application/json'}
 if _hook_token:
     _save_headers['Authorization'] = 'Bearer ' + _hook_token

@@ -9,7 +9,6 @@ Performs 3-step setup:
 import contextlib
 import io
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -18,7 +17,12 @@ from typing import Any, Dict, Optional, Union
 
 from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
 from app.cli.hooks.constants import CLAUDE_HOOKS_DIR, DEFAULT_URL
-from app.cli.hooks.status import check_connectivity, probe_api, resolve_api_url
+from app.cli.hooks.status import (
+    check_connectivity,
+    probe_api,
+    resolve_api_url,
+    server_enforces_auth,
+)
 
 TARGET_LABELS = {
     "claude": "Claude Code",
@@ -444,25 +448,18 @@ def _pkg_version() -> str:
 def _hook_token_status() -> Dict[str, Any]:
     """Detect the hook auth token for onboarding display/JSON (no secret leaked).
 
-    Mirrors ``mem-mesh hooks status``: a token exported in the *shell* env
-    (``MEM_MESH_HOOK_TOKEN``) authenticates HTTP hooks + MCP; a file-only token
-    (``~/.mem-mesh/hook_token``) only covers command (.sh) hooks. Returns the
-    status without exposing the secret value.
+    The token file (``~/.mem-mesh/hook_token``) is the single source of truth:
+    its value is baked as a literal bearer header into each tool's config at
+    install time, so one file token authenticates command (.sh) hooks, HTTP
+    hooks, and MCP alike. Returns the status without exposing the secret value.
     """
-    in_env = bool(os.environ.get("MEM_MESH_HOOK_TOKEN"))
     try:
         from app.core.config import resolve_hook_token
 
         resolved = bool(resolve_hook_token())
     except Exception:
-        resolved = in_env
-    if in_env:
-        status = "env"
-    elif resolved:
-        status = "file"
-    else:
-        status = "none"
-    return {"status": status, "in_shell_env": in_env}
+        resolved = False
+    return {"status": "file" if resolved else "none"}
 
 
 def _build_next_actions(result: Dict[str, Any]) -> None:
@@ -478,13 +475,8 @@ def _build_next_actions(result: Dict[str, Any]) -> None:
         actions.append(f"Run `{serve_cmd}` to enable the dashboard + hooks.")
     elif not server.get("reachable"):
         actions.append(f"Start the server: `{serve_cmd}` (or `docker compose up -d`).")
-    # A file-only token authenticates .sh hooks but leaves HTTP hooks / MCP
-    # unauthenticated until it is exported into the shell.
-    if result.get("hook_token", {}).get("status") == "file":
-        actions.append(
-            "Export the hook token for HTTP hooks / authenticated MCP: "
-            "`mem-mesh hooks setup-token`."
-        )
+    # The file token is baked into every tool config as a literal bearer header
+    # at install time, so a "file" status is fully configured — no extra action.
     actions.append("Run `mem-mesh status` for a full system check.")
     actions.append("Run `mem-mesh hooks doctor` for hook diagnostics.")
 
@@ -532,7 +524,7 @@ def cmd_onboarding(
             },
             "mcp": {"status": "skipped"},
         },
-        "hook_token": {"status": "none", "in_shell_env": False},
+        "hook_token": {"status": "none"},
         "next_actions": [],
         "errors": [],
     }
@@ -617,7 +609,7 @@ def _onboarding_steps(
         server["status"] = "auth_required"
         print(f"  Status: {warn(message)}")
         print(
-            f"  {dim('Server is up — export MEM_MESH_HOOK_TOKEN (mem-mesh hooks setup-token) or check your proxy auth.')}"
+            f"  {dim('Server is up — set the hook token in the dashboard (Security & Tokens), then re-run install, or check your proxy auth.')}"
         )
     else:
         server["status"] = "unreachable"
@@ -711,11 +703,17 @@ def _onboarding_steps(
     auth_blocked = False
     current_token = resolve_hook_token()
 
+    # Does the server enforce MCP/OAuth auth? Drives the MCP Bearer header
+    # (Step 2) and the shell-env token bridge (after Step 2). Authoritative via
+    # the overview API so it holds even when /health is public.
+    mcp_auth_on = (probe.ok or probe.auth_required) and server_enforces_auth(
+        resolved_url
+    )
+
     if not yes:
         chosen = _prompt_token(current_token)
         if chosen and chosen != current_token:
             _write_hook_token(chosen)
-            os.environ["MEM_MESH_HOOK_TOKEN"] = chosen  # effective for this run
         current_token = chosen
 
         # Verify only when the server is actually up (reachable or auth-gated).
@@ -736,7 +734,6 @@ def _onboarding_steps(
                     retry = _prompt_token(current_token)
                     if retry and retry != current_token:
                         _write_hook_token(retry)
-                        os.environ["MEM_MESH_HOOK_TOKEN"] = retry
                     current_token = retry
                 else:
                     print(f"  Auth test: {dim(f'HTTP {code}')}")
@@ -752,15 +749,10 @@ def _onboarding_steps(
 
     token_info = _hook_token_status()
     result["hook_token"] = token_info
-    if token_info["status"] == "env":
+    if token_info["status"] == "file":
         print(
-            f"  Auth token: {ok('MEM_MESH_HOOK_TOKEN set')} "
-            f"{dim('(shell env — HTTP hooks/MCP authenticated)')}"
-        )
-    elif token_info["status"] == "file":
-        print(
-            f"  Auth token: {warn('file only')} "
-            f"{dim('(.sh hooks ok; HTTP/MCP need: mem-mesh hooks setup-token)')}"
+            f"  Auth token: {ok('hook token ready')} "
+            f"{dim('(baked into tool configs)')}"
         )
     else:
         print(
@@ -780,11 +772,17 @@ def _onboarding_steps(
             yes=yes,
             preferred_mode=preferred_mcp_mode,
             server_reachable=probe.ok or probe.auth_required,
+            with_auth=mcp_auth_on,
             step_label="[2/3]",
         )
         or {}
     )
     result["steps"]["mcp"] = mcp_summary
+
+    # HTTP-mode MCP/hooks authenticate with the token baked into their config as
+    # a literal bearer header (run_mcp_setup for MCP, _install_claude for HTTP
+    # hooks, both reading the ~/.mem-mesh/hook_token SSOT). No shell rc bridge is
+    # written — re-running install re-stamps a rotated token.
 
     # --- Step 3: Hook installation ---
     print(bold("[3/3] Hook Installation"))
@@ -892,8 +890,7 @@ def _print_summary(
         f"  Hooks:       {ok(f'installed ({target})') if hooks_ok else warn('not installed')}"
     )
     token_label = {
-        "env": ok("MEM_MESH_HOOK_TOKEN (shell env)"),
-        "file": warn("file only (run: mem-mesh hooks setup-token)"),
+        "file": ok("hook token ready (baked into tool configs)"),
         "none": dim("not set"),
     }.get(token_status or "none")
     print(f"  Auth token:  {token_label}")

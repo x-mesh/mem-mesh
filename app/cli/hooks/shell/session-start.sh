@@ -5,7 +5,7 @@ __VERSION_MARKER__
 # Thin forwarder: POST the raw hook event; the server resumes context, detects
 # continuation (from the event stream, not the local transcript), and renders
 # the rules block — returning hookSpecificOutput. Auth is the shared hook token
-# (MEM_MESH_HOOK_TOKEN env, falling back to ~/.mem-mesh/hook_token) so every
+# (~/.mem-mesh/hook_token) so every
 # client authenticates against verify_hook_token uniformly.
 
 set -euo pipefail
@@ -14,8 +14,8 @@ mem_mesh_log "session-start" "fired" "cwd=$PWD"
 command -v jq >/dev/null 2>&1 || { mem_mesh_log "session-start" "abort" "jq not found"; echo '{}'; exit 0; }
 command -v curl >/dev/null 2>&1 || { mem_mesh_log "session-start" "abort" "curl not found"; echo '{}'; exit 0; }
 
-API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)}"
-HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
+API_URL="$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)"
+HOOK_TOKEN="$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)"
 AUTH=()
 AUTH_STATE=absent
 if [ -n "$HOOK_TOKEN" ]; then
@@ -49,7 +49,7 @@ fi
 HTTP_CODE="${META_LINE%% *}"
 [ -n "$HTTP_CODE" ] || HTTP_CODE="000"
 mem_mesh_log "session-start" "sent" "http=$HTTP_CODE bytes=${#RESP} project=$PROJECT_DIR"
-mem_mesh_logv "session-start" "config" "url=$API_URL auth=$AUTH_STATE time=${META_LINE#* }s curl_exit=$CURL_EXIT"
+mem_mesh_logv "session-start" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN") time=${META_LINE#* }s curl_exit=$CURL_EXIT"
 
 # Server returns hookSpecificOutput JSON, or an empty body on no-op. Emit valid
 # JSON verbatim; fall back to {} so Claude Code's output schema check passes.

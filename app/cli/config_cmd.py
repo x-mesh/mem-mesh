@@ -76,23 +76,24 @@ def cmd_config(verbose: bool = False) -> None:
         print(f"  {' ' * 30} {dim(description)}")
     print()
 
-    # Hook auth token — resolved the way the server does (env > data dir >
-    # ~/.mem-mesh). HTTP hooks / MCP only read the SHELL env, so a file-only
-    # token still leaves them unauthenticated. The raw value is never printed.
+    # Hook auth token (Option 2) — resolved from ~/.mem-mesh/hook_token (file
+    # canonical) and baked as a literal Bearer header into each tool's MCP /
+    # HTTP hook config at install time. The raw value is never printed.
     print(header("[Hook Token]"))
     token = collect_token_status()
-    if token.source == "env":
-        print(
-            f"  Source: {ok('shell env (MEM_MESH_HOOK_TOKEN)')}  {info(token.masked)}"
-        )
-        print(dim("  HTTP hooks / MCP are authenticated."))
-    elif token.present:
+    if token.present:
         label = {
+            "env": "shell env",
             "data_file": "data dir hook_token",
             "legacy_file": "~/.mem-mesh/hook_token",
         }.get(token.source, token.source)
-        print(f"  Source: {warn(f'file only ({label})')}  {info(token.masked)}")
-        print(dim("  .sh hooks ok; export for HTTP/MCP: mem-mesh hooks setup-token"))
+        print(f"  Source: {ok(f'set ({label})')}  {info(token.masked)}")
+        print(
+            dim(
+                "  Baked as a literal bearer token into each tool's "
+                "MCP / HTTP hook config."
+            )
+        )
     else:
         print(f"  Source: {dim('not set')}")
         print(dim("  Only needed when the server enforces authentication."))

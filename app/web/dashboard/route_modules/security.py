@@ -171,6 +171,13 @@ async def regenerate_hook_token(request: Request, response: Response):
         "masked": _mask(new_token),
         "can_reveal": reveal,
         "warning": "All existing hook clients must be reinstalled with the new token.",
+        # Concrete per-surface steps so the operator isn't left guessing which
+        # clients broke. The token file is already updated on this host; remote
+        # client hosts must pull the new value.
+        "remediation": [
+            "Re-stamp the new token into every tool config: `mem-mesh mcp config --auth` on each client host (and `mem-mesh hooks install` to refresh HTTP-hook headers).",
+            "Verify everything reconnects with `mem-mesh doctor`.",
+        ],
     }
 
 
@@ -329,4 +336,22 @@ async def update_auth_config(
             logger.error("Failed to set auth override %s: %s", key, e)
             skipped[key] = "error"
     logger.info("Auth config updated via dashboard: applied=%s", list(applied))
-    return {"applied": applied, "skipped": skipped, "warnings": warnings}
+
+    # Turning OAuth/MCP auth ON means every MCP/API client must now present the
+    # bearer token — but their config files were written without it (or with an
+    # unexported ${MEM_MESH_HOOK_TOKEN}). Surface the exact remediation so the
+    # operator isn't left chasing 401s (the gap doctor otherwise catches later).
+    notices = []
+    mcp_auth_keys = ("auth_enabled", "mcp_auth_enabled", "web_auth_enabled")
+    if any(k in applied and _truthy(payload.get(k)) for k in mcp_auth_keys):
+        notices.append(
+            "MCP/API clients now require the bearer token. On each client host run "
+            "`mem-mesh mcp config --auth` to stamp the literal token into each tool "
+            "config (or `mem-mesh doctor` to verify)."
+        )
+    return {
+        "applied": applied,
+        "skipped": skipped,
+        "warnings": warnings,
+        "notices": notices,
+    }

@@ -19,6 +19,7 @@ export class SettingsPage extends HTMLElement {
         this.render();
         this.bindEvents();
         this.loadSystemInfo();
+        this.loadAccessStatus();
         this.loadStatus();
         this.loadRulesIndex();
     }
@@ -77,14 +78,16 @@ export class SettingsPage extends HTMLElement {
             </div>
           </div>
           <div class="oauth-env settings-access-env">
-            <span class="env-title">Environment Variables</span>
-            <div class="env-list">
-              <div class="env-item"><code>MEM_MESH_HOOK_TOKEN</code><span>Hook, MCP, and REST API bearer token</span></div>
-              <div class="env-item"><code>MEM_MESH_PUBLIC_URL</code><span>Shared URL used by Connect config</span></div>
-              <div class="env-item"><code>MEM_MESH_AUTH_ENABLED</code><span>Global auth toggle</span></div>
-              <div class="env-item"><code>MEM_MESH_MCP_AUTH_ENABLED</code><span>MCP SSE auth</span></div>
-              <div class="env-item"><code>MEM_MESH_WEB_AUTH_ENABLED</code><span>Web API auth</span></div>
+            <div class="env-head">
+              <span class="env-title">Server Environment Variables</span>
+              <button class="section-action" id="refresh-access-btn" title="Refresh">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+              </button>
             </div>
+            <div class="env-list" id="access-env-list">
+              <div class="settings-loading"><div class="settings-spinner"></div><span>Loading status...</span></div>
+            </div>
+            <p class="env-foot"><span class="env-src env-src-env">env</span> set via <code>.env</code> (read-only here) &middot; <span class="env-src env-src-db">db</span> set from dashboard &middot; <span class="env-src env-src-default">default</span> unset. These reflect this <strong>server's</strong> configuration, not a client setting — clients no longer read these env vars: the hook token is baked into each tool's config and lives in <code>~/.mem-mesh/hook_token</code>. Change auth on the <a href="/security" data-route="/security">Security</a> page.</p>
           </div>
         </div>
       </div>
@@ -255,6 +258,7 @@ export class SettingsPage extends HTMLElement {
     }
 
     bindEvents() {
+        this.querySelector('#refresh-access-btn')?.addEventListener('click', () => this.loadAccessStatus());
         this.querySelector('#refresh-status-btn')?.addEventListener('click', () => this.loadStatus());
         this.querySelector('#change-model-btn')?.addEventListener('click', () => {
             window.history.pushState({}, '', '/onboarding');
@@ -328,6 +332,103 @@ export class SettingsPage extends HTMLElement {
         </div>
       </div>
     `;
+    }
+
+    // ── Access & Security Status ──
+
+    async fetchSecurityJSON(path) {
+        // Direct fetch (not the cached APIClient): the security/connect endpoints
+        // send Cache-Control: no-store and report live source/env-pin state.
+        const res = await fetch(path, { headers: { Accept: 'application/json' } });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message || data.detail || `HTTP ${res.status}`);
+        return data;
+    }
+
+    async loadAccessStatus() {
+        const el = this.querySelector('#access-env-list');
+        if (!el) return;
+        try {
+            const [config, overview, connectCfg] = await Promise.all([
+                this.fetchSecurityJSON('/api/security/config'),
+                this.fetchSecurityJSON('/api/security/overview'),
+                this.fetchSecurityJSON('/api/connect/config').catch(() => null),
+            ]);
+            this.renderAccessStatus(el, config, overview, connectCfg);
+        } catch (error) {
+            console.error('Failed to load security status:', error);
+            el.innerHTML = `<div class="settings-error">Failed to load security status: ${this.escapeHtml(error.message)}</div>`;
+        }
+    }
+
+    renderAccessStatus(el, config, overview, connectCfg) {
+        const auth = (config && config.auth) || {};
+        const hook = (overview && overview.hook) || {};
+        const bind = (overview && overview.bind) || {};
+        const a = (k) => auth[k] || {};
+
+        const srcBadge = (source, pinned) => {
+            const s = source || 'default';
+            const cls = s === 'env' ? 'env-src-env' : s === 'db' ? 'env-src-db' : 'env-src-default';
+            return `<span class="env-src ${cls}" title="active source">${s}${pinned ? ' &#128274;' : ''}</span>`;
+        };
+        const onOff = (v) => v
+            ? '<span class="env-state on">On</span>'
+            : '<span class="env-state off">Off</span>';
+        const setUnset = (v) => v
+            ? '<span class="env-state on">Set</span>'
+            : '<span class="env-state off">Not set</span>';
+        const textVal = (v) => `<span class="env-state val">${this.escapeHtml(v || '(unset)')}</span>`;
+
+        // hook source is env | data_file | legacy_file | none → collapse to a badge.
+        const hookSrc = hook.source === 'env' ? 'env' : (hook.configured ? 'db' : 'default');
+
+        const rows = [
+            { name: 'MEM_MESH_HOOK_TOKEN', state: setUnset(hook.configured),
+              src: srcBadge(hookSrc, hook.env_pinned), desc: 'Server bearer token (baked into client configs)' },
+            { name: 'MEM_MESH_PUBLIC_URL',
+              state: connectCfg && connectCfg.public_url ? textVal(connectCfg.public_url) : setUnset(false),
+              src: srcBadge(connectCfg && connectCfg.source, connectCfg && connectCfg.env_pinned),
+              desc: 'Shared URL used by Connect config' },
+            { name: 'MEM_MESH_WEB_BASIC_AUTH_ENABLED', state: onOff(a('web_basic_auth_enabled').value),
+              src: srcBadge(a('web_basic_auth_enabled').source, a('web_basic_auth_enabled').env_pinned),
+              desc: 'Dashboard login (Basic Auth)' },
+            { name: 'MEM_MESH_ADMIN_USERNAME', state: textVal(a('admin_username').value),
+              src: srcBadge(a('admin_username').source, a('admin_username').env_pinned),
+              desc: 'Dashboard admin username' },
+            { name: 'MEM_MESH_ADMIN_PASSWORD', state: setUnset(a('admin_password').value),
+              src: srcBadge(a('admin_password').source, a('admin_password').env_pinned),
+              desc: 'Dashboard admin password' },
+            { name: 'MEM_MESH_AUTH_ENABLED', state: onOff(a('auth_enabled').value),
+              src: srcBadge(a('auth_enabled').source, a('auth_enabled').env_pinned),
+              desc: 'Global OAuth (api + mcp)' },
+            { name: 'MEM_MESH_MCP_AUTH_ENABLED', state: onOff(a('mcp_auth_enabled').value),
+              src: srcBadge(a('mcp_auth_enabled').source, a('mcp_auth_enabled').env_pinned),
+              desc: 'MCP SSE OAuth' },
+            { name: 'MEM_MESH_WEB_AUTH_ENABLED', state: onOff(a('web_auth_enabled').value),
+              src: srcBadge(a('web_auth_enabled').source, a('web_auth_enabled').env_pinned),
+              desc: 'Web API OAuth' },
+        ];
+
+        const exposed = bind && bind.effective_host && !bind.is_loopback;
+        const unguarded = !a('web_basic_auth_enabled').value && !a('web_auth_enabled').value;
+        const warn = exposed && unguarded
+            ? `<div class="env-warn">Dashboard is reachable on <code>${this.escapeHtml(bind.effective_host)}</code> without login. Enable Basic Auth on the <a href="/security" data-route="/security">Security</a> page, or restrict access with a firewall.</div>`
+            : '';
+
+        el.innerHTML = warn + rows.map((r) => `
+            <div class="env-item">
+              <code>${r.name}</code>
+              ${r.state}
+              ${r.src}
+              <span class="env-desc">${r.desc}</span>
+            </div>`).join('');
+    }
+
+    escapeHtml(text) {
+        return (text == null ? '' : String(text))
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     // ── Status ──
@@ -1288,10 +1389,139 @@ style.textContent = `
   padding: 1px 5px;
   border-radius: 2px;
   color: var(--text-primary);
+  min-width: 250px;
+  flex-shrink: 0;
 }
 
 .env-item span {
   color: var(--text-muted);
+}
+
+/* Access status — head / footer */
+
+.env-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-1);
+}
+
+.env-head .env-title {
+  margin-bottom: 0;
+}
+
+.env-head .section-action {
+  width: 24px;
+  height: 24px;
+}
+
+.env-foot {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-color);
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+.env-foot code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  background: var(--bg-tertiary);
+  padding: 0 3px;
+  border-radius: 2px;
+}
+
+.env-foot a {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Access status — value & source badges */
+
+.env-state {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: var(--font-semibold);
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border-color);
+}
+
+.env-item .env-state.on {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.env-item .env-state.off {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.env-item .env-state.val {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: var(--font-medium);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.env-src {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.env-src-env {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.env-src-db {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.env-src-default {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+}
+
+.env-item .env-desc {
+  margin-left: auto;
+  text-align: right;
+  color: var(--text-muted);
+}
+
+.env-warn {
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: #fff3cd;
+  color: #856404;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.env-warn code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0 3px;
+  border-radius: 2px;
+}
+
+.env-warn a {
+  color: #856404;
+  font-weight: var(--font-semibold);
+  text-decoration: underline;
 }
 
 /* Info */
@@ -1559,6 +1789,20 @@ details[open] .info-summary::before {
   .data-action-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .env-item {
+    flex-wrap: wrap;
+  }
+
+  .env-item code {
+    min-width: 0;
+  }
+
+  .env-item .env-desc {
+    margin-left: 0;
+    width: 100%;
+    text-align: left;
   }
 }
 

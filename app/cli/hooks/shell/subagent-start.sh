@@ -10,8 +10,8 @@ mem_mesh_log "subagent-start" "fired" "cwd=$PWD"
 command -v jq >/dev/null 2>&1 || { mem_mesh_log "subagent-start" "abort" "jq not found"; exit 0; }
 command -v curl >/dev/null 2>&1 || { mem_mesh_log "subagent-start" "abort" "curl not found"; exit 0; }
 
-API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)}"
-HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
+API_URL="$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)"
+HOOK_TOKEN="$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)"
 AUTH=()
 AUTH_STATE=absent
 if [ -n "$HOOK_TOKEN" ]; then AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}"); AUTH_STATE=present; fi
@@ -26,7 +26,7 @@ esac
 
 PROJECT_DIR=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
-mem_mesh_logv "subagent-start" "config" "url=$API_URL auth=$AUTH_STATE agent=$AGENT_TYPE"
+mem_mesh_logv "subagent-start" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN") agent=$AGENT_TYPE"
 
 # Fetch key decisions/rules (lightweight: limit=5, category=decision)
 RESPONSE=$(curl -s --max-time 3 \

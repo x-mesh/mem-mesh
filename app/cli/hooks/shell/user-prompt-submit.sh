@@ -5,7 +5,7 @@ __VERSION_MARKER__
 # Thin forwarder: the server does keyword-matched memory search + save/pin
 # reminders, driven by the event stream (not the local transcript). Tuning knobs
 # (MEM_MESH_SEARCH_THRESHOLD / _LIMIT / MEM_MESH_SAVE_REMINDER_TURNS, ...) now
-# live on the server side. Auth = shared hook token (env or ~/.mem-mesh file).
+# live on the server side. Auth = shared hook token (~/.mem-mesh/hook_token).
 
 set -euo pipefail
 __HOOK_LOG__
@@ -13,8 +13,8 @@ mem_mesh_log "user-prompt-submit" "fired" "cwd=$PWD"
 command -v jq >/dev/null 2>&1 || { mem_mesh_log "user-prompt-submit" "abort" "jq not found"; exit 0; }
 command -v curl >/dev/null 2>&1 || { mem_mesh_log "user-prompt-submit" "abort" "curl not found"; exit 0; }
 
-API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)}"
-HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
+API_URL="$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)"
+HOOK_TOKEN="$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)"
 AUTH=()
 AUTH_STATE=absent
 if [ -n "$HOOK_TOKEN" ]; then
@@ -45,7 +45,7 @@ fi
 HTTP_CODE="${META_LINE%% *}"
 [ -n "$HTTP_CODE" ] || HTTP_CODE="000"
 mem_mesh_log "user-prompt-submit" "sent" "http=$HTTP_CODE bytes=${#RESP} project=$PROJECT_DIR"
-mem_mesh_logv "user-prompt-submit" "config" "url=$API_URL auth=$AUTH_STATE time=${META_LINE#* }s curl_exit=$CURL_EXIT"
+mem_mesh_logv "user-prompt-submit" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN") time=${META_LINE#* }s curl_exit=$CURL_EXIT"
 
 # Emit hookSpecificOutput JSON if the server returned any; stay silent otherwise.
 if printf '%s' "$RESP" | jq -e . >/dev/null 2>&1; then

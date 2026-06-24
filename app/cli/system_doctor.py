@@ -15,6 +15,7 @@ import os
 from typing import List, Optional
 
 from app.cli.hooks.colors import dim, err, header, info, ok, warn
+from app.cli.codex_config import CODEX_HOOKS_DIR
 from app.cli.hooks.constants import (
     CLAUDE_HOOKS_DIR,
     CLAUDE_SETTINGS,
@@ -54,7 +55,7 @@ def _render_api(url: str, source: str, issues: List[str]) -> None:
             f"  {dim('The server is UP — this is an auth gate, not a network error.')}"
         )
         print(
-            f"  {dim('→ export the token: mem-mesh hooks setup-token, or check your reverse proxy auth.')}"
+            f"  {dim('→ ensure the token file exists + tools carry it: mem-mesh mcp config --auth, or check your reverse proxy auth.')}"
         )
         issues.append(f"API at {url} requires authentication (HTTP {probe.status})")
     else:
@@ -67,27 +68,36 @@ def _render_api(url: str, source: str, issues: List[str]) -> None:
 
 
 def _render_token(issues: List[str]) -> None:
-    """[Hook Token]: source + masked preview + remediation when file-only."""
+    """[Hook Token]: source + masked preview.
+
+    Under option 2 the ``~/.mem-mesh/hook_token`` file (or the data-dir token) is
+    canonical — hooks read it directly and each tool config carries the stamped
+    literal. A ``MEM_MESH_HOOK_TOKEN`` env var is now residual and only shadows
+    the file; it is shown here but the issue is counted once under
+    [Config Conflicts].
+    """
     print(header("[Hook Token]"))
     token = collect_token_status()
-    if token.source == "env":
+    if token.source in ("data_file", "legacy_file"):
         print(
-            f"  Source: {ok('shell env (MEM_MESH_HOOK_TOKEN)')}  {info(token.masked)}"
+            f"  Source: {ok('file SSOT (<data dir>/hook_token | ~/.mem-mesh/hook_token)')}"
+            f"  {info(token.masked)}"
         )
-        print(f"  {dim('HTTP hooks / MCP are authenticated.')}")
-    elif token.present:
-        label = {
-            "data_file": "data dir hook_token",
-            "legacy_file": "~/.mem-mesh/hook_token",
-        }.get(token.source, token.source)
-        print(f"  Source: {warn(f'file only ({label})')}  {info(token.masked)}")
         print(
-            f"  {dim('.sh hooks are covered, but HTTP hooks / MCP read the SHELL env only.')}"
+            f"  {dim('Canonical — hooks read this file, tools carry the stamped literal.')}"
         )
-        print(f"  {dim('→ export it: mem-mesh hooks setup-token')}")
+    elif token.source == "env":
+        print(
+            f"  Source: {warn('MEM_MESH_HOOK_TOKEN env (residual)')}  {info(token.masked)}"
+        )
+        print(
+            f"  {dim('Option 2 removed env reliance — unset it; the ~/.mem-mesh file is canonical.')}"
+        )
     else:
         print(f"  Source: {dim('not set')}")
-        print(f"  {dim('Only required when the server enforces authentication.')}")
+        print(
+            f"  {dim('The server bootstraps one at startup (<data dir>/hook_token).')}"
+        )
     print()
 
 
@@ -97,6 +107,57 @@ def _entry_has_auth_header(entry: Optional[dict]) -> bool:
         return False
     headers = entry.get("headers") or {}
     return bool(headers.get("Authorization"))
+
+
+def _file_canonical_token() -> Optional[str]:
+    """The canonical hook token from the file SSOT, ignoring the env.
+
+    Option 2 makes the on-disk token (``<data dir>/hook_token`` →
+    ``~/.mem-mesh/hook_token``) the source of truth. ``resolve_hook_token()``
+    can't be used for the canonical comparison because it consults the env
+    first, so a residual ``MEM_MESH_HOOK_TOKEN`` would shadow the file value and
+    poison the "is the stamped literal stale?" check.
+    """
+    from app.core.config import (
+        HOOK_TOKEN_FILE,
+        _data_dir_hook_token_file,
+        _read_token_file,
+    )
+
+    return _read_token_file(_data_dir_hook_token_file()) or _read_token_file(
+        HOOK_TOKEN_FILE
+    )
+
+
+def _entry_literal_token(entry: Optional[dict]) -> Optional[str]:
+    """The literal bearer token stamped into an http entry's Authorization
+    header, or None when it is absent or still a ``${ENV}`` reference."""
+    if not entry:
+        return None
+    auth = (entry.get("headers") or {}).get("Authorization") or ""
+    if not auth.startswith("Bearer "):
+        return None
+    tok = auth[len("Bearer ") :].strip()
+    if not tok or "${" in tok or "$" in tok:
+        return None
+    return tok
+
+
+def _entry_references_token_env(entry: Optional[dict]) -> bool:
+    """True if an http entry's Authorization header carries a ``${...}`` env
+    reference instead of an inline literal token.
+
+    Option 2 removed all env reliance, so any ``${...}`` reference in the header
+    is *always* a defect: there is no env to substitute, the MCP client sends an
+    empty token, and the server 401s. The header must carry the literal token
+    (re-stamp it with ``mem-mesh mcp config --auth``). The name is kept for
+    call-site stability; the meaning is now "uses an env reference", which is
+    unconditionally a fault.
+    """
+    if not entry:
+        return False
+    auth = (entry.get("headers") or {}).get("Authorization") or ""
+    return "${" in auth
 
 
 def _render_mcp(
@@ -127,7 +188,8 @@ def _render_mcp(
             print(f"  {err('✗')} {t.name:<15} {info(mode):<8} {err(t.verify_message)}")
             issues.append(f"MCP for {t.name}: {t.verify_message}")
             print(f"     {dim('→ re-run: mem-mesh mcp config')}")
-        # Server requires MCP auth but this http entry sends no token header.
+        # --- auth header health (option 2: a literal token must be stamped) ---
+        # 1) Server enforces MCP auth but this http entry has no token header.
         if (
             mcp_auth_required
             and t.mode == "http"
@@ -137,7 +199,33 @@ def _render_mcp(
                 f"MCP for {t.name}: server requires auth but entry has no token"
             )
             print(
-                f"     {warn('!')} {dim('server enforces MCP auth — add token: mem-mesh mcp config --auth')}"
+                f"     {warn('!')} {dim('no token — stamp the literal token: mem-mesh mcp config --auth')}"
+            )
+        # 2) Header references ${...}: option 2 removed the env, so the client
+        # substitutes an empty value and the server 401s. Always a defect now,
+        # independent of whether the server is currently enforcing auth.
+        elif t.mode == "http" and _entry_references_token_env(t.entry):
+            issues.append(
+                f"MCP for {t.name}: Authorization header references a ${{...}} "
+                f"env var — env reliance was removed, so an empty token is sent "
+                f"and the server will 401; it must carry the literal token"
+            )
+            print(
+                f"     {warn('!')} {dim('re-stamp the literal: mem-mesh mcp config --auth, then restart the client')}"
+            )
+        # 3) Literal token present but stale (differs from the file SSOT).
+        elif (
+            t.mode == "http"
+            and _entry_literal_token(t.entry)
+            and _file_canonical_token()
+            and _entry_literal_token(t.entry) != _file_canonical_token()
+        ):
+            issues.append(
+                f"MCP for {t.name}: stamped token is stale "
+                f"(differs from ~/.mem-mesh/hook_token) — re-stamp"
+            )
+            print(
+                f"     {warn('!')} {dim('stale token literal — re-stamp: mem-mesh mcp config --auth')}"
             )
         if verbose and t.configured:
             render_entry_source(t.config_path, t.entry_lines, entry_json(t.entry))
@@ -220,154 +308,109 @@ def _render_overrides(verbose: bool, issues: List[str]) -> None:
 
 
 def _render_ssot(issues: List[str]) -> None:
-    """[SSOT]: the ~/.mem-mesh files every tool's hooks read when env is unset.
+    """[SSOT]: the ~/.mem-mesh files are canonical; tools carry stamped literals.
 
-    The point of the file SSOT is that GUI- and terminal-launched tools alike
-    resolve config from here — so the canonical values belong on screen, not
-    only the currently-effective (possibly env-overridden) ones. Each line shows
-    the on-disk value (token masked) and whether it is the active source or
-    shadowed by an env override.
+    Under option 2 there is no env source of truth: ``~/.mem-mesh/api_url`` and
+    ``~/.mem-mesh/hook_token`` (or the data-dir token) are canonical. Hooks read
+    those files directly and each tool config carries the stamped literal token.
+    Any ``MEM_MESH_*`` env var is residual and only shadows the file — shown here
+    but counted once under [Config Conflicts].
     """
-    from app.core.config import (
-        HOOK_TOKEN_FILE,
-        _data_dir_hook_token_file,
-        _read_token_file,
-    )
     from app.core.redaction import mask_secret
 
     print(
         header("[SSOT]")
-        + dim(
-            "  ~/.mem-mesh — the file source every tool's hooks read when env is unset"
-        )
+        + dim("  ~/.mem-mesh files are canonical — tools carry the stamped literals")
     )
 
-    # api_url — ~/.mem-mesh/api_url
+    # api_url — the file is canonical; .sh hooks read it directly.
     file_url = _read_config_file_url()
-    env_url = os.environ.get("MEM_MESH_API_URL") or os.environ.get("API_URL")
     if file_url:
-        state = warn("(shadowed by env)") if env_url else ok("(active)")
-        print(f"  api_url      {info(file_url)}  {state}")
+        print(f"  api_url      {info(file_url)}  {ok('(~/.mem-mesh/api_url)')}")
     else:
         print(
             f"  api_url      {dim('not set')} "
-            f"{dim('— hooks fall back to the baked/default URL')}"
+            f"{dim('— run: mem-mesh mcp config --url <url>')}"
         )
+    env_url = (
+        os.environ.get("MEM_MESH_API_URL") or os.environ.get("API_URL") or ""
+    ).strip()
+    if env_url:
+        print(f"               {warn('! MEM_MESH_API_URL env is residual — unset it')}")
 
-    # hook_token — prefer the server-resolved on-disk file (data dir, then legacy)
-    token_value = None
-    token_label = None
-    for label, path in (
-        ("data dir", _data_dir_hook_token_file()),
-        ("~/.mem-mesh", HOOK_TOKEN_FILE),
-    ):
-        found = _read_token_file(path)
-        if found:
-            token_value, token_label = found, label
-            break
-    env_tok = (os.environ.get("MEM_MESH_HOOK_TOKEN") or "").strip()
+    # hook_token — the file is canonical; tools carry the stamped literal.
+    token_value = _file_canonical_token()
     if token_value:
-        state = warn("(shadowed by env)") if env_tok else ok("(active)")
-        print(
-            f"  hook_token   {info(mask_secret(token_value))} "
-            f"{dim(f'({token_label})')}  {state}"
-        )
+        print(f"  hook_token   {info(mask_secret(token_value))}  {ok('(file SSOT)')}")
     else:
         print(
             f"  hook_token   {dim('not set')} "
-            f"{dim('— authenticated hooks will be rejected (401)')}"
+            f"{dim('— server bootstraps at startup')}"
+        )
+    env_tok = (os.environ.get("MEM_MESH_HOOK_TOKEN") or "").strip()
+    if env_tok and env_tok != token_value:
+        print(
+            f"               {warn('! MEM_MESH_HOOK_TOKEN env is residual, shadows the file')}"
         )
     print()
 
 
-def _render_conflicts(issues: List[str]) -> None:
-    """[Config Conflicts]: surface values shadowed in the resolution chain.
+def _render_conflicts(url: str, issues: List[str]) -> None:
+    """[Config Conflicts]: the ~/.mem-mesh files are canonical; flag stale tool
+    literals and residual env vars.
 
-    URL resolves as ``MEM_MESH_API_URL env > API_URL env > ~/.mem-mesh/api_url``
-    and the token as ``MEM_MESH_HOOK_TOKEN env > <data dir> > ~/.mem-mesh``. Each
-    silently takes the first hit, so the active value comes from a higher layer
-    than the file SSOT. Two shapes are reported:
-
-    * ``conflict`` — a higher layer holds a *different* value, so effective
-      config diverges from what a file/dotfile edit suggests (the 401 trap).
-      Counted as an issue.
-    * ``redundant`` — env shadows the file with the *same* value: harmless now,
-      but the file is inactive (edits won't take effect) and a later divergence
-      would silently win. Reported as info, not an issue — it explains why the
-      [API]/[Hook Token] source reads "env" while the file looks authoritative.
+    Option 2 makes ``~/.mem-mesh/{api_url,hook_token}`` the source of truth and
+    bakes a literal token into each tool config. Real drift is therefore a
+    *stale stamped literal* — a rotated token or a moved URL that a tool config
+    still carries the old value of — or a ``${...}`` env reference that can no
+    longer resolve. ``MEM_MESH_*`` env vars are residual under option 2 and only
+    shadow the files, so they are flagged here too, and counted *once* here so
+    [Hook Token]/[SSOT] can show their warnings without inflating the total.
     """
     print(header("[Config Conflicts]"))
-    conflicts: List[str] = []
-    redundant: List[str] = []
+    drift: List[str] = []
 
-    # --- API URL chain ---
-    env_url = (os.environ.get("MEM_MESH_API_URL") or "").rstrip("/")
-    alt_env_url = (os.environ.get("API_URL") or "").rstrip("/")
     file_url = (_read_config_file_url() or "").rstrip("/")
-    if env_url:
-        if alt_env_url and alt_env_url != env_url:
-            conflicts.append(
-                f"API_URL={alt_env_url} ignored — MEM_MESH_API_URL={env_url} wins"
+    file_tok = _file_canonical_token()
+
+    # --- per-tool: stamped literal vs the ~/.mem-mesh SSOT ---
+    for t in collect_mcp_status(url):
+        if not (t.configured and t.mode == "http" and t.entry):
+            continue
+        entry_url = (t.entry.get("url") or "").rsplit("/mcp/sse", 1)[0].rstrip("/")
+        if file_url and entry_url and entry_url != file_url:
+            drift.append(
+                f"{t.name}: configured url {entry_url} differs from "
+                f"~/.mem-mesh/api_url={file_url}"
             )
-        if file_url:
-            if file_url != env_url:
-                conflicts.append(
-                    f"~/.mem-mesh/api_url={file_url} ignored — "
-                    f"MEM_MESH_API_URL env={env_url} wins (edits to the file have no effect)"
-                )
-            else:
-                redundant.append(
-                    f"MEM_MESH_API_URL env shadows ~/.mem-mesh/api_url "
-                    f"(same value {env_url}; file inactive — unset env to make it authoritative)"
-                )
-    elif alt_env_url and file_url and alt_env_url != file_url:
-        conflicts.append(
-            f"~/.mem-mesh/api_url={file_url} ignored — API_URL env={alt_env_url} wins"
-        )
-
-    # --- Hook token chain: env shadowing an on-disk token ---
-    from app.core.config import (
-        HOOK_TOKEN_FILE,
-        _data_dir_hook_token_file,
-        _read_token_file,
-        hook_token_source,
-    )
-
-    if hook_token_source() == "env":
-        env_tok = (os.environ.get("MEM_MESH_HOOK_TOKEN") or "").strip()
-        for label, path in (
-            ("<data dir>/hook_token", _data_dir_hook_token_file()),
-            ("~/.mem-mesh/hook_token", HOOK_TOKEN_FILE),
-        ):
-            file_tok = _read_token_file(path)
-            if not file_tok or not env_tok:
-                continue
-            if file_tok != env_tok:
-                conflicts.append(
-                    f"{label} differs from MEM_MESH_HOOK_TOKEN env — "
-                    f"env wins (a rotated on-disk token is being overridden)"
-                )
-            else:
-                redundant.append(
-                    f"MEM_MESH_HOOK_TOKEN env shadows {label} "
-                    f"(same value; file inactive — unset env to make it authoritative)"
+        if _entry_references_token_env(t.entry):
+            drift.append(
+                f"{t.name}: Authorization references a ${{...}} env var — env "
+                f"reliance was removed; re-stamp the literal token"
+            )
+        else:
+            literal = _entry_literal_token(t.entry)
+            if literal and file_tok and literal != file_tok:
+                drift.append(
+                    f"{t.name}: stamped token is stale (differs from "
+                    f"~/.mem-mesh/hook_token) — a rotated token isn't carried"
                 )
 
-    if conflicts:
-        for c in conflicts:
-            print(f"  {warn('shadowed:')} {c}")
-        issues.append(
-            f"{len(conflicts)} shadowed config value(s) — see Config Conflicts"
-        )
-    for r in redundant:
-        print(f"  {dim('redundant:')} {r}")
-    if conflicts or redundant:
+    # --- residual MEM_MESH_* env vars (no longer a source under option 2) ---
+    for var in ("MEM_MESH_API_URL", "API_URL", "MEM_MESH_HOOK_TOKEN"):
+        if (os.environ.get(var) or "").strip():
+            drift.append(f"{var} env is residual under option 2 — unset it")
+
+    if drift:
+        for d in drift:
+            print(f"  {warn('drift:')} {d}")
         print(
-            f"  {dim('→ keep one source per key. SSOT: ~/.mem-mesh/{api_url,hook_token}; ')}"
-            f"{dim('unset the env override unless you mean to override deliberately.')}"
+            f"  {dim('→ re-stamp: mem-mesh mcp config (add --url/--token to move the SSOT), ')}"
+            f"{dim('then restart clients.')}"
         )
+        issues.append(f"{len(drift)} config drift — see Config Conflicts")
     else:
-        print(f"  {ok('no shadowed config — single source per key')}")
+        print(f"  {ok('tool literals match the ~/.mem-mesh SSOT')}")
     print()
 
 
@@ -378,6 +421,9 @@ def _render_hooks_summary() -> None:
         ("Claude Code", CLAUDE_HOOKS_DIR, CLAUDE_SETTINGS),
         ("Kiro", KIRO_HOOKS_DIR, KIRO_SETTINGS),
         ("Cursor", CURSOR_HOOKS_DIR, CURSOR_SETTINGS),
+        # Codex installs .sh lifecycle hooks under ~/.codex/hooks too; profile is
+        # detected from the scripts (no settings.json-style file to parse).
+        ("Codex", CODEX_HOOKS_DIR, None),
     ]:
         if not hooks_dir.exists():
             print(f"  {label:12s}  {dim('no hooks installed')}")
@@ -418,7 +464,7 @@ def cmd_system_doctor(verbose: bool = False) -> int:
 
     _render_mcp(url, verbose, issues, mcp_auth_required=_mcp_auth_required(url))
     _render_overrides(verbose, issues)
-    _render_conflicts(issues)
+    _render_conflicts(url, issues)
     _render_hooks_summary()
 
     # Summary — most important info last (clig.dev).

@@ -44,18 +44,20 @@ def build_codex_mcp_block(
     command: Optional[str] = None,
     args: Optional[List[str]] = None,
     env: Optional[Dict[str, str]] = None,
+    token: Optional[str] = None,
 ) -> str:
-    """Return a managed ``[mcp_servers.mem-mesh]`` TOML block for Codex."""
+    """Return a managed ``[mcp_servers.mem-mesh]`` TOML block for Codex.
+
+    For http mode with a ``token``, the literal bearer token is baked into a
+    ``[mcp_servers.mem-mesh.http_headers]`` table — Codex has no inline
+    ``bearer_token`` field, but ``http_headers`` carries literal static headers,
+    so the secret lives in the config (Option 2) with no env var indirection.
+    """
     env = {"MEM_MESH_CLIENT": "codex", **(env or {})}
     lines = [_BEGIN, "[mcp_servers.mem-mesh]"]
 
     if mode in ("http", "api", "sse"):
-        lines.extend(
-            [
-                f"url = {_toml_string(url.rstrip('/') + '/mcp/sse')}",
-                'bearer_token_env_var = "MEM_MESH_HOOK_TOKEN"',
-            ]
-        )
+        lines.append(f"url = {_toml_string(url.rstrip('/') + '/mcp/sse')}")
     else:
         server_command = command or sys.executable
         server_args = args or ["-m", "app.mcp_stdio"]
@@ -80,6 +82,16 @@ def build_codex_mcp_block(
     )
     for key in sorted(env):
         lines.append(f"{key} = {_toml_string(env[key])}")
+    # Literal bearer header (Option 2): an auth-enforcing http server's token is
+    # baked here rather than referenced via an env var.
+    if mode in ("http", "api", "sse") and token:
+        lines.extend(
+            [
+                "",
+                "[mcp_servers.mem-mesh.http_headers]",
+                f"Authorization = {_toml_string(f'Bearer {token}')}",
+            ]
+        )
     lines.append(_END)
     return "\n".join(lines) + "\n"
 
@@ -89,7 +101,13 @@ def build_codex_mcp_block_from_entry(entry: Dict[str, Any]) -> str:
     env = entry.get("env") if isinstance(entry.get("env"), dict) else {}
     if "url" in entry:
         url = str(entry["url"]).rsplit("/mcp/sse", 1)[0]
-        return build_codex_mcp_block(mode="http", url=url, env=env)
+        # Carry the literal bearer token from the generic entry's header into the
+        # Codex http_headers table.
+        token = None
+        auth = (entry.get("headers") or {}).get("Authorization", "")
+        if isinstance(auth, str) and auth.startswith("Bearer "):
+            token = auth[len("Bearer ") :].strip() or None
+        return build_codex_mcp_block(mode="http", url=url, env=env, token=token)
     return build_codex_mcp_block(
         mode="local",
         command=str(entry.get("command", sys.executable)),

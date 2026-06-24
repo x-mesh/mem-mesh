@@ -5,17 +5,21 @@ __VERSION_MARKER__
 # Thin forwarder: POST the Cursor hook event (camelCase fields normalized to
 # snake_case); the server resumes context and renders the rules block —
 # returning hookSpecificOutput. Auth = shared hook token
-# (MEM_MESH_HOOK_TOKEN env or ~/.mem-mesh/hook_token).
+# (~/.mem-mesh/hook_token).
 
 set -euo pipefail
-command -v jq >/dev/null 2>&1 || { echo '{}'; exit 0; }
-command -v curl >/dev/null 2>&1 || { echo '{}'; exit 0; }
+__HOOK_LOG__
+mem_mesh_log "session-start" "fired" "cwd=$PWD"
+command -v jq >/dev/null 2>&1 || { mem_mesh_log "session-start" "abort" "jq not found"; echo '{}'; exit 0; }
+command -v curl >/dev/null 2>&1 || { mem_mesh_log "session-start" "abort" "curl not found"; echo '{}'; exit 0; }
 
-API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)}"
-HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
+API_URL="$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)"
+HOOK_TOKEN="$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)"
 AUTH=()
+AUTH_STATE=absent
 if [ -n "$HOOK_TOKEN" ]; then
   AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}")
+  AUTH_STATE=present
 fi
 
 INPUT=$(cat)
@@ -33,16 +37,22 @@ PAYLOAD=$(printf '%s' "$INPUT" | jq -c --arg pid "$PROJECT_DIR" '. + {
   project_id: $pid
 }' 2>/dev/null) || PAYLOAD="$INPUT"
 
+CURL_EXIT=0
 RESP=$(curl -s --max-time 8 \
   -X POST "${API_URL}/api/hooks/claude/session-start" \
   -H "Content-Type: application/json" \
   ${AUTH[@]+"${AUTH[@]}"} \
-  -d "$PAYLOAD" 2>/dev/null) || RESP=""
+  -d "$PAYLOAD" 2>/dev/null) || { CURL_EXIT=$?; RESP=""; }
 
 # Server returns hookSpecificOutput JSON, or an empty body on no-op. Emit valid
-# JSON verbatim; fall back to {} so the output schema check passes.
+# JSON verbatim; fall back to {} so the output schema check passes. The logging
+# block only writes to ~/.mem-mesh/hooks.log, never stdout, so it never
+# corrupts the JSON Cursor reads here.
 if printf '%s' "$RESP" | jq -e . >/dev/null 2>&1; then
+  mem_mesh_log "session-start" "sent" "resp=json project=$PROJECT_DIR"
   printf '%s\n' "$RESP"
 else
+  mem_mesh_log "session-start" "sent" "resp=empty project=$PROJECT_DIR"
   echo '{}'
 fi
+mem_mesh_logv "session-start" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN") curl_exit=$CURL_EXIT"

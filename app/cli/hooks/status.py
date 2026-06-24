@@ -75,17 +75,26 @@ def _check_script_version(path: Path) -> str:
 def _extract_url_from_script(path: Path) -> Optional[str]:
     """Extract the baked default URL from an installed script.
 
-    Supports both legacy and config-file-fallback patterns:
-      - Legacy: ${MEM_MESH_API_URL:-https://example.com}
-      - New:    ${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://example.com)}
+    Supports the current config-file (no-env) form plus the older
+    env-fallback patterns so a partially-migrated install still reports:
+      - Current: API_URL="$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://example.com)"
+      - Legacy:  ${MEM_MESH_API_URL:-https://example.com}
+      - Legacy:  ${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://example.com)}
     """
     if not path.exists():
         return None
     content = path.read_text(encoding="utf-8")
     for line in content.splitlines():
-        if "MEM_MESH_API_URL:-" not in line:
+        stripped = line.strip()
+        # Match the API_URL assignment (no-env form) or any legacy
+        # env-default form. Gate on `|| echo ` / `MEM_MESH_API_URL:-`
+        # rather than the env var name so the no-env render still parses.
+        if not (
+            stripped.startswith("API_URL=")
+            or "MEM_MESH_API_URL:-" in line
+        ):
             continue
-        # New pattern: extract URL after `echo `
+        # Config-file form: extract the URL after the `|| echo ` fallback.
         echo_idx = line.find("|| echo ")
         if echo_idx >= 0:
             after = line[echo_idx + len("|| echo ") :]
@@ -94,11 +103,12 @@ def _extract_url_from_script(path: Path) -> Optional[str]:
                 if idx >= 0:
                     return after[:idx].strip()
             return after.strip()
-        # Legacy pattern
-        start = line.find(":-") + 2
-        end = line.find("}", start)
-        if start > 1 and end > start:
-            return line[start:end].strip('"').strip("'")
+        # Legacy env-default pattern: ${MEM_MESH_API_URL:-https://example.com}
+        if "MEM_MESH_API_URL:-" in line:
+            start = line.find(":-") + 2
+            end = line.find("}", start)
+            if start > 1 and end > start:
+                return line[start:end].strip('"').strip("'")
     return None
 
 
@@ -295,6 +305,33 @@ def check_connectivity(url: str, timeout: int = 5) -> Tuple[bool, str]:
     return False, probe.message
 
 
+def server_enforces_auth(url: str) -> bool:
+    """Whether the server enforces MCP / OAuth auth, read authoritatively.
+
+    Uses ``GET /api/security/overview`` (no auth gate, secrets never returned),
+    which reports the *runtime* toggle even when ``/health`` is public — so a
+    server with ``auth_enabled``/``mcp_auth_enabled`` on is detected, where
+    :attr:`ApiProbe.auth_required` (which only fires on a gated /health) misses
+    it. Returns ``False`` on any error or an older server without the endpoint.
+
+    Shared by onboarding (MCP auth header + token bridge) and ``cmd_install``
+    (token-file bootstrap) so both entry points gate on the same signal.
+    """
+    import json
+
+    from app.cli.hooks.doctor import _http
+
+    try:
+        status, body = _http("GET", f"{url.rstrip('/')}/api/security/overview")
+        if status != 200:
+            return False
+        data = json.loads(body or b"{}")
+        mcp = data.get("mcp_auth") or {}
+        return bool(mcp.get("mcp_auth_enabled") or mcp.get("oauth_auth_enabled"))
+    except Exception:
+        return False
+
+
 def cmd_status() -> None:
     """Print installation status with color output."""
     from app.cli.hooks.sync import _find_project_root
@@ -356,28 +393,23 @@ def cmd_status() -> None:
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     print(f"  ANTHROPIC_API_KEY: {_colorize_status('set' if api_key else 'not set')}")
 
-    # Hook auth token. HTTP hooks / MCP read $MEM_MESH_HOOK_TOKEN from the SHELL
-    # (no file fallback), so distinguish "exported in shell" from "file only": a
-    # file-only token authenticates command (.sh) hooks but leaves HTTP hooks and
-    # MCP unauthenticated until exported (run `mem-mesh hooks setup-token`).
-    env_token = os.environ.get("MEM_MESH_HOOK_TOKEN")
+    # Hook auth token (Option 2). The token lives in ~/.mem-mesh/hook_token (file
+    # canonical) and is baked as a literal Bearer header into each tool's MCP /
+    # HTTP hook config at install time — no shell export is required — so we only
+    # report present/absent. The raw value is never printed.
     try:
         from app.core.config import resolve_hook_token
 
-        file_token = resolve_hook_token()
+        hook_token = resolve_hook_token()
     except Exception:
-        file_token = env_token
-    if env_token:
+        hook_token = os.environ.get("MEM_MESH_HOOK_TOKEN")
+    if hook_token:
         print(
-            f"  MEM_MESH_HOOK_TOKEN: {ok('set')} {dim('(shell env — HTTP hooks/MCP ok)')}"
-        )
-    elif file_token:
-        print(
-            f"  MEM_MESH_HOOK_TOKEN: {warn('file only')} "
-            f"{dim('(.sh hooks ok; HTTP/MCP need: mem-mesh hooks setup-token)')}"
+            f"  hook token:        {ok('set')} "
+            f"{dim('(baked as a literal bearer token into each tool config)')}"
         )
     else:
-        print(f"  MEM_MESH_HOOK_TOKEN: {_colorize_status('not set')}")
+        print(f"  hook token:        {_colorize_status('not set')}")
 
     if CLAUDE_SETTINGS.exists():
         try:

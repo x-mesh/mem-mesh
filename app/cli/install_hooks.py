@@ -156,14 +156,16 @@ _HTTP_HOOK_ENDPOINTS = {
 _WRITE_TOOL_MATCHER = "Edit|Write|MultiEdit|NotebookEdit"
 
 
-# Env var Claude Code interpolates into the HTTP hook Authorization header.
-# Resolution mirrors app.core.config.resolve_hook_token (env first, then file).
+# The server-side env var name for the hook auth token. The CLI no longer
+# interpolates this into client configs (HTTP hook + MCP headers now carry the
+# token as a baked literal); it stays here because the *server* still resolves
+# its own token env-first via app.core.config.resolve_hook_token.
 HOOK_TOKEN_ENV_VAR = "MEM_MESH_HOOK_TOKEN"
 
-# The file SSOT for the API URL. Generated .sh hooks resolve the URL as
-# ``${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url)}`` (see app/cli/hooks/shell/*),
-# so this file is what every tool's hook reads when no env override is set —
-# reachable from GUI- and terminal-launched tools alike.
+# The on-disk source for the API URL, backing the MEM_MESH_API_URL env (the SSOT
+# clients read). Generated .sh hooks resolve the URL as
+# ``${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url)}`` (see app/cli/hooks/shell/*):
+# the env wins, and this file is the fallback the hooks read when it is unset.
 API_URL_FILE = Path.home() / ".mem-mesh" / "api_url"
 
 
@@ -246,6 +248,7 @@ def _claude_hook_entry(
     url: str,
     is_async: bool = False,
     matcher: Optional[str] = None,
+    token: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build one Claude Code hook entry.
 
@@ -254,22 +257,25 @@ def _claude_hook_entry(
     non-blocking by nature, so the ``async`` flag is only meaningful for
     command hooks. ``matcher`` (used by PostToolUse) scopes the entry to a
     tool-name regex; when set it is emitted alongside ``hooks`` so Claude Code
-    only fires the hook for matching tools.
+    only fires the hook for matching tools. ``token`` is the hook auth secret
+    baked directly into the Authorization header as a literal (read from the
+    ~/.mem-mesh/hook_token SSOT at install time); when ``None`` the header is
+    omitted (unauthenticated server).
     """
     if mode == "http" and event in _HTTP_HOOK_ENDPOINTS:
         endpoint = _HTTP_HOOK_ENDPOINTS[event]
-        # Authenticate the native HTTP hook with a bearer token. The value is
-        # interpolated by Claude Code from the MEM_MESH_HOOK_TOKEN env var at
-        # call time (declared in allowedEnvVars) — the secret is never written
-        # into settings.json, so the entry stays constant and idempotent. The
-        # installer generates ~/.mem-mesh/hook_token (see _ensure_hook_token).
+        # Authenticate the native HTTP hook with a bearer token baked in as a
+        # literal value (read from ~/.mem-mesh/hook_token at install time, see
+        # _ensure_hook_token). No shell env interpolation: the token is stamped
+        # straight into settings.json so GUI-launched clients authenticate
+        # without a shell export. Re-run install to re-stamp a rotated token.
         hook: Dict[str, Any] = {
             "type": "http",
             "url": f"{url.rstrip('/')}/api/hooks/claude/{endpoint}",
             "timeout": timeout,
-            "headers": {"Authorization": f"Bearer ${HOOK_TOKEN_ENV_VAR}"},
-            "allowedEnvVars": [HOOK_TOKEN_ENV_VAR],
         }
+        if token:
+            hook["headers"] = {"Authorization": f"Bearer {token}"}
     else:
         hook = {"type": "command", "command": command, "timeout": timeout}
         if is_async:
@@ -284,6 +290,8 @@ def _build_claude_hooks_settings(
     mode: str = "api",
     url: str = DEFAULT_URL,
     hooks_prefix: str = "~/.claude/hooks",
+    *,
+    token: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build Claude Code hooks settings dynamically based on profile and mode.
 
@@ -316,6 +324,7 @@ def _build_claude_hooks_settings(
             15,
             mode=mode,
             url=url,
+            token=token,
         )
     ]
 
@@ -329,7 +338,13 @@ def _build_claude_hooks_settings(
     stop_cmd, stop_timeout = stop_command.get(profile, stop_command["minimal"])
     settings["hooks"]["Stop"] = [
         _claude_hook_entry(
-            "Stop", stop_cmd, stop_timeout, mode=mode, url=url, is_async=True
+            "Stop",
+            stop_cmd,
+            stop_timeout,
+            mode=mode,
+            url=url,
+            is_async=True,
+            token=token,
         )
     ]
 
@@ -342,6 +357,7 @@ def _build_claude_hooks_settings(
                 5,
                 mode=mode,
                 url=url,
+                token=token,
             )
         ]
 
@@ -360,6 +376,7 @@ def _build_claude_hooks_settings(
                 url=url,
                 is_async=True,
                 matcher=_WRITE_TOOL_MATCHER,
+                token=token,
             )
         ]
 
@@ -373,6 +390,7 @@ def _build_claude_hooks_settings(
                 5,
                 mode=mode,
                 url=url,
+                token=token,
             )
         ]
 
@@ -386,6 +404,7 @@ def _build_claude_hooks_settings(
                 mode=mode,
                 url=url,
                 is_async=True,
+                token=token,
             )
         ]
 
@@ -399,6 +418,7 @@ def _build_claude_hooks_settings(
                 mode=mode,
                 url=url,
                 is_async=True,
+                token=token,
             )
         ]
 
@@ -411,6 +431,7 @@ def _build_claude_hooks_settings(
             10,
             mode=mode,
             url=url,
+            token=token,
         )
     ]
 
@@ -423,6 +444,7 @@ def _build_claude_hooks_settings(
             10,
             mode=mode,
             url=url,
+            token=token,
         )
     ]
 
@@ -452,6 +474,10 @@ def _render_template(
     result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
     result = result.replace("__SOURCE_TAG__", source_tag)
     result = result.replace("__IDE_TAG__", ide_tag)
+    # Opt-in hook logging block (single source of truth). Injected BEFORE
+    # __CLIENT_TAG__ so the block's own __CLIENT_TAG__ placeholder (the client
+    # tag stamped on every log line) is substituted along with the template's.
+    result = result.replace("__HOOK_LOG__", HOOK_LOG_BLOCK)
     result = result.replace("__CLIENT_TAG__", client_tag)
     # Inject renderer-generated text
     result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
@@ -465,8 +491,6 @@ def _render_template(
     result = result.replace("__ENHANCED_PROMPT__", render_enhanced_stop_prompt())
     # Keyword matcher block (single source of truth)
     result = result.replace("__KEYWORD_MATCHER__", KEYWORD_MATCHER_BLOCK)
-    # Opt-in hook logging block (single source of truth)
-    result = result.replace("__HOOK_LOG__", HOOK_LOG_BLOCK)
     return result
 
 
@@ -495,6 +519,9 @@ def _render_local_template(
     result = result.replace("__KEYWORD_MATCHER__", KEYWORD_MATCHER_BLOCK)
     # Opt-in hook logging block (single source of truth)
     result = result.replace("__HOOK_LOG__", HOOK_LOG_BLOCK)
+    # Local-mode hooks carry no client_tag; resolve the block's tag so no
+    # placeholder leaks if a local template ever opts into __HOOK_LOG__.
+    result = result.replace("__CLIENT_TAG__", "local")
     return result
 
 
@@ -1183,15 +1210,16 @@ def _install_claude(
                 script.unlink()
                 print(f"  removed {script} (replaced by HTTP hook)")
 
-    # http hooks authenticate with a bearer token; ensure it exists on disk so
-    # the user can export MEM_MESH_HOOK_TOKEN (the value is never stored in
-    # settings.json — only the $VAR reference is).
+    # http hooks authenticate with a bearer token baked into settings.json as a
+    # literal. Read the token from the ~/.mem-mesh/hook_token SSOT (generating it
+    # if missing) and stamp it straight into each HTTP hook's Authorization
+    # header — no shell env bridge, so GUI-launched clients authenticate too.
+    _hook_token: Optional[str] = None
     if _http:
-        _ensure_hook_token()
+        _hook_token = _ensure_hook_token()
         print(
-            f"  hook auth: token at {HOOK_TOKEN_FILE} — export "
-            f"{HOOK_TOKEN_ENV_VAR} in your shell so HTTP hooks authenticate "
-            f"(e.g. export {HOOK_TOKEN_ENV_VAR}=$(cat {HOOK_TOKEN_FILE}))"
+            f"  hook auth: token at {HOOK_TOKEN_FILE} — baked into each tool"
+            " config as a literal bearer header"
         )
 
     print("[claude] Updating settings.json...")
@@ -1202,7 +1230,9 @@ def _install_claude(
         _hooks_prefix = "$CLAUDE_PROJECT_DIR/.claude/hooks"
     else:
         _hooks_prefix = "~/.claude/hooks"
-    hooks_settings = _build_claude_hooks_settings(profile, mode, url, _hooks_prefix)
+    hooks_settings = _build_claude_hooks_settings(
+        profile, mode, url, _hooks_prefix, token=_hook_token
+    )
     _merge_json_settings(settings_path, hooks_settings, force=force)
     # NOTE: mem-mesh now *owns* a PostToolUse hook (write-signal recorder), so
     # the legacy "remove all PostToolUse" cleanup is gone — _merge_json_settings
@@ -1631,17 +1661,25 @@ def _install_codex(
     print("[codex] Updating config.toml MCP server...")
     mcp_mode = "local" if mode == "local" else "http"
     mcp_path = path or str(Path(__file__).resolve().parent.parent.parent)
+    # http mode bakes the literal hook token into config.toml's http_headers
+    # (option 2). Use _ensure_hook_token() (not resolve) so the file exists BEFORE
+    # we stamp it — the resolve-only path left the first install header-less (the
+    # token-generating _ensure_hook_token below ran afterwards), breaking
+    # idempotency. _ensure_hook_token is idempotent, so the later call is a no-op.
+    codex_token = _ensure_hook_token() if mcp_mode == "http" else None
     merge_codex_mcp_config(
         config_path,
-        build_codex_mcp_block(mode=mcp_mode, url=url, path=mcp_path),
+        build_codex_mcp_block(
+            mode=mcp_mode, url=url, path=mcp_path, token=codex_token
+        ),
     )
     print(f"  -> {config_path}")
 
     if mode != "local":
         _ensure_hook_token()
         print(
-            f"  hook/MCP auth: token at {HOOK_TOKEN_FILE} — export "
-            f"{HOOK_TOKEN_ENV_VAR} if the server requires bearer auth"
+            f"  hook/MCP auth: token at {HOOK_TOKEN_FILE} — baked into the"
+            " MCP config as a literal bearer header"
         )
 
     print("[codex] Done.")
@@ -2189,6 +2227,22 @@ def cmd_install(
         # env export. Local mode renders a path, not a URL, so it is skipped.
         _ensure_api_url(url)
 
+        # Ensure the shared token FILE exists when the server enforces auth, so
+        # every client has a credential to present: .sh hooks (Kiro/Cursor) fall
+        # back to ~/.mem-mesh/hook_token, and native HTTP hooks/MCP get the token
+        # baked into their config as a literal bearer header. Without this,
+        # installing only Kiro/Cursor (whose _install_* never bootstrap a token)
+        # — or any direct cmd_install — against an auth-gated server leaves them
+        # 401. Mirrors onboarding's token step; the parallel path it never covered.
+        from app.cli.hooks.status import server_enforces_auth
+
+        if server_enforces_auth(url):
+            _ensure_hook_token()
+            print(
+                f"  hook auth: token at {HOOK_TOKEN_FILE} — baked into each"
+                " tool config as a literal bearer header\n"
+            )
+
     if base_dir is not None:
         print(f"Scope: project ({base_dir})")
     print(f"Prompt version: {PROMPT_VERSION} | Profile: {profile}\n")
@@ -2427,29 +2481,6 @@ def main(argv: Optional[List[str]] = None) -> None:
     # doctor
     subparsers.add_parser("doctor", help="Run diagnostics and connectivity checks")
 
-    # setup-token
-    token_parser = subparsers.add_parser(
-        "setup-token",
-        help="Export MEM_MESH_HOOK_TOKEN in your shell rc (needed for HTTP hooks / MCP)",
-    )
-    token_parser.add_argument(
-        "--print",
-        dest="print_only",
-        action="store_true",
-        help="Print the export block instead of editing the rc file",
-    )
-    token_parser.add_argument(
-        "--api-url", default=None, help="Also write ~/.mem-mesh/api_url (URL SSOT)"
-    )
-    token_parser.add_argument(
-        "--no-test", action="store_true", help="Skip the post-setup auth test"
-    )
-    token_parser.add_argument(
-        "--rc",
-        default=None,
-        help="Shell rc file to edit (default: auto-detect from $SHELL)",
-    )
-
     # sync-project
     sync_parser = subparsers.add_parser(
         "sync-project",
@@ -2495,15 +2526,6 @@ def main(argv: Optional[List[str]] = None) -> None:
         from app.cli.hooks.doctor import cmd_doctor
 
         cmd_doctor()
-    elif args.command == "setup-token":
-        from app.cli.hooks.token_setup import cmd_setup_token
-
-        cmd_setup_token(
-            print_only=args.print_only,
-            api_url=args.api_url,
-            no_test=args.no_test,
-            rc_path=args.rc,
-        )
     elif args.command == "sync-project":
         cmd_sync_project(args.target, args.project_id)
 

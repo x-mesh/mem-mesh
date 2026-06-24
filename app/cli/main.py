@@ -121,28 +121,6 @@ def main(argv: Optional[List[str]] = None) -> None:
     hooks_sub.add_parser("status", help="Show hook status")
     hooks_sub.add_parser("doctor", help="Run hook diagnostics")
 
-    hooks_token = hooks_sub.add_parser(
-        "setup-token",
-        help="Export MEM_MESH_HOOK_TOKEN in your shell rc (needed for HTTP hooks / MCP)",
-    )
-    hooks_token.add_argument(
-        "--print",
-        dest="print_only",
-        action="store_true",
-        help="Print the export block instead of editing the rc file",
-    )
-    hooks_token.add_argument(
-        "--api-url", default=None, help="Also write ~/.mem-mesh/api_url (URL SSOT)"
-    )
-    hooks_token.add_argument(
-        "--no-test", action="store_true", help="Skip the post-setup auth test"
-    )
-    hooks_token.add_argument(
-        "--rc",
-        default=None,
-        help="Shell rc file to edit (default: auto-detect from $SHELL)",
-    )
-
     hooks_sync = hooks_sub.add_parser("sync-project", help="Sync project-local hooks")
     hooks_sync.add_argument(
         "--target", choices=["claude", "kiro", "cursor", "all"], default="all"
@@ -220,8 +198,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     mcp_config_parser.add_argument(
         "--token",
         default=None,
-        help="Hook auth token — write to ~/.mem-mesh/hook_token (SSOT) and enable "
-        "the MCP auth header",
+        help="Hook auth token — write to ~/.mem-mesh/hook_token (SSOT) and bake it "
+        "as a literal Bearer token into each tool's MCP config",
     )
     mcp_config_parser.add_argument(
         "-y", "--yes", action="store_true", help="Non-interactive mode"
@@ -229,8 +207,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     mcp_config_parser.add_argument(
         "--auth",
         action="store_true",
-        help="Add an Authorization: Bearer ${MEM_MESH_HOOK_TOKEN} header (http mode, "
-        "for servers that enforce MCP auth)",
+        help="Bake an Authorization: Bearer <token> header with the literal token "
+        "from ~/.mem-mesh/hook_token (http mode, for auth-enforcing servers)",
     )
     mcp_verify_parser = mcp_sub.add_parser(
         "verify", help="Verify mem-mesh MCP config across all detected dev tools"
@@ -383,13 +361,17 @@ def main(argv: Optional[List[str]] = None) -> None:
 
                 _ensure_api_url(args.url)
                 print(f"  API URL written to {API_URL_FILE} (hook SSOT)")
+            explicit_token = None
             if args.token:
                 from app.cli.install_hooks import HOOK_TOKEN_FILE, _write_hook_token
 
                 _write_hook_token(args.token)
                 with_auth = True  # a supplied token implies authenticated MCP
+                explicit_token = args.token
                 print(f"  Hook token written to {HOOK_TOKEN_FILE}")
-            run_mcp_setup(url=url, yes=args.yes, with_auth=with_auth)
+            run_mcp_setup(
+                url=url, yes=args.yes, with_auth=with_auth, token=explicit_token
+            )
         elif args.mcp_command == "verify":
             from app.cli.hooks.status import resolve_api_url
             from app.cli.mcp_verify import cmd_mcp_verify
@@ -415,7 +397,7 @@ def _dispatch_hooks(args: argparse.Namespace) -> None:
     if args.hooks_command is None:
         print(
             "Usage: mem-mesh hooks "
-            "{install|uninstall|status|doctor|setup-token|sync-project}"
+            "{install|uninstall|status|doctor|sync-project}"
         )
         return
 
@@ -453,16 +435,6 @@ def _dispatch_hooks(args: argparse.Namespace) -> None:
         from app.cli.hooks.doctor import cmd_doctor
 
         cmd_doctor()
-
-    elif args.hooks_command == "setup-token":
-        from app.cli.hooks.token_setup import cmd_setup_token
-
-        cmd_setup_token(
-            print_only=args.print_only,
-            api_url=args.api_url,
-            no_test=args.no_test,
-            rc_path=args.rc,
-        )
 
     elif args.hooks_command == "sync-project":
         from app.cli.install_hooks import cmd_sync_project

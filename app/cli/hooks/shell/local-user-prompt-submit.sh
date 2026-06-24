@@ -177,8 +177,8 @@ fi
 # "Tracked" = open OR in_progress (pin_add creates in_progress by default).
 # in_progress first so the common case needs one request; the status filter
 # is exact-match, so each status is its own request.
-LOCAL_API_URL="${MEM_MESH_API_URL:-http://localhost:8000}"
-HOOK_TOKEN="${MEM_MESH_HOOK_TOKEN:-$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)}"
+LOCAL_API_URL="$(cat ~/.mem-mesh/api_url 2>/dev/null || echo http://localhost:8000)"
+HOOK_TOKEN="$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)"
 AUTH=()
 if [ -n "$HOOK_TOKEN" ]; then
   AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}")

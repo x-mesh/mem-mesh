@@ -125,6 +125,10 @@ def _render_template(
     result = result.replace("__VERSION_MARKER__", VERSION_MARKER)
     result = result.replace("__SOURCE_TAG__", source_tag)
     result = result.replace("__IDE_TAG__", ide_tag)
+    # Opt-in hook logging block (single source of truth). Injected BEFORE
+    # __CLIENT_TAG__ so the block's own __CLIENT_TAG__ placeholder (the client
+    # tag stamped on every log line) is substituted along with the template's.
+    result = result.replace("__HOOK_LOG__", HOOK_LOG_BLOCK)
     result = result.replace("__CLIENT_TAG__", client_tag)
     # Inject renderer-generated text
     result = result.replace("__RULES_TEXT__", render_rules_text(project_id))
@@ -138,8 +142,6 @@ def _render_template(
     result = result.replace("__ENHANCED_PROMPT__", render_enhanced_stop_prompt())
     # Keyword matcher block (single source of truth)
     result = result.replace("__KEYWORD_MATCHER__", KEYWORD_MATCHER_BLOCK)
-    # Opt-in hook logging block (single source of truth)
-    result = result.replace("__HOOK_LOG__", HOOK_LOG_BLOCK)
     return result
 
 
@@ -168,6 +170,9 @@ def _render_local_template(
     result = result.replace("__KEYWORD_MATCHER__", KEYWORD_MATCHER_BLOCK)
     # Opt-in hook logging block (single source of truth)
     result = result.replace("__HOOK_LOG__", HOOK_LOG_BLOCK)
+    # Local-mode hooks carry no client_tag; resolve the block's tag so no
+    # placeholder leaks if a local template ever opts into __HOOK_LOG__.
+    result = result.replace("__CLIENT_TAG__", "local")
     return result
 
 

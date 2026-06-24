@@ -135,6 +135,7 @@ def generate_mcp_entry(
     auto_approve: bool = True,
     tool_key: str = "",
     with_auth: bool = False,
+    token: Optional[str] = None,
 ) -> dict:
     """Generate a mem-mesh MCP server entry.
 
@@ -143,10 +144,12 @@ def generate_mcp_entry(
         url: API server URL (used for http mode)
         auto_approve: Whether to add autoApprove list for common tools
         tool_key: Tool registry key (e.g. 'claude-code', 'cursor') for MEM_MESH_CLIENT env
-        with_auth: For http mode, add an ``Authorization: Bearer
-            ${MEM_MESH_HOOK_TOKEN}`` header (a reference, never the literal
-            secret) for servers that enforce MCP auth. Requires the MCP client
-            to expand ``${ENV}`` in headers.
+        with_auth: For http mode, embed an ``Authorization: Bearer <token>``
+            header with the LITERAL hook token (mem-mesh owns this config file and
+            bakes the secret in, so the MCP client needs no ``${ENV}`` expansion).
+            When with_auth is set but ``token`` is falsy, no header is emitted.
+        token: The literal hook token to bake into the auth header (resolved from
+            the ~/.mem-mesh/hook_token SSOT by the caller).
     """
     approve_list = [
         "add",
@@ -176,10 +179,11 @@ def generate_mcp_entry(
             "url": f"{url.rstrip('/')}/mcp/sse",
             "type": "http",
         }
-        if with_auth:
-            # Reference, not the literal token, so the secret never lands in the
-            # config file. Only useful where the client expands ${ENV} headers.
-            entry["headers"] = {"Authorization": "Bearer ${MEM_MESH_HOOK_TOKEN}"}
+        if with_auth and token:
+            # Literal token: mem-mesh manages this config file, so the secret is
+            # baked in rather than referencing an env var the MCP client would
+            # have to expand. Falsy token -> header omitted (caller warns).
+            entry["headers"] = {"Authorization": f"Bearer {token}"}
     elif mode == "uvx":
         # uvx mode — each MCP client spawns an isolated, cached mem-mesh install.
         # No pre-install needed; uvx downloads on first run, reuses cache after.
@@ -493,6 +497,7 @@ def run_mcp_setup(
     preferred_mode: Optional[str] = None,
     server_reachable: bool = False,
     with_auth: bool = False,
+    token: Optional[str] = None,
     step_label: str = "[3/3]",
 ) -> Dict[str, Any]:
     """Interactive MCP configuration step for onboarding.
@@ -514,10 +519,24 @@ def run_mcp_setup(
     print(bold(f"{step_label} MCP Configuration"))
     print()
 
+    # Resolve the literal hook token once — it gets baked into each tool's MCP
+    # config (Option 2). An explicit token (from `mcp config --token`) wins;
+    # otherwise read the ~/.mem-mesh/hook_token SSOT. If auth is requested but no
+    # token exists, drop auth with a warning rather than baking an empty header.
+    if with_auth and token is None:
+        from app.core.config import resolve_hook_token
+
+        token = resolve_hook_token()
+    if with_auth and not token:
+        print(
+            f"  {warn('No hook token (~/.mem-mesh/hook_token) — MCP auth header skipped.')}"
+        )
+        with_auth = False
+
     # Show the API URL exactly as resolved by the caller. The caller owns
     # precedence (explicit --url > MEM_MESH_API_URL env > ~/.mem-mesh/api_url >
-    # default); re-applying the env override here silently ignored an explicit
-    # --url, the same shadowing trap the file SSOT was meant to kill.
+    # default); re-applying the env override here would silently ignore an
+    # explicit --url.
     print(f"  API URL: {info(url)}")
     print()
 
@@ -577,19 +596,20 @@ def run_mcp_setup(
             mode = "uvx" if uvx_available else "http"
         targets = installed_tools
     else:
-        # Choose connection mode — uvx first if available (recommended)
+        # Choose connection mode — HTTP first (recommended): the standard
+        # server-backed deployment the dashboard, hooks, and the env SSOT assume.
         print(f"  {bold('Connection mode:')}")
         mode_options: list[str] = []
         mode_keys: list[str] = []
-        if uvx_available:
-            mode_options.append(
-                f"uvx {dim('(recommended — auto-spawned by each tool, no server to manage)')}"
-            )
-            mode_keys.append("uvx")
         mode_options.append(
-            f"HTTP {dim('(streamable HTTP — uses a running API server at ' + url + ')')}"
+            f"HTTP {dim('(recommended — streamable HTTP via a running API server at ' + url + ')')}"
         )
         mode_keys.append("http")
+        if uvx_available:
+            mode_options.append(
+                f"uvx {dim('(auto-spawned by each tool, no server to manage)')}"
+            )
+            mode_keys.append("uvx")
         mode_options.append(
             f"Stdio {dim('(local Python — runs MCP process per tool)')}"
         )
@@ -654,10 +674,17 @@ def run_mcp_setup(
 
     # Show sample MCP entry
     sample_entry = generate_mcp_entry(
-        mode=mode, url=url, tool_key=targets[0]["key"], with_auth=with_auth
+        mode=mode, url=url, tool_key=targets[0]["key"], with_auth=with_auth, token=token
     )
     print(f"  {bold('MCP entry')} ({mode} mode):")
-    entry_json = json.dumps({"mem-mesh": sample_entry}, indent=2)
+    # Mask the literal bearer token before printing to the console / --json log;
+    # the real value still lands in the config file (the accepted tradeoff).
+    display_entry = dict(sample_entry)
+    if "headers" in display_entry and token:
+        from app.core.redaction import mask_secret
+
+        display_entry["headers"] = {"Authorization": f"Bearer {mask_secret(token)}"}
+    entry_json = json.dumps({"mem-mesh": display_entry}, indent=2)
     for line in entry_json.splitlines():
         print(f"    {dim(line)}")
     print()
@@ -681,7 +708,7 @@ def run_mcp_setup(
             if existing_mode and existing_mode != mode:
                 entry_mode = existing_mode  # keep the backend, fix the contents
         mcp_entry = generate_mcp_entry(
-            mode=entry_mode, url=url, tool_key=t["key"], with_auth=with_auth
+            mode=entry_mode, url=url, tool_key=t["key"], with_auth=with_auth, token=token
         )
         success, msg = configure_tool(t, mcp_entry, do_backup=True)
         configured.append(
