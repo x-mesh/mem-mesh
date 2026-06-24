@@ -208,7 +208,7 @@ _HTTP_COMMAND_EVENTS = {
 def test_build_claude_hooks_settings_http_mode() -> None:
     """http mode emits http-type entries for covered events, command for rest."""
     settings = install_hooks._build_claude_hooks_settings(
-        "standard", "http", "http://localhost:8000/"
+        "standard", "http", "http://localhost:8000/", token="tok-http"
     )
     hooks = settings["hooks"]
 
@@ -232,9 +232,20 @@ def test_install_claude_http_skips_endpoint_scripts(
     """http install writes only the command-only scripts; settings use http type."""
     hooks_dir = tmp_path / "claude-hooks"
     settings_path = tmp_path / "claude-settings.json"
+    token_file = tmp_path / "hook_token"
     monkeypatch.setattr(install_hooks, "CLAUDE_HOOKS_DIR", hooks_dir)
     monkeypatch.setattr(install_hooks, "CLAUDE_SETTINGS", settings_path)
-    monkeypatch.setattr(install_hooks, "HOOK_TOKEN_FILE", tmp_path / "hook_token")
+    monkeypatch.setattr(install_hooks, "HOOK_TOKEN_FILE", token_file)
+    # Pin the token SSOT to tmp + seed a value so the baked HTTP-hook header is a
+    # deterministic, non-empty literal (Option 2) — and a real ~/.mem-mesh token
+    # can't leak in.
+    monkeypatch.setattr("app.core.config.HOOK_TOKEN_FILE", token_file)
+    monkeypatch.setattr(
+        "app.core.config._data_dir_hook_token_file",
+        lambda: tmp_path / "data" / "hook_token",
+    )
+    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
+    token_file.write_text("seeded-http-tok", encoding="utf-8")
 
     install_hooks._install_claude(
         url="http://localhost:8000", mode="http", path="", profile="standard"
@@ -248,7 +259,11 @@ def test_install_claude_http_skips_endpoint_scripts(
         assert (hooks_dir / script_name).exists(), script_name
 
     parsed = _read_json(settings_path)
-    assert parsed["hooks"]["SessionStart"][0]["hooks"][0]["type"] == "http"
+    session_hook = parsed["hooks"]["SessionStart"][0]["hooks"][0]
+    assert session_hook["type"] == "http"
+    # The literal token is baked into the header — no env reference, no empty Bearer.
+    assert session_hook["headers"]["Authorization"] == "Bearer seeded-http-tok"
+    assert "allowedEnvVars" not in session_hook
     assert parsed["hooks"]["PreCompact"][0]["hooks"][0]["type"] == "command"
 
     # Idempotent re-run.
@@ -462,17 +477,36 @@ def test_render_template_rejects_url_injection() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_claude_http_hook_entry_has_auth_header() -> None:
+def test_claude_http_hook_entry_has_literal_auth_header() -> None:
+    """Option 2: the native HTTP hook header carries the LITERAL hook token
+    baked in at install time (read from ~/.mem-mesh/hook_token), not a
+    ``$MEM_MESH_HOOK_TOKEN`` env reference, and no ``allowedEnvVars`` (Claude
+    Code no longer interpolates an env var)."""
     settings = install_hooks._build_claude_hooks_settings(
-        "standard", "http", "http://localhost:8000"
+        "standard", "http", "http://localhost:8000", token="real-tok-123"
     )
     for event in _HTTP_EVENTS:
         hook = settings["hooks"][event][0]["hooks"][0]
         assert hook["type"] == "http"
-        assert hook["headers"]["Authorization"] == "Bearer $MEM_MESH_HOOK_TOKEN"
-        assert hook["allowedEnvVars"] == ["MEM_MESH_HOOK_TOKEN"]
+        assert hook["headers"]["Authorization"] == "Bearer real-tok-123"
+        assert "${" not in hook["headers"]["Authorization"]
+        assert "$MEM_MESH_HOOK_TOKEN" not in hook["headers"]["Authorization"]
+        assert "allowedEnvVars" not in hook
     for event in _HTTP_COMMAND_EVENTS:  # command hooks carry no header
         assert "headers" not in settings["hooks"][event][0]["hooks"][0]
+
+
+def test_claude_http_hook_omits_header_without_token() -> None:
+    """No resolved token -> the header is omitted entirely rather than baking an
+    empty ``Bearer `` (which would silently fail auth)."""
+    settings = install_hooks._build_claude_hooks_settings(
+        "standard", "http", "http://localhost:8000", token=None
+    )
+    for event in _HTTP_EVENTS:
+        hook = settings["hooks"][event][0]["hooks"][0]
+        assert hook["type"] == "http"
+        assert "headers" not in hook
+        assert "allowedEnvVars" not in hook
 
 
 def test_ensure_hook_token_generates_0600_and_reuses(
@@ -656,7 +690,8 @@ def test_install_codex_api_writes_command_hooks_and_mcp_config(
     config_text = config_path.read_text(encoding="utf-8")
     assert "[mcp_servers.mem-mesh]" in config_text
     assert 'url = "https://mem.example.com/mcp/sse"' in config_text
-    assert 'bearer_token_env_var = "MEM_MESH_HOOK_TOKEN"' in config_text
+    # Option 2 dropped the env-var indirection: no named bearer_token_env_var.
+    assert "bearer_token_env_var" not in config_text
     assert 'MEM_MESH_CLIENT = "codex"' in config_text
 
     first_hooks = hooks_path.read_text(encoding="utf-8")
@@ -797,6 +832,38 @@ def test_mcp_config_configures_codex_toml(tmp_path: Path) -> None:
     assert "[mcp_servers.mem-mesh]" not in config_path.read_text(encoding="utf-8")
 
 
+def test_mcp_config_codex_bakes_literal_bearer_header(tmp_path: Path) -> None:
+    """Option 2: an auth-enabled Codex MCP entry carries the LITERAL bearer token
+    in an ``[mcp_servers.mem-mesh.http_headers]`` table — Codex has no inline
+    bearer field, but http_headers holds the static literal (no env indirection)."""
+    from app.cli import mcp_config
+
+    config_path = tmp_path / ".codex" / "config.toml"
+    tool = {
+        "name": "Codex",
+        "key": "codex",
+        "config_path": config_path,
+        "installed": True,
+        "has_config": False,
+    }
+    entry = mcp_config.generate_mcp_entry(
+        mode="http",
+        url="https://mem.example.com",
+        tool_key="codex",
+        with_auth=True,
+        token="codex-tok-456",
+    )
+
+    ok, _ = mcp_config.configure_tool(tool, entry, do_backup=False)
+    assert ok is True
+
+    text = config_path.read_text(encoding="utf-8")
+    assert "[mcp_servers.mem-mesh.http_headers]" in text
+    assert 'Authorization = "Bearer codex-tok-456"' in text
+    assert "bearer_token_env_var" not in text
+    assert "${" not in text
+
+
 def test_ensure_api_url_writes_file_ssot(tmp_path: Path, monkeypatch) -> None:
     """_ensure_api_url mirrors the install URL into the ~/.mem-mesh/api_url SSOT."""
     api_file = tmp_path / ".mem-mesh" / "api_url"
@@ -821,19 +888,6 @@ def test_ensure_api_url_is_idempotent(tmp_path: Path, monkeypatch) -> None:
     # A changed URL rewrites it.
     install_hooks._ensure_api_url("http://localhost:9999")
     assert api_file.read_text(encoding="utf-8").strip() == "http://localhost:9999"
-
-
-def test_setup_token_export_block_is_token_only() -> None:
-    """The rc export block carries only the file-sourced token — never a literal
-    MEM_MESH_API_URL (that would shadow the ~/.mem-mesh/api_url SSOT)."""
-    from app.cli.hooks.token_setup import _export_block
-
-    for shell in ("zsh", "bash", "fish"):
-        block = _export_block(shell)
-        assert "MEM_MESH_HOOK_TOKEN" in block
-        assert "MEM_MESH_API_URL" not in block
-        # Token is sourced from the file, not written as a plaintext literal.
-        assert "hook_token" in block
 
 
 def test_write_hook_token_explicit(tmp_path: Path, monkeypatch) -> None:

@@ -21,7 +21,30 @@ def test_extract_url_legacy_pattern(tmp_path: Path) -> None:
     assert _extract_url_from_script(script) == "http://legacy.example.com"
 
 
-def test_extract_url_config_file_pattern(tmp_path: Path) -> None:
+def test_extract_url_no_env_config_pattern(tmp_path: Path) -> None:
+    # Current (no-env) render form: API_URL reads the config file directly and
+    # falls back to the baked URL via `|| echo`, with no ${MEM_MESH_API_URL:-...}
+    # env wrapper at all.
+    script = tmp_path / "hook.sh"
+    script.write_text(
+        'API_URL="$(cat ~/.mem-mesh/api_url 2>/dev/null '
+        '|| echo https://baked.example.com)"\n'
+    )
+    assert _extract_url_from_script(script) == "https://baked.example.com"
+
+
+def test_extract_url_no_env_placeholder_pattern(tmp_path: Path) -> None:
+    # No-env render form before placeholder substitution.
+    script = tmp_path / "hook.sh"
+    script.write_text(
+        'API_URL="$(cat ~/.mem-mesh/api_url 2>/dev/null || echo __DEFAULT_URL__)"\n'
+    )
+    assert _extract_url_from_script(script) == "__DEFAULT_URL__"
+
+
+def test_extract_url_legacy_config_file_pattern(tmp_path: Path) -> None:
+    # Legacy env-fallback config form is still parsed for partially-migrated
+    # installs.
     script = tmp_path / "hook.sh"
     script.write_text(
         'API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null '
@@ -30,8 +53,8 @@ def test_extract_url_config_file_pattern(tmp_path: Path) -> None:
     assert _extract_url_from_script(script) == "https://baked.example.com"
 
 
-def test_extract_url_placeholder_pattern(tmp_path: Path) -> None:
-    # installer leaves __DEFAULT_URL__ before substitution
+def test_extract_url_legacy_placeholder_pattern(tmp_path: Path) -> None:
+    # Legacy installer leaves __DEFAULT_URL__ before substitution.
     script = tmp_path / "hook.sh"
     script.write_text(
         'API_URL="${MEM_MESH_API_URL:-$(cat ~/.mem-mesh/api_url 2>/dev/null '

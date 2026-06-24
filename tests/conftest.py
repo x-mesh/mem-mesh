@@ -41,7 +41,13 @@ collect_ignore = [
 # ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
 def _reset_global_singletons():
-    """매 테스트 후 글로벌 싱글톤 상태 초기화"""
+    """매 테스트 전후 글로벌 싱글톤 상태 초기화"""
+    # settings 싱글톤은 시작 시점에도 리셋 — 한 테스트가 MEM_MESH_* env를 set한
+    # 뒤 get_settings()를 호출하면 그 값이 _settings 전역에 캐시되어, 다음 테스트가
+    # env를 지워도 새지 않도록(예: 토큰 헤더에 ENV-SHADOW가 박히는 누수).
+    import app.core.config as _config
+
+    _config._settings = None
     yield
     # cache_manager 싱글톤 리셋
     from app.core.services import cache_manager
@@ -52,6 +58,9 @@ def _reset_global_singletons():
     from app.core.services import query_expander
 
     query_expander._query_expander = None
+
+    # settings 싱글톤 리셋
+    _config._settings = None
 
 
 # ---------------------------------------------------------------------------

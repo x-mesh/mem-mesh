@@ -90,6 +90,7 @@ def test_cursor_session_start_snapshot(request):
         SNAPSHOT_URL,
         source_tag="cursor-hook",
         ide_tag="cursor",
+        client_tag="cursor",
         project_id="mem-mesh",
     )
     _check_snapshot(request, "cursor_session_start.sh", rendered)
@@ -101,6 +102,7 @@ def test_cursor_stop_snapshot(request):
         SNAPSHOT_URL,
         source_tag="cursor-hook",
         ide_tag="cursor",
+        client_tag="cursor",
         project_id="mem-mesh",
     )
     _check_snapshot(request, "cursor_stop.sh", rendered)

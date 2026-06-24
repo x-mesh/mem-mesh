@@ -92,13 +92,19 @@ def _run_stop_decide(
     script = _render_stop_decide(tmp_path)
     capture_path = tmp_path / "curl-payload.json"
     bin_dir = _install_fake_git_and_curl(tmp_path, toplevel=toplevel)
+    # The rendered hook reads its URL from ~/.mem-mesh/api_url (no env fallback),
+    # so pin HOME at the tmp dir: with no config file there the hook uses the
+    # baked default URL (http://localhost:1). The fake curl captures the payload
+    # regardless of which URL it is aimed at.
     env = {
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
-        "MEM_MESH_API_URL": "http://localhost:1",
+        "HOME": str(tmp_path),
         "FAKE_GIT_TOPLEVEL": toplevel,
         "CAPTURED_CURL_PAYLOAD": str(capture_path),
     }
+    env.pop("MEM_MESH_API_URL", None)
+    env.pop("MEM_MESH_HOOK_TOKEN", None)
 
     result = subprocess.run(
         ["bash", str(script)],

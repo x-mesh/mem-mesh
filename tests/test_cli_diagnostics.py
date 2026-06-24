@@ -127,13 +127,15 @@ def test_classify_mode():
 # ── collect_token_status ──
 
 
-def test_collect_token_status_env(monkeypatch):
+def test_collect_token_status_file(monkeypatch):
+    """Option 2: the ~/.mem-mesh file is the only token source (no env layer)."""
     from app.core import config as core_config
 
-    monkeypatch.setattr(core_config, "hook_token_source", lambda: "env")
+    monkeypatch.setattr(core_config, "hook_token_source", lambda: "legacy_file")
     monkeypatch.setattr(core_config, "resolve_hook_token", lambda: "supersecrettoken")
     t = diagnostics.collect_token_status()
-    assert t.source == "env" and t.present and t.in_shell_env
+    assert t.source in ("legacy_file", "data_file") and t.present
+    assert not t.in_shell_env  # the token never comes from the shell env anymore
     assert t.masked.endswith("oken") and "super" not in t.masked
 
 
@@ -320,118 +322,114 @@ def test_doctor_api_section_distinguishes_auth_from_network(monkeypatch, capsys)
     assert any("unreachable" in i for i in issues2)
 
 
-def test_doctor_conflicts_flags_env_shadowing_file(monkeypatch, capsys):
-    """The 401 trap: MEM_MESH_API_URL env shadows a differing ~/.mem-mesh/api_url."""
+def test_doctor_conflicts_flags_tool_literal_drift(monkeypatch, capsys):
+    """Option 2: the ~/.mem-mesh files are canonical; a tool config carrying a
+    stale baked-literal token (a rotated SSOT not yet re-stamped) is the drift."""
     from app.cli import system_doctor
+    from app.cli.hooks.diagnostics import McpToolStatus
 
-    monkeypatch.setenv("MEM_MESH_API_URL", "https://remote.example")
-    monkeypatch.delenv("API_URL", raising=False)
-    monkeypatch.setattr(
-        system_doctor, "_read_config_file_url", lambda: "http://localhost:8000"
-    )
-    # No token-side shadow for this case.
-    from app.core import config as core_config
-
-    monkeypatch.setattr(core_config, "hook_token_source", lambda: "none")
-
-    issues = []
-    system_doctor._render_conflicts(issues)
-    out = capsys.readouterr().out
-    assert "shadowed:" in out
-    assert "http://localhost:8000 ignored" in out
-    assert "MEM_MESH_API_URL env=https://remote.example wins" in out
-    assert any("shadowed config" in i for i in issues)
-
-
-def test_doctor_conflicts_flags_double_env(monkeypatch, capsys):
-    """API_URL is silently ignored when MEM_MESH_API_URL is also set."""
-    from app.cli import system_doctor
-    from app.core import config as core_config
-
-    monkeypatch.setenv("MEM_MESH_API_URL", "http://localhost:8000")
-    monkeypatch.setenv("API_URL", "http://localhost:9999")
-    monkeypatch.setattr(system_doctor, "_read_config_file_url", lambda: None)
-    monkeypatch.setattr(core_config, "hook_token_source", lambda: "none")
-
-    issues = []
-    system_doctor._render_conflicts(issues)
-    out = capsys.readouterr().out
-    assert "API_URL=http://localhost:9999 ignored" in out
-    assert issues
-
-
-def test_doctor_conflicts_clean_when_single_source(monkeypatch, capsys):
-    """No env override + file present → no shadow, no issue."""
-    from app.cli import system_doctor
-    from app.core import config as core_config
-
-    monkeypatch.delenv("MEM_MESH_API_URL", raising=False)
-    monkeypatch.delenv("API_URL", raising=False)
-    monkeypatch.setattr(
-        system_doctor, "_read_config_file_url", lambda: "http://localhost:8000"
-    )
-    monkeypatch.setattr(core_config, "hook_token_source", lambda: "legacy_file")
-
-    issues = []
-    system_doctor._render_conflicts(issues)
-    out = capsys.readouterr().out
-    assert "no shadowed config" in out
-    assert issues == []
-
-
-def test_doctor_ssot_shows_file_values_and_state(monkeypatch, capsys):
-    """[SSOT] prints the on-disk api_url/hook_token and active-vs-shadowed state."""
-    from app.cli import system_doctor
-    from app.core import config as core_config
-
-    monkeypatch.setattr(
-        system_doctor, "_read_config_file_url", lambda: "http://localhost:8000"
-    )
-    monkeypatch.setattr(
-        core_config, "_read_token_file", lambda path: "5-jWabcdefghTESTq7JY"
-    )
-
-    # env unset → the file is the active source.
+    # No env layer under option 2 — keep residual env vars out of the picture.
     monkeypatch.delenv("MEM_MESH_API_URL", raising=False)
     monkeypatch.delenv("API_URL", raising=False)
     monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
+    monkeypatch.setattr(
+        system_doctor, "_read_config_file_url", lambda: "http://localhost:8000"
+    )
+    # The file SSOT carries the rotated token; the tool still bakes the old one.
+    monkeypatch.setattr(system_doctor, "_file_canonical_token", lambda: "tok-NEW")
+
+    stale = McpToolStatus(
+        "Cursor",
+        "cursor",
+        "/p",
+        True,
+        True,
+        True,
+        "http",
+        {
+            "url": "http://localhost:8000/mcp/sse",
+            "type": "http",
+            "headers": {"Authorization": "Bearer tok-OLD"},
+        },
+        True,
+        "ok",
+        (1, 2),
+    )
+    monkeypatch.setattr(system_doctor, "collect_mcp_status", lambda url: [stale])
+
+    issues = []
+    system_doctor._render_conflicts("http://localhost:8000", issues)
+    out = capsys.readouterr().out
+    assert "drift:" in out
+    assert "stale" in out and "Cursor" in out
+    assert any("config drift" in i for i in issues)
+
+
+def test_doctor_conflicts_clean_when_tools_match_ssot(monkeypatch, capsys):
+    """Clean state under option 2: every baked literal equals the file SSOT and
+    no residual env var lingers."""
+    from app.cli import system_doctor
+    from app.cli.hooks.diagnostics import McpToolStatus
+
+    monkeypatch.delenv("MEM_MESH_API_URL", raising=False)
+    monkeypatch.delenv("API_URL", raising=False)
+    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
+    monkeypatch.setattr(
+        system_doctor, "_read_config_file_url", lambda: "http://localhost:8000"
+    )
+    monkeypatch.setattr(system_doctor, "_file_canonical_token", lambda: "tok-MATCH")
+
+    aligned = McpToolStatus(
+        "Cursor",
+        "cursor",
+        "/p",
+        True,
+        True,
+        True,
+        "http",
+        {
+            "url": "http://localhost:8000/mcp/sse",
+            "type": "http",
+            "headers": {"Authorization": "Bearer tok-MATCH"},
+        },
+        True,
+        "ok",
+        (1, 2),
+    )
+    monkeypatch.setattr(system_doctor, "collect_mcp_status", lambda url: [aligned])
+
+    issues = []
+    system_doctor._render_conflicts("http://localhost:8000", issues)
+    out = capsys.readouterr().out
+    assert "tool literals match the ~/.mem-mesh SSOT" in out
+    assert "drift:" not in out
+    assert issues == []
+
+
+def test_doctor_ssot_shows_values_and_source(monkeypatch, capsys):
+    """Option 2: [SSOT] prints the ~/.mem-mesh/api_url value and the masked
+    hook_token as the canonical source — no '(env)' marking, raw token hidden."""
+    from app.cli import system_doctor
+
+    monkeypatch.delenv("MEM_MESH_API_URL", raising=False)
+    monkeypatch.delenv("API_URL", raising=False)
+    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
+    monkeypatch.setattr(
+        system_doctor, "_read_config_file_url", lambda: "http://localhost:8000"
+    )
+    monkeypatch.setattr(
+        system_doctor, "_file_canonical_token", lambda: "5-jWabcdefghTESTq7JY"
+    )
+
     issues = []
     system_doctor._render_ssot(issues)
     out = capsys.readouterr().out
     assert "[SSOT]" in out
     assert "http://localhost:8000" in out
-    assert "(active)" in out
+    assert "(~/.mem-mesh/api_url)" in out  # the file is the canonical source
+    assert "file SSOT" in out
     assert "q7JY" in out and "TEST" not in out  # token masked, tail only
-
-    # env set → the file is shadowed (but still shown).
-    monkeypatch.setenv("MEM_MESH_API_URL", "http://localhost:8000")
-    monkeypatch.setenv("MEM_MESH_HOOK_TOKEN", "5-jWabcdefghTESTq7JY")
-    issues2 = []
-    system_doctor._render_ssot(issues2)
-    out2 = capsys.readouterr().out
-    assert "shadowed by env" in out2
-    assert "http://localhost:8000" in out2  # file value still displayed
-
-
-def test_doctor_conflicts_redundant_env_matches_file(monkeypatch, capsys):
-    """env set == file: reported as 'redundant' info, not counted as an issue."""
-    from app.cli import system_doctor
-    from app.core import config as core_config
-
-    monkeypatch.setenv("MEM_MESH_API_URL", "http://localhost:8000")
-    monkeypatch.delenv("API_URL", raising=False)
-    monkeypatch.setattr(
-        system_doctor, "_read_config_file_url", lambda: "http://localhost:8000"
-    )
-    monkeypatch.setattr(core_config, "hook_token_source", lambda: "none")
-
-    issues = []
-    system_doctor._render_conflicts(issues)
-    out = capsys.readouterr().out
-    assert "redundant:" in out
-    assert "file inactive" in out
-    assert "no shadowed config" not in out  # the clean line is suppressed
-    assert issues == []  # redundant is informational, exit stays 0
+    assert "(env)" not in out  # no env source to mark under option 2
 
 
 # ── render fallback when rich is unavailable ──
@@ -539,9 +537,16 @@ def test_merge_json_settings_backs_up_on_change_and_skips_noop(tmp_path):
 def test_generate_mcp_entry_with_auth_header():
     from app.cli.mcp_config import generate_mcp_entry
 
-    e = generate_mcp_entry("http", url="https://x", tool_key="cursor", with_auth=True)
-    assert e["headers"]["Authorization"] == "Bearer ${MEM_MESH_HOOK_TOKEN}"
-    # never the literal secret
+    # Option 2: mem-mesh owns the config file and bakes the LITERAL token in — no
+    # ${ENV} reference for the MCP client to expand (env reliance was removed).
+    e = generate_mcp_entry(
+        "http", url="https://x", tool_key="cursor", with_auth=True, token="real-tok-123"
+    )
+    assert e["headers"]["Authorization"] == "Bearer real-tok-123"
+    assert "${" not in e["headers"]["Authorization"]
+    # with_auth but no token → header omitted (caller warns)
+    assert "headers" not in generate_mcp_entry("http", url="https://x", with_auth=True)
+    # without auth → no header at all
     assert "headers" not in generate_mcp_entry("http", url="https://x", with_auth=False)
 
 
@@ -565,7 +570,7 @@ def test_generate_mcp_entry_no_db_path_when_unset(monkeypatch):
 
 
 def test_ensure_hook_token_mirrors_resolved_to_legacy_path(monkeypatch, tmp_path):
-    # The .sh hooks only fall back to ~/.mem-mesh/hook_token; a server token that
+    # The .sh hooks read ~/.mem-mesh/hook_token directly; a server token that
     # resolves from the data-dir must be mirrored there or hooks 401.
     import app.cli.install_hooks as ih
     from app.core import config as cc
@@ -605,7 +610,8 @@ def test_doctor_flags_missing_mcp_auth_token(monkeypatch, capsys):
     capsys.readouterr()
     assert any("no token" in i for i in issues)
 
-    # With the token header present, no flag.
+    # With a LITERAL token header present (option 2 bakes the secret in), no flag.
+    monkeypatch.setattr(sd, "_file_canonical_token", lambda: None)
     http_auth = McpToolStatus(
         "Cursor",
         "cursor",
@@ -614,7 +620,7 @@ def test_doctor_flags_missing_mcp_auth_token(monkeypatch, capsys):
         True,
         True,
         "http",
-        {"url": "x", "headers": {"Authorization": "Bearer ${MEM_MESH_HOOK_TOKEN}"}},
+        {"url": "x", "headers": {"Authorization": "Bearer real-tok-123"}},
         True,
         "ok",
         (1, 2),
@@ -624,6 +630,62 @@ def test_doctor_flags_missing_mcp_auth_token(monkeypatch, capsys):
     sd._render_mcp("http://x", False, issues2, mcp_auth_required=True)
     capsys.readouterr()
     assert not any("no token" in i for i in issues2)
+
+
+# ── option 2 doctor helpers: file-canonical token + baked-literal extraction ──
+
+
+def test_file_canonical_token_ignores_env(monkeypatch):
+    """Option 2: the canonical token comes from the file SSOT, never the env —
+    a residual MEM_MESH_HOOK_TOKEN must not shadow the on-disk value."""
+    from app.cli import system_doctor
+    from app.core import config as cc
+
+    monkeypatch.setenv("MEM_MESH_HOOK_TOKEN", "ENV-SHADOW")
+    monkeypatch.setattr(cc, "_read_token_file", lambda p: "FILE-CANONICAL")
+    assert system_doctor._file_canonical_token() == "FILE-CANONICAL"
+
+
+def test_file_canonical_token_prefers_data_dir_over_legacy(monkeypatch):
+    """The data-dir token wins over the legacy ~/.mem-mesh/hook_token file."""
+    from app.cli import system_doctor
+    from app.core import config as cc
+
+    data_path = cc._data_dir_hook_token_file()
+    monkeypatch.setattr(
+        cc, "_read_token_file", lambda p: "DATA-DIR" if p == data_path else "LEGACY"
+    )
+    assert system_doctor._file_canonical_token() == "DATA-DIR"
+
+
+def test_file_canonical_token_none_when_absent(monkeypatch):
+    from app.cli import system_doctor
+    from app.core import config as cc
+
+    monkeypatch.setattr(cc, "_read_token_file", lambda p: None)
+    assert system_doctor._file_canonical_token() is None
+
+
+def test_entry_literal_token_extracts_baked_literal():
+    """Option 2 bakes a literal Bearer token; only a real literal is returned."""
+    from app.cli.system_doctor import _entry_literal_token
+
+    assert (
+        _entry_literal_token({"headers": {"Authorization": "Bearer real-tok-123"}})
+        == "real-tok-123"
+    )
+    # a ${ENV} reference is NOT a literal (env reliance was removed)
+    assert (
+        _entry_literal_token(
+            {"headers": {"Authorization": "Bearer ${MEM_MESH_HOOK_TOKEN}"}}
+        )
+        is None
+    )
+    # absent / non-bearer / empty all yield None
+    assert _entry_literal_token(None) is None
+    assert _entry_literal_token({}) is None
+    assert _entry_literal_token({"headers": {"Authorization": "Basic xyz"}}) is None
+    assert _entry_literal_token({"headers": {"Authorization": "Bearer "}}) is None
 
 
 # ── CLI routing: new subcommands are wired into main.py ──
@@ -660,14 +722,14 @@ def test_main_routes_mcp_verify(monkeypatch):
     assert exc.value.code == 1 and seen["url"] == "http://x:8000"
 
 
-def test_main_routes_hooks_setup_token(monkeypatch):
+def test_hooks_setup_token_no_longer_routed():
+    """Option 2 removed the file->shell-env bridge: `hooks setup-token` (and the
+    token_setup module) are gone, so argparse rejects the subcommand."""
     import app.cli.main as main_mod
-    import app.cli.hooks.token_setup as ts
 
-    seen = {}
-    monkeypatch.setattr(ts, "cmd_setup_token", lambda **k: seen.update(k))
-    main_mod.main(["hooks", "setup-token", "--print", "--no-test"])
-    assert seen["print_only"] is True and seen["no_test"] is True
+    with pytest.raises(SystemExit) as exc:
+        main_mod.main(["hooks", "setup-token", "--print", "--no-test"])
+    assert exc.value.code != 0  # argparse: invalid choice 'setup-token'
 
 
 def test_doctor_mcp_flags_url_split(monkeypatch, capsys):

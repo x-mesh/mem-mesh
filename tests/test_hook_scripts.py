@@ -41,9 +41,26 @@ def _run_hook(
     script_path: Path,
     input_data: dict,
     env: dict | None = None,
+    *,
+    api_url: str | None = None,
 ) -> subprocess.CompletedProcess:
-    """Run a hook script with JSON input on stdin."""
-    run_env = {**os.environ, "MEM_MESH_API_URL": FAKE_URL}
+    """Run a hook script with JSON input on stdin.
+
+    The rendered hook reads its API URL only from ``~/.mem-mesh/api_url`` (no env
+    fallback), so the run is pinned to a hermetic HOME (the script's tmp dir).
+    Pass ``api_url`` to drop a config file there and aim the hook at a fake
+    server; without it the hook uses the baked default (FAKE_URL → curl fails
+    fast, offline). The inherited mem-mesh control vars are dropped so a stray
+    host value can never shadow the file.
+    """
+    home = script_path.parent
+    run_env = {**os.environ, "HOME": str(home)}
+    run_env.pop("MEM_MESH_API_URL", None)
+    run_env.pop("MEM_MESH_HOOK_TOKEN", None)
+    if api_url is not None:
+        cfg_dir = home / ".mem-mesh"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        (cfg_dir / "api_url").write_text(api_url, encoding="utf-8")
     if env:
         run_env.update(env)
     return subprocess.run(
@@ -202,7 +219,7 @@ def test_session_start_forwards_server_context(tmp_path: Path, hook_api_server) 
     script = _render_and_write(
         tmp_path, SESSION_START_HOOK_TEMPLATE, project_id="test-project"
     )
-    result = _run_hook(script, {}, env={"MEM_MESH_API_URL": url})
+    result = _run_hook(script, {}, api_url=url)
     assert result.returncode == 0
     context = _extract_context(json.loads(result.stdout))
     assert "mem-mesh" in context
@@ -371,7 +388,7 @@ def test_user_prompt_submit_reminds_when_no_tracked_pins(
         tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
     )
     result = _run_hook(
-        script, {"prompt": NO_KEYWORD_PROMPT}, env={"MEM_MESH_API_URL": url}
+        script, {"prompt": NO_KEYWORD_PROMPT}, api_url=url
     )
     assert result.returncode == 0
     assert PIN_REMINDER_TEXT in result.stdout
@@ -391,7 +408,7 @@ def test_user_prompt_submit_silent_with_in_progress_pin(
         tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
     )
     result = _run_hook(
-        script, {"prompt": NO_KEYWORD_PROMPT}, env={"MEM_MESH_API_URL": url}
+        script, {"prompt": NO_KEYWORD_PROMPT}, api_url=url
     )
     assert result.returncode == 0
     assert PIN_REMINDER_TEXT not in result.stdout
@@ -407,7 +424,7 @@ def test_user_prompt_submit_silent_with_open_pin(
         tmp_path, USER_PROMPT_SUBMIT_HOOK_TEMPLATE, project_id="test-project"
     )
     result = _run_hook(
-        script, {"prompt": NO_KEYWORD_PROMPT}, env={"MEM_MESH_API_URL": url}
+        script, {"prompt": NO_KEYWORD_PROMPT}, api_url=url
     )
     assert result.returncode == 0
     assert PIN_REMINDER_TEXT not in result.stdout

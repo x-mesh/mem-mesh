@@ -78,7 +78,8 @@ def _stub_steps_for_uvx(monkeypatch) -> None:
     monkeypatch.setattr(onboarding, "_detect_targets", lambda: ["codex"])
 
     # Deterministic "no token" baseline; token-specific tests override after.
-    monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
+    # The ~/.mem-mesh/hook_token file is the only token source (no env layer),
+    # so stubbing resolve_hook_token alone pins the baseline.
     from app.core import config as core_config
 
     monkeypatch.setattr(core_config, "resolve_hook_token", lambda: "")
@@ -123,31 +124,24 @@ def test_onboarding_json_emits_structured_result(monkeypatch, capsys) -> None:
     assert data["errors"] == []
 
 
-def test_onboarding_json_reports_hook_token_from_env(monkeypatch, capsys) -> None:
-    _stub_steps_for_uvx(monkeypatch)
-    monkeypatch.setenv("MEM_MESH_HOOK_TOKEN", "tok-xyz")
-
-    with pytest.raises(SystemExit):
-        onboarding.cmd_onboarding(json_mode=True)
-
-    data = json.loads(capsys.readouterr().out)
-    assert data["hook_token"] == {"status": "env", "in_shell_env": True}
-    # An exported token needs no setup-token guidance.
-    assert not any("setup-token" in a for a in data["next_actions"])
-
-
-def test_onboarding_json_guides_setup_token_when_file_only(monkeypatch, capsys) -> None:
+def test_onboarding_json_reports_hook_token_from_file(monkeypatch, capsys) -> None:
     _stub_steps_for_uvx(monkeypatch)
     from app.core import config as core_config
 
+    # The ~/.mem-mesh/hook_token file is the single source of truth (no env
+    # layer): a resolved token reports as the 2-state "file" status, with no
+    # shell-env marker.
     monkeypatch.setattr(core_config, "resolve_hook_token", lambda: "file-token")
 
     with pytest.raises(SystemExit):
         onboarding.cmd_onboarding(json_mode=True)
 
     data = json.loads(capsys.readouterr().out)
-    assert data["hook_token"]["status"] == "file"
-    assert any("setup-token" in a for a in data["next_actions"])
+    assert data["hook_token"] == {"status": "file"}
+    # The file token is baked into every tool config as a literal bearer header
+    # at install time, so a "file" status is fully configured — no setup-token
+    # guidance is emitted.
+    assert not any("setup-token" in a for a in data["next_actions"])
 
 
 def test_onboarding_json_reports_hook_failure(monkeypatch, capsys) -> None:
