@@ -11,6 +11,7 @@ export class SettingsPage extends HTMLElement {
         this.statusData = null;
         this.migrationInterval = null;
         this.rulesIndex = null;
+        this.rulesMeta = null;
         this.rulesCache = new Map();
         this.progressErrorCount = 0;
     }
@@ -174,9 +175,29 @@ export class SettingsPage extends HTMLElement {
           </button>
         </div>
         <div class="section-body">
-          <p class="section-desc">Select rules to merge, then copy or save the result.</p>
+          <p class="section-desc">Generate copy-ready hook rules from the same renderer used by <code>mem-mesh hooks rules</code>, or merge packaged rule modules.</p>
+          <div class="rules-toolbar">
+            <div class="rules-field">
+              <label for="rules-project-id">Project ID</label>
+              <input id="rules-project-id" class="settings-input" value="mem-mesh" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="rules-field">
+              <label for="rules-format-select">Output</label>
+              <select id="rules-format-select" class="settings-select">
+                <option value="plain">Plain hook rules</option>
+                <option value="claude">CLAUDE.md managed block</option>
+              </select>
+            </div>
+            <button id="generate-hook-rules-btn" class="settings-btn-primary">Generate Hook Rules</button>
+            <button id="copy-rules-command-btn" class="settings-btn">Copy CLI Command</button>
+          </div>
+          <div class="rules-meta" id="rules-meta">Prompt version and output details will appear after rules load.</div>
           <div class="rules-grid">
             <div class="rules-col">
+              <div class="rules-pane-head">
+                <span class="rules-pane-title">Module Library</span>
+                <span class="rules-pane-desc">Select modules for a manual bundle.</span>
+              </div>
               <div class="rules-list" id="rules-list">
                 <div class="settings-loading">
                   <div class="settings-spinner"></div>
@@ -184,17 +205,21 @@ export class SettingsPage extends HTMLElement {
                 </div>
               </div>
               <div class="rules-btns">
-                <button id="merge-rules-btn" class="settings-btn-primary">Merge</button>
+                <button id="merge-rules-btn" class="settings-btn">Merge Selected Modules</button>
                 <button id="copy-rules-btn" class="settings-btn">Copy</button>
                 <button id="download-rules-btn" class="settings-btn">Download</button>
               </div>
               <div class="rules-save-row">
                 <select id="rules-target-select" class="settings-select"></select>
-                <button id="save-rules-btn" class="settings-btn-primary">Save</button>
+                <button id="save-rules-btn" class="settings-btn">Save to Module</button>
               </div>
             </div>
             <div class="rules-col">
-              <textarea id="rules-output" class="rules-textarea" rows="14" placeholder="Merged output will appear here..."></textarea>
+              <div class="rules-pane-head">
+                <span class="rules-pane-title">Output</span>
+                <span class="rules-pane-desc" id="rules-output-stats">0 chars</span>
+              </div>
+              <textarea id="rules-output" class="rules-textarea" rows="14" placeholder="Generated hook rules or merged module output will appear here..."></textarea>
             </div>
           </div>
         </div>
@@ -265,7 +290,15 @@ export class SettingsPage extends HTMLElement {
             window.dispatchEvent(new PopStateEvent('popstate'));
         });
         this.querySelector('#start-migration-btn')?.addEventListener('click', () => this.startMigration());
-        this.querySelector('#refresh-rules-btn')?.addEventListener('click', () => this.loadRulesIndex());
+        this.querySelector('#refresh-rules-btn')?.addEventListener('click', () => this.loadRulesIndex({ refresh: true }));
+        this.querySelector('#generate-hook-rules-btn')?.addEventListener('click', () => this.generateHookRules());
+        this.querySelector('#copy-rules-command-btn')?.addEventListener('click', () => this.copyRulesCommand());
+        this.querySelector('#rules-format-select')?.addEventListener('change', () => this.renderRulesCommandMeta());
+        this.querySelector('#rules-project-id')?.addEventListener('input', () => this.renderRulesCommandMeta());
+        this.querySelector('#rules-project-id')?.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') this.generateHookRules();
+        });
+        this.querySelector('#rules-output')?.addEventListener('input', () => this.updateRulesOutputStats());
         this.querySelector('#merge-rules-btn')?.addEventListener('click', () => this.mergeSelectedRules());
         this.querySelector('#copy-rules-btn')?.addEventListener('click', () => this.copyMergedRules());
         this.querySelector('#download-rules-btn')?.addEventListener('click', () => this.downloadMergedRules());
@@ -645,17 +678,27 @@ export class SettingsPage extends HTMLElement {
 
     // ── Rules ──
 
-    async loadRulesIndex() {
+    async loadRulesIndex({ refresh = false } = {}) {
         const el = this.querySelector('#rules-list');
         if (!el) return;
 
         el.innerHTML = `<div class="settings-loading"><div class="settings-spinner"></div><span>Loading rules...</span></div>`;
 
         try {
+            if (refresh) {
+                window.app.apiClient.invalidateCache('/rules');
+                this.rulesCache.clear();
+            }
             const data = await window.app.apiClient.get('/rules');
+            this.rulesMeta = data.hook_rules || null;
             this.rulesIndex = data.rules || [];
+            this.renderRulesCommandMeta();
             this.renderRulesList();
             this.renderRulesTargets();
+            const out = this.querySelector('#rules-output');
+            if (out && !out.value.trim()) {
+                await this.generateHookRules({ silent: true });
+            }
         } catch (error) {
             console.error('Failed to load rules index:', error);
             el.innerHTML = `<div class="settings-error">Failed to load rules: ${error.message}</div>`;
@@ -666,13 +709,14 @@ export class SettingsPage extends HTMLElement {
         const el = this.querySelector('#rules-list');
         if (!el) return;
 
-        if (!this.rulesIndex || this.rulesIndex.length === 0) {
+        const modules = this.getRuleModules();
+        if (modules.length === 0) {
             el.innerHTML = '<span class="section-desc">No rules available.</span>';
             return;
         }
 
         el.innerHTML = '';
-        this.rulesIndex.forEach((rule) => {
+        modules.forEach((rule) => {
             const item = document.createElement('label');
             item.className = 'rule-row';
             const cb = document.createElement('input');
@@ -697,7 +741,7 @@ export class SettingsPage extends HTMLElement {
         const select = this.querySelector('#rules-target-select');
         if (!select) return;
         select.innerHTML = '';
-        (this.rulesIndex || []).forEach((rule) => {
+        this.getRuleModules().forEach((rule) => {
             const opt = document.createElement('option');
             opt.value = rule.id;
             opt.textContent = `${rule.title} (${rule.id})`;
@@ -705,11 +749,104 @@ export class SettingsPage extends HTMLElement {
         });
     }
 
+    getRuleModules() {
+        return (this.rulesIndex || []).filter((rule) => rule.kind === 'module');
+    }
+
     getSelectedRuleIds() {
         const boxes = this.querySelectorAll('#rules-list input[type="checkbox"]');
         const selected = Array.from(boxes).filter(c => c.checked).map(c => c.value);
         if (!selected.includes('core')) selected.unshift('core');
         return selected;
+    }
+
+    getRulesProjectId() {
+        const input = this.querySelector('#rules-project-id');
+        return (input?.value || 'mem-mesh').trim() || 'mem-mesh';
+    }
+
+    getRulesFormat() {
+        return this.querySelector('#rules-format-select')?.value || 'plain';
+    }
+
+    shellArg(value) {
+        const text = String(value || '');
+        if (/^[A-Za-z0-9._/-]+$/.test(text)) return text;
+        return "'" + text.replace(/'/g, "'\\''") + "'";
+    }
+
+    buildRulesCommand() {
+        const projectId = this.getRulesProjectId();
+        const format = this.getRulesFormat();
+        return `mem-mesh hooks rules --project-id ${this.shellArg(projectId)} --format ${this.shellArg(format)}`;
+    }
+
+    renderRulesCommandMeta(extra = '') {
+        const el = this.querySelector('#rules-meta');
+        if (!el) return;
+        const version = this.rulesMeta?.prompt_version ? `v${this.rulesMeta.prompt_version}` : 'version unknown';
+        const command = this.buildRulesCommand();
+        el.innerHTML = `
+          <span class="rules-meta-pill">${this.escapeHtml(version)}</span>
+          <code>${this.escapeHtml(command)}</code>
+          ${extra ? `<span>${this.escapeHtml(extra)}</span>` : ''}
+        `;
+    }
+
+    updateRulesOutputStats(payload = null) {
+        const stats = this.querySelector('#rules-output-stats');
+        const out = this.querySelector('#rules-output');
+        if (!stats || !out) return;
+        const content = out.value || '';
+        const lines = content ? content.split('\n').length : 0;
+        const suffix = payload
+            ? `${payload.format} · ${payload.project_id} · prompt v${payload.prompt_version}`
+            : `${content.length.toLocaleString()} chars · ${lines.toLocaleString()} lines`;
+        stats.textContent = suffix;
+    }
+
+    async generateHookRules({ silent = false } = {}) {
+        const out = this.querySelector('#rules-output');
+        const btn = this.querySelector('#generate-hook-rules-btn');
+        if (!out) return;
+
+        const projectId = this.getRulesProjectId();
+        const format = this.getRulesFormat();
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Generating...';
+        }
+
+        try {
+            const payload = await window.app.apiClient.get('/rules/render', {
+                project_id: projectId,
+                format,
+            });
+            const projectInput = this.querySelector('#rules-project-id');
+            if (projectInput && payload.project_id) projectInput.value = payload.project_id;
+            out.value = `${payload.content || ''}\n`;
+            this.renderRulesCommandMeta('Generated');
+            this.updateRulesOutputStats(payload);
+            if (!silent) showToast('Hook rules generated.', 'success');
+        } catch (error) {
+            console.error('Failed to generate hook rules:', error);
+            if (!silent) showToast(`Generate failed: ${error.message}`, 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Generate Hook Rules';
+            }
+        }
+    }
+
+    async copyRulesCommand() {
+        try {
+            await navigator.clipboard.writeText(this.buildRulesCommand());
+            showToast('CLI command copied.', 'success');
+        } catch (error) {
+            console.error('Command copy failed:', error);
+            showToast('Command copy failed.', 'error');
+        }
     }
 
     async fetchRuleContent(ruleId) {
@@ -730,6 +867,8 @@ export class SettingsPage extends HTMLElement {
             const merged = `${parts.join('\n\n---\n\n')}\n`;
             const out = this.querySelector('#rules-output');
             if (out) out.value = merged;
+            this.renderRulesCommandMeta('Merged modules');
+            this.updateRulesOutputStats();
             showToast('Rules merged.', 'success');
         } catch (error) {
             console.error('Failed to merge rules:', error);
@@ -1275,6 +1414,60 @@ style.textContent = `
 
 /* Rules */
 
+.rules-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto auto;
+  align-items: end;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.rules-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.rules-field label {
+  font-size: 10px;
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.rules-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 26px;
+  padding: 5px var(--space-2);
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow-x: auto;
+}
+
+.rules-meta code {
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.rules-meta-pill {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: var(--font-semibold);
+}
+
 .rules-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1285,6 +1478,25 @@ style.textContent = `
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.rules-pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 20px;
+}
+
+.rules-pane-title {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  color: var(--text-secondary);
+}
+
+.rules-pane-desc {
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 .rules-list {
@@ -1346,6 +1558,7 @@ style.textContent = `
 
 .rules-btns {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-1);
 }
 
@@ -1841,6 +2054,15 @@ details[open] .info-summary::before {
 
   .mig-stats {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .rules-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .rules-meta {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .rules-grid {

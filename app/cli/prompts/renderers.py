@@ -35,7 +35,7 @@ def render_rules_text(project_id: str = "mem-mesh") -> str:
     lines: List[str] = []
     for i, rule in enumerate(CORE_RULES, 1):
         desc = rule.description.replace("{project_id}", project_id)
-        lines.append(f"{i}. **{rule.title}** — {desc}")
+        lines.append(f"{i}. **{rule.title}**: {desc}")
     return "\n".join(lines)
 
 

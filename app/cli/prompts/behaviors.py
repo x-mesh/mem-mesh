@@ -14,7 +14,7 @@ from typing import List
 # Prompt schema version — bump on ANY behavioral rule change
 # ---------------------------------------------------------------------------
 
-PROMPT_VERSION: int = 21
+PROMPT_VERSION: int = 22
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +71,18 @@ CORE_RULES: List[Rule] = [
             "Return the code or answer first. Perform mem-mesh calls after the "
             "response work is complete. Do not start responses with status "
             "announcements such as 'I will search memory first.'"
+        ),
+    ),
+    Rule(
+        key="session_gate",
+        title="Restore session context",
+        description=(
+            "At session start, call "
+            'session_resume(project_id="{project_id}", expand="smart") and '
+            "report only the useful counts: pins_count, in_progress_pins, "
+            "open_pins, and completed_pins. If no active session exists, "
+            "continue with the task; the first pin_add() or add() call creates "
+            "the session."
         ),
     ),
     Rule(

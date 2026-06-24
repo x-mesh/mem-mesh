@@ -11,6 +11,8 @@ from typing import Union
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 
+from app.cli.prompts.behaviors import PROMPT_VERSION
+from app.cli.prompts.renderers import render_claude_project_rules, render_rules_text
 from app.core.errors import (
     InvalidStatusTransitionError,
     NoActiveSessionError,
@@ -82,6 +84,33 @@ def _resolve_rule_path(rule_entry: dict) -> Path:
     if not str(candidate).startswith(str(base)):
         raise ValueError("Invalid rule path")
     return candidate
+
+
+def _render_hook_rules(project_id: str, output_format: str) -> dict:
+    normalized_project_id = normalize_project_id(project_id or "mem-mesh")
+    if not normalized_project_id:
+        raise ValueError("project_id is required")
+
+    if output_format == "plain":
+        content = render_rules_text(normalized_project_id)
+    elif output_format == "claude":
+        content = render_claude_project_rules(normalized_project_id)
+    else:
+        raise ValueError("format must be 'plain' or 'claude'")
+
+    command = (
+        "mem-mesh hooks rules "
+        f"--project-id {normalized_project_id} "
+        f"--format {output_format}"
+    )
+    return {
+        "source": "mem-mesh-hooks",
+        "prompt_version": PROMPT_VERSION,
+        "project_id": normalized_project_id,
+        "format": output_format,
+        "command": command,
+        "content": content,
+    }
 
 
 @router.post("/internal/notify", dependencies=[Depends(verify_hook_token)])
@@ -247,6 +276,23 @@ async def list_rules():
         rules = index_data.get("rules", [])
         return {
             "version": index_data.get("version", 1),
+            "hook_rules": {
+                "source": "mem-mesh-hooks",
+                "prompt_version": PROMPT_VERSION,
+                "default_project_id": "mem-mesh",
+                "formats": [
+                    {
+                        "id": "plain",
+                        "title": "Plain Hook Rules",
+                        "description": "Same output as mem-mesh hooks rules.",
+                    },
+                    {
+                        "id": "claude",
+                        "title": "Claude Managed Block",
+                        "description": "CLAUDE.md managed block with version markers.",
+                    },
+                ],
+            },
             "rules": [
                 {
                     "id": rule.get("id"),
@@ -260,6 +306,15 @@ async def list_rules():
     except Exception as e:
         logger.error(f"List rules error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/rules/render")
+async def render_rules(project_id: str = "mem-mesh", format: str = "plain"):
+    """Render canonical hook rules without modifying files."""
+    try:
+        return _render_hook_rules(project_id, format)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/rules/{rule_id}")
