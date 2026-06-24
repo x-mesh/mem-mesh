@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.2] - 2026-06-24
+
+Hook stdout 노이즈를 제어하고, 토큰 SSOT 모델을 env 우선으로 일관화하며, `--yes` 비대화 onboarding의 auth 검증 갭을 닫는 patch 릴리스. WHY: (1) Codex/Claude/Cursor hook이 매 세션·프롬프트마다 mem-mesh 컨텍스트를 stdout으로 그대로 쏟아내 노이즈가 컸다. (2) 토큰의 단일 정본이 "`~/.mem-mesh/hook_token` 파일(Option 2)"로 표기돼 있었으나 실제 운영 정본은 `MEM_MESH_HOOK_TOKEN` env이고 파일은 materialized fallback이라, 진단 표면마다 설명이 어긋났다. (3) `--yes` 설치의 auth probe가 토큰 소스 `env`에만 걸려 있어, stale한 파일 토큰이면 401 hook이 조용히 설치되고(원래 이 플로우가 막으려던 함정), 비대화 모드인데도 401 재시도에서 `input()`을 호출했다.
+
+### Added
+- **Hook output mode (`compact` / `quiet` / `full`)** — 모든 hookSpecificOutput 계열 hook(session-start, user-prompt-submit, subagent-start, precompact + local·cursor variants)에 `HOOK_OUTPUT_MODE`를 도입. `compact`는 컨텍스트를 1200자로 절단, `quiet`는 stdout을 억제(mem-mesh 저장 payload는 유지), `full`은 기존 동작. CLI install 템플릿과 shell 스크립트 전반에 적용. `app/cli/hooks/renderer.py`, `app/cli/install_hooks.py`, `app/cli/hooks/shell/*.sh`
+- **MCP 전용 서버 → 대시보드 실시간 알림 브리지** — MCP 전용 서버에는 in-process WebSocket 라우터가 없어 memory/pin 이벤트가 대시보드에 실시간 반영되지 않았다. `HttpNotifier`로 대시보드 서버에 이벤트를 전달하고, 알림 base URL을 `MEM_MESH_API_URL`→`api_base_url`→`localhost:port` 순으로 결정한다. `app/web/mcp/lifespan.py`, `tests/test_mcp_lifespan.py`
+
+### Changed
+- **토큰 SSOT 모델 env 우선으로 정합화** — 정본은 `MEM_MESH_HOOK_TOKEN` env, `~/.mem-mesh/hook_token`은 shell hook이 읽고 MCP config 스탬핑에 쓰이는 materialized fallback/cache로 명시. doctor/status/config 표면이 env→file→server-data 순으로 일관되게 상태와 drift를 표시한다. `app/cli/hooks/diagnostics.py`, `app/cli/system_doctor.py`, `app/cli/system_status.py`, `app/cli/hooks/status.py`, `app/cli/config_cmd.py`, `app/cli/main.py`
+- **MCP install transport 보존** — `--yes` auto 모드에서 기존 엔트리의 transport(http/local)를 요청 mode와 달라도 무단 전환하지 않고 유지. `app/cli/mcp_config.py`
+- **CORS origins 기본값/안내 명시** — `MEM_MESH_CORS_ORIGINS` 기본값을 localhost로 두고, 리버스 프록시 뒤 공개 도메인 설정 안내를 docker-compose에 추가. `docker-compose.yml`
+
+### Fixed
+- **onboarding `--yes` auth 검증 갭** — auth probe를 토큰 소스(env/file) 무관하게 실행하도록 검증 블록을 분기 밖으로 이동해, stale 파일 토큰으로 401 hook이 조용히 설치되던 문제를 해결. 아울러 `--yes` 비대화 모드에서는 401 시 `input()` 프롬프트 대신 즉시 fail-fast(`auth_blocked`)하도록 수정해 CI에서의 EOFError/행을 제거. `app/cli/onboarding.py`
+- **`hook_output_mode` 입력 검증** — 알 수 없는 mode 값에 `ValueError`를 던져 오타가 조용히 통과하지 않도록 가드. `app/cli/hooks/renderer.py`
+- **memory 삭제 전 조회 오류 처리** — 삭제 직전 memory 로드에 `service.get()`을 사용하고, 실패 시 로그를 error→warning으로 낮춰 정상 삭제 흐름을 방해하지 않도록 수정. `app/web/dashboard/route_modules/memories.py`
+
 ## [1.18.1] - 2026-06-24
 
 1.18.0에서 유입된 회귀를 수정하는 patch 릴리스. `uvx mem-mesh` onboarding이 `ModuleNotFoundError: No module named 'httpx'`로 즉시 실패하던 문제를 해결한다. WHY: 1.18.0의 autoApprove SSOT 변경(`app/cli/mcp_config.py`가 `app.mcp_common.schemas`를 import)이 패키지 `__init__`의 eager `storage` import를 경유해 `core.storage.api`의 `httpx`까지 끌어왔고, base 의존성(httpx 미포함)으로 설치되는 `uvx mem-mesh` onboarding 경로가 import 시점에 깨졌다.
