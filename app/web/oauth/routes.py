@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from app.core import runtime_config as rc
 from app.core.auth import OAuthService
 from app.core.auth.schemas import (
     OAuthClientCreate,
@@ -34,11 +35,29 @@ def get_oauth_service(request: Request) -> OAuthService:
     return request.app.state.oauth_service
 
 
+def _issuer_origin(request: Request) -> str:
+    """Origin advertised in OAuth metadata (issuer + every endpoint).
+
+    Precedence: the shared ``public_url`` runtime setting (env or dashboard-set —
+    a reverse-proxied/domain deploy emits the domain for all clients) > the
+    request origin (``request.base_url``, proxy-header-aware) > the static
+    ``oauth_issuer`` fallback. Without this the metadata advertises the localhost
+    ``oauth_issuer`` default, so an MCP client's OAuth flow points at localhost
+    and re-auth fails behind a reverse proxy (Claude Desktop/Code can't log in).
+    """
+    public = rc.effective_str("public_url")
+    if public:
+        return public.strip().rstrip("/")
+    origin = str(request.base_url).rstrip("/")
+    if origin and "localhost" not in origin and "127.0.0.1" not in origin:
+        return origin
+    return get_settings().oauth_issuer.rstrip("/")
+
+
 @router.get("/.well-known/oauth-authorization-server")
 async def oauth_metadata(request: Request) -> OAuthMetadata:
     """OAuth Authorization Server Metadata (RFC 8414)."""
-    settings = get_settings()
-    base_url = settings.oauth_issuer
+    base_url = _issuer_origin(request)
 
     return OAuthMetadata(
         issuer=base_url,

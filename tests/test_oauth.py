@@ -714,6 +714,12 @@ class TestOAuthEndpoints:
         assert "registration_endpoint" in data
         assert "code_challenge_methods_supported" in data
         assert "S256" in data["code_challenge_methods_supported"]
+        # issuer/endpoints must reflect the request origin (proxy domain), NOT
+        # the localhost oauth_issuer default — else an MCP client's OAuth flow
+        # points at localhost and re-auth fails behind a reverse proxy.
+        assert "localhost" not in data["issuer"]
+        assert "127.0.0.1" not in data["issuer"]
+        assert data["authorization_endpoint"].startswith(data["issuer"])
 
     def test_oauth_register_client(self, app_client):
         """Test dynamic client registration endpoint."""
