@@ -36,6 +36,19 @@ def _toml_array(values: List[str]) -> str:
     return "[" + ", ".join(_toml_string(v) for v in values) + "]"
 
 
+def _toml_table_segment(value: str) -> str:
+    if re.match(r"^[A-Za-z0-9_-]+$", value):
+        return value
+    return _toml_string(value)
+
+
+def _approval_tool_names() -> List[str]:
+    # Lazy import keeps this module free of CLI import cycles.
+    from app.mcp_common.schemas import get_all_tool_schemas
+
+    return [str(schema["name"]) for schema in get_all_tool_schemas()]
+
+
 def build_codex_mcp_block(
     *,
     mode: str,
@@ -45,6 +58,7 @@ def build_codex_mcp_block(
     args: Optional[List[str]] = None,
     env: Optional[Dict[str, str]] = None,
     token: Optional[str] = None,
+    approval_tools: Optional[List[str]] = None,
 ) -> str:
     """Return a managed ``[mcp_servers.mem-mesh]`` TOML block for Codex.
 
@@ -78,6 +92,16 @@ def build_codex_mcp_block(
             "tool_timeout_sec = 60",
         ]
     )
+    if approval_tools is None:
+        approval_tools = _approval_tool_names()
+    for tool_name in approval_tools:
+        lines.extend(
+            [
+                "",
+                f"[mcp_servers.mem-mesh.tools.{_toml_table_segment(str(tool_name))}]",
+                'approval_mode = "approve"',
+            ]
+        )
     is_remote = mode in ("http", "api", "sse")
     # [mcp_servers.mem-mesh.env]는 stdio(local) 전송에서만 유효하다. Codex는
     # streamable_http(url) 전송에서 env 테이블을 거부한다
@@ -105,6 +129,9 @@ def build_codex_mcp_block(
 def build_codex_mcp_block_from_entry(entry: Dict[str, Any]) -> str:
     """Convert the generic MCP entry dict used by onboarding into Codex TOML."""
     env = entry.get("env") if isinstance(entry.get("env"), dict) else {}
+    approval_tools = entry.get("autoApprove") if "autoApprove" in entry else []
+    if not isinstance(approval_tools, list):
+        approval_tools = []
     if "url" in entry:
         url = str(entry["url"]).rsplit("/mcp/sse", 1)[0]
         # Carry the literal bearer token from the generic entry's header into the
@@ -113,13 +140,20 @@ def build_codex_mcp_block_from_entry(entry: Dict[str, Any]) -> str:
         auth = (entry.get("headers") or {}).get("Authorization", "")
         if isinstance(auth, str) and auth.startswith("Bearer "):
             token = auth[len("Bearer ") :].strip() or None
-        return build_codex_mcp_block(mode="http", url=url, env=env, token=token)
+        return build_codex_mcp_block(
+            mode="http",
+            url=url,
+            env=env,
+            token=token,
+            approval_tools=[str(name) for name in approval_tools],
+        )
     return build_codex_mcp_block(
         mode="local",
         command=str(entry.get("command", sys.executable)),
         args=[str(arg) for arg in entry.get("args", ["-m", "app.mcp_stdio"])],
         path=str(entry.get("cwd", "")),
         env=env,
+        approval_tools=[str(name) for name in approval_tools],
     )
 
 

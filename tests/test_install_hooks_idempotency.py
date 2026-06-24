@@ -43,6 +43,12 @@ def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _mem_mesh_tool_names() -> list[str]:
+    from app.mcp_common.schemas import get_all_tool_schemas
+
+    return [schema["name"] for schema in get_all_tool_schemas()]
+
+
 def test_merge_json_settings_preserves_existing_user_hooks(tmp_path: Path) -> None:
     settings_path = tmp_path / "hooks.json"
     settings_path.write_text(
@@ -751,6 +757,9 @@ def test_install_codex_api_writes_command_hooks_and_mcp_config(
     # Codex rejects env blocks for streamable_http/url transports; client
     # identity is carried by hook payloads and MCP clientInfo/User-Agent.
     assert 'MEM_MESH_CLIENT = "codex"' not in config_text
+    for tool_name in _mem_mesh_tool_names():
+        assert f"[mcp_servers.mem-mesh.tools.{tool_name}]" in config_text
+    assert config_text.count('approval_mode = "approve"') == len(_mem_mesh_tool_names())
 
     first_hooks = hooks_path.read_text(encoding="utf-8")
     first_config = config_path.read_text(encoding="utf-8")
@@ -800,6 +809,8 @@ def test_install_codex_local_uses_stdio_mcp_and_no_post_tool_hook(
     assert 'args = ["-m", "app.mcp_stdio"]' in config_text
     assert f'cwd = "{project}"' in config_text
     assert 'MEM_MESH_CLIENT = "codex"' in config_text
+    assert "[mcp_servers.mem-mesh.tools.add]" in config_text
+    assert "[mcp_servers.mem-mesh.tools.session_resume]" in config_text
 
 
 def test_uninstall_codex_preserves_user_hooks_and_removes_mcp(
@@ -890,6 +901,9 @@ def test_mcp_config_configures_codex_toml(tmp_path: Path) -> None:
     assert "[mcp_servers.mem-mesh]" in text
     assert 'url = "https://mem.example.com/mcp/sse"' in text
     assert 'MEM_MESH_CLIENT = "codex"' not in text
+    for tool_name in _mem_mesh_tool_names():
+        assert f"[mcp_servers.mem-mesh.tools.{tool_name}]" in text
+    assert text.count('approval_mode = "approve"') == len(_mem_mesh_tool_names())
 
     verified, verify_msg = mcp_config.verify_tool_config(tool)
     assert verified is True
@@ -931,6 +945,8 @@ def test_mcp_config_codex_bakes_literal_bearer_header(tmp_path: Path) -> None:
     assert 'Authorization = "Bearer codex-tok-456"' in text
     assert "bearer_token_env_var" not in text
     assert "${" not in text
+    assert "[mcp_servers.mem-mesh.tools.add]" in text
+    assert 'approval_mode = "approve"' in text
 
 
 def test_mcp_config_claude_desktop_uses_mcp_remote_proxy() -> None:
@@ -958,6 +974,17 @@ def test_mcp_config_claude_desktop_uses_mcp_remote_proxy() -> None:
     assert "url" not in entry
     assert "type" not in entry
     assert "headers" not in entry
+
+
+def test_mcp_config_json_entries_auto_approve_all_schema_tools() -> None:
+    from app.cli import mcp_config
+
+    entry = mcp_config.generate_mcp_entry(
+        mode="http", url="https://remote.example", tool_key="claude-code"
+    )
+
+    assert entry["env"] == {"MEM_MESH_CLIENT": "claude_code"}
+    assert entry["autoApprove"] == _mem_mesh_tool_names()
 
 
 def test_ensure_api_url_writes_materialized_fallback(

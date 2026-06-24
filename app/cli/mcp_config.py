@@ -454,16 +454,54 @@ def _existing_mem_mesh_entry(tool: dict) -> Optional[Any]:
     """Return the tool's current mem-mesh MCP entry, or None if absent.
 
     Used to guard against silently rewriting a working entry under ``--yes``.
-    For Codex (TOML, different shape) a truthy sentinel is returned when an
-    entry exists so the guard preserves it rather than comparing dicts.
+    For Codex (TOML, different shape) this returns a small dict shaped like the
+    generic entry so the auto-mode transport guard can still preserve http/uvx.
     """
     config_path: Path = tool["config_path"]
     if not config_path.exists():
         return None
     if tool["key"] == "codex":
-        return {"__codex__": True} if codex_config_has_mem_mesh(config_path) else None
+        return _existing_codex_mem_mesh_entry(config_path)
     data = read_config(config_path)
     return data.get("mcpServers", {}).get(MCP_SERVER_KEY)
+
+
+def _existing_codex_mem_mesh_entry(config_path: Path) -> Optional[dict]:
+    """Classify the Codex TOML mem-mesh entry without adding a TOML dependency."""
+    if not codex_config_has_mem_mesh(config_path):
+        return None
+    try:
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {"__codex__": True}
+
+    in_mem_mesh = False
+    saw_command = ""
+    saw_args = ""
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            if line == "[mcp_servers.mem-mesh]":
+                in_mem_mesh = True
+                continue
+            if in_mem_mesh:
+                break
+        if not in_mem_mesh:
+            continue
+        if line.startswith("url") and "=" in line:
+            return {"url": True}
+        if line.startswith("command") and "=" in line:
+            saw_command = line.split("=", 1)[1].strip().strip('"')
+        elif line.startswith("args") and "=" in line:
+            saw_args = line.split("=", 1)[1].strip()
+
+    if saw_command == "uvx" or "uvx" in saw_args:
+        return {"command": "uvx"}
+    if saw_command:
+        return {"command": saw_command}
+    return {"__codex__": True}
 
 
 def _entry_mode(entry: Optional[Any]) -> Optional[str]:
@@ -471,8 +509,8 @@ def _entry_mode(entry: Optional[Any]) -> Optional[str]:
 
     Inverse of :func:`generate_mcp_entry`. Used to keep an entry on its current
     backend during a non-interactive fix (so http stays http) rather than
-    flipping it. Returns None for an unrecognized shape (e.g. the Codex
-    sentinel), which means "no opinion — use the chosen mode".
+    flipping it. Returns None for an unrecognized shape, which means
+    "no opinion — use the chosen mode".
     """
     if not isinstance(entry, dict):
         return None

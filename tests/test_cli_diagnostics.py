@@ -257,6 +257,41 @@ def test_yes_unreachable_does_not_flip_existing_http_to_uvx(
     assert "url" in after  # stays on the http backend
 
 
+def test_yes_unreachable_does_not_flip_existing_codex_http_to_uvx(
+    monkeypatch, tmp_path, capsys
+):
+    import app.cli.mcp_config as m
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        "\n".join(
+            [
+                "[mcp_servers.mem-mesh]",
+                'url = "https://remote/mcp/sse"',
+                'default_tools_approval_mode = "prompt"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(m, "detect_tools", lambda: [_fake_tool(cfg, "codex", "Codex")])
+    monkeypatch.setattr(m, "has_uvx", lambda: True)
+    monkeypatch.setattr(m, "verify_tool_config", lambda t, url="": (True, "ok"))
+
+    m.run_mcp_setup(
+        url="https://remote",
+        yes=True,
+        preferred_mode=None,
+        server_reachable=False,
+    )
+    capsys.readouterr()
+    text = cfg.read_text(encoding="utf-8")
+    assert 'url = "https://remote/mcp/sse"' in text
+    assert 'command = "uvx"' not in text
+    assert "[mcp_servers.mem-mesh.tools.add]" in text
+    assert 'approval_mode = "approve"' in text
+
+
 def test_yes_repairs_same_transport_misconfig(monkeypatch, tmp_path, capsys):
     # A legacy http entry (transport:sse) MUST be repaired non-interactively —
     # the guard only blocks backend flips, not same-transport fixes.
