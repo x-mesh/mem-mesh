@@ -10,8 +10,12 @@ export class RelayPage extends HTMLElement {
     this.limit = 10;
     this.loading = false;
     this.shareCandidates = [];
+    this.projectCandidates = [];
+    this.filteredProjectCandidates = [];
     this.selectedMemoryId = '';
+    this.selectedProjectId = '';
     this.memorySearchTimer = null;
+    this.projectSearchTimer = null;
     this.realtimeRefreshTimer = null;
     this.realtimeToastAt = 0;
     this.boundRealtimeHandlers = null;
@@ -22,6 +26,7 @@ export class RelayPage extends HTMLElement {
     this.setupRealtimeListeners();
     this.loadOverview();
     this.loadSettings();
+    this.loadProjects();
     this.loadShareCandidates();
   }
 
@@ -35,6 +40,14 @@ export class RelayPage extends HTMLElement {
     if (this.realtimeRefreshTimer) {
       window.clearTimeout(this.realtimeRefreshTimer);
       this.realtimeRefreshTimer = null;
+    }
+    if (this.memorySearchTimer) {
+      window.clearTimeout(this.memorySearchTimer);
+      this.memorySearchTimer = null;
+    }
+    if (this.projectSearchTimer) {
+      window.clearTimeout(this.projectSearchTimer);
+      this.projectSearchTimer = null;
     }
   }
 
@@ -108,6 +121,11 @@ export class RelayPage extends HTMLElement {
             <label class="relay-field relay-field-wide">
               <span>Project</span>
               <input id="share-project-id" type="text" autocomplete="off" placeholder="Select a memory or enter a project id">
+            </label>
+            <div id="relay-project-options" class="relay-project-options relay-field-wide"></div>
+            <label class="relay-force-row relay-field-wide">
+              <input id="share-force" type="checkbox">
+              <span>Requeue if already sent</span>
             </label>
           </div>
           <div class="relay-actions">
@@ -203,6 +221,7 @@ export class RelayPage extends HTMLElement {
   setupEventListeners() {
     this.querySelector('#relay-refresh')?.addEventListener('click', () => {
       this.loadOverview();
+      this.loadProjects();
       this.loadShareCandidates();
     });
     this.querySelector('#relay-limit')?.addEventListener('change', (event) => {
@@ -229,6 +248,22 @@ export class RelayPage extends HTMLElement {
       const button = event.target.closest('[data-memory-id]');
       if (button) {
         this.selectMemory(button.dataset.memoryId);
+      }
+    });
+    this.querySelector('#share-project-id')?.addEventListener('input', (event) => {
+      this.selectedProjectId = '';
+      window.clearTimeout(this.projectSearchTimer);
+      this.projectSearchTimer = window.setTimeout(() => {
+        this.filterProjectCandidates(event.target.value.trim());
+      }, 120);
+    });
+    this.querySelector('#share-project-id')?.addEventListener('focus', (event) => {
+      this.filterProjectCandidates(event.target.value.trim());
+    });
+    this.querySelector('#relay-project-options')?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-project-id]');
+      if (button) {
+        this.selectProject(button.dataset.projectId);
       }
     });
     this.querySelectorAll('.relay-tab').forEach((button) => {
@@ -320,6 +355,40 @@ export class RelayPage extends HTMLElement {
         target.innerHTML = `<div class="relay-error" role="alert">${this.escapeHtml(this.errorMessage(error))}</div>`;
       }
     }
+  }
+
+  async loadProjects() {
+    if (!this.api) return;
+    try {
+      const response = this.api.getProjects
+        ? await this.api.getProjects()
+        : await this.api.get('/projects');
+      this.projectCandidates = response?.projects || [];
+      this.filterProjectCandidates(this.querySelector('#share-project-id')?.value.trim() || '');
+    } catch (error) {
+      const target = this.querySelector('#relay-project-options');
+      if (target) {
+        target.innerHTML = `<div class="relay-error" role="alert">${this.escapeHtml(this.errorMessage(error))}</div>`;
+      }
+    }
+  }
+
+  filterProjectCandidates(query = '') {
+    const needle = query.toLowerCase();
+    const projects = this.projectCandidates || [];
+    this.filteredProjectCandidates = projects
+      .filter((project) => {
+        if (!needle) return true;
+        const haystack = [
+          project.id,
+          project.name,
+          ...(project.categories || []),
+          ...(project.tags || []),
+        ].join(' ').toLowerCase();
+        return haystack.includes(needle);
+      })
+      .slice(0, 8);
+    this.renderProjectOptions();
   }
 
   async savePersonalSettings() {
@@ -470,6 +539,7 @@ export class RelayPage extends HTMLElement {
     const memoryId = this.querySelector('#share-memory-id')?.value.trim();
     const sourceVersion = Number(this.querySelector('#share-source-version')?.value || 0);
     const eventType = this.querySelector('#share-event-type')?.value || 'update';
+    const force = Boolean(this.querySelector('#share-force')?.checked);
 
     if (!memoryId) {
       showToast('Select a memory to share.', 'warning');
@@ -482,6 +552,7 @@ export class RelayPage extends HTMLElement {
       const result = await this.api.shareRelayMemory(memoryId, {
         source_version: sourceVersion,
         event_type: eventType,
+        force,
       });
       status.textContent = `Queued ${result.outbox_id} to ${result.target_hub}`;
       showToast('Memory queued for relay.', 'success');
@@ -502,6 +573,7 @@ export class RelayPage extends HTMLElement {
     const projectId = this.querySelector('#share-project-id')?.value.trim();
     const sourceVersion = Number(this.querySelector('#share-source-version')?.value || 0);
     const eventType = this.querySelector('#share-event-type')?.value || 'update';
+    const force = Boolean(this.querySelector('#share-force')?.checked);
 
     if (!projectId) {
       showToast('Project id is missing.', 'warning');
@@ -514,6 +586,7 @@ export class RelayPage extends HTMLElement {
       const result = await this.api.shareRelayProject(projectId, {
         source_version: sourceVersion,
         event_type: eventType,
+        force,
       });
       status.textContent = `Queued ${result.queued_count} memories to ${result.target_hub}`;
       showToast('Project queued for relay.', 'success');
@@ -650,9 +723,18 @@ export class RelayPage extends HTMLElement {
     const projectInput = this.querySelector('#share-project-id');
     const selected = this.shareCandidates.find((memory) => memory.id === this.selectedMemoryId);
     if (projectInput && selected?.project_id) {
-      projectInput.value = selected.project_id;
+      this.selectProject(selected.project_id);
     }
     this.renderMemoryOptions();
+  }
+
+  selectProject(projectId) {
+    this.selectedProjectId = projectId || '';
+    const projectInput = this.querySelector('#share-project-id');
+    if (projectInput) {
+      projectInput.value = this.selectedProjectId;
+    }
+    this.filterProjectCandidates(this.selectedProjectId);
   }
 
   renderMemoryOptions() {
@@ -677,6 +759,39 @@ export class RelayPage extends HTMLElement {
           </span>
           <span class="relay-memory-option-meta">
             ${this.escapeHtml(memory.project_id || 'default')}
+          </span>
+        </button>
+      `;
+    }).join('');
+  }
+
+  renderProjectOptions() {
+    const target = this.querySelector('#relay-project-options');
+    if (!target) return;
+    if (!this.projectCandidates?.length) {
+      target.innerHTML = this.renderEmpty('No local projects found');
+      return;
+    }
+    if (!this.filteredProjectCandidates?.length) {
+      target.innerHTML = this.renderEmpty('No matching projects');
+      return;
+    }
+    target.innerHTML = this.filteredProjectCandidates.map((project) => {
+      const projectId = String(project.id || project.name || '');
+      const selected = projectId === this.selectedProjectId;
+      const categories = (project.categories || []).slice(0, 3).join(', ');
+      return `
+        <button
+          class="relay-project-option ${selected ? 'selected' : ''}"
+          type="button"
+          data-project-id="${this.escapeHtml(projectId)}"
+        >
+          <span class="relay-project-option-main">
+            <strong>${this.escapeHtml(project.name || projectId)}</strong>
+            <span>${this.escapeHtml(projectId)}</span>
+          </span>
+          <span class="relay-project-option-meta">
+            ${Number(project.memory_count || 0).toLocaleString()} memories${categories ? ` · ${this.escapeHtml(categories)}` : ''}
           </span>
         </button>
       `;

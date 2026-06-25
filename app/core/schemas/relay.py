@@ -399,6 +399,7 @@ class RelayShareMemoryRequest(BaseModel):
     target_hub: Optional[str] = Field(default=None, max_length=500)
     event_type: RelayEventType = "update"
     status: str = Field(default="active", min_length=1, max_length=50)
+    force: bool = False
 
 
 class RelayShareMemoryResponse(BaseModel):
@@ -414,6 +415,7 @@ class RelayShareProjectRequest(BaseModel):
     target_hub: Optional[str] = Field(default=None, max_length=500)
     event_type: RelayEventType = "update"
     status: str = Field(default="active", min_length=1, max_length=50)
+    force: bool = False
 
 
 class RelayShareProjectResponse(BaseModel):

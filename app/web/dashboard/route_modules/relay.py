@@ -279,7 +279,7 @@ async def ingest_relay_event(
     token = _extract_bearer_token(authorization)
     try:
         result = await service.ingest(token, payload)
-        if result.current_memory_id and not result.replayed:
+        if result.current_memory_id:
             memory_event = "none"
             if result.applied_to_current:
                 if payload.event_type == "retract":
@@ -288,6 +288,8 @@ async def ingest_relay_event(
                     memory_event = "created"
                 else:
                     memory_event = "updated"
+            elif result.replayed:
+                memory_event = "updated"
             await _notify_relay_projection(
                 service,
                 action=payload.event_type,
@@ -295,6 +297,7 @@ async def ingest_relay_event(
                 memory_event=memory_event,
                 extra={
                     "event_id": result.event_id,
+                    "replayed": result.replayed,
                     "applied_to_current": result.applied_to_current,
                     "queued_item": result.queued_item,
                 },
@@ -388,6 +391,7 @@ async def share_memory_to_relay_outbox(
             target_hub=target_hub,
             event_type=payload.event_type,
             status=payload.status,
+            force=payload.force,
         )
         return RelayShareMemoryResponse(
             outbox_id=outbox_id,
@@ -434,6 +438,7 @@ async def share_project_to_relay_outbox(
             target_hub=target_hub,
             event_type=payload.event_type,
             status=payload.status,
+            force=payload.force,
         )
     except HTTPException:
         raise

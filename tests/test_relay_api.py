@@ -500,6 +500,31 @@ async def test_relay_share_memory_endpoint_enqueues_existing_memory():
         )
         assert outbox["idempotency_key"] == "node-1:memory-1:v3:update"
 
+        await db.execute(
+            """
+            UPDATE relay_outbox
+            SET status = 'sent',
+                attempts = 2,
+                last_error = 'previous error'
+            WHERE id = ?
+            """,
+            (data["outbox_id"],),
+        )
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            forced = await client.post(
+                "/api/relay/v1/outbox/share/memory-1",
+                json={"force": True},
+            )
+        forced_outbox = await db.fetchone(
+            "SELECT status, attempts, last_error FROM relay_outbox WHERE id = ?",
+            (data["outbox_id"],),
+        )
+        assert forced.status_code == 200
+        assert forced.json()["outbox_id"] == data["outbox_id"]
+        assert forced_outbox["status"] == "pending"
+        assert forced_outbox["attempts"] == 0
+        assert forced_outbox["last_error"] is None
+
 
 @pytest.mark.asyncio
 async def test_relay_share_project_endpoint_enqueues_shareable_project_memories():

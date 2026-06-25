@@ -237,6 +237,30 @@ async def test_materialize_current_memories_backfills_existing_current_rows():
 
 
 @pytest.mark.asyncio
+async def test_ingest_replay_resyncs_deleted_materialized_memory():
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        first = await service.ingest("relay-token", _request())
+        memory_id = f"relay:{first.current_memory_id}"
+        await db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+
+        replay = await service.ingest("relay-token", _request())
+        materialized = await db.fetchone(
+            """
+            SELECT id, content, source
+            FROM memories
+            WHERE id = ?
+            """,
+            (memory_id,),
+        )
+
+        assert replay.replayed is True
+        assert replay.current_memory_id == first.current_memory_id
+        assert materialized["content"] == _request().content
+        assert materialized["source"] == "relay"
+
+
+@pytest.mark.asyncio
 async def test_secret_guard_blocks_before_raw_persistence():
     async with _temp_db() as db:
         service = await _service_with_identity(db)
@@ -292,6 +316,43 @@ async def test_outbox_enqueue_is_idempotent_and_blocks_secrets_before_queueing()
 
         outbox_count = await db.fetchone("SELECT COUNT(*) AS count FROM relay_outbox")
         assert outbox_count["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_enqueue_outbox_force_requeues_existing_terminal_row():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+
+        request = _request()
+        outbox_id = await service.enqueue_outbox(
+            payload=request,
+            target_hub="https://hub.local",
+        )
+        claimed = await service.claim_outbox("outbox-worker", lease_seconds=30)
+        assert claimed is not None
+        await service.mark_outbox_sent(claimed.id)
+
+        replay_id = await service.enqueue_outbox(
+            payload=request,
+            target_hub="https://hub.local",
+            force=True,
+        )
+
+        outbox = await db.fetchone(
+            """
+            SELECT status, attempts, locked_by, locked_at, last_error
+            FROM relay_outbox
+            WHERE id = ?
+            """,
+            (outbox_id,),
+        )
+        assert replay_id == outbox_id
+        assert outbox["status"] == "pending"
+        assert outbox["attempts"] == 0
+        assert outbox["locked_by"] is None
+        assert outbox["locked_at"] is None
+        assert outbox["last_error"] is None
 
 
 @pytest.mark.asyncio

@@ -190,6 +190,10 @@ export class APIClient {
   async getStats(filters = {}) {
     return this.get('/memories/stats', filters);
   }
+
+  async getProjects() {
+    return this.get('/projects');
+  }
   
   async searchMemories(query, filters = {}) {
     return this.get('/memories/search', { query, ...filters });

@@ -1014,6 +1014,7 @@ class RelayService:
         event_type: str = "update",
         status: str = "active",
         allowed_kinds: Optional[Sequence[str]] = None,
+        force: bool = False,
     ) -> str:
         """Build and enqueue a relay outbox event from an existing memory."""
 
@@ -1058,7 +1059,11 @@ class RelayService:
             created_at=getattr(memory, "created_at", None),
             updated_at=getattr(memory, "updated_at", None),
         )
-        return await self.enqueue_outbox(payload=request, target_hub=target_hub)
+        return await self.enqueue_outbox(
+            payload=request,
+            target_hub=target_hub,
+            force=force,
+        )
 
     async def enqueue_memory_share_by_id(
         self,
@@ -1069,6 +1074,7 @@ class RelayService:
         target_hub: str,
         event_type: str = "update",
         status: str = "active",
+        force: bool = False,
     ) -> str:
         row = await self.db.fetchone(
             "SELECT * FROM memories WHERE id = ?", (memory_id,)
@@ -1082,6 +1088,7 @@ class RelayService:
             target_hub=target_hub,
             event_type=event_type,
             status=status,
+            force=force,
         )
 
     async def enqueue_project_share(
@@ -1093,6 +1100,7 @@ class RelayService:
         target_hub: str,
         event_type: str = "update",
         status: str = "active",
+        force: bool = False,
     ) -> RelayShareProjectResponse:
         rows = await self.db.fetchall(
             """
@@ -1119,6 +1127,7 @@ class RelayService:
                         target_hub=target_hub,
                         event_type=event_type,
                         status=status,
+                        force=force,
                     )
                 )
             except (RelayTypeGateBlocked, RelaySecretBlocked) as exc:
@@ -1138,6 +1147,7 @@ class RelayService:
         *,
         payload: Union[RelayIngestRequest, Dict[str, Any]],
         target_hub: str,
+        force: bool = False,
     ) -> str:
         """Queue a relay event on a personal node before S2S push."""
 
@@ -1153,13 +1163,40 @@ class RelayService:
         payload_json = _json_dumps(request.model_dump(mode="json"))
         async with self.db.transaction():
             existing = await self.db.fetchone(
-                "SELECT id, payload_hash FROM relay_outbox WHERE idempotency_key = ?",
+                """
+                SELECT id, payload_hash, status
+                FROM relay_outbox
+                WHERE idempotency_key = ?
+                """,
                 (request.idempotency_key,),
             )
             if existing:
                 if existing["payload_hash"] != request.payload_hash:
                     raise RelayIdempotencyConflict(
                         "outbox idempotency key reused with a different payload hash"
+                    )
+                if force and existing["status"] not in {"pending", "processing"}:
+                    await self.db.execute(
+                        """
+                        UPDATE relay_outbox
+                        SET payload_json = ?,
+                            target_hub = ?,
+                            status = 'pending',
+                            attempts = 0,
+                            next_attempt_at = ?,
+                            locked_by = NULL,
+                            locked_at = NULL,
+                            last_error = NULL,
+                            updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            payload_json,
+                            target_hub,
+                            _epoch_now(),
+                            now,
+                            existing["id"],
+                        ),
                     )
                 return existing["id"]
 
@@ -1370,6 +1407,11 @@ class RelayService:
                 current = await self._get_current_locked(
                     source_node_id, payload.source_memory_id
                 )
+                if current:
+                    await self._sync_materialized_from_current_locked(
+                        current,
+                        now=now,
+                    )
                 return RelayIngestResponse(
                     accepted=True,
                     event_id=existing["id"],
@@ -2207,6 +2249,21 @@ class RelayService:
                     len(content),
                 ),
             )
+
+    async def _sync_materialized_from_current_locked(
+        self, current: Any, *, now: str
+    ) -> None:
+        await self._sync_materialized_memory_locked(
+            current_memory_id=str(current["id"]),
+            source_node_id=str(current["source_node_id"]),
+            kind=str(current["authoritative_kind"]),
+            tags=_json_loads(current["tags_json"], []),
+            team_project_id=str(current["team_project_id"]),
+            content_hash=str(current["content_hash"]),
+            content=current["content"],
+            visible=bool(current["visible"]),
+            now=now,
+        )
 
     async def _delete_materialized_memory_locked(self, memory_id: str) -> None:
         await self._delete_memory_vector_locked(memory_id)
