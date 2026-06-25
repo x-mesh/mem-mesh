@@ -227,6 +227,20 @@ class RelayQueueSummary(BaseModel):
     updated_at: str
 
 
+class RelayDeadLetterSummary(BaseModel):
+    id: str
+    queue: Literal["outbox", "item", "aggregate"]
+    ref_id: Optional[str] = None
+    raw_event_id: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    target_hub: Optional[str] = None
+    attempts: int
+    next_attempt_at: float
+    last_error: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
 class RelayDigestSummary(BaseModel):
     team_project_id: str
     narrative: str = ""
@@ -266,6 +280,7 @@ class RelayAdminOverviewResponse(BaseModel):
     projects: int = 0
     recent_outbox: List[RelayOutboxSummary] = Field(default_factory=list)
     recent_queue: List[RelayQueueSummary] = Field(default_factory=list)
+    dead_letters: List[RelayDeadLetterSummary] = Field(default_factory=list)
     recent_digests: List[RelayDigestSummary] = Field(default_factory=list)
     recent_memories: List[RelayMemorySummary] = Field(default_factory=list)
 
@@ -275,6 +290,27 @@ class RelayMaterializeResponse(BaseModel):
     materialized: int = 0
     deleted: int = 0
     skipped: int = 0
+    status: str = "ok"
+
+
+class RelayPurgeResponse(BaseModel):
+    scanned: int = 0
+    purged: int = 0
+    materialized_deleted: int = 0
+    status: str = "ok"
+
+
+class RelayRetryRequest(BaseModel):
+    queue: Literal["all", "outbox", "item", "aggregate"] = "all"
+    id: Optional[str] = None
+    limit: int = Field(default=1000, ge=1, le=100000)
+
+
+class RelayRetryResponse(BaseModel):
+    retried: int = 0
+    outbox: int = 0
+    item: int = 0
+    aggregate: int = 0
     status: str = "ok"
 
 

@@ -227,11 +227,23 @@ export class APIClient {
    */
 
   async getRelayOverview(limit = 10) {
-    return this.get('/relay/v1/admin/overview', { limit });
+    return this.get('/relay/v1/admin/overview', { limit, _ts: Date.now() });
   }
 
   async materializeRelayMemories(limit = 1000) {
     return this.post('/relay/v1/admin/materialize', null, { limit });
+  }
+
+  async purgeRelayCurrentMemories(limit = 10000) {
+    return this.post('/relay/v1/admin/purge-current', null, { limit });
+  }
+
+  async retryRelayDeadLetters(payload = {}) {
+    return this.post('/relay/v1/admin/retry-dead-letters', {
+      queue: payload.queue || 'all',
+      id: payload.id || null,
+      limit: payload.limit || 1000,
+    });
   }
 
   async getRelaySettings() {

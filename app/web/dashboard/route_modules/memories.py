@@ -19,6 +19,7 @@ from app.core.schemas.responses import (
 )
 from app.core.services.context import ContextService
 from app.core.services.memory import MemoryService
+from app.core.services.relay import RelayService
 
 from ...common.dependencies import (
     get_context_service,
@@ -28,6 +29,14 @@ from ...common.dependencies import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Memories"])
+
+
+def _is_relay_materialized_memory(memory_id: str, memory_info) -> bool:
+    return bool(
+        memory_id.startswith("relay:")
+        or getattr(memory_info, "source", None) == "relay"
+        or str(getattr(memory_info, "client", "") or "").startswith("relay:")
+    )
 
 
 @router.post("/memories", response_model=AddResponse)
@@ -175,9 +184,19 @@ async def delete_memory(
             project_id = memory_info.project_id if memory_info else None
         except Exception as e:
             logger.warning(f"Failed to load memory before delete: {e}")
+            memory_info = None
             project_id = None
 
-        result = await service.delete(memory_id)
+        if memory_info and _is_relay_materialized_memory(memory_id, memory_info):
+            relay_service = RelayService(service.db)
+            await relay_service.ensure_schema()
+            relay_deleted = await relay_service.delete_materialized_memory(memory_id)
+            if relay_deleted:
+                result = DeleteResponse(id=memory_id, status="deleted")
+            else:
+                result = await service.delete(memory_id)
+        else:
+            result = await service.delete(memory_id)
 
         # WebSocket real-time notification
         try:

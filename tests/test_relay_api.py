@@ -10,8 +10,14 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.database.base import Database
 from app.core.schemas.relay import RelayHubCheckResponse, RelayIngestRequest
+from app.core.services.memory import MemoryService
 from app.core.services.relay import RelayService
-from app.web.common.dependencies import get_database, get_embedding_service
+from app.web.common.dependencies import (
+    get_database,
+    get_embedding_service,
+    get_memory_service,
+)
+from app.web.dashboard.route_modules.memories import router as memories_router
 from app.web.dashboard.route_modules.relay import router as relay_router
 
 
@@ -34,8 +40,13 @@ async def _temp_db():
 def _app(db: Database) -> FastAPI:
     app = FastAPI()
     app.include_router(relay_router, prefix="/api")
+    app.include_router(memories_router, prefix="/api")
+    embedding_service = _FakeEmbeddingService()
     app.dependency_overrides[get_database] = lambda: db
-    app.dependency_overrides[get_embedding_service] = lambda: None
+    app.dependency_overrides[get_embedding_service] = lambda: embedding_service
+    app.dependency_overrides[get_memory_service] = lambda: MemoryService(
+        db, embedding_service
+    )
     return app
 
 
@@ -294,6 +305,49 @@ async def test_relay_admin_overview_endpoint_returns_queue_status():
 
 
 @pytest.mark.asyncio
+async def test_relay_admin_overview_lists_dead_letters_and_retry_endpoint_requeues():
+    async with _temp_db() as db:
+        service = RelayService(db, max_attempts=1)
+        await service.ensure_schema()
+        await service.enqueue_outbox(payload=_request(), target_hub="https://hub.local")
+        claimed = await service.claim_outbox("outbox-worker", lease_seconds=30)
+        assert claimed is not None
+        await service.mark_outbox_failed(claimed.id, "hub unavailable")
+
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            overview = await client.get("/api/relay/v1/admin/overview")
+            retry = await client.post(
+                "/api/relay/v1/admin/retry-dead-letters",
+                json={"queue": "outbox", "id": claimed.id, "limit": 1},
+            )
+            refreshed = await client.get("/api/relay/v1/admin/overview")
+
+        overview_data = overview.json()
+        refreshed_data = refreshed.json()
+        assert overview.status_code == 200
+        assert overview_data["outbox_counts"] == [
+            {"status": "dead_letter", "count": 1}
+        ]
+        assert overview_data["dead_letters"][0]["queue"] == "outbox"
+        assert overview_data["dead_letters"][0]["id"] == claimed.id
+        assert overview_data["dead_letters"][0]["target_hub"] == "https://hub.local"
+        assert "hub unavailable" in overview_data["dead_letters"][0]["last_error"]
+        assert retry.status_code == 200
+        assert retry.json() == {
+            "retried": 1,
+            "outbox": 1,
+            "item": 0,
+            "aggregate": 0,
+            "status": "ok",
+        }
+        assert refreshed.status_code == 200
+        assert refreshed_data["outbox_counts"] == [{"status": "pending", "count": 1}]
+        assert refreshed_data["dead_letters"] == []
+
+
+@pytest.mark.asyncio
 async def test_relay_admin_materialize_endpoint_backfills_memories(monkeypatch):
     events = []
 
@@ -346,6 +400,107 @@ async def test_relay_admin_materialize_endpoint_backfills_memories(monkeypatch):
                 "status": "ok",
             }
         ]
+
+
+@pytest.mark.asyncio
+async def test_memory_delete_endpoint_tombstones_relay_materialized_memory():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        await service.register_identity(
+            token="relay-token",
+            user_id="user-1",
+            source_node_id="node-1",
+            display_name="Jinwoo",
+        )
+        ingest = await service.ingest("relay-token", _request())
+        memory_id = f"relay:{ingest.current_memory_id}"
+
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.delete(f"/api/memories/{memory_id}")
+
+        current = await db.fetchone(
+            """
+            SELECT visible, authoritative_status, tombstoned_at
+            FROM relay_memory_current
+            WHERE id = ?
+            """,
+            (ingest.current_memory_id,),
+        )
+        materialized_count = await db.fetchone(
+            "SELECT COUNT(*) AS count FROM memories WHERE id = ?",
+            (memory_id,),
+        )
+
+        backfill = await service.materialize_current_memories(limit=20)
+        after_backfill_count = await db.fetchone(
+            "SELECT COUNT(*) AS count FROM memories WHERE id = ?",
+            (memory_id,),
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"id": memory_id, "status": "deleted"}
+        assert current["visible"] == 0
+        assert current["authoritative_status"] == "deleted"
+        assert current["tombstoned_at"] is not None
+        assert materialized_count["count"] == 0
+        assert backfill.materialized == 0
+        assert backfill.deleted == 1
+        assert after_backfill_count["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_relay_admin_purge_current_endpoint_hides_received_projection():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        await service.register_identity(
+            token="relay-token",
+            user_id="user-1",
+            source_node_id="node-1",
+            display_name="Jinwoo",
+        )
+        first = await service.ingest("relay-token", _request())
+        second_payload = _request().model_copy(
+            update={
+                "idempotency_key": "node-1:memory-2:v1:create",
+                "payload_hash": "sha256:payload-2",
+                "source_memory_id": "memory-2",
+                "content": "Second relay API memory content using a SQLite queue.",
+            }
+        )
+        second = await service.ingest("relay-token", second_payload)
+        await db.execute(
+            "DELETE FROM memories WHERE id = ?",
+            (f"relay:{second.current_memory_id}",),
+        )
+
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post("/api/relay/v1/admin/purge-current?limit=20")
+
+        current_count = await db.fetchone(
+            "SELECT COUNT(*) AS count FROM relay_memory_current WHERE visible = 1"
+        )
+        raw_count = await db.fetchone("SELECT COUNT(*) AS count FROM relay_raw_event")
+        materialized_count = await db.fetchone(
+            "SELECT COUNT(*) AS count FROM memories WHERE id LIKE 'relay:%'"
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "scanned": 2,
+            "purged": 2,
+            "materialized_deleted": 1,
+            "status": "ok",
+        }
+        assert current_count["count"] == 0
+        assert raw_count["count"] == 2
+        assert materialized_count["count"] == 0
+        assert first.current_memory_id is not None
 
 
 @pytest.mark.asyncio

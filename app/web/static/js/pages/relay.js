@@ -153,6 +153,9 @@ export class RelayPage extends HTMLElement {
           <div id="relay-queue-status" class="relay-status-stack">
             ${this.renderStatusSkeleton()}
           </div>
+          <div id="relay-dead-letter-list" class="relay-dead-letter-list">
+            ${this.renderEmpty('No dead letters')}
+          </div>
           </section>
         </section>
 
@@ -181,6 +184,9 @@ export class RelayPage extends HTMLElement {
               <span class="relay-panel-meta">relay view</span>
               <button class="secondary-button relay-panel-button" id="relay-materialize-submit" type="button">
                 Sync to Memories
+              </button>
+              <button class="secondary-button relay-panel-button" id="relay-purge-current-submit" type="button">
+                Clear Received
               </button>
             </div>
           </div>
@@ -297,6 +303,25 @@ export class RelayPage extends HTMLElement {
     });
     this.querySelector('#relay-materialize-submit')?.addEventListener('click', () => {
       this.materializeRelayMemories();
+    });
+    this.querySelector('#relay-purge-current-submit')?.addEventListener('click', () => {
+      this.purgeRelayCurrentMemories();
+    });
+    this.querySelector('#relay-dead-letter-list')?.addEventListener('click', (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target) return;
+      const retryAll = target.closest('#relay-retry-dead-letters');
+      if (retryAll) {
+        this.retryRelayDeadLetters({ queue: 'all' });
+        return;
+      }
+      const retryOne = target.closest('[data-retry-dead-letter]');
+      if (retryOne) {
+        this.retryRelayDeadLetters({
+          queue: retryOne.dataset.queue,
+          id: retryOne.dataset.jobId,
+        });
+      }
     });
     this.querySelector('#relay-memory-search')?.addEventListener('input', (event) => {
       window.clearTimeout(this.memorySearchTimer);
@@ -688,6 +713,52 @@ export class RelayPage extends HTMLElement {
     }
   }
 
+  async purgeRelayCurrentMemories() {
+    if (!this.api) return;
+    const visibleCount = Number(this.overview?.visible_memories || 0);
+    if (visibleCount <= 0) {
+      showToast('No received relay memories to clear.', 'info');
+      return;
+    }
+    const countLabel = visibleCount.toLocaleString();
+    const confirmed = confirm(
+      `Clear ${countLabel} received relay memories? Raw relay events are kept, but hidden current rows will not sync back to Memories.`
+    );
+    if (!confirmed) return;
+
+    const button = this.querySelector('#relay-purge-current-submit');
+    if (button) button.disabled = true;
+    try {
+      const result = await this.api.purgeRelayCurrentMemories(10000);
+      const count = Number(result.purged || 0).toLocaleString();
+      const deleted = Number(result.materialized_deleted || 0).toLocaleString();
+      showToast(`Cleared ${count} relay memories (${deleted} materialized rows).`, 'success');
+      await this.loadOverview();
+    } catch (error) {
+      showToast(`Relay clear failed: ${this.errorMessage(error)}`, 'error');
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async retryRelayDeadLetters({ queue = 'all', id = null } = {}) {
+    if (!this.api) return;
+    const target = id ? `${queue} job` : 'all dead-letter jobs';
+    if (!confirm(`Retry ${target}?`)) return;
+
+    try {
+      const result = await this.api.retryRelayDeadLetters({
+        queue,
+        id,
+        limit: id ? 1 : 1000,
+      });
+      showToast(`Requeued ${Number(result.retried || 0).toLocaleString()} relay jobs.`, 'success');
+      await this.loadOverview();
+    } catch (error) {
+      showToast(`Relay retry failed: ${this.errorMessage(error)}`, 'error');
+    }
+  }
+
   handleRelayRealtime(data = {}) {
     const relayMemory = data.relay_memory || {};
     const source = relayMemory.source_node_id || 'relay';
@@ -782,6 +853,7 @@ export class RelayPage extends HTMLElement {
         <span class="relay-status-value">${data.raw_events.toLocaleString()}</span>
       </div>
     `;
+    this.renderDeadLetters(data.dead_letters || []);
     this.renderOutboxTable(data.recent_outbox);
     this.renderQueueTable(data.recent_queue);
     this.renderRelayMemories(data.recent_memories);
@@ -1284,6 +1356,55 @@ export class RelayPage extends HTMLElement {
     `;
   }
 
+  renderDeadLetters(rows) {
+    const target = this.querySelector('#relay-dead-letter-list');
+    if (!target) return;
+    if (!rows?.length) {
+      target.innerHTML = this.renderEmpty('No dead letters');
+      return;
+    }
+    target.innerHTML = `
+      <div class="relay-dead-letter-header">
+        <div>
+          <strong>Dead letters</strong>
+          <span>${rows.length.toLocaleString()} shown</span>
+        </div>
+        <button class="secondary-button relay-panel-button" id="relay-retry-dead-letters" type="button">
+          Retry all
+        </button>
+      </div>
+      <div class="relay-dead-letter-items">
+        ${rows.map((row) => {
+          const ref = row.queue === 'outbox'
+            ? (row.idempotency_key || row.id)
+            : (row.ref_id || row.raw_event_id || row.id);
+          return `
+            <article class="relay-dead-letter-item">
+              <div class="relay-dead-letter-main">
+                <div class="relay-dead-letter-meta">
+                  <span class="relay-status-chip status-dead_letter">${this.escapeHtml(row.queue)}</span>
+                  <span>${Number(row.attempts || 0).toLocaleString()} attempts</span>
+                  <span>${this.formatDate(row.updated_at)}</span>
+                </div>
+                <code>${this.escapeHtml(ref)}</code>
+                <p>${this.escapeHtml(row.last_error || 'No error recorded')}</p>
+              </div>
+              <button
+                class="secondary-button relay-panel-button"
+                type="button"
+                data-retry-dead-letter
+                data-queue="${this.escapeHtml(row.queue)}"
+                data-job-id="${this.escapeHtml(row.id)}"
+              >
+                Retry
+              </button>
+            </article>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
   renderRelayMemories(rows) {
     const target = this.querySelector('#relay-memory-table');
     if (!target) return;
@@ -1363,6 +1484,7 @@ export class RelayPage extends HTMLElement {
       <div class="relay-error" role="alert">${this.escapeHtml(message)}</div>
     `;
     this.querySelector('#relay-queue-status').innerHTML = this.renderEmpty('Status unavailable');
+    this.querySelector('#relay-dead-letter-list').innerHTML = this.renderEmpty('Dead letters unavailable');
     this.querySelector('#relay-outbox-table').innerHTML = this.renderEmpty('Outbox unavailable');
     this.querySelector('#relay-queue-table').innerHTML = this.renderEmpty('Worker queue unavailable');
     this.querySelector('#relay-memory-table').innerHTML = this.renderEmpty('Relay memories unavailable');

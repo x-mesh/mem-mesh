@@ -237,6 +237,95 @@ async def test_materialize_current_memories_backfills_existing_current_rows():
 
 
 @pytest.mark.asyncio
+async def test_delete_materialized_memory_tombstones_current_and_blocks_backfill():
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        ingest = await service.ingest("relay-token", _request())
+        memory_id = f"relay:{ingest.current_memory_id}"
+
+        deleted = await service.delete_materialized_memory(memory_id)
+        current = await db.fetchone(
+            """
+            SELECT visible, authoritative_status, tombstoned_at
+            FROM relay_memory_current
+            WHERE id = ?
+            """,
+            (ingest.current_memory_id,),
+        )
+        materialized_count = await db.fetchone(
+            "SELECT COUNT(*) AS count FROM memories WHERE id = ?",
+            (memory_id,),
+        )
+        queue_count = await db.fetchone(
+            """
+            SELECT COUNT(*) AS count
+            FROM relay_queue_item
+            WHERE ref_id = ? AND status IN ('pending', 'processing')
+            """,
+            (ingest.current_memory_id,),
+        )
+
+        result = await service.materialize_current_memories(limit=10)
+        after_backfill_count = await db.fetchone(
+            "SELECT COUNT(*) AS count FROM memories WHERE id = ?",
+            (memory_id,),
+        )
+
+        assert deleted is True
+        assert current["visible"] == 0
+        assert current["authoritative_status"] == "deleted"
+        assert current["tombstoned_at"] is not None
+        assert materialized_count["count"] == 0
+        assert queue_count["count"] == 0
+        assert result.scanned == 1
+        assert result.materialized == 0
+        assert result.deleted == 1
+        assert after_backfill_count["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_purge_current_memories_hides_visible_rows_and_preserves_raw_history():
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        first = await service.ingest("relay-token", _request(memory_id="memory-1"))
+        second = await service.ingest(
+            "relay-token",
+            _request(
+                memory_id="memory-2",
+                payload_hash="sha256:payload-v2",
+                content="Second relay memory content about team hub cleanup.",
+            ),
+        )
+        second_memory_id = f"relay:{second.current_memory_id}"
+        await db.execute("DELETE FROM memories WHERE id = ?", (second_memory_id,))
+
+        result = await service.purge_current_memories(limit=100)
+        current_count = await db.fetchone(
+            "SELECT COUNT(*) AS count FROM relay_memory_current WHERE visible = 1"
+        )
+        raw_count = await db.fetchone("SELECT COUNT(*) AS count FROM relay_raw_event")
+        materialized_count = await db.fetchone(
+            "SELECT COUNT(*) AS count FROM memories WHERE id LIKE 'relay:%'"
+        )
+        queue_count = await db.fetchone(
+            """
+            SELECT COUNT(*) AS count
+            FROM relay_queue_item
+            WHERE status IN ('pending', 'processing')
+            """
+        )
+
+        assert result.scanned == 2
+        assert result.purged == 2
+        assert result.materialized_deleted == 1
+        assert current_count["count"] == 0
+        assert raw_count["count"] == 2
+        assert materialized_count["count"] == 0
+        assert queue_count["count"] == 0
+        assert first.current_memory_id is not None
+
+
+@pytest.mark.asyncio
 async def test_ingest_replay_resyncs_deleted_materialized_memory():
     async with _temp_db() as db:
         service = await _service_with_identity(db)
@@ -465,6 +554,41 @@ async def test_outbox_claim_and_failure_moves_to_dead_letter_at_max_attempts():
         assert outbox["locked_by"] is None
         assert outbox["locked_at"] is None
         assert "hub unavailable" in outbox["last_error"]
+
+
+@pytest.mark.asyncio
+async def test_retry_dead_letters_requeues_outbox_and_clears_failure_state():
+    async with _temp_db() as db:
+        service = RelayService(db, max_attempts=1)
+        await service.ensure_schema()
+        await service.enqueue_outbox(
+            payload=_request(),
+            target_hub="https://hub.local",
+        )
+        claimed = await service.claim_outbox("outbox-worker", lease_seconds=30)
+        assert claimed is not None
+        await service.mark_outbox_failed(claimed.id, "hub unavailable")
+
+        result = await service.retry_dead_letters(queue="outbox", job_id=claimed.id)
+
+        outbox = await db.fetchone(
+            """
+            SELECT status, attempts, next_attempt_at, locked_by, locked_at, last_error
+            FROM relay_outbox
+            WHERE id = ?
+            """,
+            (claimed.id,),
+        )
+        assert result.retried == 1
+        assert result.outbox == 1
+        assert result.item == 0
+        assert result.aggregate == 0
+        assert outbox["status"] == "pending"
+        assert outbox["attempts"] == 0
+        assert outbox["next_attempt_at"] <= time.time() + 1
+        assert outbox["locked_by"] is None
+        assert outbox["locked_at"] is None
+        assert outbox["last_error"] is None
 
 
 @pytest.mark.asyncio
