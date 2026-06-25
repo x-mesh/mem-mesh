@@ -18,7 +18,10 @@ from app.core.schemas.relay import (
     RelayIngestRequest,
     RelayIngestResponse,
     RelayMaterializeResponse,
+    RelayPurgeResponse,
     RelayProjectDigestResponse,
+    RelayRetryRequest,
+    RelayRetryResponse,
     RelaySearchRequest,
     RelaySearchResponse,
     RelaySettingsResponse,
@@ -158,6 +161,40 @@ async def materialize_relay_admin_memories(
         return result
     except Exception as exc:
         logger.exception("Relay memory materialization failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/admin/purge-current", response_model=RelayPurgeResponse)
+async def purge_relay_admin_current_memories(
+    limit: int = 10000,
+    service: RelayService = Depends(get_relay_service),
+) -> RelayPurgeResponse:
+    """Hide visible relay current rows so materialize cannot recreate them."""
+
+    try:
+        return await service.purge_current_memories(limit=limit)
+    except Exception as exc:
+        logger.exception("Relay current purge failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/admin/retry-dead-letters", response_model=RelayRetryResponse)
+async def retry_relay_admin_dead_letters(
+    payload: RelayRetryRequest,
+    service: RelayService = Depends(get_relay_service),
+) -> RelayRetryResponse:
+    """Move dead-lettered relay jobs back to pending."""
+
+    try:
+        return await service.retry_dead_letters(
+            queue=payload.queue,
+            job_id=payload.id,
+            limit=payload.limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Relay dead-letter retry failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 

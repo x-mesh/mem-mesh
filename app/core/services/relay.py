@@ -30,6 +30,7 @@ from ..redaction import redact_secrets
 from ..schemas.relay import (
     RelayAdminOverviewResponse,
     RelayAggregateJob,
+    RelayDeadLetterSummary,
     RelayDigestSummary,
     RelayDigestData,
     RelayEnrichmentData,
@@ -42,10 +43,12 @@ from ..schemas.relay import (
     RelayMemorySummary,
     RelayOutboxJob,
     RelayOutboxSummary,
+    RelayPurgeResponse,
     RelayProjectDigestResponse,
     RelayProcessResult,
     RelayQueueJob,
     RelayQueueSummary,
+    RelayRetryResponse,
     RelaySearchResponse,
     RelaySearchResult,
     RelaySettingValue,
@@ -465,6 +468,45 @@ class RelayService:
             """,
             (limit,),
         )
+        dead_outbox_rows = await self.db.fetchall(
+            """
+            SELECT
+                'outbox' AS queue, id, NULL AS ref_id, NULL AS raw_event_id,
+                idempotency_key, target_hub, attempts, next_attempt_at,
+                last_error, created_at, updated_at
+            FROM relay_outbox
+            WHERE status = 'dead_letter'
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        dead_item_rows = await self.db.fetchall(
+            """
+            SELECT
+                'item' AS queue, id, ref_id, raw_event_id,
+                NULL AS idempotency_key, NULL AS target_hub,
+                attempts, next_attempt_at, last_error, created_at, updated_at
+            FROM relay_queue_item
+            WHERE status = 'dead_letter'
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        dead_aggregate_rows = await self.db.fetchall(
+            """
+            SELECT
+                'aggregate' AS queue, id, ref_id, raw_event_id,
+                NULL AS idempotency_key, NULL AS target_hub,
+                attempts, next_attempt_at, last_error, created_at, updated_at
+            FROM relay_queue_aggregate
+            WHERE status = 'dead_letter'
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
         digest_rows = await self.db.fetchall(
             """
             SELECT
@@ -506,6 +548,11 @@ class RelayService:
         queue_rows = sorted(
             [*item_rows, *aggregate_rows],
             key=lambda row: str(row["created_at"]),
+            reverse=True,
+        )[:limit]
+        dead_letter_rows = sorted(
+            [*dead_outbox_rows, *dead_item_rows, *dead_aggregate_rows],
+            key=lambda row: str(row["updated_at"]),
             reverse=True,
         )[:limit]
 
@@ -552,6 +599,22 @@ class RelayService:
                     updated_at=str(row["updated_at"]),
                 )
                 for row in queue_rows
+            ],
+            dead_letters=[
+                RelayDeadLetterSummary(
+                    id=str(row["id"]),
+                    queue=row["queue"],
+                    ref_id=row["ref_id"],
+                    raw_event_id=row["raw_event_id"],
+                    idempotency_key=row["idempotency_key"],
+                    target_hub=row["target_hub"],
+                    attempts=int(row["attempts"]),
+                    next_attempt_at=float(row["next_attempt_at"] or 0),
+                    last_error=row["last_error"],
+                    created_at=str(row["created_at"]),
+                    updated_at=str(row["updated_at"]),
+                )
+                for row in dead_letter_rows
             ],
             recent_digests=[
                 RelayDigestSummary(
@@ -707,6 +770,201 @@ class RelayService:
             materialized=materialized,
             deleted=deleted,
             skipped=skipped,
+        )
+
+    async def delete_materialized_memory(self, materialized_memory_id: str) -> bool:
+        """Hide relay current and delete the ordinary memory projection.
+
+        A relay materialized memory is derived from ``relay_memory_current``.
+        Deleting only ``memories`` lets the next materialize/replay pass recreate
+        it, so UI deletion must tombstone the current projection as well.
+        """
+
+        if not materialized_memory_id.startswith("relay:"):
+            return False
+
+        current_memory_id = materialized_memory_id.removeprefix("relay:")
+        if not current_memory_id:
+            return False
+
+        now = _utc_now()
+        async with self.db.transaction():
+            current = await self.db.fetchone(
+                "SELECT id FROM relay_memory_current WHERE id = ?",
+                (current_memory_id,),
+            )
+            if not current:
+                return False
+
+            await self.db.execute(
+                """
+                UPDATE relay_memory_current
+                SET visible = 0,
+                    authoritative_status = 'deleted',
+                    tombstoned_at = COALESCE(tombstoned_at, ?),
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (now, now, current_memory_id),
+            )
+            await self._delete_materialized_memory_locked(materialized_memory_id)
+            await self.db.execute(
+                """
+                UPDATE relay_queue_item
+                SET status = 'done',
+                    locked_by = NULL,
+                    locked_at = NULL,
+                    last_error = NULL,
+                    updated_at = ?
+                WHERE ref_id = ?
+                  AND status IN ('pending', 'processing')
+                """,
+                (now, current_memory_id),
+            )
+
+        return True
+
+    async def purge_current_memories(self, *, limit: int = 10000) -> RelayPurgeResponse:
+        """Hide visible relay current rows and remove materialized projections.
+
+        This is an operator reset for the team hub after ordinary memories were
+        manually deleted. Raw relay events stay append-only; the visible current
+        projection is tombstoned so future materialize runs do not recreate rows.
+        """
+
+        limit = max(1, min(limit, 100000))
+        now = _utc_now()
+        materialized_deleted = 0
+
+        async with self.db.transaction():
+            rows = await self.db.fetchall(
+                """
+                SELECT id
+                FROM relay_memory_current
+                WHERE visible = 1
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            current_ids = [str(row["id"]) for row in rows]
+            if not current_ids:
+                return RelayPurgeResponse()
+
+            placeholders = ",".join("?" for _ in current_ids)
+            memory_ids = [self._materialized_memory_id(id_) for id_ in current_ids]
+            memory_placeholders = ",".join("?" for _ in memory_ids)
+            existing_materialized = await self.db.fetchone(
+                f"""
+                SELECT COUNT(*) AS count
+                FROM memories
+                WHERE id IN ({memory_placeholders})
+                """,
+                tuple(memory_ids),
+            )
+            materialized_deleted = (
+                int(existing_materialized["count"]) if existing_materialized else 0
+            )
+
+            await self.db.execute(
+                f"""
+                UPDATE relay_memory_current
+                SET visible = 0,
+                    authoritative_status = 'deleted',
+                    tombstoned_at = COALESCE(tombstoned_at, ?),
+                    updated_at = ?
+                WHERE id IN ({placeholders})
+                """,
+                tuple([now, now, *current_ids]),
+            )
+            for memory_id in memory_ids:
+                await self._delete_materialized_memory_locked(memory_id)
+            await self.db.execute(
+                f"""
+                UPDATE relay_queue_item
+                SET status = 'done',
+                    locked_by = NULL,
+                    locked_at = NULL,
+                    last_error = NULL,
+                    updated_at = ?
+                WHERE ref_id IN ({placeholders})
+                  AND status IN ('pending', 'processing')
+                """,
+                tuple([now, *current_ids]),
+            )
+
+        return RelayPurgeResponse(
+            scanned=len(current_ids),
+            purged=len(current_ids),
+            materialized_deleted=materialized_deleted,
+        )
+
+    async def retry_dead_letters(
+        self,
+        *,
+        queue: str = "all",
+        job_id: Optional[str] = None,
+        limit: int = 1000,
+    ) -> RelayRetryResponse:
+        """Move dead-lettered relay jobs back to pending for another attempt."""
+
+        queue = queue or "all"
+        if queue not in {"all", "outbox", "item", "aggregate"}:
+            raise ValueError("queue must be one of all, outbox, item, aggregate")
+        limit = max(1, min(limit, 100000))
+        now_iso = _utc_now()
+        now_epoch = _epoch_now()
+
+        async def retry_table(table_name: str) -> int:
+            params: list[Any] = []
+            where = "status = 'dead_letter'"
+            if job_id:
+                where += " AND id = ?"
+                params.append(job_id)
+            rows = await self.db.fetchall(
+                f"""
+                SELECT id
+                FROM {table_name}
+                WHERE {where}
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                tuple([*params, limit]),
+            )
+            ids = [str(row["id"]) for row in rows]
+            if not ids:
+                return 0
+            placeholders = ",".join("?" for _ in ids)
+            await self.db.execute(
+                f"""
+                UPDATE {table_name}
+                SET status = 'pending',
+                    attempts = 0,
+                    next_attempt_at = ?,
+                    locked_by = NULL,
+                    locked_at = NULL,
+                    last_error = NULL,
+                    updated_at = ?
+                WHERE id IN ({placeholders})
+                """,
+                tuple([now_epoch, now_iso, *ids]),
+            )
+            return len(ids)
+
+        counts = {"outbox": 0, "item": 0, "aggregate": 0}
+        async with self.db.transaction():
+            if queue in {"all", "outbox"}:
+                counts["outbox"] = await retry_table("relay_outbox")
+            if queue in {"all", "item"}:
+                counts["item"] = await retry_table("relay_queue_item")
+            if queue in {"all", "aggregate"}:
+                counts["aggregate"] = await retry_table("relay_queue_aggregate")
+
+        return RelayRetryResponse(
+            retried=sum(counts.values()),
+            outbox=counts["outbox"],
+            item=counts["item"],
+            aggregate=counts["aggregate"],
         )
 
     async def get_admin_settings(self, settings: Any) -> RelaySettingsResponse:

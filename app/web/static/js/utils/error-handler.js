@@ -4,6 +4,7 @@
  */
 
 import { APIError } from '../services/api-client.js';
+import { showToast as showGlobalToast } from './toast-notifications.js';
 
 export class ErrorHandler {
   constructor() {
@@ -169,25 +170,19 @@ export class ErrorHandler {
    * Show toast notification
    */
   showToast({ type, title, message, duration = 3000, actions = [] }) {
-    if (!this.toastContainer) {
-      console.warn('Toast container not available');
-      return;
-    }
-    
-    const toastId = ++this.toastId;
-    const toast = this.createToastElement(toastId, type, title, message, actions);
-    
-    // Add to container
-    this.toastContainer.appendChild(toast);
-    
-    // Auto-remove after duration
-    if (duration > 0) {
-      setTimeout(() => {
-        this.removeToast(toastId);
-      }, duration);
-    }
-    
-    return toastId;
+    const normalizedActions = actions.map(action => ({
+      label: action.label,
+      primary: action.primary || action.type === 'primary',
+      callback: action.callback || action.handler,
+      closeOnClick: action.closeOnClick,
+    }));
+
+    return showGlobalToast(message, type, {
+      title,
+      duration,
+      persistent: duration === 0,
+      actions: normalizedActions,
+    });
   }
   
   /**
@@ -250,6 +245,11 @@ export class ErrorHandler {
    * Remove toast by ID
    */
   removeToast(id) {
+    if (window.app?.toastNotifications?.exists?.(id)) {
+      window.app.toastNotifications.hide(id);
+      return;
+    }
+
     const toast = this.toastContainer?.querySelector(`[data-toast-id="${id}"]`);
     if (toast) {
       toast.style.animation = 'slideOut 0.3s ease-in forwards';
@@ -265,6 +265,11 @@ export class ErrorHandler {
    * Clear all toasts
    */
   clearAllToasts() {
+    if (window.app?.toastNotifications?.hideAll) {
+      window.app.toastNotifications.hideAll();
+      return;
+    }
+
     if (this.toastContainer) {
       this.toastContainer.innerHTML = '';
     }
@@ -331,17 +336,6 @@ style.textContent = `
       transform: translateX(100%);
       opacity: 0;
     }
-  }
-  
-  .toast-actions {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 0.75rem;
-  }
-  
-  .toast-actions .btn {
-    padding: 0.25rem 0.75rem;
-    font-size: 0.8rem;
   }
 `;
 document.head.appendChild(style);

@@ -89,25 +89,36 @@ export class ToastNotifications {
       }
       
       .toast {
+        --toast-accent: var(--info, #3b82f6);
         display: inline-flex;
         align-items: center;
         gap: 10px;
         max-width: min(420px, calc(100vw - 40px));
-        min-height: 38px;
-        padding: 10px 18px;
-        border: 0;
-        border-radius: 6px;
-        color: white;
-        font-size: 13px;
-        font-weight: 500;
+        min-height: 40px;
+        padding: 10px 12px;
+        background: var(--bg-primary, #ffffff);
+        border: 1px solid var(--border-color, #e5e5e5);
+        border-radius: var(--radius-md, 6px);
+        color: var(--text-primary, #171717);
+        font-size: var(--text-sm, 14px);
+        font-weight: var(--font-medium, 500);
         line-height: 1.35;
-        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.18);
+        box-shadow: var(--shadow-md, 0 4px 6px -1px rgb(0 0 0 / 0.1));
         pointer-events: auto;
         transform: translateY(-16px);
         opacity: 0;
         transition: opacity 0.25s ease, transform 0.25s ease;
         position: relative;
         overflow: visible;
+      }
+
+      .toast::before {
+        content: '';
+        width: 8px;
+        height: 8px;
+        border-radius: var(--radius-full, 9999px);
+        background: var(--toast-accent);
+        flex: 0 0 8px;
       }
       
       .toast.show {
@@ -122,13 +133,16 @@ export class ToastNotifications {
       
       .toast-body {
         display: flex;
-        align-items: center;
-        gap: 8px;
+        align-items: baseline;
+        gap: 6px;
         min-width: 0;
+        flex: 1 1 auto;
       }
       
       .toast-title {
-        font-weight: 700;
+        color: var(--text-primary, #171717);
+        font-weight: var(--font-semibold, 600);
+        white-space: nowrap;
       }
       
       .toast-icon {
@@ -138,21 +152,23 @@ export class ToastNotifications {
       .toast-close {
         width: 20px;
         height: 20px;
-        margin: -2px -8px -2px 0;
+        margin: -2px -4px -2px 0;
         padding: 0;
-        background: rgba(255, 255, 255, 0.16);
-        border: none;
-        border-radius: 999px;
-        color: white;
+        background: var(--bg-secondary, #fafafa);
+        border: 1px solid transparent;
+        border-radius: var(--radius-full, 9999px);
+        color: var(--text-secondary, #525252);
         cursor: pointer;
         font-size: 16px;
         line-height: 1;
         flex: 0 0 auto;
-        transition: background 0.15s ease;
+        transition: background var(--transition, 150ms ease-out), color var(--transition, 150ms ease-out), border-color var(--transition, 150ms ease-out);
       }
       
       .toast-close:hover {
-        background: rgba(255, 255, 255, 0.28);
+        background: var(--bg-tertiary, #f5f5f5);
+        border-color: var(--border-hover, var(--border-color, #d4d4d4));
+        color: var(--text-primary, #171717);
       }
       
       .toast-message {
@@ -160,54 +176,85 @@ export class ToastNotifications {
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
+        color: var(--text-primary, #171717);
+        white-space: nowrap;
+      }
+
+      .toast-title + .toast-message {
+        color: var(--text-secondary, #525252);
       }
       
       .toast-actions {
         display: flex;
         gap: 6px;
+        flex: 0 0 auto;
       }
       
       .toast-action {
-        min-height: 26px;
+        min-height: 28px;
         padding: 4px 10px;
-        background: rgba(255, 255, 255, 0.18);
-        border: none;
-        border-radius: 5px;
-        color: white;
+        background: var(--text-primary, #171717);
+        border: 1px solid var(--text-primary, #171717);
+        border-radius: var(--radius-md, 6px);
+        color: var(--bg-primary, #ffffff);
         cursor: pointer;
         font-size: 12px;
-        font-weight: 500;
-        transition: background 0.15s ease;
+        font-weight: var(--font-medium, 500);
+        transition: background var(--transition, 150ms ease-out), border-color var(--transition, 150ms ease-out), color var(--transition, 150ms ease-out);
       }
       
       .toast-action:hover {
-        background: rgba(255, 255, 255, 0.28);
+        background: var(--primary-hover, #404040);
+        border-color: var(--primary-hover, #404040);
       }
       
       .toast-action.secondary {
-        background: rgba(255, 255, 255, 0.1);
-        color: white;
+        background: var(--bg-secondary, #fafafa);
+        border-color: var(--border-color, #e5e5e5);
+        color: var(--text-primary, #171717);
       }
       
       .toast-action.secondary:hover {
-        background: rgba(255, 255, 255, 0.2);
+        background: var(--bg-tertiary, #f5f5f5);
+        border-color: var(--border-hover, #d4d4d4);
+      }
+
+      .toast-content {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .toast-content strong {
+        color: var(--text-primary, #171717);
+        font-weight: var(--font-semibold, 600);
+      }
+
+      .toast-content p {
+        margin: 0;
+        color: var(--text-secondary, #525252);
       }
       
       /* Toast types */
-      .toast.success {
-        background: #10b981;
+      .toast.success,
+      .toast.toast-success {
+        --toast-accent: var(--success-color, var(--success, #22c55e));
       }
       
-      .toast.error {
-        background: #ef4444;
+      .toast.error,
+      .toast.toast-error {
+        --toast-accent: var(--error-color, var(--error, #ef4444));
       }
       
-      .toast.warning {
-        background: #f59e0b;
+      .toast.warning,
+      .toast.toast-warning {
+        --toast-accent: var(--warning-color, var(--warning, #f59e0b));
       }
       
-      .toast.info {
-        background: #3b82f6;
+      .toast.info,
+      .toast.toast-info {
+        --toast-accent: var(--info, #3b82f6);
       }
       
       /* Responsive design */

@@ -55,6 +55,17 @@ function highlight(text, query) {
   return escaped.replace(new RegExp(`(${pattern})`, 'gi'), '<mark>$1</mark>');
 }
 
+function isRelayMemory(mem) {
+  if (!mem) return false;
+  const tags = Array.isArray(mem.tags) ? mem.tags : [];
+  return Boolean(
+    String(mem.id || '').startsWith('relay:') ||
+    mem.source === 'relay' ||
+    String(mem.client || '').startsWith('relay:') ||
+    tags.includes('relay')
+  );
+}
+
 /* ── Component ──────────────────────────────────────────────── */
 
 class MemoriesPage extends HTMLElement {
@@ -265,6 +276,7 @@ class MemoriesPage extends HTMLElement {
     const srcBadge = source ? `<span class="mem-source-badge mem-clickable-filter" data-filter-type="source" data-filter-value="${esc(source)}">${esc(source)}</span>` : '';
     const client = mem.client || '';
     const clientBadge = client ? `<span class="mem-client-badge client-${client}">${esc(client)}</span>` : '';
+    const deleteTitle = isRelayMemory(mem) ? 'Delete and hide from relay sync' : 'Delete';
 
     return `
       <div class="recent-item mem-row${isSelected ? ' mem-selected' : ''}" data-memory-id="${esc(mem.id)}" role="button" tabindex="0">
@@ -287,7 +299,7 @@ class MemoriesPage extends HTMLElement {
           <button class="mem-action-btn mem-edit-btn" data-id="${esc(mem.id)}" title="Edit">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
-          <button class="mem-action-btn mem-delete-btn" data-id="${esc(mem.id)}" title="Delete">
+          <button class="mem-action-btn mem-delete-btn" data-id="${esc(mem.id)}" title="${deleteTitle}">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
           </button>
         </span>
@@ -659,7 +671,12 @@ class MemoriesPage extends HTMLElement {
       if (delBtn) {
         e.stopPropagation();
         const id = delBtn.dataset.id;
-        if (id && confirm('Delete this memory?')) this.deleteMemory(id);
+        if (!id) return;
+        const mem = this.memories.find(m => m.id === id);
+        const message = isRelayMemory(mem)
+          ? 'Delete this relay memory? It will also be hidden from relay sync so materialize will not recreate it.'
+          : 'Delete this memory?';
+        if (confirm(message)) this.deleteMemory(id);
         return;
       }
 
@@ -957,6 +974,7 @@ class MemoriesPage extends HTMLElement {
         setTimeout(() => row.remove(), 200);
       }
       this.renderFooter();
+      this.loadStats();
     }
   }
 
@@ -981,17 +999,32 @@ class MemoriesPage extends HTMLElement {
     try {
       const api = window.app?.apiClient;
       if (!api) throw new Error('API not available');
+      const mem = this.memories.find(m => m.id === memoryId);
       await api.deleteMemory(memoryId);
       this.memories = this.memories.filter(m => m.id !== memoryId);
       this.totalMemories--;
       const row = this.querySelector(`.mem-row[data-memory-id="${memoryId}"]`);
       if (row) row.remove();
-      this.renderFooter();
-      this.showToast('Memory deleted', 'success');
+      await this.refreshAfterDeletion();
+      this.showToast(
+        isRelayMemory(mem) ? 'Relay memory deleted and hidden from sync' : 'Memory deleted',
+        'success'
+      );
     } catch (error) {
       console.error('Failed to delete memory:', error);
       this.showToast('Failed to delete memory', 'error');
     }
+  }
+
+  async refreshAfterDeletion() {
+    this.page = 0;
+    this.hasMore = true;
+    this._selected.clear();
+    this.renderBatchBar();
+    await Promise.all([
+      this.loadMemories(),
+      this.loadStats()
+    ]);
   }
 
   /* ── Inline Edit Modal ───────────────────────────────────── */
@@ -1436,8 +1469,12 @@ class MemoriesPage extends HTMLElement {
       return;
     }
     bar.style.display = 'flex';
+    const loadedCount = this.memories.length;
+    const suffix = this.totalMemories > loadedCount
+      ? ` from ${loadedCount} loaded`
+      : '';
     bar.innerHTML = `
-      <span class="mem-batch-count">${count} selected</span>
+      <span class="mem-batch-count">${count} selected${suffix}</span>
       <select class="mem-batch-cat" title="Change category">
         <option value="">Category...</option>
         <option value="task">Task</option>
@@ -1455,12 +1492,17 @@ class MemoriesPage extends HTMLElement {
   async batchDelete() {
     const ids = [...this._selected];
     if (!ids.length) return;
-    if (!confirm(`Delete ${ids.length} memories?`)) return;
+    const relayCount = ids.filter(id => isRelayMemory(this.memories.find(m => m.id === id))).length;
+    const confirmMessage = relayCount > 0
+      ? `Delete ${ids.length} memories? ${relayCount} relay memories will also be hidden from relay sync.`
+      : `Delete ${ids.length} memories?`;
+    if (!confirm(confirmMessage)) return;
 
     const api = window.app?.apiClient;
     if (!api) return;
 
     let deleted = 0;
+    let failed = 0;
     for (const id of ids) {
       try {
         await api.deleteMemory(id);
@@ -1469,12 +1511,16 @@ class MemoriesPage extends HTMLElement {
         const row = this.querySelector(`.mem-row[data-memory-id="${id}"]`);
         if (row) row.remove();
         deleted++;
-      } catch { /* continue */ }
+      } catch {
+        failed++;
+      }
     }
-    this._selected.clear();
-    this.renderBatchBar();
-    this.renderFooter();
-    this.showToast(`${deleted} memories deleted`, 'success');
+    await this.refreshAfterDeletion();
+    if (failed > 0) {
+      this.showToast(`${deleted} memories deleted, ${failed} failed`, 'warning');
+    } else {
+      this.showToast(`${deleted} memories deleted`, 'success');
+    }
   }
 
   async batchChangeCategory(category) {
