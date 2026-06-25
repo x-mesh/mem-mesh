@@ -394,6 +394,46 @@ class Settings(BaseSettings):
         default=3, ge=1, description="Maximum retries for API requests"
     )
 
+    # Relay worker settings
+    relay_hub_url: str = Field(
+        default="",
+        description="Default team hub URL used by relay share UI",
+    )
+    relay_source_node_id: str = Field(
+        default="",
+        description="Default source node id used by relay share UI",
+    )
+    relay_sonnet_api_key: str = Field(
+        default="",
+        description="API key for relay Sonnet enrichment worker",
+    )
+    relay_sonnet_model: str = Field(
+        default="claude-sonnet-4-6",
+        description="Model used by relay text enrichment and digest workers",
+    )
+    relay_sonnet_base_url: str = Field(
+        default="https://api.anthropic.com/v1/messages",
+        description="Anthropic Messages API endpoint for relay enrichment",
+    )
+    relay_sonnet_timeout: float = Field(
+        default=30.0,
+        ge=1.0,
+        description="Timeout for relay Sonnet API calls in seconds",
+    )
+    relay_http_timeout: float = Field(
+        default=10.0,
+        ge=1.0,
+        description="Timeout for relay S2S HTTP delivery in seconds",
+    )
+    relay_hub_token: str = Field(
+        default="",
+        description="Bearer token used by personal-node outbox delivery to hub",
+    )
+    relay_prompt_version: str = Field(
+        default="relay-v1",
+        description="Prompt version stamped on relay enrichment and digest outputs",
+    )
+
     @field_validator("storage_mode")
     @classmethod
     def validate_storage_mode(cls, v: str) -> str:

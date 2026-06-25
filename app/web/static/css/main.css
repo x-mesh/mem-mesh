@@ -35,5 +35,8 @@
 /* Monitoring page: metrics, queries, embedding stats */
 @import url('./modules/monitoring.css');
 
+/* Relay admin page: outbox, queues, digest status */
+@import url('./modules/relay.css');
+
 /* Project analytics, alerts panel */
 @import url('./modules/project-analytics.css');

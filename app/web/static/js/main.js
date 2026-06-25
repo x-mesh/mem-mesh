@@ -51,6 +51,7 @@ import { OAuthPage } from './pages/oauth.js';
 import { SecurityPage } from './pages/security-page.js';
 import { ConnectPage } from './pages/connect-page.js';
 import { OnboardingPage } from './pages/onboarding.js';
+import { RelayPage } from './pages/relay.js';
 
 /**
  * Main Application Class
@@ -64,9 +65,9 @@ class App {
     this.appState = new AppState();
     this.router = new Router();
     this.themeManager = new ThemeManager();
+    this.toastNotifications = new ToastNotifications();
     this.errorHandler = new ErrorHandler();
     this.keyboardShortcuts = new KeyboardShortcuts();
-    this.toastNotifications = new ToastNotifications();
     
     this.pages = new Map();
     this.currentPage = null;
@@ -138,6 +139,7 @@ class App {
     this.pages.set('security', SecurityPage);
     this.pages.set('connect', ConnectPage);
     this.pages.set('onboarding', OnboardingPage);
+    this.pages.set('relay', RelayPage);
   }
   
   /**
@@ -163,6 +165,7 @@ class App {
     this.router.register('/security', () => this.renderPage('security'));
     this.router.register('/connect', () => this.renderPage('connect'));
     this.router.register('/onboarding', () => this.renderPage('onboarding'));
+    this.router.register('/relay', () => this.renderPage('relay'));
   }
 
   /**
@@ -445,6 +448,9 @@ class App {
         case 'onboarding':
           pageElement = document.createElement('onboarding-page');
           break;
+        case 'relay':
+          pageElement = document.createElement('relay-page');
+          break;
         default:
           throw new Error(`Unknown page: ${pageName}`);
       }
@@ -488,6 +494,7 @@ class App {
         (route === '/settings' && settingsPages.has(pageName)) ||
         (route === '/security' && pageName === 'security') ||
         (route === '/connect' && pageName === 'connect') ||
+        (route === '/relay' && pageName === 'relay') ||
         (route === '/work' && pageName === 'work') ||
         (route === '/monitoring' && pageName === 'monitoring')
       ) {

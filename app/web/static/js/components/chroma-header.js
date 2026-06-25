@@ -93,6 +93,15 @@ class ChromaHeader extends HTMLElement {
                 </svg>
                 <span>Analytics</span>
               </a>
+              <a href="/relay" class="nav-link" data-route="/relay" data-nav="relay">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                  <circle cx="6" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                  <circle cx="18" cy="6" r="3" stroke="currentColor" stroke-width="2"/>
+                  <circle cx="18" cy="18" r="3" stroke="currentColor" stroke-width="2"/>
+                  <path d="M8.7 10.7L15.3 7.3M8.7 13.3L15.3 16.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span>Relay</span>
+              </a>
               <a href="/settings" class="nav-link" data-route="/settings" data-nav="settings">
                 <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
                   <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
@@ -235,6 +244,15 @@ class ChromaHeader extends HTMLElement {
                   <path d="M6 20V14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                 </svg>
                 <span>Analytics</span>
+              </a>
+              <a href="/relay" class="mobile-nav-link" data-route="/relay" data-nav="relay">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                  <circle cx="6" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                  <circle cx="18" cy="6" r="3" stroke="currentColor" stroke-width="2"/>
+                  <circle cx="18" cy="18" r="3" stroke="currentColor" stroke-width="2"/>
+                  <path d="M8.7 10.7L15.3 7.3M8.7 13.3L15.3 16.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span>Relay</span>
               </a>
               <a href="/settings" class="mobile-nav-link" data-route="/settings" data-nav="settings">
                 <svg class="nav-icon" viewBox="0 0 24 24" fill="none">

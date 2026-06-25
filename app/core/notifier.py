@@ -83,3 +83,9 @@ class HttpNotifier:
 
     async def notify_pin_promoted(self, pin_id: str, memory_id: str) -> None:
         await self._send("pin_promoted", {"pin_id": pin_id, "memory_id": memory_id})
+
+    async def notify_relay_ingested(self, relay_data: Dict[str, Any]) -> None:
+        await self._send("relay_ingested", relay_data)
+
+    async def notify_relay_materialized(self, result_data: Dict[str, Any]) -> None:
+        await self._send("relay_materialized", result_data)

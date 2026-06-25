@@ -5,6 +5,7 @@
  */
 
 import { wsClient } from '../services/websocket-client.js';
+import { showToast as showGlobalToast } from '../utils/toast-notifications.js';
 import '../components/searchable-combobox.js';
 
 /* ── helpers (same as dashboard.js) ─────────────────────────── */
@@ -1714,23 +1715,7 @@ class MemoriesPage extends HTMLElement {
   /* ── Toast ──────────────────────────────────────────────── */
 
   showToast(message, type = 'info') {
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-    Object.assign(toast.style, {
-      position: 'fixed', top: '20px', right: '20px',
-      padding: '10px 18px', borderRadius: '6px', color: 'white',
-      fontSize: '13px', fontWeight: '500', zIndex: '10001',
-      opacity: '0', transform: 'translateY(-16px)', transition: 'all 0.25s ease'
-    });
-    const colors = { success: '#10b981', info: '#3b82f6', warning: '#f59e0b', error: '#ef4444' };
-    toast.style.backgroundColor = colors[type] || colors.info;
-    document.body.appendChild(toast);
-    requestAnimationFrame(() => { toast.style.opacity = '1'; toast.style.transform = 'translateY(0)'; });
-    setTimeout(() => {
-      toast.style.opacity = '0'; toast.style.transform = 'translateY(-16px)';
-      setTimeout(() => toast.remove(), 250);
-    }, 3000);
+    showGlobalToast(message, type, { duration: 3000 });
   }
 }
 

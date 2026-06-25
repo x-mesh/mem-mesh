@@ -108,6 +108,74 @@ def main(argv: Optional[List[str]] = None) -> None:
         "--reload", action="store_true", help="Enable auto-reload"
     )
 
+    # --- mem-mesh relay ---
+    relay_parser = sub.add_parser("relay", help="Relay layer utilities")
+    relay_sub = relay_parser.add_subparsers(dest="relay_command", help="Relay commands")
+    relay_worker = relay_sub.add_parser("worker", help="Run relay background worker")
+    relay_worker.add_argument(
+        "--once",
+        action="store_true",
+        help="Process at most one job per enabled queue and exit",
+    )
+    relay_worker.add_argument(
+        "--tasks",
+        default="outbox,item,aggregate",
+        help="Comma-separated relay tasks: outbox,item,aggregate",
+    )
+    relay_worker.add_argument(
+        "--interval",
+        type=float,
+        default=1.0,
+        help="Idle polling interval in seconds for continuous mode",
+    )
+    relay_worker.add_argument("--worker-id", default=None, help="Stable worker id")
+    relay_worker.add_argument(
+        "--max-attempts",
+        type=int,
+        default=3,
+        help="Retry attempts before moving a relay job to dead_letter",
+    )
+    relay_worker.add_argument(
+        "--backoff-max",
+        type=float,
+        default=300.0,
+        help="Maximum retry backoff in seconds",
+    )
+    relay_worker.add_argument(
+        "--lease-seconds",
+        type=int,
+        default=300,
+        help="Seconds before a processing relay job can be reclaimed",
+    )
+    relay_worker.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="Number of relay worker loops to run in this process",
+    )
+    relay_worker.add_argument(
+        "--json", action="store_true", help="Emit machine-readable JSON"
+    )
+    relay_worker.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Include relay queue diagnostics in the worker result",
+    )
+    relay_materialize = relay_sub.add_parser(
+        "materialize",
+        help="Backfill received relay rows into ordinary memories",
+    )
+    relay_materialize.add_argument(
+        "--limit",
+        type=int,
+        default=1000,
+        help="Maximum relay current rows to scan",
+    )
+    relay_materialize.add_argument(
+        "--json", action="store_true", help="Emit machine-readable JSON"
+    )
+
     # --- mem-mesh hooks (delegate to install_hooks.py) ---
     hooks_parser = sub.add_parser("hooks", help="Hook management")
     hooks_sub = hooks_parser.add_subparsers(dest="hooks_command", help="Hook commands")
@@ -353,6 +421,36 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     elif args.command == "hooks":
         _dispatch_hooks(args)
+
+    elif args.command == "relay":
+        if args.relay_command == "worker":
+            from app.cli.relay import cmd_relay_worker
+
+            sys.exit(
+                cmd_relay_worker(
+                    once=args.once,
+                    json_mode=args.json,
+                    tasks=args.tasks,
+                    interval=args.interval,
+                    worker_id=args.worker_id,
+                    max_attempts=args.max_attempts,
+                    backoff_max=args.backoff_max,
+                    lease_seconds=args.lease_seconds,
+                    concurrency=args.concurrency,
+                    verbose=args.verbose,
+                )
+            )
+        elif args.relay_command == "materialize":
+            from app.cli.relay import cmd_relay_materialize
+
+            sys.exit(
+                cmd_relay_materialize(
+                    limit=args.limit,
+                    json_mode=args.json,
+                )
+            )
+        else:
+            sub.choices["relay"].print_help()
 
     elif args.command == "config":
         from app.cli.config_cmd import cmd_config

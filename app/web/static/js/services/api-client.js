@@ -190,6 +190,10 @@ export class APIClient {
   async getStats(filters = {}) {
     return this.get('/memories/stats', filters);
   }
+
+  async getProjects() {
+    return this.get('/projects');
+  }
   
   async searchMemories(query, filters = {}) {
     return this.get('/memories/search', { query, ...filters });
@@ -216,6 +220,46 @@ export class APIClient {
   
   async deleteMemory(memoryId) {
     return this.delete(`/memories/${memoryId}`);
+  }
+
+  /**
+   * Relay API methods
+   */
+
+  async getRelayOverview(limit = 10) {
+    return this.get('/relay/v1/admin/overview', { limit });
+  }
+
+  async materializeRelayMemories(limit = 1000) {
+    return this.post('/relay/v1/admin/materialize', null, { limit });
+  }
+
+  async getRelaySettings() {
+    return this.get('/relay/v1/admin/settings');
+  }
+
+  async updateRelaySettings(payload) {
+    return this.put('/relay/v1/admin/settings', payload);
+  }
+
+  async checkRelayHub(payload) {
+    return this.post('/relay/v1/admin/hub/check', payload);
+  }
+
+  async createRelayIdentity(payload) {
+    return this.post('/relay/v1/admin/identities', payload);
+  }
+
+  async updateRelayIdentity(tokenHashPrefix, payload) {
+    return this.put(`/relay/v1/admin/identities/${encodeURIComponent(tokenHashPrefix)}`, payload);
+  }
+
+  async shareRelayMemory(memoryId, payload) {
+    return this.post(`/relay/v1/outbox/share/${encodeURIComponent(memoryId)}`, payload);
+  }
+
+  async shareRelayProject(projectId, payload) {
+    return this.post(`/relay/v1/outbox/share-project/${encodeURIComponent(projectId)}`, payload);
   }
   
   /**
