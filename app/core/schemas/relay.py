@@ -269,6 +269,14 @@ class RelayAdminOverviewResponse(BaseModel):
     recent_memories: List[RelayMemorySummary] = Field(default_factory=list)
 
 
+class RelayMaterializeResponse(BaseModel):
+    scanned: int = 0
+    materialized: int = 0
+    deleted: int = 0
+    skipped: int = 0
+    status: str = "ok"
+
+
 class RelaySettingValue(BaseModel):
     key: str
     label: str

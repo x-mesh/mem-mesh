@@ -135,7 +135,12 @@ export class RelayPage extends HTMLElement {
         <section class="relay-panel">
           <div class="relay-panel-header">
             <h2>Received Relay Memories</h2>
-            <span class="relay-panel-meta">relay view</span>
+            <div class="relay-panel-actions">
+              <span class="relay-panel-meta">relay view</span>
+              <button class="secondary-button relay-panel-button" id="relay-materialize-submit" type="button">
+                Sync to Memories
+              </button>
+            </div>
           </div>
           <div id="relay-memory-table" class="relay-table-wrap">${this.renderTableSkeleton()}</div>
         </section>
@@ -176,6 +181,9 @@ export class RelayPage extends HTMLElement {
     });
     this.querySelector('#relay-project-share-submit')?.addEventListener('click', () => {
       this.shareProject();
+    });
+    this.querySelector('#relay-materialize-submit')?.addEventListener('click', () => {
+      this.materializeRelayMemories();
     });
     this.querySelector('#relay-memory-search')?.addEventListener('input', (event) => {
       window.clearTimeout(this.memorySearchTimer);
@@ -482,6 +490,22 @@ export class RelayPage extends HTMLElement {
       showToast(`Relay project share failed: ${message}`, 'error');
     } finally {
       submit.disabled = false;
+    }
+  }
+
+  async materializeRelayMemories() {
+    if (!this.api) return;
+    const button = this.querySelector('#relay-materialize-submit');
+    if (button) button.disabled = true;
+    try {
+      const result = await this.api.materializeRelayMemories(1000);
+      const count = Number(result.materialized || 0).toLocaleString();
+      showToast(`Synced ${count} relay memories.`, 'success');
+      await this.loadOverview();
+    } catch (error) {
+      showToast(`Relay sync failed: ${this.errorMessage(error)}`, 'error');
+    } finally {
+      if (button) button.disabled = false;
     }
   }
 

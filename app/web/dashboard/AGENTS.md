@@ -33,6 +33,7 @@ Modular route structure for better maintainability:
   - POST /api/relay/v1/admin/hub/check - check configured team hub reachability
   - POST /api/relay/v1/admin/identities - register or generate hub identity token
   - PUT /api/relay/v1/admin/identities/{token_hash_prefix} - update hub identity metadata/scopes/revocation
+  - POST /api/relay/v1/admin/materialize - backfill received relay rows into ordinary memories
   - GET /api/relay/v1/health - relay hub health probe for personal nodes
   - POST /api/relay/v1/ingest - S2S relay ingest
   - POST /api/relay/v1/search - team relay view search

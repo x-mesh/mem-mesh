@@ -226,6 +226,10 @@ export class APIClient {
     return this.get('/relay/v1/admin/overview', { limit });
   }
 
+  async materializeRelayMemories(limit = 1000) {
+    return this.post('/relay/v1/admin/materialize', null, { limit });
+  }
+
   async getRelaySettings() {
     return this.get('/relay/v1/admin/settings');
   }

@@ -38,6 +38,7 @@ from ..schemas.relay import (
     RelayIdentityUpdateRequest,
     RelayIngestRequest,
     RelayIngestResponse,
+    RelayMaterializeResponse,
     RelayMemorySummary,
     RelayOutboxJob,
     RelayOutboxSummary,
@@ -569,6 +570,60 @@ class RelayService:
                 )
                 for row in memory_rows
             ],
+        )
+
+    async def materialize_current_memories(
+        self, *, limit: int = 1000
+    ) -> RelayMaterializeResponse:
+        """Backfill relay current projection into ordinary memories."""
+
+        limit = max(1, min(limit, 10000))
+        materialized = 0
+        deleted = 0
+        skipped = 0
+        now = _utc_now()
+
+        async with self.db.transaction():
+            rows = await self.db.fetchall(
+                """
+                SELECT
+                    id, source_node_id, team_project_id, authoritative_kind,
+                    content_hash, content, tags_json, visible
+                FROM relay_memory_current
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+
+            for row in rows:
+                current_memory_id = str(row["id"])
+                visible = bool(row["visible"])
+                content = row["content"]
+                if visible and content:
+                    await self._sync_materialized_memory_locked(
+                        current_memory_id=current_memory_id,
+                        source_node_id=str(row["source_node_id"]),
+                        kind=str(row["authoritative_kind"]),
+                        tags=_json_loads(row["tags_json"], []),
+                        team_project_id=str(row["team_project_id"]),
+                        content_hash=str(row["content_hash"]),
+                        content=str(content),
+                        visible=True,
+                        now=now,
+                    )
+                    materialized += 1
+                else:
+                    await self._delete_materialized_memory_locked(
+                        self._materialized_memory_id(current_memory_id)
+                    )
+                    deleted += 1
+
+        return RelayMaterializeResponse(
+            scanned=len(rows),
+            materialized=materialized,
+            deleted=deleted,
+            skipped=skipped,
         )
 
     async def get_admin_settings(self, settings: Any) -> RelaySettingsResponse:
@@ -1956,7 +2011,8 @@ class RelayService:
         await self._sync_materialized_memory_locked(
             current_memory_id=current_memory_id,
             source_node_id=source_node_id,
-            payload=payload,
+            kind=payload.kind,
+            tags=payload.tags,
             team_project_id=team_project_id,
             content_hash=content_hash,
             content=content,
@@ -1970,7 +2026,8 @@ class RelayService:
         *,
         current_memory_id: str,
         source_node_id: str,
-        payload: RelayIngestRequest,
+        kind: str,
+        tags: Sequence[str],
         team_project_id: str,
         content_hash: str,
         content: Optional[str],
@@ -1994,7 +2051,7 @@ class RelayService:
             if existing is not None and not content_changed
             else self._zero_embedding_bytes()
         )
-        tags = self._materialized_tags(payload.tags)
+        tags_json = self._materialized_tags(tags)
         client = f"relay:{source_node_id}"
 
         if existing:
@@ -2017,10 +2074,10 @@ class RelayService:
                     content,
                     content_hash,
                     team_project_id,
-                    payload.kind,
+                    kind,
                     client,
                     embedding,
-                    tags,
+                    tags_json,
                     now,
                     len(content),
                     memory_id,
@@ -2042,10 +2099,10 @@ class RelayService:
                     content,
                     content_hash,
                     team_project_id,
-                    payload.kind,
+                    kind,
                     client,
                     embedding,
-                    tags,
+                    tags_json,
                     now,
                     now,
                     len(content),

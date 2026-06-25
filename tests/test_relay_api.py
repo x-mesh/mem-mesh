@@ -248,6 +248,39 @@ async def test_relay_admin_overview_endpoint_returns_queue_status():
 
 
 @pytest.mark.asyncio
+async def test_relay_admin_materialize_endpoint_backfills_memories():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        await service.register_identity(
+            token="relay-token",
+            user_id="user-1",
+            source_node_id="node-1",
+            display_name="Jinwoo",
+        )
+        ingest = await service.ingest("relay-token", _request())
+        memory_id = f"relay:{ingest.current_memory_id}"
+        await db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post("/api/relay/v1/admin/materialize?limit=20")
+
+        materialized = await db.fetchone(
+            "SELECT source, content FROM memories WHERE id = ?",
+            (memory_id,),
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["scanned"] == 1
+        assert data["materialized"] == 1
+        assert materialized["source"] == "relay"
+        assert materialized["content"] == _request().content
+
+
+@pytest.mark.asyncio
 async def test_relay_admin_settings_endpoint_persists_defaults_and_identity(
     monkeypatch,
 ):

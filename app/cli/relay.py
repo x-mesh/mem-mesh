@@ -52,6 +52,37 @@ def cmd_relay_worker(
         return 1
 
 
+def cmd_relay_materialize(*, limit: int = 1000, json_mode: bool = False) -> int:
+    """Backfill relay current rows into ordinary memories from CLI."""
+
+    try:
+        result = asyncio.run(_run_relay_materialize(limit=limit))
+        if json_mode:
+            print(json.dumps({"ok": True, "result": result}, ensure_ascii=False))
+        else:
+            print(f"relay materialize: {result}")
+        return 0
+    except Exception as exc:
+        if json_mode:
+            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        else:
+            print(f"relay materialize failed: {exc}", file=sys.stderr)
+        return 1
+
+
+async def _run_relay_materialize(*, limit: int = 1000) -> dict:
+    settings = Settings()
+    db = Database(settings.database_path, embedding_dim=settings.embedding_dim)
+    await db.connect()
+    try:
+        service = RelayService(db)
+        await service.ensure_schema()
+        result = await service.materialize_current_memories(limit=limit)
+        return result.model_dump()
+    finally:
+        await db.close()
+
+
 async def _run_relay_worker(
     *,
     once: bool,

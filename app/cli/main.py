@@ -112,6 +112,19 @@ def main(argv: Optional[List[str]] = None) -> None:
         action="store_true",
         help="Include relay queue diagnostics in the worker result",
     )
+    relay_materialize = relay_sub.add_parser(
+        "materialize",
+        help="Backfill received relay rows into ordinary memories",
+    )
+    relay_materialize.add_argument(
+        "--limit",
+        type=int,
+        default=1000,
+        help="Maximum relay current rows to scan",
+    )
+    relay_materialize.add_argument(
+        "--json", action="store_true", help="Emit machine-readable JSON"
+    )
 
     # --- mem-mesh hooks (delegate to install_hooks.py) ---
     hooks_parser = sub.add_parser("hooks", help="Hook management")
@@ -358,6 +371,15 @@ def main(argv: Optional[List[str]] = None) -> None:
                     interval=args.interval,
                     worker_id=args.worker_id,
                     verbose=args.verbose,
+                )
+            )
+        elif args.relay_command == "materialize":
+            from app.cli.relay import cmd_relay_materialize
+
+            sys.exit(
+                cmd_relay_materialize(
+                    limit=args.limit,
+                    json_mode=args.json,
                 )
             )
         else:

@@ -17,6 +17,7 @@ from app.core.schemas.relay import (
     RelayIdentityUpdateRequest,
     RelayIngestRequest,
     RelayIngestResponse,
+    RelayMaterializeResponse,
     RelayProjectDigestResponse,
     RelaySearchRequest,
     RelaySearchResponse,
@@ -98,6 +99,20 @@ async def get_relay_admin_overview(
         return await service.get_admin_overview(limit=limit)
     except Exception as exc:
         logger.exception("Relay admin overview failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/admin/materialize", response_model=RelayMaterializeResponse)
+async def materialize_relay_admin_memories(
+    limit: int = 1000,
+    service: RelayService = Depends(get_relay_service),
+) -> RelayMaterializeResponse:
+    """Backfill visible relay current rows into ordinary memories."""
+
+    try:
+        return await service.materialize_current_memories(limit=limit)
+    except Exception as exc:
+        logger.exception("Relay memory materialization failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 

@@ -30,6 +30,25 @@ def test_main_dispatches_relay_worker_once_json(monkeypatch):
     assert calls["verbose"] is True
 
 
+def test_main_dispatches_relay_materialize_json(monkeypatch):
+    calls = {}
+
+    def fake_cmd(**kwargs):
+        calls.update(kwargs)
+        return 0
+
+    import app.cli.relay as relay_cli
+
+    monkeypatch.setattr(relay_cli, "cmd_relay_materialize", fake_cmd)
+
+    with pytest.raises(SystemExit) as exc:
+        main(["relay", "materialize", "--json", "--limit", "50"])
+
+    assert exc.value.code == 0
+    assert calls["json_mode"] is True
+    assert calls["limit"] == 50
+
+
 @pytest.mark.asyncio
 async def test_relay_worker_verbose_reports_empty_outbox_queue(tmp_path, monkeypatch):
     import app.cli.relay as relay_cli

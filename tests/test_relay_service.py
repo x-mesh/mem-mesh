@@ -203,6 +203,38 @@ async def test_retract_hides_current_projection_without_deleting_raw_history():
 
 
 @pytest.mark.asyncio
+async def test_materialize_current_memories_backfills_existing_current_rows():
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        ingest = await service.ingest("relay-token", _request())
+        memory_id = f"relay:{ingest.current_memory_id}"
+        await db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+
+        missing = await db.fetchone(
+            "SELECT COUNT(*) AS count FROM memories WHERE id = ?",
+            (memory_id,),
+        )
+        result = await service.materialize_current_memories(limit=10)
+        materialized = await db.fetchone(
+            """
+            SELECT id, content, project_id, category, source
+            FROM memories
+            WHERE id = ?
+            """,
+            (memory_id,),
+        )
+
+        assert missing["count"] == 0
+        assert result.scanned == 1
+        assert result.materialized == 1
+        assert result.deleted == 0
+        assert materialized["content"] == _request().content
+        assert materialized["project_id"] == "node-1:relay"
+        assert materialized["category"] == "decision"
+        assert materialized["source"] == "relay"
+
+
+@pytest.mark.asyncio
 async def test_secret_guard_blocks_before_raw_persistence():
     async with _temp_db() as db:
         service = await _service_with_identity(db)
