@@ -9,8 +9,12 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from app.core.config import get_settings
 from app.core.schemas.relay import (
     RelayAdminOverviewResponse,
+    RelayHealthResponse,
+    RelayHubCheckRequest,
+    RelayHubCheckResponse,
     RelayIdentityCreateRequest,
     RelayIdentityCreateResponse,
+    RelayIdentityUpdateRequest,
     RelayIngestRequest,
     RelayIngestResponse,
     RelayProjectDigestResponse,
@@ -20,6 +24,8 @@ from app.core.schemas.relay import (
     RelaySettingsUpdateRequest,
     RelayShareMemoryRequest,
     RelayShareMemoryResponse,
+    RelayShareProjectRequest,
+    RelayShareProjectResponse,
 )
 from app.core.services.relay import (
     RelayIdempotencyConflict,
@@ -49,6 +55,36 @@ def _extract_bearer_token(authorization: Optional[str]) -> str:
     if scheme.lower() != "bearer" or not token:
         raise HTTPException(status_code=401, detail="Expected Bearer token")
     return token
+
+
+@router.get("/health", response_model=RelayHealthResponse)
+async def get_relay_health() -> RelayHealthResponse:
+    """Lightweight public health endpoint for personal-node hub checks."""
+
+    return RelayHealthResponse()
+
+
+async def _resolve_share_defaults(
+    service: RelayService,
+    *,
+    source_node_id: Optional[str],
+    source_version: Optional[int],
+    target_hub: Optional[str],
+) -> tuple[str, int, str]:
+    effective = await service.get_effective_config(get_settings())
+    values = effective["values"]
+    resolved_source_node_id = source_node_id or values["source_node_id"]
+    resolved_target_hub = target_hub or values["hub_url"]
+    resolved_source_version = (
+        source_version
+        if source_version is not None
+        else values["default_source_version"]
+    )
+    if not resolved_source_node_id:
+        raise HTTPException(status_code=400, detail="Relay source node is not set")
+    if not resolved_target_hub:
+        raise HTTPException(status_code=400, detail="Relay team hub URL is not set")
+    return resolved_source_node_id, resolved_source_version, resolved_target_hub
 
 
 @router.get("/admin/overview", response_model=RelayAdminOverviewResponse)
@@ -94,6 +130,23 @@ async def update_relay_admin_settings(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.post("/admin/hub/check", response_model=RelayHubCheckResponse)
+async def check_relay_hub(
+    payload: RelayHubCheckRequest,
+    service: RelayService = Depends(get_relay_service),
+) -> RelayHubCheckResponse:
+    """Check whether a configured team hub URL exposes relay health."""
+
+    try:
+        return await service.check_hub(
+            payload.hub_url,
+            timeout=get_settings().relay_http_timeout,
+        )
+    except Exception as exc:
+        logger.exception("Relay hub check failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.post("/admin/identities", response_model=RelayIdentityCreateResponse)
 async def create_relay_identity(
     payload: RelayIdentityCreateRequest,
@@ -123,6 +176,35 @@ async def create_relay_identity(
         )
     except Exception as exc:
         logger.exception("Relay identity registration failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.put(
+    "/admin/identities/{token_hash_prefix}", response_model=RelayIdentityCreateResponse
+)
+async def update_relay_identity(
+    token_hash_prefix: str,
+    payload: RelayIdentityUpdateRequest,
+    service: RelayService = Depends(get_relay_service),
+) -> RelayIdentityCreateResponse:
+    """Update a hub identity by its visible token hash prefix."""
+
+    try:
+        identity = await service.update_identity(token_hash_prefix, payload)
+        if identity is None:
+            raise HTTPException(status_code=404, detail="Relay identity not found")
+        return RelayIdentityCreateResponse(
+            identity=identity,
+            token=None,
+            token_generated=False,
+            token_hash_prefix=identity.token_hash_prefix,
+        )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Relay identity update failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -212,15 +294,27 @@ async def share_memory_to_relay_outbox(
     """Queue an existing local memory for relay delivery."""
 
     try:
-        outbox_id = await service.enqueue_memory_share_by_id(
-            memory_id,
+        source_node_id, source_version, target_hub = await _resolve_share_defaults(
+            service,
             source_node_id=payload.source_node_id,
             source_version=payload.source_version,
             target_hub=payload.target_hub,
+        )
+        outbox_id = await service.enqueue_memory_share_by_id(
+            memory_id,
+            source_node_id=source_node_id,
+            source_version=source_version,
+            target_hub=target_hub,
             event_type=payload.event_type,
             status=payload.status,
         )
-        return RelayShareMemoryResponse(outbox_id=outbox_id)
+        return RelayShareMemoryResponse(
+            outbox_id=outbox_id,
+            target_hub=target_hub,
+            source_node_id=source_node_id,
+        )
+    except HTTPException:
+        raise
     except KeyError:
         raise HTTPException(status_code=404, detail="Memory not found")
     except RelayTypeGateBlocked as exc:
@@ -231,4 +325,41 @@ async def share_memory_to_relay_outbox(
         raise HTTPException(status_code=409, detail=str(exc))
     except Exception as exc:
         logger.exception("Relay share enqueue failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post(
+    "/outbox/share-project/{project_id}",
+    response_model=RelayShareProjectResponse,
+)
+async def share_project_to_relay_outbox(
+    project_id: str,
+    payload: RelayShareProjectRequest,
+    service: RelayService = Depends(get_relay_service),
+) -> RelayShareProjectResponse:
+    """Queue all shareable local memories in a project for relay delivery."""
+
+    try:
+        source_node_id, source_version, target_hub = await _resolve_share_defaults(
+            service,
+            source_node_id=payload.source_node_id,
+            source_version=payload.source_version,
+            target_hub=payload.target_hub,
+        )
+        return await service.enqueue_project_share(
+            project_id,
+            source_node_id=source_node_id,
+            source_version=source_version,
+            target_hub=target_hub,
+            event_type=payload.event_type,
+            status=payload.status,
+        )
+    except HTTPException:
+        raise
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Project has no memories")
+    except RelayIdempotencyConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Relay project share enqueue failed")
         raise HTTPException(status_code=500, detail=str(exc))

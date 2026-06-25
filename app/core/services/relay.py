@@ -33,7 +33,9 @@ from ..schemas.relay import (
     RelayDigestSummary,
     RelayDigestData,
     RelayEnrichmentData,
+    RelayHubCheckResponse,
     RelayIdentitySummary,
+    RelayIdentityUpdateRequest,
     RelayIngestRequest,
     RelayIngestResponse,
     RelayOutboxJob,
@@ -45,6 +47,7 @@ from ..schemas.relay import (
     RelaySearchResponse,
     RelaySearchResult,
     RelaySettingValue,
+    RelayShareProjectResponse,
     RelaySettingsResponse,
     RelaySettingsUpdateRequest,
     RelayStatusCount,
@@ -102,6 +105,15 @@ class RelayHTTPClient:
         return f"{base}/api/relay/v1/ingest"
 
     @staticmethod
+    def health_url(target_hub: str) -> str:
+        base = target_hub.rstrip("/")
+        if base.endswith("/api/relay/v1/health"):
+            return base
+        if base.endswith("/api/relay/v1"):
+            return f"{base}/health"
+        return f"{base}/api/relay/v1/health"
+
+    @staticmethod
     def _response_detail(response: Any) -> str:
         try:
             data = response.json()
@@ -140,10 +152,23 @@ class RelayService:
         "hub_url": "relay.hub_url",
         "source_node_id": "relay.source_node_id",
         "default_source_version": "relay.default_source_version",
+        "hub_token": "relay.hub_token",
+        "sonnet_api_key": "relay.sonnet_api_key",
+        "sonnet_model": "relay.sonnet_model",
+        "sonnet_base_url": "relay.sonnet_base_url",
+        "prompt_version": "relay.prompt_version",
     }
-    ENV_SETTING_FIELDS = {
+    SETTING_FIELDS = {
         "hub_url": ("relay_hub_url", "MEM_MESH_RELAY_HUB_URL"),
         "source_node_id": ("relay_source_node_id", "MEM_MESH_RELAY_SOURCE_NODE_ID"),
+        "hub_token": ("relay_hub_token", "MEM_MESH_RELAY_HUB_TOKEN"),
+        "sonnet_api_key": ("relay_sonnet_api_key", "MEM_MESH_RELAY_SONNET_API_KEY"),
+        "sonnet_model": ("relay_sonnet_model", "MEM_MESH_RELAY_SONNET_MODEL"),
+        "sonnet_base_url": (
+            "relay_sonnet_base_url",
+            "MEM_MESH_RELAY_SONNET_BASE_URL",
+        ),
+        "prompt_version": ("relay_prompt_version", "MEM_MESH_RELAY_PROMPT_VERSION"),
     }
     DEFAULT_SHAREABLE_KINDS = {
         "bug",
@@ -365,20 +390,20 @@ class RelayService:
                 await self.db.execute(statement)
             await self._ensure_vector_schema()
 
-    async def get_admin_overview(self, *, limit: int = 10) -> RelayAdminOverviewResponse:
+    async def get_admin_overview(
+        self, *, limit: int = 10
+    ) -> RelayAdminOverviewResponse:
         """Return relay operational status for the dashboard admin page."""
 
         limit = max(1, min(limit, 50))
 
         async def status_counts(table_name: str) -> list[RelayStatusCount]:
-            rows = await self.db.fetchall(
-                f"""
+            rows = await self.db.fetchall(f"""
                 SELECT status, COUNT(*) AS count
                 FROM {table_name}
                 GROUP BY status
                 ORDER BY status
-                """
-            )
+                """)
             return [
                 RelayStatusCount(status=str(row["status"]), count=int(row["count"]))
                 for row in rows
@@ -444,7 +469,9 @@ class RelayService:
             outbox_counts=await status_counts("relay_outbox"),
             item_queue_counts=await status_counts("relay_queue_item"),
             aggregate_queue_counts=await status_counts("relay_queue_aggregate"),
-            raw_events=await scalar_count("SELECT COUNT(*) AS count FROM relay_raw_event"),
+            raw_events=await scalar_count(
+                "SELECT COUNT(*) AS count FROM relay_raw_event"
+            ),
             visible_memories=await scalar_count(
                 "SELECT COUNT(*) AS count FROM relay_memory_current WHERE visible = 1"
             ),
@@ -500,13 +527,7 @@ class RelayService:
     async def get_admin_settings(self, settings: Any) -> RelaySettingsResponse:
         """Return relay settings and identity registry state for the dashboard."""
 
-        version_value = await self.db.get_app_config(
-            self.CONFIG_KEYS["default_source_version"]
-        )
-        try:
-            default_source_version = int(version_value) if version_value else 1
-        except ValueError:
-            default_source_version = 1
+        default_source_version = await self.get_default_source_version()
 
         return RelaySettingsResponse(
             generated_at=_utc_now(),
@@ -521,42 +542,32 @@ class RelayService:
                 settings=settings,
             ),
             default_source_version=default_source_version,
-            hub_token=self._env_only_setting(
+            hub_token=await self._db_backed_setting(
                 key="hub_token",
                 label="Hub bearer token",
                 settings=settings,
-                field="relay_hub_token",
-                env_var="MEM_MESH_RELAY_HUB_TOKEN",
                 secret=True,
             ),
-            sonnet_api_key=self._env_only_setting(
+            sonnet_api_key=await self._db_backed_setting(
                 key="sonnet_api_key",
                 label="Sonnet API key",
                 settings=settings,
-                field="relay_sonnet_api_key",
-                env_var="MEM_MESH_RELAY_SONNET_API_KEY",
                 secret=True,
             ),
-            sonnet_model=self._env_only_setting(
+            sonnet_model=await self._db_backed_setting(
                 key="sonnet_model",
                 label="Sonnet model",
                 settings=settings,
-                field="relay_sonnet_model",
-                env_var="MEM_MESH_RELAY_SONNET_MODEL",
             ),
-            sonnet_base_url=self._env_only_setting(
+            sonnet_base_url=await self._db_backed_setting(
                 key="sonnet_base_url",
                 label="Sonnet endpoint",
                 settings=settings,
-                field="relay_sonnet_base_url",
-                env_var="MEM_MESH_RELAY_SONNET_BASE_URL",
             ),
-            prompt_version=self._env_only_setting(
+            prompt_version=await self._db_backed_setting(
                 key="prompt_version",
                 label="Prompt version",
                 settings=settings,
-                field="relay_prompt_version",
-                env_var="MEM_MESH_RELAY_PROMPT_VERSION",
             ),
             identities=await self.list_identities(),
         )
@@ -566,13 +577,18 @@ class RelayService:
     ) -> RelaySettingsResponse:
         """Persist dashboard-managed relay defaults."""
 
-        for key in ("hub_url", "source_node_id"):
-            _field_name, env_var = self.ENV_SETTING_FIELDS[key]
+        for key in (
+            "hub_url",
+            "source_node_id",
+            "hub_token",
+            "sonnet_api_key",
+            "sonnet_model",
+            "sonnet_base_url",
+            "prompt_version",
+        ):
             value = getattr(request, key)
             if value is None:
                 continue
-            if os.environ.get(env_var) is not None:
-                raise PermissionError(f"{env_var} is set; this key is env-pinned")
             cleaned = str(value).strip()
             if cleaned:
                 await self.db.set_app_config(self.CONFIG_KEYS[key], cleaned)
@@ -589,16 +605,90 @@ class RelayService:
 
         return await self.get_admin_settings(get_settings())
 
+    async def get_default_source_version(self) -> int:
+        version_value = await self.db.get_app_config(
+            self.CONFIG_KEYS["default_source_version"]
+        )
+        try:
+            return int(version_value) if version_value else 1
+        except ValueError:
+            return 1
+
+    async def get_effective_config(self, settings: Any) -> dict[str, Any]:
+        values = {}
+        sources = {}
+        for key in self.SETTING_FIELDS:
+            value, source = await self._effective_setting_value(key, settings)
+            values[key] = value
+            sources[key] = source
+        values["default_source_version"] = await self.get_default_source_version()
+        sources["default_source_version"] = (
+            "db"
+            if await self.db.get_app_config(self.CONFIG_KEYS["default_source_version"])
+            is not None
+            else "default"
+        )
+        return {"values": values, "sources": sources}
+
+    async def check_hub(
+        self,
+        hub_url: str,
+        *,
+        timeout: float = 5.0,
+        http_client: Any = None,
+    ) -> RelayHubCheckResponse:
+        cleaned = str(hub_url or "").strip()
+        health_url = RelayHTTPClient.health_url(cleaned)
+        client = http_client
+        close_client = False
+        if client is None:
+            import httpx
+
+            client = httpx.AsyncClient()
+            close_client = True
+
+        try:
+            response = await client.get(health_url, timeout=timeout)
+            status_code = int(getattr(response, "status_code", 0) or 0)
+            data = {}
+            try:
+                data = response.json()
+            except Exception:
+                data = {}
+            ok = status_code < 400 and bool(data.get("ok", True))
+            relay = data.get("relay") if isinstance(data, dict) else None
+            message = (
+                "hub reachable" if ok else RelayHTTPClient._response_detail(response)
+            )
+            return RelayHubCheckResponse(
+                ok=ok,
+                hub_url=cleaned,
+                health_url=health_url,
+                status_code=status_code,
+                relay=relay,
+                message=message,
+            )
+        except Exception as exc:
+            return RelayHubCheckResponse(
+                ok=False,
+                hub_url=cleaned,
+                health_url=health_url,
+                status_code=None,
+                relay=None,
+                message=str(exc),
+            )
+        finally:
+            if close_client:
+                await client.aclose()
+
     async def list_identities(self) -> list[RelayIdentitySummary]:
-        rows = await self.db.fetchall(
-            """
+        rows = await self.db.fetchall("""
             SELECT
                 token_hash, user_id, source_node_id, display_name,
                 home_domain, scopes_json, revoked, created_at, updated_at
             FROM relay_identity
             ORDER BY updated_at DESC
-            """
-        )
+            """)
         return [self._identity_from_row(row) for row in rows]
 
     async def get_identity(self, token_hash: str) -> Optional[RelayIdentitySummary]:
@@ -613,6 +703,55 @@ class RelayService:
             (token_hash,),
         )
         return self._identity_from_row(row) if row else None
+
+    async def update_identity(
+        self,
+        token_hash_prefix: str,
+        request: RelayIdentityUpdateRequest,
+    ) -> Optional[RelayIdentitySummary]:
+        row = await self._identity_row_by_prefix(token_hash_prefix)
+        if not row:
+            return None
+
+        user_id = request.user_id or str(row["user_id"])
+        source_node_id = request.source_node_id or str(row["source_node_id"])
+        display_name = request.display_name or str(row["display_name"])
+        home_domain = (
+            request.home_domain
+            if request.home_domain is not None
+            else row["home_domain"]
+        )
+        scopes = (
+            request.scopes
+            if request.scopes is not None
+            else _json_loads(row["scopes_json"], [])
+        )
+        revoked = bool(row["revoked"]) if request.revoked is None else request.revoked
+
+        await self.db.execute(
+            """
+            UPDATE relay_identity
+            SET user_id = ?,
+                source_node_id = ?,
+                display_name = ?,
+                home_domain = ?,
+                scopes_json = ?,
+                revoked = ?,
+                updated_at = ?
+            WHERE token_hash = ?
+            """,
+            (
+                user_id,
+                source_node_id,
+                display_name,
+                home_domain,
+                _json_dumps(scopes),
+                1 if revoked else 0,
+                _utc_now(),
+                row["token_hash"],
+            ),
+        )
+        return await self.get_identity(row["token_hash"])
 
     async def register_identity(
         self,
@@ -746,7 +885,9 @@ class RelayService:
         event_type: str = "update",
         status: str = "active",
     ) -> str:
-        row = await self.db.fetchone("SELECT * FROM memories WHERE id = ?", (memory_id,))
+        row = await self.db.fetchone(
+            "SELECT * FROM memories WHERE id = ?", (memory_id,)
+        )
         if not row:
             raise KeyError(f"memory not found: {memory_id}")
         return await self.enqueue_memory_share(
@@ -758,6 +899,55 @@ class RelayService:
             status=status,
         )
 
+    async def enqueue_project_share(
+        self,
+        project_id: str,
+        *,
+        source_node_id: str,
+        source_version: int,
+        target_hub: str,
+        event_type: str = "update",
+        status: str = "active",
+    ) -> RelayShareProjectResponse:
+        rows = await self.db.fetchall(
+            """
+            SELECT *
+            FROM memories
+            WHERE project_id = ?
+            ORDER BY updated_at DESC, created_at DESC
+            """,
+            (project_id,),
+        )
+        if not rows:
+            raise KeyError(f"project has no memories: {project_id}")
+
+        outbox_ids = []
+        skipped = []
+        for row in rows:
+            memory = Memory(**dict(row))
+            try:
+                outbox_ids.append(
+                    await self.enqueue_memory_share(
+                        memory,
+                        source_node_id=source_node_id,
+                        source_version=source_version,
+                        target_hub=target_hub,
+                        event_type=event_type,
+                        status=status,
+                    )
+                )
+            except (RelayTypeGateBlocked, RelaySecretBlocked) as exc:
+                skipped.append({"memory_id": str(memory.id), "reason": str(exc)})
+
+        return RelayShareProjectResponse(
+            project_id=project_id,
+            outbox_ids=outbox_ids,
+            queued_count=len(outbox_ids),
+            skipped=skipped,
+            target_hub=target_hub,
+            source_node_id=source_node_id,
+        )
+
     async def enqueue_outbox(
         self,
         *,
@@ -767,7 +957,9 @@ class RelayService:
         """Queue a relay event on a personal node before S2S push."""
 
         request = (
-            payload if isinstance(payload, RelayIngestRequest) else RelayIngestRequest(**payload)
+            payload
+            if isinstance(payload, RelayIngestRequest)
+            else RelayIngestRequest(**payload)
         )
         if request.content and redact_secrets(request.content) != request.content:
             raise RelaySecretBlocked("relay payload contains a high-confidence secret")
@@ -881,7 +1073,7 @@ class RelayService:
         )
         attempts = row["attempts"] if row else self.max_attempts
         status = "dead_letter" if attempts >= self.max_attempts else "pending"
-        backoff = min(300, 2**max(attempts - 1, 0))
+        backoff = min(300, 2 ** max(attempts - 1, 0))
         await self.db.execute(
             """
             UPDATE relay_outbox
@@ -1718,7 +1910,14 @@ class RelayService:
             )
             VALUES (?, ?, ?, 'pending', 0, ?, NULL, NULL, NULL, ?, ?)
             """,
-            (str(uuid.uuid4()), current_memory_id, raw_event_id, _epoch_now(), now, now),
+            (
+                str(uuid.uuid4()),
+                current_memory_id,
+                raw_event_id,
+                _epoch_now(),
+                now,
+                now,
+            ),
         )
 
     async def _enqueue_aggregate_locked(
@@ -1785,7 +1984,7 @@ class RelayService:
         )
         attempts = row["attempts"] if row else self.max_attempts
         status = "dead_letter" if attempts >= self.max_attempts else "pending"
-        backoff = min(300, 2**max(attempts - 1, 0))
+        backoff = min(300, 2 ** max(attempts - 1, 0))
         await self.db.execute(
             """
             UPDATE relay_queue_item
@@ -1806,7 +2005,7 @@ class RelayService:
         )
         attempts = row["attempts"] if row else self.max_attempts
         status = "dead_letter" if attempts >= self.max_attempts else "pending"
-        backoff = min(300, 2**max(attempts - 1, 0))
+        backoff = min(300, 2 ** max(attempts - 1, 0))
         await self.db.execute(
             """
             UPDATE relay_queue_aggregate
@@ -1892,7 +2091,9 @@ class RelayService:
             return None
 
         try:
-            query_embedding = [float(value) for value in await embedding_service.aembed(query)]
+            query_embedding = [
+                float(value) for value in await embedding_service.aembed(query)
+            ]
             if len(query_embedding) != self.db.embedding_dim:
                 return None
             params: list[Any] = [_json_dumps(query_embedding), limit * 3]
@@ -1944,7 +2145,9 @@ class RelayService:
         )
 
     @staticmethod
-    def _search_result_from_row(row: Any, *, rank: int, score: float) -> RelaySearchResult:
+    def _search_result_from_row(
+        row: Any, *, rank: int, score: float
+    ) -> RelaySearchResult:
         tags = _json_loads(row["enrichment_tags"], None)
         if tags is None:
             tags = _json_loads(row["tags_json"], [])
@@ -1970,64 +2173,52 @@ class RelayService:
         key: str,
         label: str,
         settings: Any,
-    ) -> RelaySettingValue:
-        field, env_var = self.ENV_SETTING_FIELDS[key]
-        env_pinned = os.environ.get(env_var) is not None
-        if env_pinned:
-            value = str(getattr(settings, field, "") or "")
-            return RelaySettingValue(
-                key=key,
-                label=label,
-                value=value,
-                configured=bool(value),
-                source="env",
-                env_var=env_var,
-                env_pinned=True,
-            )
-
-        db_value = await self.db.get_app_config(self.CONFIG_KEYS[key])
-        if db_value is not None:
-            return RelaySettingValue(
-                key=key,
-                label=label,
-                value=str(db_value),
-                configured=bool(str(db_value).strip()),
-                source="db",
-                env_var=env_var,
-            )
-
-        value = str(getattr(settings, field, "") or "")
-        return RelaySettingValue(
-            key=key,
-            label=label,
-            value=value,
-            configured=bool(value),
-            source="default",
-            env_var=env_var,
-        )
-
-    @staticmethod
-    def _env_only_setting(
-        *,
-        key: str,
-        label: str,
-        settings: Any,
-        field: str,
-        env_var: str,
         secret: bool = False,
     ) -> RelaySettingValue:
-        value = str(getattr(settings, field, "") or "")
-        env_pinned = os.environ.get(env_var) is not None
+        value, source = await self._effective_setting_value(key, settings)
+        _field, env_var = self.SETTING_FIELDS[key]
         return RelaySettingValue(
             key=key,
             label=label,
             value=None if secret else value,
             configured=bool(value),
-            source="env" if env_pinned else "default",
+            source=source,
             env_var=env_var,
-            env_pinned=env_pinned,
+            env_pinned=os.environ.get(env_var) is not None,
             secret=secret,
         )
+
+    async def _effective_setting_value(
+        self, key: str, settings: Any
+    ) -> tuple[str, str]:
+        db_value = await self.db.get_app_config(self.CONFIG_KEYS[key])
+        if db_value is not None:
+            return str(db_value), "db"
+
+        field, env_var = self.SETTING_FIELDS[key]
+        value = str(getattr(settings, field, "") or "")
+        source = "env" if os.environ.get(env_var) is not None else "default"
+        return value, source
+
+    async def _identity_row_by_prefix(self, token_hash_prefix: str) -> Optional[Any]:
+        prefix = str(token_hash_prefix or "").strip()
+        if not prefix:
+            return None
+        rows = await self.db.fetchall(
+            """
+            SELECT
+                token_hash, user_id, source_node_id, display_name,
+                home_domain, scopes_json, revoked, created_at, updated_at
+            FROM relay_identity
+            WHERE token_hash LIKE ?
+            ORDER BY updated_at DESC
+            LIMIT 2
+            """,
+            (f"{prefix}%",),
+        )
+        if len(rows) > 1:
+            raise ValueError("relay identity token hash prefix is ambiguous")
+        return rows[0] if rows else None
 
     @staticmethod
     def _identity_from_row(row: Any) -> RelayIdentitySummary:
@@ -2115,9 +2306,9 @@ class RelayService:
 
     @staticmethod
     def _hash_payload(payload: Dict[str, Any]) -> str:
-        return "sha256:" + hashlib.sha256(
-            _json_dumps(payload).encode("utf-8")
-        ).hexdigest()
+        return (
+            "sha256:" + hashlib.sha256(_json_dumps(payload).encode("utf-8")).hexdigest()
+        )
 
     @staticmethod
     def _memory_tags(memory: Any) -> list[str]:

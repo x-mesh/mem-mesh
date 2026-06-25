@@ -4,7 +4,6 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-
 RelayEventType = Literal["create", "update", "retract"]
 RelayKind = Literal[
     "task",
@@ -274,6 +273,25 @@ class RelayIdentitySummary(BaseModel):
     updated_at: str
 
 
+class RelayHubCheckRequest(BaseModel):
+    hub_url: str = Field(min_length=1, max_length=500)
+
+
+class RelayHubCheckResponse(BaseModel):
+    ok: bool
+    hub_url: str
+    health_url: str
+    status_code: Optional[int] = None
+    relay: Optional[str] = None
+    message: str = ""
+
+
+class RelayHealthResponse(BaseModel):
+    ok: bool = True
+    relay: str = "mem-mesh-relay"
+    role: str = "hub"
+
+
 class RelaySettingsResponse(BaseModel):
     generated_at: str
     hub_url: RelaySettingValue
@@ -291,6 +309,11 @@ class RelaySettingsUpdateRequest(BaseModel):
     hub_url: Optional[str] = Field(default=None, max_length=500)
     source_node_id: Optional[str] = Field(default=None, max_length=200)
     default_source_version: Optional[int] = Field(default=None, ge=0)
+    hub_token: Optional[str] = Field(default=None, max_length=500)
+    sonnet_api_key: Optional[str] = Field(default=None, max_length=500)
+    sonnet_model: Optional[str] = Field(default=None, max_length=200)
+    sonnet_base_url: Optional[str] = Field(default=None, max_length=500)
+    prompt_version: Optional[str] = Field(default=None, max_length=100)
 
 
 class RelayIdentityCreateRequest(BaseModel):
@@ -320,10 +343,32 @@ class RelayIdentityCreateResponse(BaseModel):
     token_hash_prefix: str
 
 
+class RelayIdentityUpdateRequest(BaseModel):
+    user_id: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    source_node_id: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    home_domain: Optional[str] = Field(default=None, max_length=300)
+    scopes: Optional[List[str]] = None
+    revoked: Optional[bool] = None
+
+    @field_validator("scopes")
+    @classmethod
+    def _validate_scopes(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return None
+        scopes = [scope for scope in value if scope]
+        if not scopes:
+            raise ValueError("at least one relay scope is required")
+        unknown = set(scopes) - {"read", "write"}
+        if unknown:
+            raise ValueError(f"unknown relay scope(s): {', '.join(sorted(unknown))}")
+        return scopes
+
+
 class RelayShareMemoryRequest(BaseModel):
-    source_node_id: str = Field(min_length=1, max_length=200)
-    source_version: int = Field(ge=0)
-    target_hub: str = Field(min_length=1)
+    source_node_id: Optional[str] = Field(default=None, max_length=200)
+    source_version: Optional[int] = Field(default=None, ge=0)
+    target_hub: Optional[str] = Field(default=None, max_length=500)
     event_type: RelayEventType = "update"
     status: str = Field(default="active", min_length=1, max_length=50)
 
@@ -331,3 +376,23 @@ class RelayShareMemoryRequest(BaseModel):
 class RelayShareMemoryResponse(BaseModel):
     outbox_id: str
     status: str = "queued"
+    target_hub: str
+    source_node_id: str
+
+
+class RelayShareProjectRequest(BaseModel):
+    source_node_id: Optional[str] = Field(default=None, max_length=200)
+    source_version: Optional[int] = Field(default=None, ge=0)
+    target_hub: Optional[str] = Field(default=None, max_length=500)
+    event_type: RelayEventType = "update"
+    status: str = Field(default="active", min_length=1, max_length=50)
+
+
+class RelayShareProjectResponse(BaseModel):
+    project_id: str
+    outbox_ids: List[str] = Field(default_factory=list)
+    queued_count: int = 0
+    skipped: List[Dict[str, str]] = Field(default_factory=list)
+    status: str = "queued"
+    target_hub: str
+    source_node_id: str

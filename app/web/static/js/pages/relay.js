@@ -8,12 +8,16 @@ export class RelayPage extends HTMLElement {
     this.activeTab = 'operations';
     this.limit = 10;
     this.loading = false;
+    this.shareCandidates = [];
+    this.selectedMemoryId = '';
+    this.memorySearchTimer = null;
   }
 
   connectedCallback() {
     this.render();
     this.loadOverview();
     this.loadSettings();
+    this.loadShareCandidates();
   }
 
   get api() {
@@ -43,7 +47,8 @@ export class RelayPage extends HTMLElement {
 
       <nav class="relay-tabs" aria-label="Relay sections">
         <button class="relay-tab active" data-tab="operations" type="button">Operations</button>
-        <button class="relay-tab" data-tab="settings" type="button">Settings</button>
+        <button class="relay-tab" data-tab="personal" type="button">Personal Node</button>
+        <button class="relay-tab" data-tab="hub" type="button">Team Hub</button>
       </nav>
 
       <div class="relay-tab-panel" data-panel="operations">
@@ -55,17 +60,20 @@ export class RelayPage extends HTMLElement {
           <form class="relay-panel relay-share-panel" id="relay-share-form">
           <div class="relay-panel-header">
             <h2>Share Memory</h2>
-            <span class="relay-panel-meta">outbox</span>
+            <span id="relay-share-target-meta" class="relay-panel-meta">outbox</span>
+          </div>
+          <div id="relay-share-connection" class="relay-connection-summary">
+            ${this.renderEmpty('Load settings to show the target hub')}
           </div>
           <div class="relay-form-grid">
-            <label class="relay-field">
-              <span>Memory ID</span>
-              <input id="share-memory-id" name="memory_id" type="text" autocomplete="off" required>
+            <label class="relay-field relay-field-wide">
+              <span>Find Memory</span>
+              <input id="relay-memory-search" type="search" autocomplete="off" placeholder="Search recent memories">
             </label>
-            <label class="relay-field">
-              <span>Source Node</span>
-              <input id="share-source-node" name="source_node_id" type="text" autocomplete="off" required>
-            </label>
+            <input id="share-memory-id" name="memory_id" type="hidden">
+            <div id="relay-memory-options" class="relay-memory-options relay-field-wide">
+              ${this.renderTableSkeleton()}
+            </div>
             <label class="relay-field">
               <span>Version</span>
               <input id="share-source-version" name="source_version" type="number" min="0" value="1" required>
@@ -79,14 +87,17 @@ export class RelayPage extends HTMLElement {
               </select>
             </label>
             <label class="relay-field relay-field-wide">
-              <span>Target Hub</span>
-              <input id="share-target-hub" name="target_hub" type="url" autocomplete="off" required>
+              <span>Project</span>
+              <input id="share-project-id" type="text" autocomplete="off" placeholder="Select a memory or enter a project id">
             </label>
           </div>
           <div class="relay-actions">
             <button class="primary-button" id="relay-share-submit" type="submit">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
-              Queue Share
+              Queue Memory
+            </button>
+            <button class="secondary-button" id="relay-project-share-submit" type="button">
+              Queue Project
             </button>
             <span id="relay-share-result" class="relay-inline-status" aria-live="polite"></span>
           </div>
@@ -130,7 +141,11 @@ export class RelayPage extends HTMLElement {
         </section>
       </div>
 
-      <section class="relay-tab-panel hidden" data-panel="settings">
+      <section class="relay-tab-panel hidden" data-panel="personal">
+        ${this.renderSettingsSkeleton()}
+      </section>
+
+      <section class="relay-tab-panel hidden" data-panel="hub">
         ${this.renderSettingsSkeleton()}
       </section>
     `;
@@ -141,6 +156,7 @@ export class RelayPage extends HTMLElement {
   setupEventListeners() {
     this.querySelector('#relay-refresh')?.addEventListener('click', () => {
       this.loadOverview();
+      this.loadShareCandidates();
     });
     this.querySelector('#relay-limit')?.addEventListener('change', (event) => {
       this.limit = Number(event.target.value || 10);
@@ -150,19 +166,44 @@ export class RelayPage extends HTMLElement {
       event.preventDefault();
       this.shareMemory();
     });
+    this.querySelector('#relay-project-share-submit')?.addEventListener('click', () => {
+      this.shareProject();
+    });
+    this.querySelector('#relay-memory-search')?.addEventListener('input', (event) => {
+      window.clearTimeout(this.memorySearchTimer);
+      this.memorySearchTimer = window.setTimeout(() => {
+        this.loadShareCandidates(event.target.value.trim());
+      }, 180);
+    });
+    this.querySelector('#relay-memory-options')?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-memory-id]');
+      if (button) {
+        this.selectMemory(button.dataset.memoryId);
+      }
+    });
     this.querySelectorAll('.relay-tab').forEach((button) => {
       button.addEventListener('click', () => this.switchTab(button.dataset.tab));
     });
   }
 
   bindSettingsEvents() {
-    this.querySelector('#relay-settings-form')?.addEventListener('submit', (event) => {
+    this.querySelector('#relay-personal-form')?.addEventListener('submit', (event) => {
       event.preventDefault();
-      this.saveSettings();
+      this.savePersonalSettings();
+    });
+    this.querySelector('#relay-hub-check')?.addEventListener('click', () => {
+      this.checkHubConnection();
+    });
+    this.querySelector('#relay-worker-form')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.saveWorkerSettings();
     });
     this.querySelector('#relay-identity-form')?.addEventListener('submit', (event) => {
       event.preventDefault();
       this.createIdentity();
+    });
+    this.querySelectorAll('[data-identity-save]').forEach((button) => {
+      button.addEventListener('click', () => this.saveIdentity(button.dataset.identitySave));
     });
   }
 
@@ -175,7 +216,7 @@ export class RelayPage extends HTMLElement {
     this.querySelectorAll('.relay-tab-panel').forEach((panel) => {
       panel.classList.toggle('hidden', panel.dataset.panel !== tab);
     });
-    if (tab === 'settings' && !this.settings) {
+    if ((tab === 'personal' || tab === 'hub') && !this.settings) {
       this.loadSettings();
     }
   }
@@ -202,39 +243,112 @@ export class RelayPage extends HTMLElement {
       this.renderSettings();
       this.applyShareDefaults();
     } catch (error) {
-      const panel = this.querySelector('[data-panel="settings"]');
-      if (panel) {
-        panel.innerHTML = `<div class="relay-error" role="alert">${this.escapeHtml(this.errorMessage(error))}</div>`;
+      const errorHtml = `<div class="relay-error" role="alert">${this.escapeHtml(this.errorMessage(error))}</div>`;
+      const personalPanel = this.querySelector('[data-panel="personal"]');
+      const hubPanel = this.querySelector('[data-panel="hub"]');
+      if (personalPanel) personalPanel.innerHTML = errorHtml;
+      if (hubPanel) hubPanel.innerHTML = errorHtml;
+    }
+  }
+
+  async loadShareCandidates(query = '') {
+    if (!this.api) return;
+    const target = this.querySelector('#relay-memory-options');
+    if (target) {
+      target.innerHTML = this.renderTableSkeleton();
+    }
+    try {
+      const response = await this.api.searchMemories(query, {
+        limit: 8,
+        recency_weight: query ? 0 : 1.0,
+        search_mode: query ? 'hybrid' : 'exact',
+      });
+      this.shareCandidates = response?.results || [];
+      this.renderMemoryOptions();
+    } catch (error) {
+      if (target) {
+        target.innerHTML = `<div class="relay-error" role="alert">${this.escapeHtml(this.errorMessage(error))}</div>`;
       }
     }
   }
 
-  async saveSettings() {
+  async savePersonalSettings() {
     if (!this.api) return;
-    const submit = this.querySelector('#relay-settings-submit');
+    const submit = this.querySelector('#relay-personal-submit');
     const hubUrlInput = this.querySelector('#relay-setting-hub-url');
     const sourceNodeInput = this.querySelector('#relay-setting-source-node');
+    const hubTokenInput = this.querySelector('#relay-setting-hub-token');
     const payload = {
+      hub_url: hubUrlInput?.value.trim() || '',
+      source_node_id: sourceNodeInput?.value.trim() || '',
       default_source_version: Number(
         this.querySelector('#relay-setting-source-version')?.value || 1
       ),
     };
-    if (hubUrlInput && !hubUrlInput.disabled) {
-      payload.hub_url = hubUrlInput.value.trim();
-    }
-    if (sourceNodeInput && !sourceNodeInput.disabled) {
-      payload.source_node_id = sourceNodeInput.value.trim();
+    if (hubTokenInput?.value.trim()) {
+      payload.hub_token = hubTokenInput.value.trim();
     }
     submit.disabled = true;
     try {
       this.settings = await this.api.updateRelaySettings(payload);
       this.renderSettings();
       this.applyShareDefaults();
-      showToast('Relay settings saved.', 'success');
+      showToast('Personal relay settings saved.', 'success');
     } catch (error) {
       showToast(`Relay settings failed: ${this.errorMessage(error)}`, 'error');
     } finally {
       submit.disabled = false;
+    }
+  }
+
+  async saveWorkerSettings() {
+    if (!this.api) return;
+    const submit = this.querySelector('#relay-worker-submit');
+    const payload = {
+      sonnet_model: this.querySelector('#relay-setting-sonnet-model')?.value.trim() || '',
+      sonnet_base_url: this.querySelector('#relay-setting-sonnet-base-url')?.value.trim() || '',
+      prompt_version: this.querySelector('#relay-setting-prompt-version')?.value.trim() || '',
+    };
+    const sonnetKey = this.querySelector('#relay-setting-sonnet-api-key')?.value.trim();
+    if (sonnetKey) {
+      payload.sonnet_api_key = sonnetKey;
+    }
+    submit.disabled = true;
+    try {
+      this.settings = await this.api.updateRelaySettings(payload);
+      this.renderSettings();
+      showToast('Team hub worker settings saved.', 'success');
+    } catch (error) {
+      showToast(`Worker settings failed: ${this.errorMessage(error)}`, 'error');
+    } finally {
+      submit.disabled = false;
+    }
+  }
+
+  async checkHubConnection() {
+    if (!this.api) return;
+    const button = this.querySelector('#relay-hub-check');
+    const status = this.querySelector('#relay-hub-check-result');
+    const hubUrl = this.querySelector('#relay-setting-hub-url')?.value.trim()
+      || this.settings?.hub_url?.value
+      || '';
+    if (!hubUrl) {
+      showToast('Team hub URL is missing.', 'warning');
+      return;
+    }
+    button.disabled = true;
+    status.textContent = 'Checking...';
+    try {
+      const result = await this.api.checkRelayHub({ hub_url: hubUrl });
+      status.textContent = result.ok
+        ? `Reachable: ${result.health_url}`
+        : `Failed: ${result.message}`;
+      showToast(result.ok ? 'Hub is reachable.' : 'Hub check failed.', result.ok ? 'success' : 'error');
+    } catch (error) {
+      status.textContent = this.errorMessage(error);
+      showToast(`Hub check failed: ${this.errorMessage(error)}`, 'error');
+    } finally {
+      button.disabled = false;
     }
   }
 
@@ -274,18 +388,41 @@ export class RelayPage extends HTMLElement {
     }
   }
 
+  async saveIdentity(tokenHashPrefix) {
+    if (!this.api || !tokenHashPrefix) return;
+    const row = Array.from(this.querySelectorAll('[data-identity-row]')).find(
+      (item) => item.dataset.identityRow === tokenHashPrefix
+    );
+    if (!row) return;
+    const payload = {
+      user_id: row.querySelector('[data-field="user_id"]')?.value.trim(),
+      source_node_id: row.querySelector('[data-field="source_node_id"]')?.value.trim(),
+      display_name: row.querySelector('[data-field="display_name"]')?.value.trim(),
+      home_domain: row.querySelector('[data-field="home_domain"]')?.value.trim() || null,
+      scopes: Array.from(row.querySelectorAll('[data-field="scope"]:checked')).map(
+        (item) => item.value
+      ),
+      revoked: Boolean(row.querySelector('[data-field="revoked"]')?.checked),
+    };
+    try {
+      await this.api.updateRelayIdentity(tokenHashPrefix, payload);
+      await this.loadSettings();
+      showToast('Relay identity updated.', 'success');
+    } catch (error) {
+      showToast(`Identity update failed: ${this.errorMessage(error)}`, 'error');
+    }
+  }
+
   async shareMemory() {
     if (!this.api) return;
     const submit = this.querySelector('#relay-share-submit');
     const status = this.querySelector('#relay-share-result');
     const memoryId = this.querySelector('#share-memory-id')?.value.trim();
-    const sourceNodeId = this.querySelector('#share-source-node')?.value.trim();
     const sourceVersion = Number(this.querySelector('#share-source-version')?.value || 0);
-    const targetHub = this.querySelector('#share-target-hub')?.value.trim();
     const eventType = this.querySelector('#share-event-type')?.value || 'update';
 
-    if (!memoryId || !sourceNodeId || !targetHub) {
-      showToast('Required relay fields are missing.', 'warning');
+    if (!memoryId) {
+      showToast('Select a memory to share.', 'warning');
       return;
     }
 
@@ -293,18 +430,48 @@ export class RelayPage extends HTMLElement {
     status.textContent = 'Queueing...';
     try {
       const result = await this.api.shareRelayMemory(memoryId, {
-        source_node_id: sourceNodeId,
         source_version: sourceVersion,
-        target_hub: targetHub,
         event_type: eventType,
       });
-      status.textContent = `Queued ${result.outbox_id}`;
+      status.textContent = `Queued ${result.outbox_id} to ${result.target_hub}`;
       showToast('Memory queued for relay.', 'success');
       await this.loadOverview();
     } catch (error) {
       const message = this.errorMessage(error);
       status.textContent = message;
       showToast(`Relay share failed: ${message}`, 'error');
+    } finally {
+      submit.disabled = false;
+    }
+  }
+
+  async shareProject() {
+    if (!this.api) return;
+    const submit = this.querySelector('#relay-project-share-submit');
+    const status = this.querySelector('#relay-share-result');
+    const projectId = this.querySelector('#share-project-id')?.value.trim();
+    const sourceVersion = Number(this.querySelector('#share-source-version')?.value || 0);
+    const eventType = this.querySelector('#share-event-type')?.value || 'update';
+
+    if (!projectId) {
+      showToast('Project id is missing.', 'warning');
+      return;
+    }
+
+    submit.disabled = true;
+    status.textContent = 'Queueing project...';
+    try {
+      const result = await this.api.shareRelayProject(projectId, {
+        source_version: sourceVersion,
+        event_type: eventType,
+      });
+      status.textContent = `Queued ${result.queued_count} memories to ${result.target_hub}`;
+      showToast('Project queued for relay.', 'success');
+      await this.loadOverview();
+    } catch (error) {
+      const message = this.errorMessage(error);
+      status.textContent = message;
+      showToast(`Relay project share failed: ${message}`, 'error');
     } finally {
       submit.disabled = false;
     }
@@ -337,16 +504,85 @@ export class RelayPage extends HTMLElement {
     this.renderDigests(data.recent_digests);
   }
 
+  selectMemory(memoryId) {
+    this.selectedMemoryId = memoryId || '';
+    const input = this.querySelector('#share-memory-id');
+    if (input) input.value = this.selectedMemoryId;
+    const projectInput = this.querySelector('#share-project-id');
+    const selected = this.shareCandidates.find((memory) => memory.id === this.selectedMemoryId);
+    if (projectInput && selected?.project_id) {
+      projectInput.value = selected.project_id;
+    }
+    this.renderMemoryOptions();
+  }
+
+  renderMemoryOptions() {
+    const target = this.querySelector('#relay-memory-options');
+    if (!target) return;
+    if (!this.shareCandidates?.length) {
+      target.innerHTML = this.renderEmpty('No shareable memory candidates');
+      return;
+    }
+    target.innerHTML = this.shareCandidates.map((memory) => {
+      const selected = memory.id === this.selectedMemoryId;
+      const content = this.truncate(memory.content || '', 120);
+      return `
+        <button
+          class="relay-memory-option ${selected ? 'selected' : ''}"
+          type="button"
+          data-memory-id="${this.escapeHtml(memory.id)}"
+        >
+          <span class="relay-memory-option-main">
+            <strong>${this.escapeHtml(memory.category || 'memory')}</strong>
+            <span>${this.escapeHtml(content)}</span>
+          </span>
+          <span class="relay-memory-option-meta">
+            ${this.escapeHtml(memory.project_id || 'default')}
+          </span>
+        </button>
+      `;
+    }).join('');
+  }
+
+  renderShareConnection() {
+    const target = this.querySelector('#relay-share-connection');
+    const meta = this.querySelector('#relay-share-target-meta');
+    if (!target || !this.settings) return;
+    const hub = this.settings.hub_url?.value || '';
+    const node = this.settings.source_node_id?.value || '';
+    const tokenConfigured = Boolean(this.settings.hub_token?.configured);
+    if (meta) {
+      meta.textContent = hub || 'hub not set';
+    }
+    target.innerHTML = `
+      <div class="relay-connection-item">
+        <span>Hub</span>
+        <code>${this.escapeHtml(hub || 'not set')}</code>
+      </div>
+      <div class="relay-connection-item">
+        <span>Node</span>
+        <code>${this.escapeHtml(node || 'not set')}</code>
+      </div>
+      <div class="relay-connection-item">
+        <span>Token</span>
+        <span class="relay-status-chip ${tokenConfigured ? 'status-completed' : 'status-pending'}">
+          ${tokenConfigured ? 'configured' : 'missing'}
+        </span>
+      </div>
+    `;
+  }
+
   renderSettings() {
     const data = this.settings;
-    const panel = this.querySelector('[data-panel="settings"]');
-    if (!data || !panel) return;
+    const personalPanel = this.querySelector('[data-panel="personal"]');
+    const hubPanel = this.querySelector('[data-panel="hub"]');
+    if (!data || !personalPanel || !hubPanel) return;
 
-    panel.innerHTML = `
+    personalPanel.innerHTML = `
       <section class="relay-settings-grid">
-        <form class="relay-panel" id="relay-settings-form">
+        <form class="relay-panel" id="relay-personal-form">
           <div class="relay-panel-header">
-            <h2>Personal Node Defaults</h2>
+            <h2>Connection</h2>
             <span class="relay-panel-meta">${this.formatDate(data.generated_at)}</span>
           </div>
           <div class="relay-form-grid">
@@ -356,7 +592,6 @@ export class RelayPage extends HTMLElement {
                 id="relay-setting-hub-url"
                 type="url"
                 value="${this.escapeHtml(data.hub_url.value || '')}"
-                ${data.hub_url.env_pinned ? 'disabled' : ''}
                 placeholder="https://team-hub.example.com"
               >
               ${this.renderSettingHint(data.hub_url)}
@@ -367,7 +602,6 @@ export class RelayPage extends HTMLElement {
                 id="relay-setting-source-node"
                 type="text"
                 value="${this.escapeHtml(data.source_node_id.value || '')}"
-                ${data.source_node_id.env_pinned ? 'disabled' : ''}
                 placeholder="jinwoo-laptop"
               >
               ${this.renderSettingHint(data.source_node_id)}
@@ -381,20 +615,84 @@ export class RelayPage extends HTMLElement {
                 value="${Number(data.default_source_version || 1)}"
               >
             </label>
+            <label class="relay-field relay-field-wide">
+              <span>Hub Token</span>
+              <input
+                id="relay-setting-hub-token"
+                type="password"
+                autocomplete="new-password"
+                placeholder="${data.hub_token.configured ? 'configured, enter new token to replace' : 'paste hub-issued token'}"
+              >
+              ${this.renderSettingHint(data.hub_token)}
+            </label>
           </div>
           <div class="relay-actions">
-            <button class="primary-button" id="relay-settings-submit" type="submit">Save Defaults</button>
-            <span class="relay-inline-status">Used to prefill Share Memory.</span>
+            <button class="primary-button" id="relay-personal-submit" type="submit">Save Personal Node</button>
+            <button class="secondary-button" id="relay-hub-check" type="button">Check Hub</button>
+            <span id="relay-hub-check-result" class="relay-inline-status" aria-live="polite"></span>
           </div>
         </form>
 
         <section class="relay-panel">
           <div class="relay-panel-header">
-            <h2>Worker Environment</h2>
-            <span class="relay-panel-meta">read-only</span>
+            <h2>Connection State</h2>
+            <span class="relay-panel-meta">local db first</span>
           </div>
           <div class="relay-setting-list">
+            ${this.renderSettingRow(data.hub_url)}
+            ${this.renderSettingRow(data.source_node_id)}
             ${this.renderSettingRow(data.hub_token)}
+          </div>
+        </section>
+      </section>
+    `;
+
+    hubPanel.innerHTML = `
+      <section class="relay-settings-grid">
+        <form class="relay-panel" id="relay-worker-form">
+          <div class="relay-panel-header">
+            <h2>Worker LLM</h2>
+            <span class="relay-panel-meta">team hub</span>
+          </div>
+          <div class="relay-form-grid">
+            <label class="relay-field relay-field-wide">
+              <span>Sonnet API Key</span>
+              <input
+                id="relay-setting-sonnet-api-key"
+                type="password"
+                autocomplete="new-password"
+                placeholder="${data.sonnet_api_key.configured ? 'configured, enter new key to replace' : 'required for item/aggregate workers'}"
+              >
+              ${this.renderSettingHint(data.sonnet_api_key)}
+            </label>
+            <label class="relay-field">
+              <span>Sonnet Model</span>
+              <input id="relay-setting-sonnet-model" type="text" value="${this.escapeHtml(data.sonnet_model.value || '')}">
+              ${this.renderSettingHint(data.sonnet_model)}
+            </label>
+            <label class="relay-field">
+              <span>Prompt Version</span>
+              <input id="relay-setting-prompt-version" type="text" value="${this.escapeHtml(data.prompt_version.value || '')}">
+              ${this.renderSettingHint(data.prompt_version)}
+            </label>
+            <label class="relay-field relay-field-wide">
+              <span>Sonnet Endpoint</span>
+              <input id="relay-setting-sonnet-base-url" type="url" value="${this.escapeHtml(data.sonnet_base_url.value || '')}">
+              ${this.renderSettingHint(data.sonnet_base_url)}
+            </label>
+          </div>
+          <div class="relay-actions">
+            <button class="primary-button" id="relay-worker-submit" type="submit">Save Worker</button>
+            <span class="relay-inline-status">Used by item and aggregate workers.</span>
+          </div>
+        </form>
+
+        <section class="relay-panel">
+          <div class="relay-panel-header">
+            <h2>Worker State</h2>
+            <span class="relay-panel-meta">local db first</span>
+          </div>
+          <div class="relay-setting-list">
             ${this.renderSettingRow(data.sonnet_api_key)}
             ${this.renderSettingRow(data.sonnet_model)}
             ${this.renderSettingRow(data.sonnet_base_url)}
@@ -462,6 +760,7 @@ export class RelayPage extends HTMLElement {
     `;
 
     this.bindSettingsEvents();
+    this.renderShareConnection();
   }
 
   renderSettingRow(item) {
@@ -486,7 +785,7 @@ export class RelayPage extends HTMLElement {
     return `
       <small class="relay-field-hint">
         ${this.escapeHtml(item.env_var)}
-        ${item.env_pinned ? ' is set and overrides dashboard changes.' : ` source: ${item.source}`}
+        ${item.env_pinned && item.source !== 'db' ? ' fallback from env' : ` source: ${item.source}`}
       </small>
     `;
   }
@@ -499,21 +798,39 @@ export class RelayPage extends HTMLElement {
       <table class="relay-table">
         <thead>
           <tr>
-            <th>Node</th>
             <th>User</th>
+            <th>Node</th>
+            <th>Home</th>
             <th>Scopes</th>
-            <th>Token Hash</th>
-            <th>Updated</th>
+            <th>State</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           ${rows.map((row) => `
-            <tr>
-              <td class="relay-ellipsis">${this.escapeHtml(row.source_node_id)}</td>
-              <td>${this.escapeHtml(row.display_name)}<br><span class="relay-muted">${this.escapeHtml(row.user_id)}</span></td>
-              <td>${row.scopes.map((scope) => `<span class="relay-status-chip">${this.escapeHtml(scope)}</span>`).join(' ')}</td>
-              <td><code>${this.escapeHtml(row.token_hash_prefix)}</code></td>
-              <td>${this.formatDate(row.updated_at)}</td>
+            <tr data-identity-row="${this.escapeHtml(row.token_hash_prefix)}">
+              <td>
+                <input class="relay-table-input" data-field="display_name" value="${this.escapeHtml(row.display_name)}">
+                <input class="relay-table-input muted" data-field="user_id" value="${this.escapeHtml(row.user_id)}">
+              </td>
+              <td>
+                <input class="relay-table-input" data-field="source_node_id" value="${this.escapeHtml(row.source_node_id)}">
+                <code>${this.escapeHtml(row.token_hash_prefix)}</code>
+              </td>
+              <td>
+                <input class="relay-table-input" data-field="home_domain" value="${this.escapeHtml(row.home_domain || '')}">
+              </td>
+              <td>
+                <label class="relay-inline-check"><input data-field="scope" type="checkbox" value="read" ${row.scopes.includes('read') ? 'checked' : ''}> read</label>
+                <label class="relay-inline-check"><input data-field="scope" type="checkbox" value="write" ${row.scopes.includes('write') ? 'checked' : ''}> write</label>
+              </td>
+              <td>
+                <label class="relay-inline-check"><input data-field="revoked" type="checkbox" ${row.revoked ? 'checked' : ''}> revoked</label>
+                <span class="relay-muted">${this.formatDate(row.updated_at)}</span>
+              </td>
+              <td>
+                <button class="secondary-button relay-table-action" type="button" data-identity-save="${this.escapeHtml(row.token_hash_prefix)}">Save</button>
+              </td>
             </tr>
           `).join('')}
         </tbody>
@@ -523,18 +840,11 @@ export class RelayPage extends HTMLElement {
 
   applyShareDefaults() {
     if (!this.settings) return;
-    const sourceInput = this.querySelector('#share-source-node');
     const versionInput = this.querySelector('#share-source-version');
-    const hubInput = this.querySelector('#share-target-hub');
-    if (sourceInput && !sourceInput.value) {
-      sourceInput.value = this.settings.source_node_id.value || '';
-    }
     if (versionInput && (!versionInput.value || versionInput.value === '1')) {
       versionInput.value = this.settings.default_source_version || 1;
     }
-    if (hubInput && !hubInput.value) {
-      hubInput.value = this.settings.hub_url.value || '';
-    }
+    this.renderShareConnection();
   }
 
   showIssuedToken(token) {
@@ -745,6 +1055,12 @@ export class RelayPage extends HTMLElement {
 
   errorMessage(error) {
     return error?.data?.detail || error?.data?.message || error?.message || 'Request failed';
+  }
+
+  truncate(value, maxLength) {
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
   }
 
   escapeHtml(value) {

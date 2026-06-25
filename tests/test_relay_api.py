@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.core.database.base import Database
-from app.core.schemas.relay import RelayIngestRequest
+from app.core.schemas.relay import RelayHubCheckResponse, RelayIngestRequest
 from app.core.services.relay import RelayService
 from app.web.common.dependencies import get_database, get_embedding_service
 from app.web.dashboard.route_modules.relay import router as relay_router
@@ -250,6 +250,7 @@ async def test_relay_admin_settings_endpoint_persists_defaults_and_identity(
 ):
     monkeypatch.delenv("MEM_MESH_RELAY_HUB_URL", raising=False)
     monkeypatch.delenv("MEM_MESH_RELAY_SOURCE_NODE_ID", raising=False)
+    monkeypatch.setenv("MEM_MESH_RELAY_HUB_TOKEN", "env-token")
 
     async with _temp_db() as db:
         service = RelayService(db)
@@ -264,6 +265,7 @@ async def test_relay_admin_settings_endpoint_persists_defaults_and_identity(
                     "hub_url": "https://hub.local",
                     "source_node_id": "node-1",
                     "default_source_version": 7,
+                    "hub_token": "db-token",
                 },
             )
             identity = await client.post(
@@ -276,11 +278,22 @@ async def test_relay_admin_settings_endpoint_persists_defaults_and_identity(
                     "scopes": ["read", "write"],
                 },
             )
+            identity_update = await client.put(
+                f"/api/relay/v1/admin/identities/{identity.json()['token_hash_prefix']}",
+                json={
+                    "display_name": "Jinwoo Local",
+                    "home_domain": "laptop.local",
+                    "scopes": ["read"],
+                    "revoked": True,
+                },
+            )
             settings = await client.get("/api/relay/v1/admin/settings")
 
         assert updated.status_code == 200
         assert updated.json()["hub_url"]["value"] == "https://hub.local"
         assert updated.json()["hub_url"]["source"] == "db"
+        assert updated.json()["hub_token"]["configured"] is True
+        assert updated.json()["hub_token"]["source"] == "db"
         assert updated.json()["default_source_version"] == 7
 
         assert identity.status_code == 200
@@ -289,16 +302,58 @@ async def test_relay_admin_settings_endpoint_persists_defaults_and_identity(
         assert len(identity_data["token"]) >= 32
         assert identity_data["identity"]["source_node_id"] == "node-1"
 
+        assert identity_update.status_code == 200
+        assert identity_update.json()["identity"]["display_name"] == "Jinwoo Local"
+        assert identity_update.json()["identity"]["scopes"] == ["read"]
+        assert identity_update.json()["identity"]["revoked"] is True
+
         assert settings.status_code == 200
         data = settings.json()
         assert data["source_node_id"]["value"] == "node-1"
-        assert data["identities"][0]["display_name"] == "Jinwoo"
-        assert data["identities"][0]["token_hash_prefix"] == identity_data["token_hash_prefix"]
+        assert data["identities"][0]["display_name"] == "Jinwoo Local"
+        assert (
+            data["identities"][0]["token_hash_prefix"]
+            == identity_data["token_hash_prefix"]
+        )
+
+
+@pytest.mark.asyncio
+async def test_relay_health_and_hub_check_endpoint(monkeypatch):
+    async def fake_check_hub(self, hub_url, **kwargs):
+        return RelayHubCheckResponse(
+            ok=True,
+            hub_url=hub_url,
+            health_url=f"{hub_url}/api/relay/v1/health",
+            status_code=200,
+            relay="mem-mesh-relay",
+            message="hub reachable",
+        )
+
+    monkeypatch.setattr(RelayService, "check_hub", fake_check_hub)
+
+    async with _temp_db() as db:
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            health = await client.get("/api/relay/v1/health")
+            check = await client.post(
+                "/api/relay/v1/admin/hub/check",
+                json={"hub_url": "http://hub.local"},
+            )
+
+        assert health.status_code == 200
+        assert health.json()["ok"] is True
+        assert check.status_code == 200
+        assert check.json()["ok"] is True
+        assert check.json()["relay"] == "mem-mesh-relay"
 
 
 @pytest.mark.asyncio
 async def test_relay_share_memory_endpoint_enqueues_existing_memory():
     async with _temp_db() as db:
+        await db.set_app_config("relay.hub_url", "https://hub.local")
+        await db.set_app_config("relay.source_node_id", "node-1")
+        await db.set_app_config("relay.default_source_version", "3")
         await db.execute(
             """
             INSERT INTO memories (
@@ -328,15 +383,63 @@ async def test_relay_share_memory_endpoint_enqueues_existing_memory():
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post(
                 "/api/relay/v1/outbox/share/memory-1",
-                json={
-                    "source_node_id": "node-1",
-                    "source_version": 3,
-                    "target_hub": "https://hub.local",
-                },
+                json={},
             )
 
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "queued"
-        outbox = await db.fetchone("SELECT * FROM relay_outbox WHERE id = ?", (data["outbox_id"],))
+        assert data["target_hub"] == "https://hub.local"
+        assert data["source_node_id"] == "node-1"
+        outbox = await db.fetchone(
+            "SELECT * FROM relay_outbox WHERE id = ?", (data["outbox_id"],)
+        )
         assert outbox["idempotency_key"] == "node-1:memory-1:v3:update"
+
+
+@pytest.mark.asyncio
+async def test_relay_share_project_endpoint_enqueues_shareable_project_memories():
+    async with _temp_db() as db:
+        await db.set_app_config("relay.hub_url", "https://hub.local")
+        await db.set_app_config("relay.source_node_id", "node-1")
+        await db.set_app_config("relay.default_source_version", "5")
+        for memory_id, category in [("memory-1", "decision"), ("memory-2", "task")]:
+            await db.execute(
+                """
+                INSERT INTO memories (
+                    id, content, content_hash, project_id, category, source,
+                    client, embedding, tags, created_at, updated_at, content_bytes
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    memory_id,
+                    f"Relay project memory {memory_id}",
+                    f"hash-{memory_id}",
+                    "relay",
+                    category,
+                    "test",
+                    None,
+                    b"123",
+                    '["relay"]',
+                    "2026-06-25T00:00:00Z",
+                    "2026-06-25T00:01:00Z",
+                    32,
+                ),
+            )
+
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/relay/v1/outbox/share-project/relay",
+                json={},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["queued_count"] == 1
+        assert data["target_hub"] == "https://hub.local"
+        assert data["skipped"][0]["memory_id"] == "memory-2"
+        outbox_count = await db.fetchone("SELECT COUNT(*) AS count FROM relay_outbox")
+        assert outbox_count["count"] == 1

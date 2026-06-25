@@ -84,9 +84,7 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     # --- mem-mesh relay ---
     relay_parser = sub.add_parser("relay", help="Relay layer utilities")
-    relay_sub = relay_parser.add_subparsers(
-        dest="relay_command", help="Relay commands"
-    )
+    relay_sub = relay_parser.add_subparsers(dest="relay_command", help="Relay commands")
     relay_worker = relay_sub.add_parser("worker", help="Run relay background worker")
     relay_worker.add_argument(
         "--once",
@@ -107,6 +105,12 @@ def main(argv: Optional[List[str]] = None) -> None:
     relay_worker.add_argument("--worker-id", default=None, help="Stable worker id")
     relay_worker.add_argument(
         "--json", action="store_true", help="Emit machine-readable JSON"
+    )
+    relay_worker.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Include relay queue diagnostics in the worker result",
     )
 
     # --- mem-mesh hooks (delegate to install_hooks.py) ---
@@ -353,6 +357,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     tasks=args.tasks,
                     interval=args.interval,
                     worker_id=args.worker_id,
+                    verbose=args.verbose,
                 )
             )
         else:

@@ -234,12 +234,24 @@ export class APIClient {
     return this.put('/relay/v1/admin/settings', payload);
   }
 
+  async checkRelayHub(payload) {
+    return this.post('/relay/v1/admin/hub/check', payload);
+  }
+
   async createRelayIdentity(payload) {
     return this.post('/relay/v1/admin/identities', payload);
   }
 
+  async updateRelayIdentity(tokenHashPrefix, payload) {
+    return this.put(`/relay/v1/admin/identities/${encodeURIComponent(tokenHashPrefix)}`, payload);
+  }
+
   async shareRelayMemory(memoryId, payload) {
     return this.post(`/relay/v1/outbox/share/${encodeURIComponent(memoryId)}`, payload);
+  }
+
+  async shareRelayProject(projectId, payload) {
+    return this.post(`/relay/v1/outbox/share-project/${encodeURIComponent(projectId)}`, payload);
   }
   
   /**

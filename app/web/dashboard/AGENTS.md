@@ -30,11 +30,15 @@ Modular route structure for better maintainability:
   - GET /api/relay/v1/admin/overview - dashboard relay queue/digest overview
   - GET /api/relay/v1/admin/settings - relay setup and identity registry state
   - PUT /api/relay/v1/admin/settings - update relay share defaults
+  - POST /api/relay/v1/admin/hub/check - check configured team hub reachability
   - POST /api/relay/v1/admin/identities - register or generate hub identity token
+  - PUT /api/relay/v1/admin/identities/{token_hash_prefix} - update hub identity metadata/scopes/revocation
+  - GET /api/relay/v1/health - relay hub health probe for personal nodes
   - POST /api/relay/v1/ingest - S2S relay ingest
   - POST /api/relay/v1/search - team relay view search
   - GET /api/relay/v1/projects/{team_project_id}/digest - latest relay digest
   - POST /api/relay/v1/outbox/share/{memory_id} - enqueue local memory for relay
+  - POST /api/relay/v1/outbox/share-project/{project_id} - enqueue shareable local project memories for relay
 - `route_modules/search.py` - Search endpoints (63 lines)
   - GET /api/memories/search - Search memories
   - POST /api/memories/search - Advanced search
