@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] - 2026-06-25
+
+개인 mem-mesh를 팀 단위로 연결하는 **Relay(공유) 레이어**를 도입하는 minor 릴리스. 부수적으로 프로젝트 식별을 중앙화하고, CLI 버전 배너·프롬프트 drift 가드를 추가한다. WHY: 팀원 각자가 축적한 개발 메모리(결정·버그·gotcha)를 팀 단위로 재사용하려면 노드 간 연결이 필요한데, P2P mesh는 8명 규모에서 N×N 신뢰·충돌·invalidation 비용이 과하다. 그래서 개인 N → 팀 허브 1의 **star topology**를 채택하고, 개인은 팀 공유분을 로컬 복제하지 않는 **view-only 소비자**로 두어 검색 시점에 허브 view를 live fetch + RRF 융합한다. write path는 LLM/임베딩 호출과 분리해 deterministic·low-latency를 유지하고, 정제는 SQLite 큐 + 비동기 워커로 밀어낸다(Postgres/Redis/Kafka 미도입, Golden Rule 준수). 설계 상세는 `docs/mem-mesh-relay-PRD.md`.
+
+### Added
+- **Relay 레이어 (worker + API + CLI + 대시보드)** — 개인 노드가 선택한 memory/project를 팀 허브로 push하고, 팀원이 federated search로 재사용한다. write path는 deterministic(LLM 없이 SQLite outbox에 raw event 저장 후 즉시 응답), 정제는 비동기 SQLite 큐 + 워커가 담당(텍스트는 `claude-sonnet-4-6`, 임베딩은 로컬 sentence-transformers). per-item enrichment는 검색 critical path, project digest는 bounded-stale 파생 view. idempotency는 `같은 key+payload=200 replay / 다른 payload=409 conflict`. `app/core/schemas/relay.py`, `app/core/services/relay.py`, `app/core/services/relay_worker.py`, `app/core/services/relay_fusion.py`, `app/web/dashboard/route_modules/relay.py`, `app/cli/relay.py`, `app/web/static/js/pages/relay.js`, `app/web/static/css/modules/relay.css`
+- **Relay 보안 최소선 (opt-in + type-gate + secret guard)** — 공유는 명시적 opt-in이며, API key/token 등 high-confidence secret은 outbox 진입 전 차단/redaction한다. pin은 직접 동기화하지 않고 `pin_promote → memory`를 거친다.
+- **Relay memory materialization** — 허브의 current projection을 개인 노드의 일반 memory로 backfill하는 CLI 명령·API·서비스. `app/core/services/relay.py`, 대시보드 버튼 UI
+- **Realtime relay notifications** — relay ingestion/materialization 이벤트를 WebSocket으로 브로드캐스트해 대시보드가 실시간 갱신된다. `app/web` realtime 라우팅 + 프론트 핸들러
+- **Dead-letter queue 관리** — admin overview에서 dead-letter 가시화, outbox/item/aggregate 큐의 dead-lettered job 재시도, 수신한 relay memory purge, relay-materialized memory 삭제 시 자동 sync 숨김. `app/web/dashboard/route_modules/relay.py`
+- **Relay diagnostics + hub connectivity** — verbose worker 진단 모드(큐 상태 스냅샷·pending work 분석·config sourcing), hub reachability 체크, force requeue, worker config 파라미터. `app/cli/relay.py`
+- **Stable project identity resolution** — git 기반 ad-hoc 감지를 중앙화한 `mem_mesh_project_id()`(env → git config → `.mem-mesh/project-id` 파일 → basename 순)와 `mem-mesh init` 명령. 모든 hook 스크립트·렌더러가 새 resolver를 사용. `app/cli/project_identity.py`, `tests/test_project_identity.py`
+- **CLI version banner + `--version`** — 매 CLI run마다 stderr로 버전 배너 출력(`--json`/mcp 명령 제외)하고 `--version` 플래그 추가. `app/core/version`
+- **Prompt content hash guard** — `PROMPT_CONTENT_HASH`를 drift 가드로 도입해, rule 콘텐츠 변경 시 `PROMPT_VERSION` bump를 강제(`test_prompt_rules.py`가 assert). 의도치 않은 rule drift를 차단. `tests/test_prompt_rules.py`
+- **MCP approval tool 설정** — Codex TOML/JSON 엔트리에 MCP 도구별 approval mode 설정 지원. tool name 해석·TOML table segment 포매팅 헬퍼 포함. `app/cli/codex_config.py`
+- **Relay/WebSocket 테스트 커버리지** — relay api/service/worker/fusion/cli 단위 테스트와 WebSocket live integration 테스트 추가. `tests/test_relay_*.py`, `tests/integration/test_websocket_live.py`
+
+### Changed
+- **session_start hook이 pin counts 직접 주입** — 세션 시작 시 `session_resume`를 호출하던 것을, hook이 pin 카운트를 컨텍스트에 직접 주입하도록 변경(round-trip 제거). `PROMPT_VERSION` 22→23. `app/cli/hooks/renderer.py`
+- **toast 알림 shared utility로 리팩토링** — 대시보드 toast 알림을 공용 유틸리티로 통합하고 옵션·app instance·memory 생성 알림·error handler 연동을 정리. `app/web/static/js/pages`
+- **hook 셸 스크립트 정합화** — 전 hook 셸 스크립트에 `set -euo pipefail`을 적용하고 신규 project identity resolver를 사용하도록 갱신. `app/cli/hooks/shell/*.sh`
+
 ## [1.18.2] - 2026-06-24
 
 Hook stdout 노이즈를 제어하고, 토큰 SSOT 모델을 env 우선으로 일관화하며, `--yes` 비대화 onboarding의 auth 검증 갭을 닫는 patch 릴리스. WHY: (1) Codex/Claude/Cursor hook이 매 세션·프롬프트마다 mem-mesh 컨텍스트를 stdout으로 그대로 쏟아내 노이즈가 컸다. (2) 토큰의 단일 정본이 "`~/.mem-mesh/hook_token` 파일(Option 2)"로 표기돼 있었으나 실제 운영 정본은 `MEM_MESH_HOOK_TOKEN` env이고 파일은 materialized fallback이라, 진단 표면마다 설명이 어긋났다. (3) `--yes` 설치의 auth probe가 토큰 소스 `env`에만 걸려 있어, stale한 파일 토큰이면 401 hook이 조용히 설치되고(원래 이 플로우가 막으려던 함정), 비대화 모드인데도 401 재시도에서 `input()`을 호출했다.
