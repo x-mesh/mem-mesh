@@ -134,6 +134,14 @@ export class RelayPage extends HTMLElement {
 
         <section class="relay-panel">
           <div class="relay-panel-header">
+            <h2>Received Relay Memories</h2>
+            <span class="relay-panel-meta">relay view</span>
+          </div>
+          <div id="relay-memory-table" class="relay-table-wrap">${this.renderTableSkeleton()}</div>
+        </section>
+
+        <section class="relay-panel">
+          <div class="relay-panel-header">
             <h2>Digests</h2>
             <span class="relay-panel-meta">latest</span>
           </div>
@@ -501,6 +509,7 @@ export class RelayPage extends HTMLElement {
     `;
     this.renderOutboxTable(data.recent_outbox);
     this.renderQueueTable(data.recent_queue);
+    this.renderRelayMemories(data.recent_memories);
     this.renderDigests(data.recent_digests);
   }
 
@@ -958,6 +967,56 @@ export class RelayPage extends HTMLElement {
     `;
   }
 
+  renderRelayMemories(rows) {
+    const target = this.querySelector('#relay-memory-table');
+    if (!target) return;
+    if (!rows?.length) {
+      target.innerHTML = this.renderEmpty('No relay memories received');
+      return;
+    }
+    target.innerHTML = `
+      <table class="relay-table relay-memory-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Memory</th>
+            <th>Project</th>
+            <th>Source</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => `
+            <tr>
+              <td>
+                <span class="relay-status-chip ${this.statusClass(row.visible ? 'visible' : 'hidden')}">
+                  ${row.visible ? 'visible' : 'hidden'}
+                </span>
+                ${row.enriched ? '<span class="relay-status-chip status-completed">enriched</span>' : '<span class="relay-status-chip status-pending">pending LLM</span>'}
+              </td>
+              <td>
+                <div class="relay-memory-cell">
+                  <strong>${this.escapeHtml(row.title || row.kind || 'relay memory')}</strong>
+                  <span>${this.escapeHtml(row.abstract || row.content_preview || 'No content preview')}</span>
+                  <code>${this.escapeHtml(row.source_memory_id)}</code>
+                </div>
+              </td>
+              <td>
+                <span>${this.escapeHtml(row.team_project_id)}</span>
+                <br><span class="relay-muted">${this.escapeHtml(row.source_project_key)}</span>
+              </td>
+              <td>
+                <span>${this.escapeHtml(row.source_node_id)}</span>
+                <br><span class="relay-muted">v${Number(row.source_version || 0)}</span>
+              </td>
+              <td>${this.formatDate(row.updated_at)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
   renderDigests(rows) {
     const target = this.querySelector('#relay-digest-list');
     if (!target) return;
@@ -989,6 +1048,7 @@ export class RelayPage extends HTMLElement {
     this.querySelector('#relay-queue-status').innerHTML = this.renderEmpty('Status unavailable');
     this.querySelector('#relay-outbox-table').innerHTML = this.renderEmpty('Outbox unavailable');
     this.querySelector('#relay-queue-table').innerHTML = this.renderEmpty('Worker queue unavailable');
+    this.querySelector('#relay-memory-table').innerHTML = this.renderEmpty('Relay memories unavailable');
     this.querySelector('#relay-digest-list').innerHTML = this.renderEmpty('Digests unavailable');
   }
 

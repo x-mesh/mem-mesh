@@ -418,7 +418,8 @@
 
 .relay-status-chip.status-done,
 .relay-status-chip.status-sent,
-.relay-status-chip.status-completed {
+.relay-status-chip.status-completed,
+.relay-status-chip.status-visible {
   background: var(--success-bg);
   border-color: color-mix(in oklch, var(--success-color), var(--border-color) 60%);
   color: var(--success-color);
@@ -468,6 +469,35 @@
 .relay-table code {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.relay-memory-table {
+  min-width: 860px;
+}
+
+.relay-memory-cell {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  max-width: 520px;
+}
+
+.relay-memory-cell strong,
+.relay-memory-cell span,
+.relay-memory-cell code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relay-memory-cell strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.relay-memory-cell span {
   color: var(--text-secondary);
 }
 

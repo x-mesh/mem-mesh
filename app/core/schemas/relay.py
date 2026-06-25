@@ -236,6 +236,24 @@ class RelayDigestSummary(BaseModel):
     stale: bool = False
 
 
+class RelayMemorySummary(BaseModel):
+    id: str
+    source_node_id: str
+    source_memory_id: str
+    source_project_key: str
+    team_project_id: str
+    source_version: int
+    kind: str
+    status: str
+    visible: bool = True
+    content_preview: str = ""
+    title: Optional[str] = None
+    abstract: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    updated_at: str
+    enriched: bool = False
+
+
 class RelayAdminOverviewResponse(BaseModel):
     generated_at: str
     outbox_counts: List[RelayStatusCount] = Field(default_factory=list)
@@ -248,6 +266,7 @@ class RelayAdminOverviewResponse(BaseModel):
     recent_outbox: List[RelayOutboxSummary] = Field(default_factory=list)
     recent_queue: List[RelayQueueSummary] = Field(default_factory=list)
     recent_digests: List[RelayDigestSummary] = Field(default_factory=list)
+    recent_memories: List[RelayMemorySummary] = Field(default_factory=list)
 
 
 class RelaySettingValue(BaseModel):

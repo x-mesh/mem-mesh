@@ -240,6 +240,9 @@ async def test_relay_admin_overview_endpoint_returns_queue_status():
         assert data["projects"] == 1
         assert data["recent_outbox"][0]["target_hub"] == "https://hub.local"
         assert data["recent_queue"][0]["queue"] == "item"
+        assert data["recent_memories"][0]["source_memory_id"] == "memory-1"
+        assert data["recent_memories"][0]["team_project_id"] == "node-1:relay"
+        assert data["recent_memories"][0]["enriched"] is False
         assert data["item_queue_counts"] == [{"status": "pending", "count": 1}]
         assert data["outbox_counts"] == [{"status": "pending", "count": 1}]
 

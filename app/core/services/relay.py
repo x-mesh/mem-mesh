@@ -38,6 +38,7 @@ from ..schemas.relay import (
     RelayIdentityUpdateRequest,
     RelayIngestRequest,
     RelayIngestResponse,
+    RelayMemorySummary,
     RelayOutboxJob,
     RelayOutboxSummary,
     RelayProjectDigestResponse,
@@ -457,6 +458,32 @@ class RelayService:
             """,
             (limit,),
         )
+        memory_rows = await self.db.fetchall(
+            """
+            SELECT
+                c.id,
+                c.source_node_id,
+                c.source_memory_id,
+                c.source_project_key,
+                c.team_project_id,
+                c.source_version,
+                c.authoritative_kind,
+                c.authoritative_status,
+                c.content,
+                c.tags_json,
+                c.visible,
+                c.updated_at,
+                e.title,
+                e.abstract
+            FROM relay_memory_current c
+            LEFT JOIN relay_item_enrichment e
+              ON e.current_memory_id = c.id
+             AND e.content_hash = c.content_hash
+            ORDER BY c.updated_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
 
         queue_rows = sorted(
             [*item_rows, *aggregate_rows],
@@ -521,6 +548,26 @@ class RelayService:
                     stale=bool(row["stale"]),
                 )
                 for row in digest_rows
+            ],
+            recent_memories=[
+                RelayMemorySummary(
+                    id=str(row["id"]),
+                    source_node_id=str(row["source_node_id"]),
+                    source_memory_id=str(row["source_memory_id"]),
+                    source_project_key=str(row["source_project_key"]),
+                    team_project_id=str(row["team_project_id"]),
+                    source_version=int(row["source_version"]),
+                    kind=str(row["authoritative_kind"]),
+                    status=str(row["authoritative_status"]),
+                    visible=bool(row["visible"]),
+                    content_preview=str(row["content"] or "")[:240],
+                    title=row["title"],
+                    abstract=row["abstract"],
+                    tags=_json_loads(row["tags_json"], []),
+                    updated_at=str(row["updated_at"]),
+                    enriched=bool(row["title"] or row["abstract"]),
+                )
+                for row in memory_rows
             ],
         )
 
