@@ -146,6 +146,10 @@ async def internal_notify(payload: dict) -> dict:
         await _notifier.notify_pin_promoted(
             data.get("pin_id", ""), data.get("memory_id", "")
         )
+    elif event_type == "relay_ingested":
+        await _notifier.notify_relay_ingested(data)
+    elif event_type == "relay_materialized":
+        await _notifier.notify_relay_materialized(data)
     else:
         return {"status": "ignored", "reason": f"unknown event type: {event_type}"}
 

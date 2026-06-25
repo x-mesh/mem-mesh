@@ -1,4 +1,5 @@
 import { showToast } from '../utils/toast-notifications.js';
+import { wsClient } from '../services/websocket-client.js';
 
 export class RelayPage extends HTMLElement {
   constructor() {
@@ -11,13 +12,30 @@ export class RelayPage extends HTMLElement {
     this.shareCandidates = [];
     this.selectedMemoryId = '';
     this.memorySearchTimer = null;
+    this.realtimeRefreshTimer = null;
+    this.realtimeToastAt = 0;
+    this.boundRealtimeHandlers = null;
   }
 
   connectedCallback() {
     this.render();
+    this.setupRealtimeListeners();
     this.loadOverview();
     this.loadSettings();
     this.loadShareCandidates();
+  }
+
+  disconnectedCallback() {
+    if (this.boundRealtimeHandlers) {
+      wsClient.off('relay_ingested', this.boundRealtimeHandlers.relayIngested);
+      wsClient.off('relay_materialized', this.boundRealtimeHandlers.relayMaterialized);
+      wsClient.off('reconnected', this.boundRealtimeHandlers.reconnected);
+      this.boundRealtimeHandlers = null;
+    }
+    if (this.realtimeRefreshTimer) {
+      window.clearTimeout(this.realtimeRefreshTimer);
+      this.realtimeRefreshTimer = null;
+    }
   }
 
   get api() {
@@ -42,6 +60,7 @@ export class RelayPage extends HTMLElement {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
             Refresh
           </button>
+          <span id="relay-live-status" class="relay-live-status" aria-live="polite">Live</span>
         </div>
       </header>
 
@@ -164,6 +183,21 @@ export class RelayPage extends HTMLElement {
     `;
 
     this.setupEventListeners();
+  }
+
+  setupRealtimeListeners() {
+    if (this.boundRealtimeHandlers) return;
+    this.boundRealtimeHandlers = {
+      relayIngested: this.handleRelayRealtime.bind(this),
+      relayMaterialized: this.handleRelayRealtime.bind(this),
+      reconnected: () => this.scheduleRealtimeRefresh('Reconnected'),
+    };
+    wsClient.on('relay_ingested', this.boundRealtimeHandlers.relayIngested);
+    wsClient.on('relay_materialized', this.boundRealtimeHandlers.relayMaterialized);
+    wsClient.on('reconnected', this.boundRealtimeHandlers.reconnected);
+    wsClient.connect().catch((error) => {
+      console.warn('Relay WebSocket connection failed:', error);
+    });
   }
 
   setupEventListeners() {
@@ -507,6 +541,41 @@ export class RelayPage extends HTMLElement {
     } finally {
       if (button) button.disabled = false;
     }
+  }
+
+  handleRelayRealtime(data = {}) {
+    const relayMemory = data.relay_memory || {};
+    const source = relayMemory.source_node_id || 'relay';
+    const action = data.action || (data.materialized !== undefined ? 'materialized' : 'updated');
+    this.scheduleRealtimeRefresh(`${source} ${action}`);
+
+    const now = Date.now();
+    if (now - this.realtimeToastAt > 10000) {
+      this.realtimeToastAt = now;
+      showToast('Relay update received.', 'success');
+    }
+  }
+
+  scheduleRealtimeRefresh(label = 'Updated') {
+    this.setLiveStatus(label);
+    if (this.realtimeRefreshTimer) {
+      window.clearTimeout(this.realtimeRefreshTimer);
+    }
+    this.realtimeRefreshTimer = window.setTimeout(async () => {
+      this.realtimeRefreshTimer = null;
+      if (this.loading) {
+        this.scheduleRealtimeRefresh(label);
+        return;
+      }
+      await this.loadOverview();
+    }, 250);
+  }
+
+  setLiveStatus(label) {
+    const target = this.querySelector('#relay-live-status');
+    if (!target) return;
+    const time = new Date().toLocaleTimeString();
+    target.textContent = `${label} · ${time}`;
   }
 
   renderOverview() {

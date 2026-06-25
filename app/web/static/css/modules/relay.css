@@ -10,6 +10,15 @@
   cursor: pointer;
 }
 
+.relay-live-status {
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .relay-tabs {
   display: flex;
   gap: var(--space-1);

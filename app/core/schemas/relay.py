@@ -53,6 +53,7 @@ class RelayIngestResponse(BaseModel):
     accepted: bool
     event_id: str
     current_memory_id: Optional[str]
+    current_created: bool = False
     replayed: bool = False
     applied_to_current: bool = False
     queued_item: bool = False

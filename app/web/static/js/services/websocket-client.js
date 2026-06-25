@@ -229,6 +229,14 @@ export class WebSocketClient {
           this.emit('model_download', data);
           break;
 
+        case 'relay_ingested':
+          this.emit('relay_ingested', data);
+          break;
+
+        case 'relay_materialized':
+          this.emit('relay_materialized', data);
+          break;
+
         default:
           console.warn('Unknown WebSocket message type:', type);
       }

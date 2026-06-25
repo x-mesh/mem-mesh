@@ -30,6 +30,8 @@ class EventType(str, Enum):
     PIN_COMPLETED = "pin_completed"
     PIN_PROMOTED = "pin_promoted"
     STATS_UPDATED = "stats_updated"
+    RELAY_INGESTED = "relay_ingested"
+    RELAY_MATERIALIZED = "relay_materialized"
     CONNECTION_ESTABLISHED = "connection_established"
     HEARTBEAT = "heartbeat"
 
@@ -357,6 +359,16 @@ class RealtimeNotifier:
         total_sent = await connection_manager.broadcast_to_all(message)
         logger.debug(f"Broadcast '{event_type}' sent to {total_sent} clients")
         return total_sent
+
+    @staticmethod
+    async def notify_relay_ingested(relay_data: Dict[str, Any]) -> None:
+        """Relay ingest 알림"""
+        await RealtimeNotifier.broadcast(EventType.RELAY_INGESTED, relay_data)
+
+    @staticmethod
+    async def notify_relay_materialized(result_data: Dict[str, Any]) -> None:
+        """Relay materialize/backfill 알림"""
+        await RealtimeNotifier.broadcast(EventType.RELAY_MATERIALIZED, result_data)
 
     @staticmethod
     async def notify_stats_updated(stats_data: Dict[str, Any]) -> None:

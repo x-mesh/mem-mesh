@@ -148,6 +148,52 @@ async def test_relay_ingest_endpoint_rejects_missing_or_bad_authorization():
 
 
 @pytest.mark.asyncio
+async def test_relay_ingest_endpoint_broadcasts_realtime_notifications(monkeypatch):
+    events = []
+
+    async def fake_relay_ingested(payload):
+        events.append(("relay_ingested", payload))
+
+    async def fake_memory_created(memory):
+        events.append(("memory_created", memory))
+
+    from app.web.websocket import realtime
+
+    monkeypatch.setattr(realtime.notifier, "notify_relay_ingested", fake_relay_ingested)
+    monkeypatch.setattr(realtime.notifier, "notify_memory_created", fake_memory_created)
+
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        await service.register_identity(
+            token="relay-token",
+            user_id="user-1",
+            source_node_id="node-1",
+            display_name="Jinwoo",
+        )
+
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/relay/v1/ingest",
+                json=_request().model_dump(mode="json"),
+                headers={"Authorization": "Bearer relay-token"},
+            )
+
+    assert response.status_code == 200
+    assert response.json()["current_created"] is True
+    assert [event[0] for event in events] == ["relay_ingested", "memory_created"]
+    relay_payload = events[0][1]
+    memory_payload = events[1][1]
+    assert relay_payload["action"] == "create"
+    assert relay_payload["relay_memory"]["source_memory_id"] == "memory-1"
+    assert relay_payload["memory"]["id"].startswith("relay:")
+    assert memory_payload["id"] == relay_payload["memory"]["id"]
+    assert memory_payload["source"] == "relay"
+
+
+@pytest.mark.asyncio
 async def test_relay_search_endpoint_returns_visible_team_view():
     async with _temp_db() as db:
         service = RelayService(db)
@@ -248,7 +294,20 @@ async def test_relay_admin_overview_endpoint_returns_queue_status():
 
 
 @pytest.mark.asyncio
-async def test_relay_admin_materialize_endpoint_backfills_memories():
+async def test_relay_admin_materialize_endpoint_backfills_memories(monkeypatch):
+    events = []
+
+    async def fake_relay_materialized(payload):
+        events.append(payload)
+
+    from app.web.websocket import realtime
+
+    monkeypatch.setattr(
+        realtime.notifier,
+        "notify_relay_materialized",
+        fake_relay_materialized,
+    )
+
     async with _temp_db() as db:
         service = RelayService(db)
         await service.ensure_schema()
@@ -278,6 +337,15 @@ async def test_relay_admin_materialize_endpoint_backfills_memories():
         assert data["materialized"] == 1
         assert materialized["source"] == "relay"
         assert materialized["content"] == _request().content
+        assert events == [
+            {
+                "scanned": 1,
+                "materialized": 1,
+                "deleted": 0,
+                "skipped": 0,
+                "status": "ok",
+            }
+        ]
 
 
 @pytest.mark.asyncio

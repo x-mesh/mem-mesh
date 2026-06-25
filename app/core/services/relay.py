@@ -572,6 +572,72 @@ class RelayService:
             ],
         )
 
+    async def get_relay_notification_snapshot(
+        self, current_memory_id: str
+    ) -> Dict[str, Any]:
+        """Return relay/current + materialized memory data for realtime events."""
+
+        relay_row = await self.db.fetchone(
+            """
+            SELECT
+                id, source_node_id, source_memory_id, source_project_key,
+                team_project_id, source_version, authoritative_kind,
+                authoritative_status, content, tags_json, visible, updated_at
+            FROM relay_memory_current
+            WHERE id = ?
+            """,
+            (current_memory_id,),
+        )
+        memory_id = self._materialized_memory_id(current_memory_id)
+        memory_row = await self.db.fetchone(
+            """
+            SELECT
+                id, content, project_id, category, tags, source, client,
+                created_at, updated_at
+            FROM memories
+            WHERE id = ?
+            """,
+            (memory_id,),
+        )
+
+        relay_memory = None
+        if relay_row:
+            relay_memory = {
+                "id": str(relay_row["id"]),
+                "source_node_id": str(relay_row["source_node_id"]),
+                "source_memory_id": str(relay_row["source_memory_id"]),
+                "source_project_key": str(relay_row["source_project_key"]),
+                "team_project_id": str(relay_row["team_project_id"]),
+                "source_version": int(relay_row["source_version"]),
+                "kind": str(relay_row["authoritative_kind"]),
+                "status": str(relay_row["authoritative_status"]),
+                "visible": bool(relay_row["visible"]),
+                "content_preview": str(relay_row["content"] or "")[:240],
+                "tags": _json_loads(relay_row["tags_json"], []),
+                "updated_at": str(relay_row["updated_at"]),
+            }
+
+        memory = None
+        if memory_row:
+            memory = {
+                "id": str(memory_row["id"]),
+                "content": str(memory_row["content"] or ""),
+                "project_id": str(memory_row["project_id"] or ""),
+                "category": str(memory_row["category"] or ""),
+                "tags": _json_loads(memory_row["tags"], []),
+                "source": str(memory_row["source"] or ""),
+                "client": memory_row["client"],
+                "created_at": str(memory_row["created_at"]),
+                "updated_at": str(memory_row["updated_at"]),
+            }
+
+        return {
+            "current_memory_id": current_memory_id,
+            "materialized_memory_id": memory_id,
+            "relay_memory": relay_memory,
+            "memory": memory,
+        }
+
     async def materialize_current_memories(
         self, *, limit: int = 1000
     ) -> RelayMaterializeResponse:
@@ -1256,6 +1322,7 @@ class RelayService:
         event_id = str(uuid.uuid4())
         queued_item = False
         applied_to_current = False
+        current_created = False
 
         async with self.db.transaction():
             existing = await self.db.fetchone(
@@ -1278,6 +1345,7 @@ class RelayService:
                     accepted=True,
                     event_id=existing["id"],
                     current_memory_id=current["id"] if current else None,
+                    current_created=False,
                     replayed=True,
                     applied_to_current=bool(existing["applied_to_current"]),
                     queued_item=False,
@@ -1339,6 +1407,7 @@ class RelayService:
 
             current_memory_id: Optional[str]
             if applied_to_current:
+                current_created = current is None
                 current_memory_id = await self._upsert_current_locked(
                     existing_current=current,
                     event_id=event_id,
@@ -1362,6 +1431,7 @@ class RelayService:
             accepted=True,
             event_id=event_id,
             current_memory_id=current_memory_id,
+            current_created=current_created,
             replayed=False,
             applied_to_current=applied_to_current,
             queued_item=queued_item,

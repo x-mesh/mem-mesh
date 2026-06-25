@@ -102,6 +102,49 @@ async def get_relay_admin_overview(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+async def _notify_relay_projection(
+    service: RelayService,
+    *,
+    action: str,
+    current_memory_id: str,
+    memory_event: str,
+    extra: Optional[dict] = None,
+) -> None:
+    try:
+        from ...websocket.realtime import notifier
+
+        snapshot = await service.get_relay_notification_snapshot(current_memory_id)
+        payload = {
+            "action": action,
+            **snapshot,
+            **(extra or {}),
+        }
+        await notifier.notify_relay_ingested(payload)
+
+        memory_id = str(snapshot["materialized_memory_id"])
+        relay_memory = snapshot.get("relay_memory") or {}
+        memory = snapshot.get("memory")
+        if memory_event == "deleted":
+            await notifier.notify_memory_deleted(
+                memory_id, relay_memory.get("team_project_id")
+            )
+        elif memory_event == "created" and memory:
+            await notifier.notify_memory_created(memory)
+        elif memory_event == "updated" and memory:
+            await notifier.notify_memory_updated(memory_id, memory)
+    except Exception as exc:
+        logger.warning("Relay realtime notification failed: %s", exc)
+
+
+async def _notify_relay_materialized(result: RelayMaterializeResponse) -> None:
+    try:
+        from ...websocket.realtime import notifier
+
+        await notifier.notify_relay_materialized(result.model_dump())
+    except Exception as exc:
+        logger.warning("Relay materialize notification failed: %s", exc)
+
+
 @router.post("/admin/materialize", response_model=RelayMaterializeResponse)
 async def materialize_relay_admin_memories(
     limit: int = 1000,
@@ -110,7 +153,9 @@ async def materialize_relay_admin_memories(
     """Backfill visible relay current rows into ordinary memories."""
 
     try:
-        return await service.materialize_current_memories(limit=limit)
+        result = await service.materialize_current_memories(limit=limit)
+        await _notify_relay_materialized(result)
+        return result
     except Exception as exc:
         logger.exception("Relay memory materialization failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -233,7 +278,28 @@ async def ingest_relay_event(
 
     token = _extract_bearer_token(authorization)
     try:
-        return await service.ingest(token, payload)
+        result = await service.ingest(token, payload)
+        if result.current_memory_id and not result.replayed:
+            memory_event = "none"
+            if result.applied_to_current:
+                if payload.event_type == "retract":
+                    memory_event = "deleted"
+                elif result.current_created:
+                    memory_event = "created"
+                else:
+                    memory_event = "updated"
+            await _notify_relay_projection(
+                service,
+                action=payload.event_type,
+                current_memory_id=result.current_memory_id,
+                memory_event=memory_event,
+                extra={
+                    "event_id": result.event_id,
+                    "applied_to_current": result.applied_to_current,
+                    "queued_item": result.queued_item,
+                },
+            )
+        return result
     except RelayUnauthorized as exc:
         raise HTTPException(status_code=401, detail=str(exc))
     except RelayIdempotencyConflict as exc:
