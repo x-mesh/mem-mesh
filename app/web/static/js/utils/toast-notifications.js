@@ -58,10 +58,13 @@ export class ToastNotifications {
    * Create toast container
    */
   createContainer() {
-    this.container = document.createElement('div');
-    this.container.id = 'toast-container';
+    this.container = document.getElementById('toast-container');
+    if (!this.container) {
+      this.container = document.createElement('div');
+      this.container.id = 'toast-container';
+      document.body.appendChild(this.container);
+    }
     this.container.className = 'toast-container';
-    document.body.appendChild(this.container);
   }
   
   /**

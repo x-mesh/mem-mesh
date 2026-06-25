@@ -65,9 +65,9 @@ class App {
     this.appState = new AppState();
     this.router = new Router();
     this.themeManager = new ThemeManager();
+    this.toastNotifications = new ToastNotifications();
     this.errorHandler = new ErrorHandler();
     this.keyboardShortcuts = new KeyboardShortcuts();
-    this.toastNotifications = new ToastNotifications();
     
     this.pages = new Map();
     this.currentPage = null;

@@ -556,11 +556,41 @@ export class RelayPage extends HTMLElement {
       const message = relayMemory.source_memory_id
         ? `${source} shared ${relayMemory.source_memory_id} to ${project}.`
         : `Received relay ${action} update for ${project}.`;
-      showToast(message, 'info', {
-        title: 'Relay update',
-        duration: 6500,
-      });
+      this.showRelayPush('Relay update', message);
     }
+  }
+
+  showRelayPush(title, message) {
+    let stack = document.getElementById('relay-push-stack');
+    if (!stack) {
+      stack = document.createElement('div');
+      stack.id = 'relay-push-stack';
+      stack.className = 'relay-push-stack';
+      document.body.appendChild(stack);
+    }
+
+    const item = document.createElement('article');
+    item.className = 'relay-push';
+    item.setAttribute('role', 'status');
+    item.setAttribute('aria-live', 'polite');
+    item.innerHTML = `
+      <span class="relay-push-dot" aria-hidden="true"></span>
+      <div class="relay-push-copy">
+        <strong>${this.escapeHtml(title)}</strong>
+        <span>${this.escapeHtml(message)}</span>
+      </div>
+      <button class="relay-push-close" type="button" aria-label="Close notification">&times;</button>
+    `;
+
+    const close = () => {
+      item.classList.remove('visible');
+      window.setTimeout(() => item.remove(), 180);
+    };
+    item.querySelector('.relay-push-close')?.addEventListener('click', close);
+
+    stack.appendChild(item);
+    window.requestAnimationFrame(() => item.classList.add('visible'));
+    window.setTimeout(close, 6500);
   }
 
   scheduleRealtimeRefresh(label = 'Updated') {
