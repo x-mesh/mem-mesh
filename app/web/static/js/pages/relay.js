@@ -17,8 +17,11 @@ export class RelayPage extends HTMLElement {
     this.memorySearchTimer = null;
     this.projectSearchTimer = null;
     this.realtimeRefreshTimer = null;
+    this.overviewPollTimer = null;
+    this.overviewPollIntervalMs = 3000;
     this.realtimeToastAt = 0;
     this.boundRealtimeHandlers = null;
+    this.boundVisibilityHandler = null;
   }
 
   connectedCallback() {
@@ -28,6 +31,7 @@ export class RelayPage extends HTMLElement {
     this.loadSettings();
     this.loadProjects();
     this.loadShareCandidates();
+    this.startOverviewPolling();
   }
 
   disconnectedCallback() {
@@ -41,6 +45,7 @@ export class RelayPage extends HTMLElement {
       window.clearTimeout(this.realtimeRefreshTimer);
       this.realtimeRefreshTimer = null;
     }
+    this.stopOverviewPolling();
     if (this.memorySearchTimer) {
       window.clearTimeout(this.memorySearchTimer);
       this.memorySearchTimer = null;
@@ -218,6 +223,61 @@ export class RelayPage extends HTMLElement {
     });
   }
 
+  startOverviewPolling() {
+    this.stopOverviewPolling();
+    this.boundVisibilityHandler = () => {
+      if (document.visibilityState === 'visible') {
+        this.pollOverviewNow();
+      }
+    };
+    document.addEventListener('visibilitychange', this.boundVisibilityHandler);
+    this.scheduleOverviewPoll();
+  }
+
+  stopOverviewPolling() {
+    if (this.overviewPollTimer) {
+      window.clearTimeout(this.overviewPollTimer);
+      this.overviewPollTimer = null;
+    }
+    if (this.boundVisibilityHandler) {
+      document.removeEventListener('visibilitychange', this.boundVisibilityHandler);
+      this.boundVisibilityHandler = null;
+    }
+  }
+
+  scheduleOverviewPoll(delay = this.overviewPollIntervalMs) {
+    if (this.overviewPollTimer) {
+      window.clearTimeout(this.overviewPollTimer);
+    }
+    this.overviewPollTimer = window.setTimeout(() => {
+      this.pollOverview();
+    }, delay);
+  }
+
+  async pollOverview() {
+    this.overviewPollTimer = null;
+    try {
+      if (document.visibilityState !== 'hidden') {
+        await this.loadOverview({ silent: true });
+      }
+    } finally {
+      if (this.isConnected) {
+        this.scheduleOverviewPoll();
+      }
+    }
+  }
+
+  async pollOverviewNow() {
+    if (this.overviewPollTimer) {
+      window.clearTimeout(this.overviewPollTimer);
+      this.overviewPollTimer = null;
+    }
+    await this.loadOverview({ silent: true });
+    if (this.isConnected) {
+      this.scheduleOverviewPoll();
+    }
+  }
+
   setupEventListeners() {
     this.querySelector('#relay-refresh')?.addEventListener('click', () => {
       this.loadOverview();
@@ -306,18 +366,30 @@ export class RelayPage extends HTMLElement {
     }
   }
 
-  async loadOverview() {
+  async loadOverview({ silent = false } = {}) {
     if (!this.api || this.loading) return;
     this.loading = true;
-    this.setRefreshState(true);
+    if (!silent) {
+      this.setRefreshState(true);
+    }
     try {
       this.overview = await this.api.getRelayOverview(this.limit);
       this.renderOverview();
+      if (silent) {
+        this.setLiveStatus(`Auto ${this.formatTime(new Date())}`);
+      }
     } catch (error) {
-      this.renderLoadError(error);
+      if (silent) {
+        this.setLiveStatus('Auto refresh failed');
+        console.warn('Relay overview polling failed:', error);
+      } else {
+        this.renderLoadError(error);
+      }
     } finally {
       this.loading = false;
-      this.setRefreshState(false);
+      if (!silent) {
+        this.setRefreshState(false);
+      }
     }
   }
 
@@ -1356,6 +1428,16 @@ export class RelayPage extends HTMLElement {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
     return date.toLocaleString();
+  }
+
+  formatTime(value) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
   }
 
   errorMessage(error) {
