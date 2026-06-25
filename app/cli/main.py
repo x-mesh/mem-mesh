@@ -20,6 +20,8 @@ import argparse
 import sys
 from typing import List, Optional
 
+from app.core.version import __VERSION__
+
 
 def main(argv: Optional[List[str]] = None) -> None:
     """Unified CLI entry point."""
@@ -38,6 +40,11 @@ def main(argv: Optional[List[str]] = None) -> None:
         prog="mem-mesh",
         description="mem-mesh: Centralized memory system for AI development tools.",
         parents=[common],
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"mem-mesh {__VERSION__}",
     )
     sub = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -342,6 +349,17 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
 
     args = parser.parse_args(argv)
+
+    # Version banner on every run — emitted to stderr so it never pollutes
+    # stdout (JSON output, piped rules, the MCP stdio protocol). Skipped for
+    # --json (machine-readable) and the `mcp` stdio servers.
+    if not getattr(args, "json", False) and args.command != "mcp":
+        from app.cli.prompts.behaviors import PROMPT_VERSION
+
+        print(
+            f"mem-mesh {__VERSION__} (prompt v{PROMPT_VERSION})",
+            file=sys.stderr,
+        )
 
     # Bare `mem-mesh` (no subcommand) runs onboarding — the simple entry point
     # for `uvx mem-mesh`. Interactive on a TTY; auto non-interactive when piped

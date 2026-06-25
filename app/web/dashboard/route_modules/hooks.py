@@ -336,6 +336,7 @@ async def session_start(
     # Resume session context + correlate the IDE session id.
     summary_lines: list[str] = []
     open_pin_texts: list[str] = []
+    count_line: Optional[str] = None
     try:
         context = await session_service.resume_last_session(
             project_id=project_id, expand="smart", limit=10
@@ -347,6 +348,18 @@ async def session_start(
                 client_type=client,
             )
         if context is not None:
+            # Always surface the pin counts so the agent reports them straight
+            # from the injected context — the server already resumed here, so
+            # no client-side session_resume call is needed. in_progress is
+            # derived: total - open - completed (no dedicated field).
+            total = getattr(context, "pins_count", 0)
+            open_count = getattr(context, "open_pins", 0)
+            completed_count = getattr(context, "completed_pins", 0)
+            in_progress_count = max(0, total - open_count - completed_count)
+            count_line = (
+                f"- pins: {total} ({in_progress_count} in_progress, "
+                f"{open_count} open, {completed_count} completed)"
+            )
             pins = getattr(context, "pins", None) or []
             for p in pins:
                 pin = p if isinstance(p, dict) else p.dict()
@@ -386,6 +399,8 @@ async def session_start(
         except Exception as e:  # noqa: BLE001
             logger.warning(f"relevant-memory surfacing failed: {e}")
 
+    if count_line is not None:
+        summary_lines.insert(0, count_line)
     if not summary_lines:
         summary_lines.append("No recent activity.")
 

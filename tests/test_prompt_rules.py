@@ -10,7 +10,11 @@ import pytest
 import app.cli.install_hooks as install_hooks
 import app.cli.main as cli_main
 from app.cli.install_hooks import _sync_claude_rules
-from app.cli.prompts.behaviors import PROMPT_VERSION
+from app.cli.prompts.behaviors import (
+    PROMPT_CONTENT_HASH,
+    PROMPT_VERSION,
+    compute_content_hash,
+)
 from app.cli.prompts.renderers import render_claude_project_rules, render_rules_text
 
 HANGUL_RE = re.compile(r"[\uac00-\ud7a3]")
@@ -129,3 +133,19 @@ def test_dashboard_hook_rules_render_rejects_unknown_format() -> None:
 
     with pytest.raises(ValueError, match="format"):
         _render_hook_rules("demo-project", "cursor")
+
+
+def test_prompt_content_hash_guards_rule_drift() -> None:
+    """Drift guard: a change to the canonical rule content must be deliberate.
+
+    If this fails, CORE_RULES / SAVE_CRITERIA / PIN_CRITERIA / SESSION_CONFIG
+    changed without refreshing the pinned fingerprint. Decide:
+      - intended   -> bump PROMPT_VERSION and set PROMPT_CONTENT_HASH to the new value
+      - accidental -> revert the edit
+    """
+    current = compute_content_hash()
+    assert current == PROMPT_CONTENT_HASH, (
+        "Prompt rule content drifted from PROMPT_CONTENT_HASH. If intended, bump "
+        f"PROMPT_VERSION (now {PROMPT_VERSION}) and set "
+        f'PROMPT_CONTENT_HASH = "{current}".'
+    )

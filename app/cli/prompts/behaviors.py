@@ -7,14 +7,19 @@ Usage:
     from app.cli.prompts.behaviors import CORE_RULES, SAVE_CRITERIA, PROMPT_VERSION
 """
 
-from dataclasses import dataclass
+import hashlib
+import json
+from dataclasses import asdict, dataclass
 from typing import List
 
 # ---------------------------------------------------------------------------
-# Prompt schema version — bump on ANY behavioral rule change
+# Prompt schema version — bump on ANY behavioral rule change.
+# Guarded by PROMPT_CONTENT_HASH (bottom of file): test_prompt_rules.py fails
+# when the rule content drifts without a conscious bump. See
+# compute_content_hash().
 # ---------------------------------------------------------------------------
 
-PROMPT_VERSION: int = 22
+PROMPT_VERSION: int = 23
 
 
 # ---------------------------------------------------------------------------
@@ -75,14 +80,18 @@ CORE_RULES: List[Rule] = [
     ),
     Rule(
         key="session_gate",
-        title="Restore session context",
+        title="Report injected session context",
         description=(
-            "At session start, call "
-            'session_resume(project_id="{project_id}", expand="smart") and '
-            "report only the useful counts: pins_count, in_progress_pins, "
-            "open_pins, and completed_pins. If no active session exists, "
-            "continue with the task; the first pin_add() or add() call creates "
-            "the session."
+            "Session context — the active session and pin counts (pins_count, "
+            "in_progress_pins, open_pins, completed_pins) — is auto-injected at "
+            "session start by the SessionStart hook, which already resumed it "
+            "server-side. Report those counts directly from the injected "
+            "context and briefly surface any open or in_progress pin. Do NOT "
+            "call session_resume just to fetch them. Call "
+            'session_resume(project_id="{project_id}", expand="smart") only as '
+            "a fallback when the injected context is absent (hook offline). If "
+            "no active session exists, continue with the task; the first "
+            "pin_add() or add() call creates the session."
         ),
     ),
     Rule(
@@ -215,3 +224,36 @@ STOP_PROMPT_CONFIG = StopPromptConfig(
     max_reason_chars=80,
     valid_categories=("bug", "decision", "code_snippet", "idea", "incident"),
 )
+
+
+# ---------------------------------------------------------------------------
+# Content fingerprint — drift guard
+# ---------------------------------------------------------------------------
+# Fingerprint of the canonical prompt-text definitions (the content rendered
+# into every hook prompt). It is independent of PROMPT_VERSION, so the two are
+# separate signals: the hash detects *that* the rules changed; PROMPT_VERSION
+# declares *which* revision clients should re-sync to. test_prompt_rules.py
+# asserts they stay in sync — when the hash drifts you must consciously bump
+# PROMPT_VERSION (intended change) or revert (accidental edit).
+
+
+def compute_content_hash() -> str:
+    """Stable fingerprint of the canonical prompt-text definitions.
+
+    Covers CORE_RULES + SAVE_CRITERIA + PIN_CRITERIA + SESSION_CONFIG. Excludes
+    PROMPT_VERSION so a version bump alone never changes the hash.
+    """
+    payload = {
+        "core_rules": [asdict(r) for r in CORE_RULES],
+        "save_criteria": asdict(SAVE_CRITERIA),
+        "pin_criteria": asdict(PIN_CRITERIA),
+        "session_config": asdict(SESSION_CONFIG),
+    }
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+
+
+# Pinned fingerprint of the definitions above. Regenerate after an intended
+# rule change with:
+#   python -c "from app.cli.prompts.behaviors import compute_content_hash as h; print(h())"
+PROMPT_CONTENT_HASH: str = "2633ee6db0c6bc89"
