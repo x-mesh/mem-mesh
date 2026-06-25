@@ -552,7 +552,14 @@ export class RelayPage extends HTMLElement {
     const now = Date.now();
     if (now - this.realtimeToastAt > 10000) {
       this.realtimeToastAt = now;
-      showToast('Relay update received.', 'success');
+      const project = relayMemory.team_project_id || 'team hub';
+      const message = relayMemory.source_memory_id
+        ? `${source} shared ${relayMemory.source_memory_id} to ${project}.`
+        : `Received relay ${action} update for ${project}.`;
+      showToast(message, 'info', {
+        title: 'Relay update',
+        duration: 6500,
+      });
     }
   }
 

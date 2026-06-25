@@ -10,6 +10,9 @@ let globalToastInstance = null;
  * Get or create global toast instance
  */
 function getToastInstance() {
+  if (window.app?.toastNotifications) {
+    return window.app.toastNotifications;
+  }
   if (!globalToastInstance) {
     globalToastInstance = new ToastNotifications();
   }
@@ -19,17 +22,17 @@ function getToastInstance() {
 /**
  * Convenience function to show toast
  */
-export function showToast(message, type = 'info') {
+export function showToast(message, type = 'info', options = {}) {
   const toast = getToastInstance();
   switch (type) {
     case 'success':
-      return toast.success(message);
+      return toast.success(message, options);
     case 'error':
-      return toast.error(message);
+      return toast.error(message, options);
     case 'warning':
-      return toast.warning(message);
+      return toast.warning(message, options);
     default:
-      return toast.info(message);
+      return toast.info(message, options);
   }
 }
 
