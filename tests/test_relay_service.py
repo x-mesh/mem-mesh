@@ -7,6 +7,8 @@ secret guard before persistence, and durable SQLite queue claiming.
 
 import os
 import tempfile
+import logging
+import time
 from contextlib import asynccontextmanager
 
 import pytest
@@ -405,6 +407,34 @@ async def test_outbox_claim_and_failure_moves_to_dead_letter_at_max_attempts():
 
 
 @pytest.mark.asyncio
+async def test_outbox_failure_uses_configured_backoff_cap():
+    async with _temp_db() as db:
+        service = RelayService(db, max_attempts=3, backoff_max_seconds=0.5)
+        await service.ensure_schema()
+        await service.enqueue_outbox(
+            payload=_request(),
+            target_hub="https://hub.local",
+        )
+
+        claimed = await service.claim_outbox("outbox-worker", lease_seconds=30)
+        assert claimed is not None
+        before = time.time()
+
+        await service.mark_outbox_failed(claimed.id, "hub unavailable")
+
+        outbox = await db.fetchone(
+            """
+            SELECT status, next_attempt_at
+            FROM relay_outbox
+            WHERE id = ?
+            """,
+            (claimed.id,),
+        )
+        assert outbox["status"] == "pending"
+        assert before <= outbox["next_attempt_at"] <= before + 0.75
+
+
+@pytest.mark.asyncio
 async def test_queue_claim_uses_processing_lease_and_can_reclaim_expired_jobs():
     async with _temp_db() as db:
         service = await _service_with_identity(db)
@@ -647,7 +677,7 @@ async def test_drain_next_outbox_sends_payload_and_marks_sent():
 
 
 @pytest.mark.asyncio
-async def test_drain_next_outbox_failure_requeues_without_losing_payload():
+async def test_drain_next_outbox_failure_requeues_without_losing_payload(caplog):
     async with _temp_db() as db:
         service = RelayService(db)
         await service.ensure_schema()
@@ -656,11 +686,12 @@ async def test_drain_next_outbox_failure_requeues_without_losing_payload():
             target_hub="https://hub.local",
         )
 
-        result = await service.drain_next_outbox(
-            worker_id="outbox-worker",
-            sender=_FailingOutboxSender(),
-            bearer_token="hub-token",
-        )
+        with caplog.at_level(logging.WARNING, logger="app.core.services.relay"):
+            result = await service.drain_next_outbox(
+                worker_id="outbox-worker",
+                sender=_FailingOutboxSender(),
+                bearer_token="hub-token",
+            )
 
         outbox = await db.fetchone("""
             SELECT status, attempts, locked_by, locked_at, last_error
@@ -668,6 +699,10 @@ async def test_drain_next_outbox_failure_requeues_without_losing_payload():
             """)
         assert result.processed is False
         assert "hub unavailable" in result.error
+        assert any(
+            "Relay outbox delivery failed" in record.message and record.exc_info is None
+            for record in caplog.records
+        )
         assert outbox["status"] == "pending"
         assert outbox["attempts"] == 1
         assert outbox["locked_by"] is None

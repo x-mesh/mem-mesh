@@ -104,6 +104,30 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
     relay_worker.add_argument("--worker-id", default=None, help="Stable worker id")
     relay_worker.add_argument(
+        "--max-attempts",
+        type=int,
+        default=3,
+        help="Retry attempts before moving a relay job to dead_letter",
+    )
+    relay_worker.add_argument(
+        "--backoff-max",
+        type=float,
+        default=300.0,
+        help="Maximum retry backoff in seconds",
+    )
+    relay_worker.add_argument(
+        "--lease-seconds",
+        type=int,
+        default=300,
+        help="Seconds before a processing relay job can be reclaimed",
+    )
+    relay_worker.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="Number of relay worker loops to run in this process",
+    )
+    relay_worker.add_argument(
         "--json", action="store_true", help="Emit machine-readable JSON"
     )
     relay_worker.add_argument(
@@ -370,6 +394,10 @@ def main(argv: Optional[List[str]] = None) -> None:
                     tasks=args.tasks,
                     interval=args.interval,
                     worker_id=args.worker_id,
+                    max_attempts=args.max_attempts,
+                    backoff_max=args.backoff_max,
+                    lease_seconds=args.lease_seconds,
+                    concurrency=args.concurrency,
                     verbose=args.verbose,
                 )
             )

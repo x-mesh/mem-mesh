@@ -48,7 +48,9 @@ class SonnetRelayEnricher:
         )
         return RelayEnrichmentData.from_result(payload)
 
-    async def generate(self, *, team_project_id: str, items: list[dict]) -> RelayDigestData:
+    async def generate(
+        self, *, team_project_id: str, items: list[dict]
+    ) -> RelayDigestData:
         payload = await self._post_messages(
             user_content=(
                 "Generate a grounded relay project digest from the enriched "
@@ -154,7 +156,10 @@ class RelayWorker:
         outbox_sender: Optional[Any] = None,
         outbox_bearer_token: Optional[str] = None,
         prompt_version: str = "relay-v1",
+        lease_seconds: int = 300,
     ):
+        if lease_seconds < 1:
+            raise ValueError("lease_seconds must be at least 1")
         self.service = service
         self.worker_id = worker_id
         self.embedding_service = embedding_service
@@ -163,6 +168,7 @@ class RelayWorker:
         self.outbox_sender = outbox_sender
         self.outbox_bearer_token = outbox_bearer_token
         self.prompt_version = prompt_version
+        self.lease_seconds = lease_seconds
 
     async def run_once(self) -> Dict[str, int]:
         stats = {
@@ -179,6 +185,7 @@ class RelayWorker:
                 worker_id=self.worker_id,
                 sender=self.outbox_sender,
                 bearer_token=self.outbox_bearer_token,
+                lease_seconds=self.lease_seconds,
             )
             if result.job_id:
                 if result.processed:
@@ -192,6 +199,7 @@ class RelayWorker:
                 embedding_service=self.embedding_service,
                 text_enricher=self.text_enricher,
                 prompt_version=self.prompt_version,
+                lease_seconds=self.lease_seconds,
             )
             if result.job_id:
                 if result.processed:
@@ -204,6 +212,7 @@ class RelayWorker:
                 worker_id=self.worker_id,
                 digest_generator=self.digest_generator,
                 prompt_version=self.prompt_version,
+                lease_seconds=self.lease_seconds,
             )
             if result.job_id:
                 if result.processed:

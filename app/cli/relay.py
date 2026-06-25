@@ -25,6 +25,10 @@ def cmd_relay_worker(
     tasks: str = "outbox,item,aggregate",
     interval: float = 1.0,
     worker_id: Optional[str] = None,
+    max_attempts: int = 3,
+    backoff_max: float = 300.0,
+    lease_seconds: int = 300,
+    concurrency: int = 1,
     verbose: bool = False,
 ) -> int:
     """Run the relay worker from CLI."""
@@ -36,6 +40,10 @@ def cmd_relay_worker(
                 tasks=tasks,
                 interval=interval,
                 worker_id=worker_id or f"relay-worker-{uuid.uuid4()}",
+                max_attempts=max_attempts,
+                backoff_max=backoff_max,
+                lease_seconds=lease_seconds,
+                concurrency=concurrency,
                 verbose=verbose,
             )
         )
@@ -89,18 +97,110 @@ async def _run_relay_worker(
     tasks: str,
     interval: float,
     worker_id: str,
+    max_attempts: int = 3,
+    backoff_max: float = 300.0,
+    lease_seconds: int = 300,
+    concurrency: int = 1,
     verbose: bool = False,
 ) -> dict:
-    settings = Settings()
     enabled = {task.strip() for task in tasks.split(",") if task.strip()}
     unknown = enabled - {"outbox", "item", "aggregate"}
     if unknown:
         raise ValueError(f"unknown relay worker task(s): {', '.join(sorted(unknown))}")
+    if not enabled:
+        raise ValueError("at least one relay worker task must be enabled")
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least 1")
+    if backoff_max <= 0:
+        raise ValueError("backoff_max must be greater than 0")
+    if lease_seconds < 1:
+        raise ValueError("lease_seconds must be at least 1")
+    if concurrency < 1:
+        raise ValueError("concurrency must be at least 1")
+
+    if concurrency == 1:
+        return await _run_relay_worker_instance(
+            once=once,
+            enabled=enabled,
+            interval=interval,
+            worker_id=worker_id,
+            max_attempts=max_attempts,
+            backoff_max=backoff_max,
+            lease_seconds=lease_seconds,
+            concurrency=concurrency,
+            verbose=verbose,
+        )
+
+    debug_before = (
+        await _relay_debug_snapshot_from_settings(
+            enabled=enabled,
+            worker_options=_worker_options(
+                worker_id=worker_id,
+                max_attempts=max_attempts,
+                backoff_max=backoff_max,
+                lease_seconds=lease_seconds,
+                concurrency=concurrency,
+            ),
+        )
+        if verbose and once
+        else None
+    )
+    results = await asyncio.gather(
+        *[
+            _run_relay_worker_instance(
+                once=once,
+                enabled=enabled,
+                interval=interval,
+                worker_id=_worker_instance_id(worker_id, index, concurrency),
+                max_attempts=max_attempts,
+                backoff_max=backoff_max,
+                lease_seconds=lease_seconds,
+                concurrency=concurrency,
+                verbose=False,
+            )
+            for index in range(concurrency)
+        ]
+    )
+    combined = _combine_worker_results(results)
+    if verbose and once:
+        combined["debug"] = {
+            "before": debug_before,
+            "after": await _relay_debug_snapshot_from_settings(
+                enabled=enabled,
+                worker_options=_worker_options(
+                    worker_id=worker_id,
+                    max_attempts=max_attempts,
+                    backoff_max=backoff_max,
+                    lease_seconds=lease_seconds,
+                    concurrency=concurrency,
+                ),
+            ),
+        }
+    return combined
+
+
+async def _run_relay_worker_instance(
+    *,
+    once: bool,
+    enabled: set[str],
+    interval: float,
+    worker_id: str,
+    max_attempts: int,
+    backoff_max: float,
+    lease_seconds: int,
+    concurrency: int,
+    verbose: bool = False,
+) -> dict:
+    settings = Settings()
 
     db = Database(settings.database_path, embedding_dim=settings.embedding_dim)
     await db.connect()
     try:
-        service = RelayService(db)
+        service = RelayService(
+            db,
+            max_attempts=max_attempts,
+            backoff_max_seconds=backoff_max,
+        )
         await service.ensure_schema()
         effective = await service.get_effective_config(settings)
         relay_config = effective["values"]
@@ -146,9 +246,17 @@ async def _run_relay_worker(
             outbox_sender=outbox_sender,
             outbox_bearer_token=outbox_bearer_token,
             prompt_version=relay_config["prompt_version"],
+            lease_seconds=lease_seconds,
         )
 
         if once:
+            worker_options = _worker_options(
+                worker_id=worker_id,
+                max_attempts=max_attempts,
+                backoff_max=backoff_max,
+                lease_seconds=lease_seconds,
+                concurrency=concurrency,
+            )
             debug_before = (
                 await _relay_debug_snapshot(
                     db,
@@ -156,6 +264,7 @@ async def _run_relay_worker(
                     enabled=enabled,
                     relay_config=relay_config,
                     relay_sources=relay_sources,
+                    worker_options=worker_options,
                 )
                 if verbose
                 else None
@@ -170,13 +279,83 @@ async def _run_relay_worker(
                         enabled=enabled,
                         relay_config=relay_config,
                         relay_sources=relay_sources,
+                        worker_options=worker_options,
                     ),
                 }
             return result
 
-        while True:
-            await worker.run_once()
-            await asyncio.sleep(interval)
+        await worker.run_forever(interval_seconds=interval)
+        return _empty_worker_result()
+    finally:
+        await db.close()
+
+
+def _empty_worker_result() -> dict:
+    return {
+        "outbox_processed": 0,
+        "outbox_failed": 0,
+        "item_processed": 0,
+        "item_failed": 0,
+        "aggregate_processed": 0,
+        "aggregate_failed": 0,
+    }
+
+
+def _combine_worker_results(results: list[dict]) -> dict:
+    combined = _empty_worker_result()
+    for result in results:
+        for key in combined:
+            combined[key] += int(result.get(key, 0) or 0)
+    return combined
+
+
+def _worker_instance_id(worker_id: str, index: int, concurrency: int) -> str:
+    if concurrency == 1:
+        return worker_id
+    return f"{worker_id}-{index + 1}"
+
+
+def _worker_options(
+    *,
+    worker_id: str,
+    max_attempts: int,
+    backoff_max: float,
+    lease_seconds: int,
+    concurrency: int,
+) -> dict:
+    return {
+        "worker_id": worker_id,
+        "max_attempts": max_attempts,
+        "backoff_max": backoff_max,
+        "lease_seconds": lease_seconds,
+        "concurrency": concurrency,
+    }
+
+
+async def _relay_debug_snapshot_from_settings(
+    *,
+    enabled: set[str],
+    worker_options: dict,
+) -> dict:
+    settings = Settings()
+    db = Database(settings.database_path, embedding_dim=settings.embedding_dim)
+    await db.connect()
+    try:
+        service = RelayService(
+            db,
+            max_attempts=worker_options["max_attempts"],
+            backoff_max_seconds=worker_options["backoff_max"],
+        )
+        await service.ensure_schema()
+        effective = await service.get_effective_config(settings)
+        return await _relay_debug_snapshot(
+            db,
+            settings=settings,
+            enabled=enabled,
+            relay_config=effective["values"],
+            relay_sources=effective["sources"],
+            worker_options=worker_options,
+        )
     finally:
         await db.close()
 
@@ -188,11 +367,13 @@ async def _relay_debug_snapshot(
     enabled: set[str],
     relay_config: dict,
     relay_sources: dict,
+    worker_options: Optional[dict] = None,
 ) -> dict:
     now = time.time()
     snapshot = {
         "database_path": settings.database_path,
         "enabled_tasks": sorted(enabled),
+        "worker": worker_options or {},
         "settings": {
             "hub_url": relay_config.get("hub_url", ""),
             "source_node_id": relay_config.get("source_node_id", ""),

@@ -181,9 +181,26 @@ class RelayService:
         "git-history",
     }
 
-    def __init__(self, db: Database, *, max_attempts: int = 3):
+    def __init__(
+        self,
+        db: Database,
+        *,
+        max_attempts: int = 3,
+        backoff_max_seconds: float = 300.0,
+    ):
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
+        if backoff_max_seconds <= 0:
+            raise ValueError("backoff_max_seconds must be greater than 0")
         self.db = db
         self.max_attempts = max_attempts
+        self.backoff_max_seconds = backoff_max_seconds
+
+    def _retry_backoff_seconds(self, attempts: int) -> float:
+        return min(
+            self.backoff_max_seconds,
+            float(2 ** max(attempts - 1, 0)),
+        )
 
     async def ensure_schema(self) -> None:
         """Create relay tables and indexes if they do not exist."""
@@ -1241,7 +1258,7 @@ class RelayService:
         )
         attempts = row["attempts"] if row else self.max_attempts
         status = "dead_letter" if attempts >= self.max_attempts else "pending"
-        backoff = min(300, 2 ** max(attempts - 1, 0))
+        backoff = self._retry_backoff_seconds(attempts)
         await self.db.execute(
             """
             UPDATE relay_outbox
@@ -1291,13 +1308,25 @@ class RelayService:
                 error=str(exc),
             )
         except Exception as exc:
-            logger.exception("Relay outbox delivery failed for job %s", job.id)
-            await self.mark_outbox_failed(job.id, str(exc))
+            error = self._delivery_error_summary(exc)
+            logger.warning(
+                "Relay outbox delivery failed for job %s; will retry: %s",
+                job.id,
+                error,
+            )
+            await self.mark_outbox_failed(job.id, error)
             return RelayProcessResult(
                 processed=False,
                 job_id=job.id,
-                error=str(exc),
+                error=error,
             )
+
+    @staticmethod
+    def _delivery_error_summary(exc: Exception) -> str:
+        message = str(exc).strip()
+        if message:
+            return f"{exc.__class__.__name__}: {message}"
+        return exc.__class__.__name__
 
     async def ingest(
         self, bearer_token: str, request: Union[RelayIngestRequest, Dict[str, Any]]
@@ -2287,7 +2316,7 @@ class RelayService:
         )
         attempts = row["attempts"] if row else self.max_attempts
         status = "dead_letter" if attempts >= self.max_attempts else "pending"
-        backoff = min(300, 2 ** max(attempts - 1, 0))
+        backoff = self._retry_backoff_seconds(attempts)
         await self.db.execute(
             """
             UPDATE relay_queue_item
@@ -2308,7 +2337,7 @@ class RelayService:
         )
         attempts = row["attempts"] if row else self.max_attempts
         status = "dead_letter" if attempts >= self.max_attempts else "pending"
-        backoff = min(300, 2 ** max(attempts - 1, 0))
+        backoff = self._retry_backoff_seconds(attempts)
         await self.db.execute(
             """
             UPDATE relay_queue_aggregate

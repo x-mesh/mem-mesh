@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 import pytest
 
 from app.core.database.base import Database
-from app.core.schemas.relay import RelayIngestRequest
+from app.core.schemas.relay import RelayIngestRequest, RelayProcessResult
 from app.core.services.relay import RelayService
 from app.core.services.relay_worker import (
     RelayWorker,
@@ -86,6 +86,45 @@ class _FakeSender:
         return {"accepted": True}
 
 
+class _FakeLeaseService:
+    def __init__(self):
+        self.calls = []
+
+    async def drain_next_outbox(
+        self,
+        *,
+        worker_id,
+        sender,
+        bearer_token,
+        lease_seconds,
+    ):
+        self.calls.append(("outbox", worker_id, lease_seconds))
+        return RelayProcessResult(processed=True, job_id="outbox-job")
+
+    async def process_next_item(
+        self,
+        *,
+        worker_id,
+        embedding_service,
+        text_enricher,
+        prompt_version,
+        lease_seconds,
+    ):
+        self.calls.append(("item", worker_id, lease_seconds))
+        return RelayProcessResult(processed=True, job_id="item-job")
+
+    async def process_next_aggregate(
+        self,
+        *,
+        worker_id,
+        digest_generator,
+        prompt_version,
+        lease_seconds,
+    ):
+        self.calls.append(("aggregate", worker_id, lease_seconds))
+        return RelayProcessResult(processed=True, job_id="aggregate-job")
+
+
 def _sonnet_payload(obj):
     return {
         "content": [
@@ -95,6 +134,33 @@ def _sonnet_payload(obj):
             }
         ]
     }
+
+
+@pytest.mark.asyncio
+async def test_relay_worker_passes_configured_lease_seconds():
+    service = _FakeLeaseService()
+    worker = RelayWorker(
+        service=service,
+        worker_id="relay-worker",
+        embedding_service=object(),
+        text_enricher=object(),
+        digest_generator=object(),
+        outbox_sender=object(),
+        outbox_bearer_token="hub-token",
+        prompt_version="test-prompt-v1",
+        lease_seconds=45,
+    )
+
+    stats = await worker.run_once()
+
+    assert stats["outbox_processed"] == 1
+    assert stats["item_processed"] == 1
+    assert stats["aggregate_processed"] == 1
+    assert service.calls == [
+        ("outbox", "relay-worker", 45),
+        ("item", "relay-worker", 45),
+        ("aggregate", "relay-worker", 45),
+    ]
 
 
 @pytest.mark.asyncio
@@ -231,6 +297,12 @@ async def test_relay_worker_run_once_processes_outbox_item_and_aggregate():
         assert stats["outbox_processed"] == 1
         assert stats["item_processed"] == 1
         assert stats["aggregate_processed"] == 1
-        assert (await db.fetchone("SELECT status FROM relay_outbox"))["status"] == "sent"
-        assert (await db.fetchone("SELECT status FROM relay_queue_item"))["status"] == "done"
-        assert (await db.fetchone("SELECT status FROM relay_queue_aggregate"))["status"] == "done"
+        assert (await db.fetchone("SELECT status FROM relay_outbox"))[
+            "status"
+        ] == "sent"
+        assert (await db.fetchone("SELECT status FROM relay_queue_item"))[
+            "status"
+        ] == "done"
+        assert (await db.fetchone("SELECT status FROM relay_queue_aggregate"))[
+            "status"
+        ] == "done"

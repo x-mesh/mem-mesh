@@ -21,12 +21,34 @@ def test_main_dispatches_relay_worker_once_json(monkeypatch):
     monkeypatch.setattr(relay_cli, "cmd_relay_worker", fake_cmd)
 
     with pytest.raises(SystemExit) as exc:
-        main(["relay", "worker", "--once", "--json", "-v", "--tasks", "outbox,item"])
+        main(
+            [
+                "relay",
+                "worker",
+                "--once",
+                "--json",
+                "-v",
+                "--tasks",
+                "outbox,item",
+                "--max-attempts",
+                "9",
+                "--backoff-max",
+                "120",
+                "--lease-seconds",
+                "45",
+                "--concurrency",
+                "3",
+            ]
+        )
 
     assert exc.value.code == 0
     assert calls["once"] is True
     assert calls["json_mode"] is True
     assert calls["tasks"] == "outbox,item"
+    assert calls["max_attempts"] == 9
+    assert calls["backoff_max"] == 120
+    assert calls["lease_seconds"] == 45
+    assert calls["concurrency"] == 3
     assert calls["verbose"] is True
 
 
@@ -84,10 +106,18 @@ async def test_relay_worker_verbose_reports_empty_outbox_queue(tmp_path, monkeyp
         tasks="outbox",
         interval=1.0,
         worker_id="test-worker",
+        max_attempts=5,
+        backoff_max=30.0,
+        lease_seconds=45,
+        concurrency=1,
         verbose=True,
     )
 
     assert result["outbox_processed"] == 0
+    assert result["debug"]["before"]["worker"]["max_attempts"] == 5
+    assert result["debug"]["before"]["worker"]["backoff_max"] == 30.0
+    assert result["debug"]["before"]["worker"]["lease_seconds"] == 45
+    assert result["debug"]["before"]["worker"]["concurrency"] == 1
     assert result["debug"]["before"]["settings"]["hub_token_configured"] is True
     assert result["debug"]["before"]["settings"]["hub_url"] == "http://hub.local"
     assert result["debug"]["before"]["settings"]["source_node_id"] == "node-db"
