@@ -95,9 +95,25 @@ async def test_ingest_is_idempotent_and_detects_payload_collision():
         assert replay.queued_item is False
 
         raw_count = await db.fetchone("SELECT COUNT(*) AS count FROM relay_raw_event")
-        queue_count = await db.fetchone("SELECT COUNT(*) AS count FROM relay_queue_item")
+        queue_count = await db.fetchone(
+            "SELECT COUNT(*) AS count FROM relay_queue_item"
+        )
+        materialized = await db.fetchone(
+            """
+            SELECT id, project_id, category, source, client, content, tags
+            FROM memories
+            WHERE id = ?
+            """,
+            (f"relay:{first.current_memory_id}",),
+        )
         assert raw_count["count"] == 1
         assert queue_count["count"] == 1
+        assert materialized["project_id"] == "node-1:relay"
+        assert materialized["category"] == "decision"
+        assert materialized["source"] == "relay"
+        assert materialized["client"] == "relay:node-1"
+        assert materialized["content"] == request.content
+        assert '"shared"' in materialized["tags"]
 
         collision = request.model_copy(update={"payload_hash": "sha256:changed"})
         with pytest.raises(RelayIdempotencyConflict):
@@ -136,13 +152,20 @@ async def test_update_appends_raw_event_and_older_event_does_not_replace_current
             """,
             (newer_response.current_memory_id,),
         )
-        queue_count = await db.fetchone("SELECT COUNT(*) AS count FROM relay_queue_item")
+        queue_count = await db.fetchone(
+            "SELECT COUNT(*) AS count FROM relay_queue_item"
+        )
+        materialized = await db.fetchone(
+            "SELECT content FROM memories WHERE id = ?",
+            (f"relay:{newer_response.current_memory_id}",),
+        )
 
         assert raw_count["count"] == 2
         assert current["source_version"] == 2
         assert current["content"] == newer.content
         assert current["visible"] == 1
         assert queue_count["count"] == 1
+        assert materialized["content"] == newer.content
 
 
 @pytest.mark.asyncio
@@ -168,10 +191,15 @@ async def test_retract_hides_current_projection_without_deleting_raw_history():
             "SELECT visible, tombstoned_at FROM relay_memory_current WHERE id = ?",
             (created.current_memory_id,),
         )
+        materialized_count = await db.fetchone(
+            "SELECT COUNT(*) AS count FROM memories WHERE id = ?",
+            (f"relay:{created.current_memory_id}",),
+        )
 
         assert raw_count["count"] == 2
         assert current["visible"] == 0
         assert current["tombstoned_at"] is not None
+        assert materialized_count["count"] == 0
 
 
 @pytest.mark.asyncio
@@ -257,7 +285,9 @@ async def test_enqueue_memory_share_builds_outbox_payload_from_memory():
             target_hub="https://hub.local",
         )
 
-        outbox = await db.fetchone("SELECT * FROM relay_outbox WHERE id = ?", (outbox_id,))
+        outbox = await db.fetchone(
+            "SELECT * FROM relay_outbox WHERE id = ?", (outbox_id,)
+        )
         payload = outbox["payload_json"]
         assert outbox["idempotency_key"] == "node-1:memory-1:v7:update"
         assert '"source_memory_id": "memory-1"' in payload
@@ -412,7 +442,11 @@ class _FakeOutboxSender:
 
     async def send_ingest(self, *, target_hub, bearer_token, payload):
         self.calls.append((target_hub, bearer_token, payload))
-        return {"accepted": True, "event_id": "hub-event", "current_memory_id": "hub-current"}
+        return {
+            "accepted": True,
+            "event_id": "hub-event",
+            "current_memory_id": "hub-current",
+        }
 
 
 class _FailingOutboxSender:
@@ -485,7 +519,12 @@ class _FailingTextEnricher:
 async def test_process_next_item_writes_enrichment_and_coalesces_aggregate_queue():
     async with _temp_db() as db:
         service = await _service_with_identity(db)
-        await service.ingest("relay-token", _request())
+        ingest = await service.ingest("relay-token", _request())
+        memory_id = f"relay:{ingest.current_memory_id}"
+        before_memory = await db.fetchone(
+            "SELECT embedding FROM memories WHERE id = ?",
+            (memory_id,),
+        )
 
         result = await service.process_next_item(
             worker_id="worker-1",
@@ -504,10 +543,15 @@ async def test_process_next_item_writes_enrichment_and_coalesces_aggregate_queue
             "SELECT COUNT(*) AS count FROM relay_queue_aggregate"
         )
         item_status = await db.fetchone("SELECT status FROM relay_queue_item")
+        after_memory = await db.fetchone(
+            "SELECT embedding FROM memories WHERE id = ?",
+            (memory_id,),
+        )
 
         assert enrichment_count["count"] == 1
         assert aggregate_count["count"] == 1
         assert item_status["status"] == "done"
+        assert before_memory["embedding"] != after_memory["embedding"]
 
 
 @pytest.mark.asyncio
@@ -523,12 +567,10 @@ async def test_process_next_item_failure_requeues_without_losing_job():
             prompt_version="test-prompt-v1",
         )
 
-        queue_row = await db.fetchone(
-            """
+        queue_row = await db.fetchone("""
             SELECT status, attempts, locked_by, locked_at, last_error, next_attempt_at
             FROM relay_queue_item
-            """
-        )
+            """)
         enrichment_count = await db.fetchone(
             "SELECT COUNT(*) AS count FROM relay_item_enrichment"
         )
@@ -588,12 +630,10 @@ async def test_drain_next_outbox_failure_requeues_without_losing_payload():
             bearer_token="hub-token",
         )
 
-        outbox = await db.fetchone(
-            """
+        outbox = await db.fetchone("""
             SELECT status, attempts, locked_by, locked_at, last_error
             FROM relay_outbox
-            """
-        )
+            """)
         assert result.processed is False
         assert "hub unavailable" in result.error
         assert outbox["status"] == "pending"
@@ -654,12 +694,10 @@ async def test_process_next_aggregate_failure_requeues_without_digest():
             prompt_version="digest-prompt-v1",
         )
 
-        aggregate_queue = await db.fetchone(
-            """
+        aggregate_queue = await db.fetchone("""
             SELECT status, attempts, locked_by, locked_at, last_error
             FROM relay_queue_aggregate
-            """
-        )
+            """)
         digest_count = await db.fetchone(
             "SELECT COUNT(*) AS count FROM relay_project_digest"
         )

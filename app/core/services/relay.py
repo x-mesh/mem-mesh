@@ -1470,6 +1470,11 @@ class RelayService:
                     current_memory_id=job.ref_id,
                     embedding_values=embedding_values,
                 )
+                await self._write_materialized_memory_vector_locked(
+                    current_memory_id=job.ref_id,
+                    embedding_values=embedding_values,
+                    now=now,
+                )
                 await self.db.execute(
                     """
                     UPDATE relay_queue_item
@@ -1844,6 +1849,10 @@ class RelayService:
         )
         return team_project_id
 
+    @staticmethod
+    def _materialized_memory_id(current_memory_id: str) -> str:
+        return f"relay:{current_memory_id}"
+
     async def _get_current_locked(
         self, source_node_id: str, source_memory_id: str
     ) -> Optional[Any]:
@@ -1944,7 +1953,127 @@ class RelayService:
                     now,
                 ),
             )
+        await self._sync_materialized_memory_locked(
+            current_memory_id=current_memory_id,
+            source_node_id=source_node_id,
+            payload=payload,
+            team_project_id=team_project_id,
+            content_hash=content_hash,
+            content=content,
+            visible=bool(visible),
+            now=now,
+        )
         return current_memory_id
+
+    async def _sync_materialized_memory_locked(
+        self,
+        *,
+        current_memory_id: str,
+        source_node_id: str,
+        payload: RelayIngestRequest,
+        team_project_id: str,
+        content_hash: str,
+        content: Optional[str],
+        visible: bool,
+        now: str,
+    ) -> None:
+        memory_id = self._materialized_memory_id(current_memory_id)
+        if not visible or not content:
+            await self._delete_materialized_memory_locked(memory_id)
+            return
+
+        existing = await self.db.fetchone(
+            "SELECT content_hash, embedding, created_at FROM memories WHERE id = ?",
+            (memory_id,),
+        )
+        content_changed = (
+            existing is not None and existing["content_hash"] != content_hash
+        )
+        embedding = (
+            existing["embedding"]
+            if existing is not None and not content_changed
+            else self._zero_embedding_bytes()
+        )
+        tags = self._materialized_tags(payload.tags)
+        client = f"relay:{source_node_id}"
+
+        if existing:
+            await self.db.execute(
+                """
+                UPDATE memories
+                SET content = ?,
+                    content_hash = ?,
+                    project_id = ?,
+                    category = ?,
+                    source = 'relay',
+                    client = ?,
+                    embedding = ?,
+                    tags = ?,
+                    updated_at = ?,
+                    content_bytes = ?
+                WHERE id = ?
+                """,
+                (
+                    content,
+                    content_hash,
+                    team_project_id,
+                    payload.kind,
+                    client,
+                    embedding,
+                    tags,
+                    now,
+                    len(content),
+                    memory_id,
+                ),
+            )
+            if content_changed:
+                await self._delete_memory_vector_locked(memory_id)
+        else:
+            await self.db.execute(
+                """
+                INSERT INTO memories (
+                    id, content, content_hash, project_id, category, source,
+                    client, embedding, tags, created_at, updated_at, content_bytes
+                )
+                VALUES (?, ?, ?, ?, ?, 'relay', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    memory_id,
+                    content,
+                    content_hash,
+                    team_project_id,
+                    payload.kind,
+                    client,
+                    embedding,
+                    tags,
+                    now,
+                    now,
+                    len(content),
+                ),
+            )
+
+    async def _delete_materialized_memory_locked(self, memory_id: str) -> None:
+        await self._delete_memory_vector_locked(memory_id)
+        await self.db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+
+    @staticmethod
+    def _materialized_tags(tags: Sequence[str]) -> str:
+        merged: list[str] = []
+        for tag in [*tags, "relay", "shared"]:
+            if tag and tag not in merged:
+                merged.append(tag)
+        return _json_dumps(merged)
+
+    def _zero_embedding_bytes(self) -> bytes:
+        import numpy as np
+
+        return np.zeros(self.db.embedding_dim, dtype=np.float32).tobytes()
+
+    @staticmethod
+    def _embedding_values_to_bytes(embedding_values: Sequence[float]) -> bytes:
+        import numpy as np
+
+        return np.asarray(list(embedding_values), dtype=np.float32).tobytes()
 
     async def _enqueue_item_locked(
         self, *, current_memory_id: str, raw_event_id: str, now: str
@@ -2122,6 +2251,85 @@ class RelayService:
             """,
             (current_memory_id, embedding_json),
         )
+
+    async def _write_materialized_memory_vector_locked(
+        self,
+        *,
+        current_memory_id: str,
+        embedding_values: Sequence[float],
+        now: str,
+    ) -> None:
+        if len(embedding_values) != self.db.embedding_dim:
+            logger.warning(
+                "Skipping materialized relay memory vector for %s: dim %s != db dim %s",
+                current_memory_id,
+                len(embedding_values),
+                self.db.embedding_dim,
+            )
+            return
+
+        memory_id = self._materialized_memory_id(current_memory_id)
+        existing = await self.db.fetchone(
+            "SELECT id FROM memories WHERE id = ?", (memory_id,)
+        )
+        if not existing:
+            return
+
+        embedding_bytes = self._embedding_values_to_bytes(embedding_values)
+        await self.db.execute(
+            "UPDATE memories SET embedding = ?, updated_at = ? WHERE id = ?",
+            (embedding_bytes, now, memory_id),
+        )
+
+        tables = await self._memory_vector_write_tables_locked()
+        if tables == ["memories_vec_fallback"]:
+            await self.db.execute(
+                "DELETE FROM memories_vec_fallback WHERE memory_id = ?",
+                (memory_id,),
+            )
+            await self.db.execute(
+                "INSERT INTO memories_vec_fallback (memory_id, embedding) VALUES (?, ?)",
+                (memory_id, embedding_bytes),
+            )
+            return
+
+        embedding_json = _json_dumps([float(value) for value in embedding_values])
+        for table in tables:
+            await self.db.execute(
+                f"DELETE FROM {table} WHERE memory_id = ?",
+                (memory_id,),
+            )
+            await self.db.execute(
+                f"INSERT INTO {table} (memory_id, embedding) VALUES (?, ?)",
+                (memory_id, embedding_json),
+            )
+
+    async def _delete_memory_vector_locked(self, memory_id: str) -> None:
+        for table in await self._memory_vector_write_tables_locked():
+            await self.db.execute(
+                f"DELETE FROM {table} WHERE memory_id = ?",
+                (memory_id,),
+            )
+
+    async def _memory_vector_write_tables_locked(self) -> list[str]:
+        active = await self.db.active_embedding_table()
+        row = await self.db.fetchone(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+            (active,),
+        )
+        if not row:
+            return ["memories_vec_fallback"]
+
+        tables = [active]
+        if await self.db.migration_in_progress():
+            inactive = await self.db.inactive_embedding_table()
+            inactive_row = await self.db.fetchone(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+                (inactive,),
+            )
+            if inactive_row:
+                tables.append(inactive)
+        return tables
 
     async def _search_vector(
         self,
