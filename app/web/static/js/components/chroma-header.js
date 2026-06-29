@@ -78,6 +78,12 @@ class ChromaHeader extends HTMLElement {
                 </svg>
                 <span>Memories</span>
               </a>
+              <a href="/projects" class="nav-link" data-route="/projects" data-nav="projects">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>Projects</span>
+              </a>
               <a href="/work" class="nav-link" data-route="/work" data-nav="work">
                 <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
                   <path d="M9 11L12 14L22 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -229,6 +235,12 @@ class ChromaHeader extends HTMLElement {
                   <path d="M21 21L16.65 16.65" stroke="currentColor" stroke-width="2"/>
                 </svg>
                 <span>Memories</span>
+              </a>
+              <a href="/projects" class="mobile-nav-link" data-route="/projects" data-nav="projects">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>Projects</span>
               </a>
               <a href="/work" class="mobile-nav-link" data-route="/work" data-nav="work">
                 <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
