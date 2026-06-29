@@ -66,6 +66,16 @@ function isRelayMemory(mem) {
   );
 }
 
+// Memory kinds the relay accepts (mirrors RelayService.DEFAULT_SHAREABLE_KINDS).
+// task and other non-shareable kinds never get a relay-share button.
+const RELAY_SHAREABLE_KINDS = new Set([
+  'bug', 'idea', 'decision', 'incident', 'code_snippet', 'git-history',
+]);
+
+function isRelayShareableKind(mem) {
+  return RELAY_SHAREABLE_KINDS.has(String(mem?.category || ''));
+}
+
 /* ── Component ──────────────────────────────────────────────── */
 
 class MemoriesPage extends HTMLElement {
@@ -296,9 +306,9 @@ class MemoriesPage extends HTMLElement {
         ${score}
         <span class="recent-item-time">${time}</span>
         <span class="mem-row-actions">
-          <button class="mem-action-btn mem-relay-btn" data-id="${esc(mem.id)}" title="Share to relay">
+          ${isRelayShareableKind(mem) ? `<button class="mem-action-btn mem-relay-btn" data-id="${esc(mem.id)}" title="Share to relay">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-          </button>
+          </button>` : ''}
           <button class="mem-action-btn mem-edit-btn" data-id="${esc(mem.id)}" title="Edit">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
@@ -1495,6 +1505,9 @@ class MemoriesPage extends HTMLElement {
     const suffix = this.totalMemories > loadedCount
       ? ` from ${loadedCount} loaded`
       : '';
+    const anyShareable = [...this._selected].some(
+      id => isRelayShareableKind(this.memories.find(m => m.id === id))
+    );
     bar.innerHTML = `
       <span class="mem-batch-count">${count} selected${suffix}</span>
       <select class="mem-batch-cat" title="Change category">
@@ -1506,7 +1519,7 @@ class MemoriesPage extends HTMLElement {
         <option value="incident">Incident</option>
         <option value="code_snippet">Code Snippet</option>
       </select>
-      <button class="mem-batch-share-btn">Share</button>
+      ${anyShareable ? '<button class="mem-batch-share-btn">Share</button>' : ''}
       <button class="mem-batch-delete-btn">Delete</button>
       <button class="mem-batch-clear-btn">Deselect</button>
     `;
@@ -1593,13 +1606,23 @@ class MemoriesPage extends HTMLElement {
   }
 
   async batchShareToRelay() {
-    const ids = [...this._selected];
-    if (!ids.length) return;
+    const selected = [...this._selected];
+    if (!selected.length) return;
     const api = window.app?.apiClient;
     if (!api) return;
+    // Only team-shareable kinds go to relay; the rest (e.g. task) are skipped.
+    const ids = selected.filter(
+      id => isRelayShareableKind(this.memories.find(m => m.id === id))
+    );
+    const skipped = selected.length - ids.length;
+    if (!ids.length) {
+      this.showToast('None of the selected memories are team-shareable', 'warning');
+      return;
+    }
     const relayCount = ids.filter(id => isRelayMemory(this.memories.find(m => m.id === id))).length;
     let message = `Share ${ids.length} memories to the team relay?`;
     if (relayCount > 0) message += ` (${relayCount} were received via relay and will be re-shared.)`;
+    if (skipped > 0) message += ` ${skipped} non-shareable will be skipped.`;
     if (!confirm(message)) return;
 
     let shared = 0;
@@ -1617,10 +1640,11 @@ class MemoriesPage extends HTMLElement {
     this._selected.clear();
     this.renderBatchBar();
     this.renderMemoryList();
+    const skipNote = skipped > 0 ? `, ${skipped} skipped` : '';
     if (failed > 0) {
-      this.showToast(`${shared} shared, ${failed} failed — ${lastError}`, 'warning');
+      this.showToast(`${shared} shared, ${failed} failed${skipNote} — ${lastError}`, 'warning');
     } else {
-      this.showToast(`${shared} memories queued for relay`, 'success');
+      this.showToast(`${shared} memories queued for relay${skipNote}`, 'success');
     }
   }
 
@@ -1709,9 +1733,9 @@ class MemoriesPage extends HTMLElement {
       <div class="mem-peek-header">
         <span class="mem-peek-cat">${icon} ${esc(m.category)}</span>
         <div class="mem-peek-actions">
-          <button class="mem-action-btn mem-peek-relay" data-id="${esc(m.id)}" title="Share to relay">
+          ${isRelayShareableKind(m) ? `<button class="mem-action-btn mem-peek-relay" data-id="${esc(m.id)}" title="Share to relay">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-          </button>
+          </button>` : ''}
           <button class="mem-action-btn mem-peek-fav" data-id="${esc(m.id)}" title="Favorite">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="${isFav ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
           </button>
