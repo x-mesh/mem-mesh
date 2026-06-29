@@ -569,6 +569,48 @@ async def test_relay_share_endpoints_reject_unauthenticated_remote():
 
 
 @pytest.mark.asyncio
+async def test_delete_relay_origin_memory_falls_back_to_plain_delete():
+    """A memory flagged relay-origin by source (not a ``relay:`` id) takes the
+    relay delete branch; delete_materialized_memory returns False (no relay:
+    prefix) so the route falls back to a plain delete and the row is removed."""
+    async with _temp_db() as db:
+        relay = RelayService(db)
+        await relay.ensure_schema()
+        await db.execute(
+            """
+            INSERT INTO memories
+                (id, content, content_hash, project_id, category, source,
+                 client, embedding, tags, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "plain-1",
+                "A relay-origin memory stored under a non-relay id value here.",
+                "hash-1",
+                "proj",
+                "decision",
+                "relay",  # relay-origin via source, not via id prefix
+                None,
+                b"\x00" * 12,
+                None,
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z",
+            ),
+        )
+
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.delete("/api/memories/plain-1")
+
+        assert resp.status_code == 200
+        remaining = await db.fetchone(
+            "SELECT COUNT(*) AS count FROM memories WHERE id = 'plain-1'"
+        )
+        assert remaining["count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_relay_auto_share_endpoints_list_and_toggle(monkeypatch):
     monkeypatch.setenv("MEM_MESH_RELAY_HUB_URL", "https://hub.local")
     monkeypatch.setenv("MEM_MESH_RELAY_SOURCE_NODE_ID", "node-1")

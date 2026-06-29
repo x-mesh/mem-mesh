@@ -1212,6 +1212,58 @@ async def test_auto_share_create_then_update_emit_distinct_events():
         assert await _outbox_count(db) == 2
 
 
+@pytest.mark.asyncio
+async def test_admin_overview_includes_item_and_aggregate_dead_letters():
+    """get_admin_overview must surface dead-lettered item/aggregate queue jobs
+    (with ref_id/raw_event_id), not just the outbox queue."""
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        await db.execute(
+            """
+            INSERT INTO relay_queue_item
+                (id, ref_id, raw_event_id, status, attempts, next_attempt_at,
+                 last_error, created_at, updated_at)
+            VALUES (?, ?, ?, 'dead_letter', 3, 0, ?, ?, ?)
+            """,
+            (
+                "item-1",
+                "cur-1",
+                "raw-1",
+                "boom",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z",
+            ),
+        )
+        await db.execute(
+            """
+            INSERT INTO relay_queue_aggregate
+                (id, ref_id, raw_event_id, coalesce_key, status, attempts,
+                 next_attempt_at, last_error, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'dead_letter', 3, 0, ?, ?, ?)
+            """,
+            (
+                "agg-1",
+                "cur-2",
+                "raw-2",
+                "ck-1",
+                "boom2",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z",
+            ),
+        )
+
+        overview = await service.get_admin_overview()
+        by_queue = {d.queue: d for d in overview.dead_letters}
+
+        assert "item" in by_queue
+        assert "aggregate" in by_queue
+        assert by_queue["item"].ref_id == "cur-1"
+        assert by_queue["item"].raw_event_id == "raw-1"
+        assert by_queue["item"].idempotency_key is None
+        assert by_queue["aggregate"].ref_id == "cur-2"
+        assert by_queue["aggregate"].raw_event_id == "raw-2"
+
+
 class _AutoShareFakeEmbedding:
     model_name = "fake-embedding"
     dimension = 3
