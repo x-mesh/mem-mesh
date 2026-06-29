@@ -13,6 +13,7 @@ import logging
 import os
 import time
 import uuid
+import weakref
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Sequence, Union
 
@@ -185,6 +186,13 @@ class RelayService:
         "git-history",
     }
 
+    # Databases whose relay schema has already been created this process. The
+    # DDL is CREATE ... IF NOT EXISTS (idempotent), so once a connection has run
+    # it there is no need to re-issue ~20 statements on every request / delete.
+    # Keyed weakly per Database instance so fresh connections (e.g. per-test
+    # temp DBs) still run it and closed ones drop out automatically.
+    _schema_ready: "weakref.WeakSet" = weakref.WeakSet()
+
     def __init__(
         self,
         db: Database,
@@ -207,7 +215,15 @@ class RelayService:
         )
 
     async def ensure_schema(self) -> None:
-        """Create relay tables and indexes if they do not exist."""
+        """Create relay tables and indexes if they do not exist.
+
+        Memoized per Database instance: the first call on a connection issues the
+        DDL, later calls are a no-op, so per-request / per-delete relay access
+        does not repeat ~20 CREATE IF NOT EXISTS statements.
+        """
+
+        if self.db in RelayService._schema_ready:
+            return
 
         statements = [
             """
@@ -425,6 +441,8 @@ class RelayService:
             for statement in statements:
                 await self.db.execute(statement)
             await self._ensure_vector_schema()
+
+        RelayService._schema_ready.add(self.db)
 
     async def get_admin_overview(
         self, *, limit: int = 10
