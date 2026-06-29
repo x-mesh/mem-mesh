@@ -1303,6 +1303,31 @@ async def test_auto_share_hook_fires_on_memory_service_create():
 
 
 @pytest.mark.asyncio
+async def test_auto_share_hook_fires_on_create_with_embedding():
+    """The batch/MCP path (add_with_embedding → create_with_embedding) must also
+    enqueue auto-share for a subscribed project, not just the plain create()."""
+    from app.core.services.memory import MemoryService
+
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        await _enable_auto_share(service, "proj-batch")
+
+        memory_service = MemoryService(db, _AutoShareFakeEmbedding())
+        await memory_service.add_with_embedding(
+            content=(
+                "A batch-created shareable decision that must auto-share to the "
+                "team relay through the pre-computed embedding path as well."
+            ),
+            embedding=[0.1, 0.2, 0.3],
+            project_id="proj-batch",
+            category="decision",
+            source="mcp_batch",
+        )
+
+        assert await _outbox_count(db) == 1
+
+
+@pytest.mark.asyncio
 async def test_auto_share_hook_noop_for_unsubscribed_project_create():
     from app.core.services.memory import MemoryService
 

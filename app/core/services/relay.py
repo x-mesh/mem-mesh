@@ -1475,9 +1475,12 @@ class RelayService:
         include_relay_origin: bool,
         settings: Any,
     ) -> RelayAutoShareSubscription:
-        """Enable or disable continuous relay sharing for a project. Snapshots
-        the effective hub/node at creation so later config edits do not silently
-        retarget an existing subscription."""
+        """Enable or disable continuous relay sharing for a project.
+
+        Snapshots the effective hub/node into the subscription each time it is
+        (re)enabled, so the auto-share target is pinned at toggle time rather
+        than read live on every memory write. Re-toggling refreshes the
+        snapshot to the current effective config."""
 
         await self.ensure_schema()
         effective = await self.get_effective_config(settings)

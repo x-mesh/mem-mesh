@@ -319,13 +319,19 @@ class MemoryService:
                 await self._save_to_vector_index(memory.id, embedding_bytes)
 
             logger.info("Memory created with pre-computed embedding: %s", memory.id)
-            return AddResponse(
+            response = AddResponse(
                 id=memory.id, status="saved", created_at=memory.created_at
             )
 
         except Exception as e:
             logger.error("Failed to save memory with embedding: %s", e)
             raise DatabaseError(f"Failed to save memory: {e}") from e
+
+        # Continuous relay sharing (best-effort) — also covers the batch/MCP
+        # path (batch_tools → add_with_embedding) so subscribed projects share
+        # batch-created memories too.
+        await self._relay_auto_share(memory, event_type="create")
+        return response
 
     # Alias for backward compatibility
     async def add_with_embedding(self, *args, **kwargs) -> AddResponse:

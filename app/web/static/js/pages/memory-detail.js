@@ -1143,6 +1143,9 @@ style.textContent = `
     width: 16px;
     height: 16px;
     flex-shrink: 0;
+    /* Let clicks fall through to the button — handleClick matches the button's
+       own class, so a click landing on the inner SVG must not become the target. */
+    pointer-events: none;
   }
   
   .header-buttons button:hover {
