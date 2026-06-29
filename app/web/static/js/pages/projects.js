@@ -13,6 +13,7 @@ class ProjectsPage extends HTMLElement {
     this.currentSort = 'name';
     this.sortDirection = 'asc';
     this.searchQuery = '';
+    this.autoShareEnabled = new Set();
   }
   
   connectedCallback() {
@@ -76,6 +77,7 @@ class ProjectsPage extends HTMLElement {
       
       if (data && data.projects) {
         this.projects = data.projects;
+        await this.loadAutoShare();
         this.sortProjects();
         this.renderProjects();
         this.updateSummary();
@@ -236,6 +238,14 @@ class ProjectsPage extends HTMLElement {
    * Handle project card clicks
    */
   handleProjectClick(event) {
+    const autoShareBtn = event.target.closest('.relay-autoshare-btn');
+    if (autoShareBtn) {
+      event.stopPropagation();
+      const projectId = autoShareBtn.getAttribute('data-project-id');
+      if (projectId) this.toggleAutoShare(projectId);
+      return;
+    }
+
     const shareBtn = event.target.closest('.relay-share-btn');
     if (shareBtn) {
       event.stopPropagation();
@@ -272,6 +282,46 @@ class ProjectsPage extends HTMLElement {
           window.location.href = `/memories?view=project&project_id=${encodeURIComponent(projectId)}`;
         }
       }
+    }
+  }
+
+  /**
+   * Load which projects have continuous relay sharing enabled (best-effort —
+   * relay may be unconfigured, in which case the endpoint returns an empty list).
+   */
+  async loadAutoShare() {
+    try {
+      const data = await window.app.apiClient.getRelayAutoShare();
+      this.autoShareEnabled = new Set(
+        (data?.subscriptions || [])
+          .filter(s => s.enabled)
+          .map(s => s.project_id)
+      );
+    } catch {
+      this.autoShareEnabled = new Set();
+    }
+  }
+
+  /**
+   * Toggle continuous relay sharing for a project.
+   */
+  async toggleAutoShare(projectId) {
+    const api = window.app?.apiClient;
+    if (!api) { showToast('API not available', 'error'); return; }
+    const enable = !this.autoShareEnabled.has(projectId);
+    try {
+      await api.setRelayAutoShare(projectId, { enabled: enable });
+      if (enable) this.autoShareEnabled.add(projectId);
+      else this.autoShareEnabled.delete(projectId);
+      this.renderProjects();
+      showToast(
+        enable
+          ? `"${projectId}" continuous sharing on — new memories auto-share to relay`
+          : `"${projectId}" continuous sharing off`,
+        enable ? 'success' : 'info'
+      );
+    } catch (error) {
+      showToast(error?.data?.detail || error?.message || 'Failed to update auto-share', 'error');
     }
   }
 
@@ -463,6 +513,9 @@ class ProjectsPage extends HTMLElement {
         <div class="project-actions">
           <button class="view-btn" data-project-id="${project.id}">View Memories</button>
           <button class="relay-share-btn" data-project-id="${project.id}">Share to relay</button>
+          <button class="relay-autoshare-btn ${this.autoShareEnabled.has(project.id) ? 'on' : ''}" data-project-id="${project.id}">
+            ${this.autoShareEnabled.has(project.id) ? '● Auto-share on' : '○ Auto-share off'}
+          </button>
         </div>
       </div>
     `).join('');
@@ -817,6 +870,29 @@ style.textContent = `
   .relay-share-btn:hover {
     background: var(--primary-color);
     color: var(--bg-primary);
+  }
+
+  .relay-autoshare-btn {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    transition: var(--transition);
+  }
+
+  .relay-autoshare-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+  }
+
+  .relay-autoshare-btn.on {
+    background: var(--success-color, #16a34a);
+    color: #fff;
+    border-color: var(--success-color, #16a34a);
   }
 
   .view-btn {

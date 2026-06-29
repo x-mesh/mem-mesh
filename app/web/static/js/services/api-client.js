@@ -273,7 +273,15 @@ export class APIClient {
   async shareRelayProject(projectId, payload) {
     return this.post(`/relay/v1/outbox/share-project/${encodeURIComponent(projectId)}`, payload);
   }
-  
+
+  async getRelayAutoShare() {
+    return this.get('/relay/v1/admin/auto-share');
+  }
+
+  async setRelayAutoShare(projectId, payload) {
+    return this.put(`/relay/v1/admin/auto-share/${encodeURIComponent(projectId)}`, payload);
+  }
+
   /**
    * Analytics API methods (server-side aggregation)
    */
