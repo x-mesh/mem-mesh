@@ -765,7 +765,7 @@ class RelayService:
             rows = await self.db.fetchall(
                 """
                 SELECT
-                    id, source_node_id, team_project_id, authoritative_kind,
+                    id, source_node_id, source_project_key, authoritative_kind,
                     content_hash, content, tags_json, visible
                 FROM relay_memory_current
                 ORDER BY updated_at DESC
@@ -784,7 +784,7 @@ class RelayService:
                         source_node_id=str(row["source_node_id"]),
                         kind=str(row["authoritative_kind"]),
                         tags=_json_loads(row["tags_json"], []),
-                        team_project_id=str(row["team_project_id"]),
+                        source_project_key=str(row["source_project_key"]),
                         content_hash=str(row["content_hash"]),
                         content=str(content),
                         visible=True,
@@ -2652,7 +2652,7 @@ class RelayService:
             source_node_id=source_node_id,
             kind=payload.kind,
             tags=payload.tags,
-            team_project_id=team_project_id,
+            source_project_key=payload.source_project_key,
             content_hash=content_hash,
             content=content,
             visible=bool(visible),
@@ -2667,12 +2667,16 @@ class RelayService:
         source_node_id: str,
         kind: str,
         tags: Sequence[str],
-        team_project_id: str,
+        source_project_key: str,
         content_hash: str,
         content: Optional[str],
         visible: bool,
         now: str,
     ) -> None:
+        # The materialized memory keeps the ORIGINAL project name (e.g. "mem-mesh")
+        # so it groups and searches with the team's project, not a node-prefixed
+        # team_project_id. The source node stays distinguishable via client
+        # (``relay:<source_node_id>``) below.
         memory_id = self._materialized_memory_id(current_memory_id)
         if not visible or not content:
             await self._delete_materialized_memory_locked(memory_id)
@@ -2712,7 +2716,7 @@ class RelayService:
                 (
                     content,
                     content_hash,
-                    team_project_id,
+                    source_project_key,
                     kind,
                     client,
                     embedding,
@@ -2737,7 +2741,7 @@ class RelayService:
                     memory_id,
                     content,
                     content_hash,
-                    team_project_id,
+                    source_project_key,
                     kind,
                     client,
                     embedding,
@@ -2756,7 +2760,7 @@ class RelayService:
             source_node_id=str(current["source_node_id"]),
             kind=str(current["authoritative_kind"]),
             tags=_json_loads(current["tags_json"], []),
-            team_project_id=str(current["team_project_id"]),
+            source_project_key=str(current["source_project_key"]),
             content_hash=str(current["content_hash"]),
             content=current["content"],
             visible=bool(current["visible"]),

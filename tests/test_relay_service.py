@@ -110,7 +110,7 @@ async def test_ingest_is_idempotent_and_detects_payload_collision():
         )
         assert raw_count["count"] == 1
         assert queue_count["count"] == 1
-        assert materialized["project_id"] == "node-1:relay"
+        assert materialized["project_id"] == "relay"
         assert materialized["category"] == "decision"
         assert materialized["source"] == "relay"
         assert materialized["client"] == "relay:node-1"
@@ -231,7 +231,7 @@ async def test_materialize_current_memories_backfills_existing_current_rows():
         assert result.materialized == 1
         assert result.deleted == 0
         assert materialized["content"] == _request().content
-        assert materialized["project_id"] == "node-1:relay"
+        assert materialized["project_id"] == "relay"
         assert materialized["category"] == "decision"
         assert materialized["source"] == "relay"
 
