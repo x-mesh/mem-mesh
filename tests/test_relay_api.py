@@ -327,9 +327,7 @@ async def test_relay_admin_overview_lists_dead_letters_and_retry_endpoint_requeu
         overview_data = overview.json()
         refreshed_data = refreshed.json()
         assert overview.status_code == 200
-        assert overview_data["outbox_counts"] == [
-            {"status": "dead_letter", "count": 1}
-        ]
+        assert overview_data["outbox_counts"] == [{"status": "dead_letter", "count": 1}]
         assert overview_data["dead_letters"][0]["queue"] == "outbox"
         assert overview_data["dead_letters"][0]["id"] == claimed.id
         assert overview_data["dead_letters"][0]["target_hub"] == "https://hub.local"
@@ -501,6 +499,47 @@ async def test_relay_admin_purge_current_endpoint_hides_received_projection():
         assert raw_count["count"] == 2
         assert materialized_count["count"] == 0
         assert first.current_memory_id is not None
+
+
+@pytest.mark.asyncio
+async def test_relay_admin_destructive_endpoints_reject_unauthenticated_remote():
+    """Destructive relay admin endpoints must 403 a non-loopback, unauthenticated
+    caller even with auth disabled (default), so a 0.0.0.0-exposed hub cannot be
+    wiped remotely. Loopback callers stay allowed (covered by the other admin
+    tests, which use the default 127.0.0.1 transport).
+    """
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        await service.register_identity(
+            token="relay-token",
+            user_id="user-1",
+            source_node_id="node-1",
+            display_name="Jinwoo",
+        )
+        await service.ingest("relay-token", _request())
+
+        app = _app(db)
+        # Simulate a remote (non-loopback) client; the default ASGITransport host
+        # is 127.0.0.1, which the loopback fallback would allow.
+        transport = ASGITransport(app=app, client=("203.0.113.10", 44321))
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            purge = await client.post("/api/relay/v1/admin/purge-current?limit=20")
+            materialize = await client.post("/api/relay/v1/admin/materialize?limit=20")
+            retry = await client.post(
+                "/api/relay/v1/admin/retry-dead-letters",
+                json={"queue": "outbox"},
+            )
+
+        assert purge.status_code == 403
+        assert materialize.status_code == 403
+        assert retry.status_code == 403
+
+        # The destructive action was blocked: the visible projection survives.
+        current_count = await db.fetchone(
+            "SELECT COUNT(*) AS count FROM relay_memory_current WHERE visible = 1"
+        )
+        assert current_count["count"] == 1
 
 
 @pytest.mark.asyncio

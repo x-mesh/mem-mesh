@@ -4,8 +4,9 @@ import logging
 import secrets
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
+from app.core import runtime_config as rc
 from app.core.config import get_settings
 from app.core.schemas.relay import (
     RelayAdminOverviewResponse,
@@ -40,10 +41,38 @@ from app.core.services.relay import (
 )
 
 from ...common.dependencies import get_database, get_embedding_service
+from ...oauth.middleware import is_loopback_host
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/relay/v1", tags=["Relay"])
+
+
+def _require_admin_access(request: Request) -> None:
+    """Authorize destructive relay admin actions (purge / retry / materialize).
+
+    Mirrors the dashboard secret-reveal policy (route_modules/security.py
+    ``_can_reveal``): allow when OAuth web auth gated this request, when a
+    logged-in Basic Auth dashboard session is attached, or when the caller is on
+    loopback. Otherwise 403 — so a 0.0.0.0-exposed server with auth disabled
+    never lets an unauthenticated remote caller trigger destructive admin ops,
+    while the default local dashboard (loopback) keeps working without config.
+    """
+
+    if rc.effective_bool("auth_enabled") and rc.effective_tribool("web_auth_enabled"):
+        return
+    if getattr(request.state, "dashboard_session", None):
+        return
+    client = request.client.host if request.client else None
+    if is_loopback_host(client):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Relay admin actions require an authenticated dashboard session "
+            "or loopback access"
+        ),
+    )
 
 
 async def get_relay_service(db=Depends(get_database)) -> RelayService:
@@ -151,6 +180,7 @@ async def _notify_relay_materialized(result: RelayMaterializeResponse) -> None:
 @router.post("/admin/materialize", response_model=RelayMaterializeResponse)
 async def materialize_relay_admin_memories(
     limit: int = 1000,
+    _: None = Depends(_require_admin_access),
     service: RelayService = Depends(get_relay_service),
 ) -> RelayMaterializeResponse:
     """Backfill visible relay current rows into ordinary memories."""
@@ -167,6 +197,7 @@ async def materialize_relay_admin_memories(
 @router.post("/admin/purge-current", response_model=RelayPurgeResponse)
 async def purge_relay_admin_current_memories(
     limit: int = 10000,
+    _: None = Depends(_require_admin_access),
     service: RelayService = Depends(get_relay_service),
 ) -> RelayPurgeResponse:
     """Hide visible relay current rows so materialize cannot recreate them."""
@@ -181,6 +212,7 @@ async def purge_relay_admin_current_memories(
 @router.post("/admin/retry-dead-letters", response_model=RelayRetryResponse)
 async def retry_relay_admin_dead_letters(
     payload: RelayRetryRequest,
+    _: None = Depends(_require_admin_access),
     service: RelayService = Depends(get_relay_service),
 ) -> RelayRetryResponse:
     """Move dead-lettered relay jobs back to pending."""
