@@ -102,6 +102,10 @@ class MemoriesPage extends HTMLElement {
     this._isInitialized = false;
     // P1: batch selection
     this._selected = new Set();
+    // P3: range (shift-click) + drag-paint selection
+    this._anchorId = null;   // last single-toggled checkbox id (range anchor)
+    this._painting = false;  // drag-paint in progress
+    this._paintVal = null;   // value being painted across rows
     // P1: stats
     this._stats = null;
     // P1: active pins
@@ -141,6 +145,10 @@ class MemoriesPage extends HTMLElement {
     if (this._boundKeydown) {
       document.removeEventListener('keydown', this._boundKeydown);
       this._boundKeydown = null;
+    }
+    if (this._boundMouseup) {
+      document.removeEventListener('mouseup', this._boundMouseup);
+      this._boundMouseup = null;
     }
     this.destroyPalette();
   }
@@ -290,7 +298,7 @@ class MemoriesPage extends HTMLElement {
 
     return `
       <div class="recent-item mem-row${isSelected ? ' mem-selected' : ''}" data-memory-id="${esc(mem.id)}" role="button" tabindex="0">
-        <label class="mem-checkbox-wrap" onclick="event.stopPropagation()">
+        <label class="mem-checkbox-wrap" onclick="event.stopPropagation(); event.preventDefault();">
           <input type="checkbox" class="mem-checkbox" data-id="${esc(mem.id)}" ${isSelected ? 'checked' : ''} />
         </label>
         <button class="mem-star-btn${isFav ? ' active' : ''}" data-id="${esc(mem.id)}" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">
@@ -809,6 +817,57 @@ class MemoriesPage extends HTMLElement {
       }
     });
 
+    // Checkbox selection: mousedown starts a drag-paint, or extends a range with Shift.
+    // Native checkbox toggle is suppressed in the label's inline handler, so we own state here.
+    this.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      const wrap = e.target.closest('.mem-checkbox-wrap');
+      if (!wrap) return;
+      const cb = wrap.querySelector('.mem-checkbox');
+      if (!cb) return;
+      const id = cb.dataset.id;
+      const val = !this._selected.has(id);          // value to apply (flip current)
+
+      const anchorIdx = this._anchorId
+        ? this.memories.findIndex(m => m.id === this._anchorId)
+        : -1;
+      const idx = this.memories.findIndex(m => m.id === id);
+
+      if (e.shiftKey && anchorIdx >= 0 && idx >= 0) {
+        // B: range select anchor..current, all set to `val`
+        const lo = Math.min(anchorIdx, idx);
+        const hi = Math.max(anchorIdx, idx);
+        let changed = false;
+        for (let i = lo; i <= hi; i++) {
+          changed = this._setRowSelected(this.memories[i].id, val) || changed;
+        }
+        if (changed) this.renderBatchBar();
+      } else {
+        // A: single toggle + begin drag-paint
+        if (this._setRowSelected(id, val)) this.renderBatchBar();
+        this._painting = true;
+        this._paintVal = val;
+      }
+      this._anchorId = id;
+      e.preventDefault();                            // block text selection during drag
+    });
+
+    // Drag-paint: while the button is held, apply paintVal to any checkbox we cross.
+    this.addEventListener('mouseover', (e) => {
+      if (!this._painting) return;
+      if (e.buttons !== 1) { this._painting = false; this._paintVal = null; return; }
+      const wrap = e.target.closest('.mem-checkbox-wrap');
+      if (!wrap) return;
+      const cb = wrap.querySelector('.mem-checkbox');
+      if (cb && this._setRowSelected(cb.dataset.id, this._paintVal)) {
+        this.renderBatchBar();
+      }
+    });
+
+    // End drag-paint anywhere the button is released.
+    this._boundMouseup = () => { this._painting = false; this._paintVal = null; };
+    document.addEventListener('mouseup', this._boundMouseup);
+
     // Search input with debounce
     const searchInput = this.querySelector('.mem-search-input');
     if (searchInput) {
@@ -900,6 +959,7 @@ class MemoriesPage extends HTMLElement {
           this.toggleSelect(id, !isSelected);
           const cb = sel.querySelector('.mem-checkbox');
           if (cb) cb.checked = !isSelected;
+          this._anchorId = id;
         }
       }
       // Space = toggle peek on keyboard-selected OR hovered row
@@ -1290,6 +1350,8 @@ class MemoriesPage extends HTMLElement {
             <div class="mem-shortcuts-group-title">Preview & Selection</div>
             <div class="mem-shortcut-row"><kbd>Space</kbd><span>Toggle peek preview</span></div>
             <div class="mem-shortcut-row"><kbd>x</kbd><span>Toggle checkbox</span></div>
+            <div class="mem-shortcut-row"><kbd>Drag</kbd><span>Paint checkboxes</span></div>
+            <div class="mem-shortcut-row"><kbd>Shift</kbd>+<kbd>Click</kbd><span>Select range</span></div>
             <div class="mem-shortcut-row"><kbd>Esc</kbd><span>Close peek / Deselect all</span></div>
           </div>
           <div class="mem-shortcuts-group">
@@ -1480,6 +1542,21 @@ class MemoriesPage extends HTMLElement {
     const row = this.querySelector(`.mem-row[data-memory-id="${memoryId}"]`);
     if (row) row.classList.toggle('mem-selected', checked);
     this.renderBatchBar();
+  }
+
+  // Set a single row's selection + sync its checkbox/row class. Returns true if it changed.
+  // Does NOT call renderBatchBar — callers batch that to avoid thrash during drag/range.
+  _setRowSelected(memoryId, selected) {
+    if (this._selected.has(memoryId) === selected) return false;
+    if (selected) this._selected.add(memoryId);
+    else this._selected.delete(memoryId);
+    const row = this.querySelector(`.mem-row[data-memory-id="${memoryId}"]`);
+    if (row) {
+      row.classList.toggle('mem-selected', selected);
+      const cb = row.querySelector('.mem-checkbox');
+      if (cb) cb.checked = selected;
+    }
+    return true;
   }
 
   toggleSelectAll(checked) {
