@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] - 2026-06-29
+
+v1.19.0이 도입한 Relay 인프라(worker·API·CLI·fusion) 위에 **공유 UX와 continuous auto-share**를 본격적으로 얹는 minor 릴리스. WHY: 1.19.0에서 공유 진입점이 CLI·대시보드 일부에만 있어, 정작 메모리가 만들어지는 일상 워크플로(메모리 행·peek·batch·프로젝트 카드·상세 페이지)에서 한 번에 팀으로 보내기가 번거로웠다. 그래서 (1) 모든 메모리 표면에 share 진입점을 노출하고, (2) 프로젝트 단위로 "한 번 켜두면 새 메모리가 memory-write hook을 통해 자동으로 허브로 흐르는" continuous auto-share를 추가하며, (3) 공유 대상이 될 수 없는 kind는 버튼을 dim/notice 처리해 오발행을 막는다. 아울러 outbox/admin 등 부수효과 엔드포인트에 auth-or-loopback 게이트를 강제해 보안 최소선을 닫고, purge/schema 경로의 hot-loop 비용을 줄인다.
+
+### Added
+- **메모리 전 표면에서 relay share 노출** — 메모리 행·peek·batch 및 프로젝트 카드에서 직접 팀 허브로 공유하는 진입점을 추가. `app/web/static/js/pages`
+- **프로젝트 단위 continuous auto-share** — 프로젝트 카드의 토글로 auto-share를 켜면 memory-write hook이 새 메모리를 지속적으로 허브에 push하고, 카드에 sync 상태를 표시한다. `app/web/static/js/pages/relay.js`, 대시보드 relay 라우팅
+- **kind 기반 share 게이트 + 상세 페이지 team-share** — 공유 가능한 kind에만 share 버튼을 활성화하고(비공유 kind는 dim + notice), 메모리 상세 페이지에서도 team-share를 수행할 수 있게 했다.
+- **top navigation에 Projects 링크** — 대시보드 상단 내비게이션에서 프로젝트 화면으로 바로 이동. `app/web`
+
+### Changed
+- **share 버튼 상시 노출** — 비공유 kind는 숨기는 대신 dim 처리 + 안내를 띄워, 왜 공유할 수 없는지 사용자가 알 수 있게 변경.
+- **relay materialization이 원본 project 이름 보존** — 허브 projection을 개인 노드로 backfill할 때 client 측 node에서 원래 project 이름을 유지하도록 수정. `app/core/services/relay.py`
+- **share 아이콘 클릭/배치 auto-share hook 정리** — share 아이콘 클릭 동작, batch auto-share hook, 관련 docstring을 정비.
+
+### Fixed
+- **outbox share 엔드포인트 인증 강제** — outbox share 엔드포인트가 auth 또는 loopback을 요구하도록 닫아, 무인증 외부 호출로 공유가 트리거되지 않게 했다. `app/web/dashboard/route_modules/relay.py`
+- **destructive relay admin 엔드포인트 인증 강제** — purge·재시도 등 부수효과 admin 엔드포인트도 auth/loopback 게이트로 보호. `app/web/dashboard/route_modules/relay.py`
+
+### Performance
+- **ensure_schema를 DB connection별 memoize** — relay 스키마 보장을 연결 단위로 캐시해 매 호출 재실행을 제거. `app/core/services/relay.py`
+- **purge 경로 hot-loop 정리** — vector-table lookup을 purge 루프 밖으로 hoist하고 memory delete를 배치 처리. `app/core/services/relay.py`
+
+### Tests
+- **delete fallback / dead-letter 커버리지** — relay delete fallback 경로와 item·aggregate dead-letter 처리에 대한 단위 테스트 추가. `tests/test_relay_*.py`
+
 ## [1.19.0] - 2026-06-25
 
 개인 mem-mesh를 팀 단위로 연결하는 **Relay(공유) 레이어**를 도입하는 minor 릴리스. 부수적으로 프로젝트 식별을 중앙화하고, CLI 버전 배너·프롬프트 drift 가드를 추가한다. WHY: 팀원 각자가 축적한 개발 메모리(결정·버그·gotcha)를 팀 단위로 재사용하려면 노드 간 연결이 필요한데, P2P mesh는 8명 규모에서 N×N 신뢰·충돌·invalidation 비용이 과하다. 그래서 개인 N → 팀 허브 1의 **star topology**를 채택하고, 개인은 팀 공유분을 로컬 복제하지 않는 **view-only 소비자**로 두어 검색 시점에 허브 view를 live fetch + RRF 융합한다. write path는 LLM/임베딩 호출과 분리해 deterministic·low-latency를 유지하고, 정제는 SQLite 큐 + 비동기 워커로 밀어낸다(Postgres/Redis/Kafka 미도입, Golden Rule 준수). 설계 상세는 `docs/mem-mesh-relay-PRD.md`.
