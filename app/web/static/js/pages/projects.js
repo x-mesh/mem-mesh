@@ -13,7 +13,22 @@ class ProjectsPage extends HTMLElement {
     this.currentSort = 'name';
     this.sortDirection = 'asc';
     this.searchQuery = '';
-    this.autoShareEnabled = new Set();
+    this.autoShareSubs = new Map();
+  }
+
+  _autoShareSub(projectId) {
+    return this.autoShareSubs.get(projectId);
+  }
+
+  _isAutoShareOn(projectId) {
+    return Boolean(this.autoShareSubs.get(projectId)?.enabled);
+  }
+
+  _escapeHtml(text) {
+    return String(text ?? '').replace(
+      /[&<>"']/g,
+      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+    );
   }
   
   connectedCallback() {
@@ -292,13 +307,11 @@ class ProjectsPage extends HTMLElement {
   async loadAutoShare() {
     try {
       const data = await window.app.apiClient.getRelayAutoShare();
-      this.autoShareEnabled = new Set(
-        (data?.subscriptions || [])
-          .filter(s => s.enabled)
-          .map(s => s.project_id)
+      this.autoShareSubs = new Map(
+        (data?.subscriptions || []).map(s => [s.project_id, s])
       );
     } catch {
-      this.autoShareEnabled = new Set();
+      this.autoShareSubs = new Map();
     }
   }
 
@@ -308,11 +321,10 @@ class ProjectsPage extends HTMLElement {
   async toggleAutoShare(projectId) {
     const api = window.app?.apiClient;
     if (!api) { showToast('API not available', 'error'); return; }
-    const enable = !this.autoShareEnabled.has(projectId);
+    const enable = !this._isAutoShareOn(projectId);
     try {
-      await api.setRelayAutoShare(projectId, { enabled: enable });
-      if (enable) this.autoShareEnabled.add(projectId);
-      else this.autoShareEnabled.delete(projectId);
+      const sub = await api.setRelayAutoShare(projectId, { enabled: enable });
+      if (sub && sub.project_id) this.autoShareSubs.set(projectId, sub);
       this.renderProjects();
       showToast(
         enable
@@ -323,6 +335,22 @@ class ProjectsPage extends HTMLElement {
     } catch (error) {
       showToast(error?.data?.detail || error?.message || 'Failed to update auto-share', 'error');
     }
+  }
+
+  /**
+   * Status line shown under an enabled auto-share toggle: last error if any,
+   * otherwise last sync time (or awaiting first sync).
+   */
+  _autoShareStatusHtml(projectId) {
+    const sub = this._autoShareSub(projectId);
+    if (!sub || !sub.enabled) return '';
+    if (sub.last_error) {
+      return `<div class="relay-autoshare-status error">⚠ ${this._escapeHtml(sub.last_error)}</div>`;
+    }
+    const label = sub.last_synced_at
+      ? `Last synced ${this.formatDate(sub.last_synced_at)}`
+      : 'Awaiting first sync';
+    return `<div class="relay-autoshare-status">${this._escapeHtml(label)}</div>`;
   }
 
   /**
@@ -513,10 +541,11 @@ class ProjectsPage extends HTMLElement {
         <div class="project-actions">
           <button class="view-btn" data-project-id="${project.id}">View Memories</button>
           <button class="relay-share-btn" data-project-id="${project.id}">Share to relay</button>
-          <button class="relay-autoshare-btn ${this.autoShareEnabled.has(project.id) ? 'on' : ''}" data-project-id="${project.id}">
-            ${this.autoShareEnabled.has(project.id) ? '● Auto-share on' : '○ Auto-share off'}
+          <button class="relay-autoshare-btn ${this._isAutoShareOn(project.id) ? 'on' : ''}" data-project-id="${project.id}">
+            ${this._isAutoShareOn(project.id) ? '● Auto-share on' : '○ Auto-share off'}
           </button>
         </div>
+        ${this._autoShareStatusHtml(project.id)}
       </div>
     `).join('');
   }
@@ -893,6 +922,17 @@ style.textContent = `
     background: var(--success-color, #16a34a);
     color: #fff;
     border-color: var(--success-color, #16a34a);
+  }
+
+  .relay-autoshare-status {
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: center;
+  }
+
+  .relay-autoshare-status.error {
+    color: var(--error-color, #ef4444);
   }
 
   .view-btn {
