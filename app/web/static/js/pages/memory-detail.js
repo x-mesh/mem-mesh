@@ -443,6 +443,10 @@ class MemoryDetailPage extends HTMLElement {
     const eh = window.app?.errorHandler;
     if (!api) return;
     const mem = this.memory;
+    if (!this._isRelayShareableKind(mem)) {
+      eh?.showError(`'${mem?.category}' memories aren't team-shareable`);
+      return;
+    }
     if (this._isRelayOrigin(mem) &&
         !confirm('This memory was received via relay. Share it back to the team hub anyway?')) {
       return;
@@ -892,10 +896,9 @@ class MemoryDetailPage extends HTMLElement {
                 <path d="M20.49 9C19.9828 7.56678 19.1209 6.28392 17.9845 5.27493C16.8482 4.26595 15.4745 3.56905 13.9917 3.24575C12.5089 2.92246 10.9652 2.98546 9.51691 3.42597C8.06861 3.86648 6.76302 4.66921 5.64 5.76L1 10M23 14L18.36 18.24C17.237 19.3308 15.9314 20.1335 14.4831 20.574C13.0348 21.0145 11.4911 21.0775 10.0083 20.7542C8.52547 20.431 7.1518 19.7341 6.01547 18.7251C4.87913 17.7161 4.01717 16.4332 3.51 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </button>
-            ${this._isRelayShareableKind(this.memory) ? `
-            <button class="share-btn" title="Share to relay">
+            <button class="share-btn${this._isRelayShareableKind(this.memory) ? '' : ' share-btn--off'}" title="${this._isRelayShareableKind(this.memory) ? 'Share to relay' : "'" + (this.memory?.category || '') + "' is not team-shareable"}">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-            </button>` : ''}
+            </button>
             <button class="export-btn" title="Export memory">
               <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M21 15V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1146,7 +1149,9 @@ style.textContent = `
     background: var(--bg-secondary);
     color: var(--text-primary);
   }
-  
+
+  .share-btn--off { opacity: 0.35; }
+
   .edit-btn {
     background: var(--primary-color) !important;
     color: white !important;
