@@ -3,6 +3,8 @@
  * Displays project list and management interface
  */
 
+import { showToast } from '../utils/toast-notifications.js';
+
 class ProjectsPage extends HTMLElement {
   constructor() {
     super();
@@ -234,6 +236,14 @@ class ProjectsPage extends HTMLElement {
    * Handle project card clicks
    */
   handleProjectClick(event) {
+    const shareBtn = event.target.closest('.relay-share-btn');
+    if (shareBtn) {
+      event.stopPropagation();
+      const projectId = shareBtn.getAttribute('data-project-id');
+      if (projectId) this.shareProjectToRelay(projectId);
+      return;
+    }
+
     const viewBtn = event.target.closest('.view-btn');
     if (viewBtn) {
       event.stopPropagation();
@@ -264,7 +274,28 @@ class ProjectsPage extends HTMLElement {
       }
     }
   }
-  
+
+  /**
+   * Queue every shareable memory in a project for relay delivery.
+   */
+  async shareProjectToRelay(projectId) {
+    const api = window.app?.apiClient;
+    if (!api) { showToast('API not available', 'error'); return; }
+    if (!confirm(`Share all memories in "${projectId}" to the team relay?`)) return;
+    try {
+      const result = await api.shareRelayProject(projectId, { event_type: 'update' });
+      const queued = result?.queued_count ?? 0;
+      const skipped = (result?.skipped || []).length;
+      const msg = skipped > 0
+        ? `${queued} memories queued, ${skipped} skipped (secret/type gate)`
+        : `${queued} memories queued for relay`;
+      showToast(msg, skipped > 0 ? 'warning' : 'success');
+    } catch (error) {
+      // FastAPI returns {detail}; APIError surfaces it on .data.detail / .message.
+      showToast(error?.data?.detail || error?.message || 'Failed to share project', 'error');
+    }
+  }
+
   /**
    * Handle export
    */
@@ -431,6 +462,7 @@ class ProjectsPage extends HTMLElement {
         
         <div class="project-actions">
           <button class="view-btn" data-project-id="${project.id}">View Memories</button>
+          <button class="relay-share-btn" data-project-id="${project.id}">Share to relay</button>
         </div>
       </div>
     `).join('');
@@ -765,9 +797,28 @@ style.textContent = `
   .project-actions {
     border-top: 1px solid var(--border-color);
     padding-top: 1rem;
-    text-align: center;
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
   }
-  
+
+  .relay-share-btn {
+    background: transparent;
+    color: var(--primary-color);
+    border: 1px solid var(--primary-color);
+    padding: 0.5rem 1rem;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: var(--transition);
+  }
+
+  .relay-share-btn:hover {
+    background: var(--primary-color);
+    color: var(--bg-primary);
+  }
+
   .view-btn {
     background: var(--primary-color);
     color: var(--bg-primary);

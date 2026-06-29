@@ -296,6 +296,9 @@ class MemoriesPage extends HTMLElement {
         ${score}
         <span class="recent-item-time">${time}</span>
         <span class="mem-row-actions">
+          <button class="mem-action-btn mem-relay-btn" data-id="${esc(mem.id)}" title="Share to relay">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+          </button>
           <button class="mem-action-btn mem-edit-btn" data-id="${esc(mem.id)}" title="Edit">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
@@ -604,6 +607,11 @@ class MemoriesPage extends HTMLElement {
         if (id) { this.toggleFavorite(id); this.renderPeekPanel(); }
         return;
       }
+      if (target.closest('.mem-peek-relay')) {
+        const id = target.closest('.mem-peek-relay').dataset.id;
+        if (id) this.shareMemoryToRelay(id);
+        return;
+      }
       if (target.closest('.mem-peek-open-btn')) {
         const id = target.closest('.mem-peek-open-btn').dataset.id;
         if (id && window.app?.router) { this.closePeek(); window.app.router.navigate(`/memory/${id}`); }
@@ -680,6 +688,15 @@ class MemoriesPage extends HTMLElement {
         return;
       }
 
+      // Relay share button
+      const relayBtn = target.closest('.mem-relay-btn');
+      if (relayBtn) {
+        e.stopPropagation();
+        const id = relayBtn.dataset.id;
+        if (id) this.shareMemoryToRelay(id);
+        return;
+      }
+
       // Load more
       if (target.closest('.mem-load-more-btn')) {
         this.page++;
@@ -705,6 +722,11 @@ class MemoriesPage extends HTMLElement {
         return;
       }
 
+      // Batch: share to relay
+      if (target.closest('.mem-batch-share-btn')) {
+        this.batchShareToRelay();
+        return;
+      }
       // Batch: delete
       if (target.closest('.mem-batch-delete-btn')) {
         this.batchDelete();
@@ -1484,6 +1506,7 @@ class MemoriesPage extends HTMLElement {
         <option value="incident">Incident</option>
         <option value="code_snippet">Code Snippet</option>
       </select>
+      <button class="mem-batch-share-btn">Share</button>
       <button class="mem-batch-delete-btn">Delete</button>
       <button class="mem-batch-clear-btn">Deselect</button>
     `;
@@ -1544,6 +1567,61 @@ class MemoriesPage extends HTMLElement {
     this.renderBatchBar();
     this.renderMemoryList();
     this.showToast(`${updated} memories updated to ${category}`, 'success');
+  }
+
+  /* ── Relay share ───────────────────────────────────────── */
+
+  _relayShareError(error) {
+    // FastAPI returns {detail: ...}; APIError exposes it on .data.detail.
+    return error?.data?.detail || error?.message || 'Failed to share to relay';
+  }
+
+  async shareMemoryToRelay(memoryId) {
+    const api = window.app?.apiClient;
+    if (!api) { this.showToast('API not available', 'error'); return; }
+    const mem = this.memories.find(m => m.id === memoryId);
+    if (isRelayMemory(mem) &&
+        !confirm('This memory was received via relay. Share it back to the team hub anyway?')) {
+      return;
+    }
+    try {
+      await api.shareRelayMemory(memoryId, { event_type: 'update' });
+      this.showToast('Queued for relay share', 'success');
+    } catch (error) {
+      this.showToast(this._relayShareError(error), 'error');
+    }
+  }
+
+  async batchShareToRelay() {
+    const ids = [...this._selected];
+    if (!ids.length) return;
+    const api = window.app?.apiClient;
+    if (!api) return;
+    const relayCount = ids.filter(id => isRelayMemory(this.memories.find(m => m.id === id))).length;
+    let message = `Share ${ids.length} memories to the team relay?`;
+    if (relayCount > 0) message += ` (${relayCount} were received via relay and will be re-shared.)`;
+    if (!confirm(message)) return;
+
+    let shared = 0;
+    let failed = 0;
+    let lastError = '';
+    for (const id of ids) {
+      try {
+        await api.shareRelayMemory(id, { event_type: 'update' });
+        shared++;
+      } catch (error) {
+        failed++;
+        lastError = this._relayShareError(error);
+      }
+    }
+    this._selected.clear();
+    this.renderBatchBar();
+    this.renderMemoryList();
+    if (failed > 0) {
+      this.showToast(`${shared} shared, ${failed} failed — ${lastError}`, 'warning');
+    } else {
+      this.showToast(`${shared} memories queued for relay`, 'success');
+    }
   }
 
   /* ── P2: Favorites ─────────────────────────────────────── */
@@ -1631,6 +1709,9 @@ class MemoriesPage extends HTMLElement {
       <div class="mem-peek-header">
         <span class="mem-peek-cat">${icon} ${esc(m.category)}</span>
         <div class="mem-peek-actions">
+          <button class="mem-action-btn mem-peek-relay" data-id="${esc(m.id)}" title="Share to relay">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+          </button>
           <button class="mem-action-btn mem-peek-fav" data-id="${esc(m.id)}" title="Favorite">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="${isFav ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
           </button>
@@ -2054,6 +2135,7 @@ style.textContent = `
     border-color: var(--border-hover, var(--border-color));
   }
   .mem-delete-btn:hover { color: var(--error-color, #ef4444); }
+  .mem-relay-btn:hover { color: var(--primary-color, #6366f1); }
 
   /* ── Skeleton loading ───────────────────── */
   .ml-skeleton {
@@ -2557,6 +2639,17 @@ style.textContent = `
     cursor: pointer;
   }
   .mem-batch-cat option { color: var(--text-primary); background: var(--bg-primary); }
+  .mem-batch-share-btn {
+    padding: 0.25rem 0.625rem;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 4px;
+    background: rgba(255,255,255,0.15);
+    color: white;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .mem-batch-share-btn:hover { background: rgba(255,255,255,0.28); }
   .mem-batch-delete-btn {
     padding: 0.25rem 0.625rem;
     border: 1px solid rgba(255,255,255,0.3);
