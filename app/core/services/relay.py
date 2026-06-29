@@ -877,8 +877,23 @@ class RelayService:
                 """,
                 tuple([now, now, *current_ids]),
             )
+            # Resolve the vector write tables once: within this transaction the
+            # schema is constant, so calling _memory_vector_write_tables_locked()
+            # per row only repeats the sqlite_master / migration metadata queries.
+            # Vec rows are removed per id (sqlite-vec), then the materialized
+            # memories are deleted in a single batched IN (same id list used for
+            # the COUNT above).
+            vector_tables = await self._memory_vector_write_tables_locked()
             for memory_id in memory_ids:
-                await self._delete_materialized_memory_locked(memory_id)
+                for table in vector_tables:
+                    await self.db.execute(
+                        f"DELETE FROM {table} WHERE memory_id = ?",
+                        (memory_id,),
+                    )
+            await self.db.execute(
+                f"DELETE FROM memories WHERE id IN ({memory_placeholders})",
+                tuple(memory_ids),
+            )
             await self.db.execute(
                 f"""
                 UPDATE relay_queue_item
