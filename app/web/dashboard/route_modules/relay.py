@@ -442,6 +442,7 @@ async def get_project_digest(
 async def share_memory_to_relay_outbox(
     memory_id: str,
     payload: RelayShareMemoryRequest,
+    _: None = Depends(_require_admin_access),
     service: RelayService = Depends(get_relay_service),
 ) -> RelayShareMemoryResponse:
     """Queue an existing local memory for relay delivery."""
@@ -489,6 +490,7 @@ async def share_memory_to_relay_outbox(
 async def share_project_to_relay_outbox(
     project_id: str,
     payload: RelayShareProjectRequest,
+    _: None = Depends(_require_admin_access),
     service: RelayService = Depends(get_relay_service),
 ) -> RelayShareProjectResponse:
     """Queue all shareable local memories in a project for relay delivery."""

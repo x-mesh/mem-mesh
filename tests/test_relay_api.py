@@ -543,6 +543,32 @@ async def test_relay_admin_destructive_endpoints_reject_unauthenticated_remote()
 
 
 @pytest.mark.asyncio
+async def test_relay_share_endpoints_reject_unauthenticated_remote():
+    """Outbox share endpoints expose local memories to the team hub, so they must
+    also 403 a non-loopback, unauthenticated caller (auth disabled by default).
+    Loopback/authenticated dashboard callers stay allowed.
+    """
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+
+        app = _app(db)
+        transport = ASGITransport(app=app, client=("203.0.113.10", 44322))
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            share_memory = await client.post(
+                "/api/relay/v1/outbox/share/some-memory-id",
+                json={},
+            )
+            share_project = await client.post(
+                "/api/relay/v1/outbox/share-project/some-project",
+                json={},
+            )
+
+        assert share_memory.status_code == 403
+        assert share_project.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_relay_admin_settings_endpoint_persists_defaults_and_identity(
     monkeypatch,
 ):
