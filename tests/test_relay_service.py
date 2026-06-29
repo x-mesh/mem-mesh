@@ -307,13 +307,11 @@ async def test_purge_current_memories_hides_visible_rows_and_preserves_raw_histo
         materialized_count = await db.fetchone(
             "SELECT COUNT(*) AS count FROM memories WHERE id LIKE 'relay:%'"
         )
-        queue_count = await db.fetchone(
-            """
+        queue_count = await db.fetchone("""
             SELECT COUNT(*) AS count
             FROM relay_queue_item
             WHERE status IN ('pending', 'processing')
-            """
-        )
+            """)
 
         assert result.scanned == 2
         assert result.purged == 2
@@ -1066,3 +1064,209 @@ async def test_relay_http_client_maps_5xx_to_retryable_error():
             bearer_token="hub-token",
             payload=_request(),
         )
+
+
+# ── Auto-share (continuous project sharing) ─────────────────────────────────
+
+
+async def _enable_auto_share(
+    service: RelayService,
+    project_id: str,
+    *,
+    enabled: bool = True,
+    include_relay_origin: bool = False,
+    hub: str = "https://hub.local",
+    node: str = "node-1",
+) -> None:
+    await service.ensure_schema()
+    await service.db.execute(
+        """
+        INSERT INTO relay_auto_share_subscription
+            (project_id, enabled, include_relay_origin, target_hub,
+             source_node_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_id) DO UPDATE SET
+            enabled = excluded.enabled,
+            include_relay_origin = excluded.include_relay_origin
+        """,
+        (
+            project_id,
+            1 if enabled else 0,
+            1 if include_relay_origin else 0,
+            hub,
+            node,
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:00:00Z",
+        ),
+    )
+
+
+def _shareable_memory(**overrides) -> Memory:
+    base = dict(
+        content="Relay auto-share content using a SQLite queue.",
+        source="cli",
+        category="decision",
+        project_id="proj-1",
+        embedding=b"\x00" * 12,
+        updated_at="2026-02-01T00:00:00Z",
+    )
+    base.update(overrides)
+    return Memory(**base)
+
+
+async def _outbox_count(db: Database) -> int:
+    row = await db.fetchone("SELECT COUNT(*) AS count FROM relay_outbox")
+    return int(row["count"]) if row else 0
+
+
+@pytest.mark.asyncio
+async def test_auto_share_enqueues_for_subscribed_project():
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        await _enable_auto_share(service, "proj-1")
+
+        outbox_id = await service.auto_share_on_write(
+            _shareable_memory(id="mem-1"), event_type="create"
+        )
+
+        assert outbox_id is not None
+        assert await _outbox_count(db) == 1
+        row = await db.fetchone("SELECT idempotency_key FROM relay_outbox LIMIT 1")
+        # version is derived from updated_at epoch → distinct per write
+        assert ":v" in row["idempotency_key"]
+        assert row["idempotency_key"].endswith(":create")
+
+
+@pytest.mark.asyncio
+async def test_auto_share_excludes_relay_origin_memory():
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        await _enable_auto_share(service, "proj-1", include_relay_origin=False)
+
+        result = await service.auto_share_on_write(
+            _shareable_memory(id="mem-2", source="relay"), event_type="create"
+        )
+
+        assert result is None
+        assert await _outbox_count(db) == 0
+
+
+@pytest.mark.asyncio
+async def test_auto_share_skips_disabled_subscription():
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        await _enable_auto_share(service, "proj-1", enabled=False)
+
+        result = await service.auto_share_on_write(
+            _shareable_memory(id="mem-3"), event_type="create"
+        )
+
+        assert result is None
+        assert await _outbox_count(db) == 0
+
+
+@pytest.mark.asyncio
+async def test_auto_share_skips_non_shareable_kind_without_raising():
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        await _enable_auto_share(service, "proj-1")
+
+        # "task" is not in DEFAULT_SHAREABLE_KINDS → type gate skip, no raise.
+        result = await service.auto_share_on_write(
+            _shareable_memory(id="mem-4", category="task"), event_type="create"
+        )
+
+        assert result is None
+        assert await _outbox_count(db) == 0
+
+
+@pytest.mark.asyncio
+async def test_auto_share_noop_without_subscription():
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+
+        result = await service.auto_share_on_write(
+            _shareable_memory(id="mem-5"), event_type="create"
+        )
+
+        assert result is None
+        assert await _outbox_count(db) == 0
+
+
+@pytest.mark.asyncio
+async def test_auto_share_create_then_update_emit_distinct_events():
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        await _enable_auto_share(service, "proj-1")
+
+        await service.auto_share_on_write(
+            _shareable_memory(id="mem-6", updated_at="2026-02-01T00:00:00Z"),
+            event_type="create",
+        )
+        await service.auto_share_on_write(
+            _shareable_memory(id="mem-6", updated_at="2026-02-01T00:05:00Z"),
+            event_type="update",
+        )
+
+        # Distinct versions (updated_at epoch) → two separate outbox rows.
+        assert await _outbox_count(db) == 2
+
+
+class _AutoShareFakeEmbedding:
+    model_name = "fake-embedding"
+    dimension = 3
+
+    async def aembed(self, text: str):
+        return [0.1, 0.2, 0.3]
+
+    def to_bytes(self, embedding):
+        import struct
+
+        return struct.pack(f"{len(embedding)}f", *embedding)
+
+
+@pytest.mark.asyncio
+async def test_auto_share_hook_fires_on_memory_service_create():
+    """End-to-end: a real MemoryService.create on a subscribed project enqueues
+    a relay outbox event via the post-write hook."""
+    from app.core.services.memory import MemoryService
+
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        await _enable_auto_share(service, "proj-x")
+
+        memory_service = MemoryService(db, _AutoShareFakeEmbedding())
+        await memory_service.create(
+            content=(
+                "A shareable decision memory for the relay auto-share hook. "
+                "We decided to enqueue team-relevant decisions automatically "
+                "when a project opts into continuous sharing from the dashboard."
+            ),
+            project_id="proj-x",
+            category="decision",
+            source="cli",
+        )
+
+        assert await _outbox_count(db) == 1
+
+
+@pytest.mark.asyncio
+async def test_auto_share_hook_noop_for_unsubscribed_project_create():
+    from app.core.services.memory import MemoryService
+
+    async with _temp_db() as db:
+        await _service_with_identity(db)
+
+        memory_service = MemoryService(db, _AutoShareFakeEmbedding())
+        await memory_service.create(
+            content=(
+                "A decision memory in a project that has not enabled relay "
+                "auto-share. This write must not enqueue any relay outbox event "
+                "because no subscription exists for the project at all here."
+            ),
+            project_id="proj-none",
+            category="decision",
+            source="cli",
+        )
+
+        assert await _outbox_count(db) == 0

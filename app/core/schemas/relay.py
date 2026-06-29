@@ -462,3 +462,24 @@ class RelayShareProjectResponse(BaseModel):
     status: str = "queued"
     target_hub: str
     source_node_id: str
+
+
+class RelayAutoShareSubscription(BaseModel):
+    project_id: str
+    enabled: bool = True
+    include_relay_origin: bool = False
+    target_hub: Optional[str] = None
+    source_node_id: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    last_synced_at: Optional[str] = None
+    last_error: Optional[str] = None
+
+
+class RelayAutoShareUpdateRequest(BaseModel):
+    enabled: bool = True
+    include_relay_origin: bool = False
+
+
+class RelayAutoShareListResponse(BaseModel):
+    subscriptions: List[RelayAutoShareSubscription] = Field(default_factory=list)

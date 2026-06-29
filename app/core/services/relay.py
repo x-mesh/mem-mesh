@@ -30,6 +30,7 @@ from ..redaction import redact_secrets
 from ..schemas.relay import (
     RelayAdminOverviewResponse,
     RelayAggregateJob,
+    RelayAutoShareSubscription,
     RelayDeadLetterSummary,
     RelayDigestSummary,
     RelayDigestData,
@@ -378,6 +379,19 @@ class RelayService:
                 generated_at TEXT NOT NULL,
                 stale INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(team_project_id, model_version, prompt_version)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS relay_auto_share_subscription (
+                project_id TEXT PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                include_relay_origin INTEGER NOT NULL DEFAULT 0,
+                target_hub TEXT,
+                source_node_id TEXT,
+                last_synced_at TEXT,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             )
             """,
             """
@@ -1362,6 +1376,196 @@ class RelayService:
             event_type=event_type,
             status=status,
             force=force,
+        )
+
+    # ── Auto-share (continuous project sharing) ─────────────────────────────
+
+    @staticmethod
+    def _is_relay_origin(memory: Any) -> bool:
+        """Whether a memory was received via relay (must not be re-shared by
+        default). Mirrors the dashboard isRelayMemory() id/source/client checks;
+        tags are intentionally excluded (a user-applied 'relay' tag is not proof
+        of relay origin)."""
+        memory_id = str(getattr(memory, "id", "") or "")
+        source = str(getattr(memory, "source", "") or "")
+        client = str(getattr(memory, "client", "") or "")
+        return (
+            memory_id.startswith("relay:")
+            or source == "relay"
+            or client.startswith("relay:")
+        )
+
+    @staticmethod
+    def _auto_share_version(memory: Any) -> int:
+        """Monotonic source_version for an auto-shared event. Derived from the
+        memory's updated_at epoch so each create/update produces a distinct
+        idempotency_key (``…:v{version}:{event}``) instead of deduping."""
+        stamp = str(getattr(memory, "updated_at", "") or "")
+        try:
+            normalized = stamp.replace("Z", "+00:00")
+            return int(datetime.fromisoformat(normalized).timestamp())
+        except ValueError:
+            return int(_epoch_now())
+
+    async def _auto_share_row(self, project_id: str) -> Optional[dict]:
+        """Fetch the auto-share subscription row, tolerant of a relay schema
+        that was never created (relay unused → no table → treat as no sub)."""
+        try:
+            row = await self.db.fetchone(
+                "SELECT * FROM relay_auto_share_subscription WHERE project_id = ?",
+                (project_id,),
+            )
+        except Exception:
+            return None
+        return dict(row) if row else None
+
+    def _auto_share_from_row(self, row: dict) -> RelayAutoShareSubscription:
+        return RelayAutoShareSubscription(
+            project_id=str(row["project_id"]),
+            enabled=bool(row["enabled"]),
+            include_relay_origin=bool(row["include_relay_origin"]),
+            target_hub=row.get("target_hub"),
+            source_node_id=row.get("source_node_id"),
+            created_at=row.get("created_at"),
+            updated_at=row.get("updated_at"),
+            last_synced_at=row.get("last_synced_at"),
+            last_error=row.get("last_error"),
+        )
+
+    async def get_project_auto_share(
+        self, project_id: str
+    ) -> Optional[RelayAutoShareSubscription]:
+        row = await self._auto_share_row(project_id)
+        return self._auto_share_from_row(row) if row else None
+
+    async def list_auto_share_subscriptions(
+        self,
+    ) -> list[RelayAutoShareSubscription]:
+        try:
+            rows = await self.db.fetchall(
+                "SELECT * FROM relay_auto_share_subscription ORDER BY project_id"
+            )
+        except Exception:
+            return []
+        return [self._auto_share_from_row(dict(row)) for row in rows]
+
+    async def set_project_auto_share(
+        self,
+        project_id: str,
+        *,
+        enabled: bool,
+        include_relay_origin: bool,
+        settings: Any,
+    ) -> RelayAutoShareSubscription:
+        """Enable or disable continuous relay sharing for a project. Snapshots
+        the effective hub/node at creation so later config edits do not silently
+        retarget an existing subscription."""
+
+        await self.ensure_schema()
+        effective = await self.get_effective_config(settings)
+        values = effective.get("values", {})
+        now = _utc_now()
+        existing = await self._auto_share_row(project_id)
+        created_at = existing["created_at"] if existing else now
+        # Refresh the hub/node snapshot whenever (re)enabling.
+        target_hub = values.get("hub_url")
+        source_node_id = values.get("source_node_id")
+        await self.db.execute(
+            """
+            INSERT INTO relay_auto_share_subscription (
+                project_id, enabled, include_relay_origin, target_hub,
+                source_node_id, last_synced_at, last_error, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+            ON CONFLICT(project_id) DO UPDATE SET
+                enabled = excluded.enabled,
+                include_relay_origin = excluded.include_relay_origin,
+                target_hub = excluded.target_hub,
+                source_node_id = excluded.source_node_id,
+                updated_at = excluded.updated_at
+            """,
+            (
+                project_id,
+                1 if enabled else 0,
+                1 if include_relay_origin else 0,
+                target_hub,
+                source_node_id,
+                created_at,
+                now,
+            ),
+        )
+        logger.info(
+            "Relay auto-share %s for project=%s",
+            "enabled" if enabled else "disabled",
+            project_id,
+        )
+        row = await self._auto_share_row(project_id)
+        return (
+            self._auto_share_from_row(row)
+            if row
+            else RelayAutoShareSubscription(project_id=project_id, enabled=enabled)
+        )
+
+    async def auto_share_on_write(
+        self, memory: Any, *, event_type: str
+    ) -> Optional[str]:
+        """Best-effort hook: if the memory's project has an active auto-share
+        subscription, queue the write for relay delivery. Never raises — a relay
+        problem must not break the memory write that triggered it."""
+        try:
+            project_id = str(getattr(memory, "project_id", "") or "")
+            if not project_id:
+                return None
+            row = await self._auto_share_row(project_id)
+            if not row or not bool(row["enabled"]):
+                return None
+            if not bool(row["include_relay_origin"]) and self._is_relay_origin(memory):
+                return None
+            target_hub = row.get("target_hub")
+            source_node_id = row.get("source_node_id")
+            if not target_hub or not source_node_id:
+                await self._record_auto_share_error(
+                    project_id, "relay hub or source node is not configured"
+                )
+                return None
+            outbox_id = await self.enqueue_memory_share(
+                memory,
+                source_node_id=source_node_id,
+                source_version=self._auto_share_version(memory),
+                target_hub=target_hub,
+                event_type=event_type,
+            )
+            await self._mark_auto_share_synced(project_id)
+            return outbox_id
+        except (RelayTypeGateBlocked, RelaySecretBlocked):
+            # Memory is not team-shareable (wrong kind or contains a secret) —
+            # silently skip, exactly like enqueue_project_share does per item.
+            return None
+        except RelayIdempotencyConflict:
+            return None
+        except Exception as exc:  # never propagate to the memory write
+            logger.warning("Relay auto-share failed for memory write: %s", exc)
+            try:
+                await self._record_auto_share_error(
+                    str(getattr(memory, "project_id", "") or ""), str(exc)
+                )
+            except Exception:
+                pass
+            return None
+
+    async def _mark_auto_share_synced(self, project_id: str) -> None:
+        await self.db.execute(
+            "UPDATE relay_auto_share_subscription "
+            "SET last_synced_at = ?, last_error = NULL WHERE project_id = ?",
+            (_utc_now(), project_id),
+        )
+
+    async def _record_auto_share_error(self, project_id: str, message: str) -> None:
+        if not project_id:
+            return
+        await self.db.execute(
+            "UPDATE relay_auto_share_subscription "
+            "SET last_error = ? WHERE project_id = ?",
+            (message[:500], project_id),
         )
 
     async def enqueue_project_share(

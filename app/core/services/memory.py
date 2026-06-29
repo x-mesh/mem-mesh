@@ -230,7 +230,7 @@ class MemoryService:
                 await self._save_to_vector_index(memory.id, embedding_bytes)
 
             logger.info("Memory created successfully: %s", memory.id)
-            return AddResponse(
+            response = AddResponse(
                 id=memory.id,
                 status="saved",
                 created_at=memory.created_at,
@@ -240,6 +240,10 @@ class MemoryService:
         except Exception as e:
             logger.error("Failed to save memory: %s", e)
             raise DatabaseError(f"Failed to save memory: {e}") from e
+
+        # Continuous relay sharing (best-effort, outside the save transaction).
+        await self._relay_auto_share(memory, event_type="create")
+        return response
 
     async def create_with_embedding(
         self,
@@ -460,11 +464,20 @@ class MemoryService:
                     )
 
             logger.info("Memory updated successfully: %s", memory_id)
-            return UpdateResponse(id=memory_id, status="updated")
+            response = UpdateResponse(id=memory_id, status="updated")
 
         except Exception as e:
             logger.error("Failed to update memory %s: %s", memory_id, e)
             raise DatabaseError(f"Failed to update memory: {e}") from e
+
+        # Continuous relay sharing (best-effort): re-share the refreshed memory.
+        refreshed = None
+        try:
+            refreshed = await self.get(memory_id)
+        except Exception:
+            refreshed = None
+        await self._relay_auto_share(refreshed, event_type="update")
+        return response
 
     async def delete(self, memory_id: str) -> DeleteResponse:
         """
@@ -499,11 +512,33 @@ class MemoryService:
                 await self._delete_from_vector_index(memory_id)
 
             logger.info("Memory deleted successfully: %s", memory_id)
-            return DeleteResponse(id=memory_id, status="deleted")
+            response = DeleteResponse(id=memory_id, status="deleted")
 
         except Exception as e:
             logger.error("Failed to delete memory %s: %s", memory_id, e)
             raise DatabaseError(f"Failed to delete memory: {e}") from e
+
+        # Continuous relay sharing (best-effort): retract from the team hub.
+        await self._relay_auto_share(existing_memory, event_type="retract")
+        return response
+
+    async def _relay_auto_share(self, memory: Any, *, event_type: str) -> None:
+        """Forward a memory write to relay auto-share, if a subscription exists.
+
+        Imported lazily so the core memory service carries no hard dependency on
+        the relay layer, and fully guarded so a relay problem can never change
+        the outcome of the memory write that triggered it.
+        """
+        if memory is None:
+            return
+        try:
+            from .relay import RelayService
+
+            await RelayService(self.db).auto_share_on_write(
+                memory, event_type=event_type
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Relay auto-share hook skipped: %s", exc)
 
     # Private helper methods
 

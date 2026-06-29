@@ -569,6 +569,62 @@ async def test_relay_share_endpoints_reject_unauthenticated_remote():
 
 
 @pytest.mark.asyncio
+async def test_relay_auto_share_endpoints_list_and_toggle(monkeypatch):
+    monkeypatch.setenv("MEM_MESH_RELAY_HUB_URL", "https://hub.local")
+    monkeypatch.setenv("MEM_MESH_RELAY_SOURCE_NODE_ID", "node-1")
+
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            empty = await client.get("/api/relay/v1/admin/auto-share")
+            enabled = await client.put(
+                "/api/relay/v1/admin/auto-share/proj-1",
+                json={"enabled": True},
+            )
+            listed = await client.get("/api/relay/v1/admin/auto-share")
+            disabled = await client.put(
+                "/api/relay/v1/admin/auto-share/proj-1",
+                json={"enabled": False},
+            )
+
+        assert empty.status_code == 200
+        assert empty.json()["subscriptions"] == []
+        assert enabled.status_code == 200
+        body = enabled.json()
+        assert body["project_id"] == "proj-1"
+        assert body["enabled"] is True
+        # hub/node are snapshotted from effective config at enable time.
+        assert body["target_hub"] == "https://hub.local"
+        assert body["source_node_id"] == "node-1"
+        assert listed.status_code == 200
+        assert len(listed.json()["subscriptions"]) == 1
+        assert disabled.json()["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_relay_auto_share_toggle_rejects_unauthenticated_remote():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+
+        app = _app(db)
+        transport = ASGITransport(app=app, client=("203.0.113.10", 44323))
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            put = await client.put(
+                "/api/relay/v1/admin/auto-share/proj-1",
+                json={"enabled": True},
+            )
+            listed = await client.get("/api/relay/v1/admin/auto-share")
+
+        assert put.status_code == 403
+        assert listed.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_relay_admin_settings_endpoint_persists_defaults_and_identity(
     monkeypatch,
 ):

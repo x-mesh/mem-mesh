@@ -10,6 +10,9 @@ from app.core import runtime_config as rc
 from app.core.config import get_settings
 from app.core.schemas.relay import (
     RelayAdminOverviewResponse,
+    RelayAutoShareListResponse,
+    RelayAutoShareSubscription,
+    RelayAutoShareUpdateRequest,
     RelayHealthResponse,
     RelayHubCheckRequest,
     RelayHubCheckResponse,
@@ -228,6 +231,42 @@ async def retry_relay_admin_dead_letters(
     except Exception as exc:
         logger.exception("Relay dead-letter retry failed")
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/admin/auto-share", response_model=RelayAutoShareListResponse)
+async def list_relay_auto_share(
+    _: None = Depends(_require_admin_access),
+    service: RelayService = Depends(get_relay_service),
+) -> RelayAutoShareListResponse:
+    """List projects with continuous relay sharing enabled."""
+
+    try:
+        subscriptions = await service.list_auto_share_subscriptions()
+        return RelayAutoShareListResponse(subscriptions=subscriptions)
+    except Exception:
+        logger.exception("Relay auto-share list failed")
+        raise HTTPException(status_code=500, detail="Relay auto-share list failed")
+
+
+@router.put("/admin/auto-share/{project_id}", response_model=RelayAutoShareSubscription)
+async def set_relay_auto_share(
+    project_id: str,
+    payload: RelayAutoShareUpdateRequest,
+    _: None = Depends(_require_admin_access),
+    service: RelayService = Depends(get_relay_service),
+) -> RelayAutoShareSubscription:
+    """Enable or disable continuous relay sharing for a project."""
+
+    try:
+        return await service.set_project_auto_share(
+            project_id,
+            enabled=payload.enabled,
+            include_relay_origin=payload.include_relay_origin,
+            settings=get_settings(),
+        )
+    except Exception:
+        logger.exception("Relay auto-share update failed")
+        raise HTTPException(status_code=500, detail="Relay auto-share update failed")
 
 
 @router.get("/admin/settings", response_model=RelaySettingsResponse)
