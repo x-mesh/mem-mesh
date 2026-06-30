@@ -43,7 +43,18 @@ CLAUDE_HOOKS_DIR = HOME / ".claude" / "hooks"
 CLAUDE_SETTINGS = HOME / ".claude" / "settings.json"
 
 KIRO_HOOKS_DIR = HOME / ".kiro" / "hooks"
+KIRO_SCRIPTS_DIR = HOME / ".kiro" / "mem-mesh-hooks"
 KIRO_SETTINGS = HOME / ".kiro" / "settings" / "hooks.json"
+KIRO_CLI_AGENTS_DIR = HOME / ".kiro" / "agents"
+KIRO_CLI_AGENT = KIRO_CLI_AGENTS_DIR / "mem-mesh.json"
 
 CURSOR_HOOKS_DIR = HOME / ".cursor" / "hooks"
 CURSOR_SETTINGS = HOME / ".cursor" / "hooks.json"
+
+ANTIGRAVITY_CONFIG_DIR = HOME / ".gemini" / "antigravity"
+ANTIGRAVITY_HOOKS_DIR = ANTIGRAVITY_CONFIG_DIR / "hooks"
+ANTIGRAVITY_HOOKS_FILE = ANTIGRAVITY_CONFIG_DIR / "hooks.json"
+
+AGY_CONFIG_DIR = HOME / ".gemini" / "antigravity-cli"
+AGY_HOOKS_DIR = AGY_CONFIG_DIR / "hooks"
+AGY_HOOKS_FILE = HOME / ".gemini" / "config" / "hooks.json"

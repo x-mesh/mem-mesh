@@ -7,6 +7,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Any, List, Optional
+from uuid import uuid4
 
 from ..database.base import Database
 from ..database.models import Memory
@@ -204,14 +205,18 @@ class MemoryService:
         embedding_vector = await self._generate_embedding_with_retry(content)
         embedding_bytes = self.embedding_service.to_bytes(embedding_vector)
 
-        # 3.5. Conflict detection
-        conflict_infos: list[ConflictInfo] | None = None
+        # 3.5. F1 sync gate (reconcile): nearest-neighbor candidates only.
+        # The NLI/LLM contradiction judgment is moved off the write path to the
+        # async reconcile worker (per-add cross-encoder = L1 system-stall risk).
+        reconcile_candidates: list[dict] | None = None
         if self.conflict_detector is not None:
-            conflict_infos = await self._check_conflicts(
-                content, embedding_vector, project_id
+            reconcile_candidates = await self._find_reconcile_candidates(
+                embedding_vector, project_id
             )
 
-        # 4. Create Memory object
+        # 4. Create Memory object (status defaults to 'canonical': new memories
+        # are immediately search-visible; only superseded old rows are demoted,
+        # and only after human approval).
         memory = Memory(
             content=content,
             content_hash=content_hash,
@@ -223,18 +228,26 @@ class MemoryService:
             tags=json.dumps(tags) if tags else None,
         )
 
-        # 5. Save to DB (transaction)
+        # 5. Save + enqueue reconcile in ONE transaction (C2: a canonical memory
+        # is never left without its queue rows).
         try:
             async with self.db.transaction():
                 await self.db.add_memory(memory.model_dump())
                 await self._save_to_vector_index(memory.id, embedding_bytes)
+                if reconcile_candidates:
+                    await self._enqueue_reconcile(
+                        memory.id,
+                        memory.content_hash,
+                        reconcile_candidates,
+                        project_id,
+                    )
 
             logger.info("Memory created successfully: %s", memory.id)
             response = AddResponse(
                 id=memory.id,
                 status="saved",
                 created_at=memory.created_at,
-                conflicts=conflict_infos if conflict_infos else None,
+                conflicts=None,
             )
 
         except Exception as e:
@@ -626,16 +639,20 @@ class MemoryService:
             logger.error("Failed to save to vector index: %s", e)
             raise DatabaseError(f"Failed to save to vector index: {e}") from e
 
-    async def _check_conflicts(
+    async def _find_reconcile_candidates(
         self,
-        content: str,
         embedding_vector: List[float],
         project_id: Optional[str] = None,
-    ) -> list[ConflictInfo] | None:
-        """Stage 1+2 충돌 감지: 벡터 유사도 -> NLI contradiction 체크.
+    ) -> list[dict] | None:
+        """F1 sync gate: nearest-neighbor candidates for the async reconcile worker.
 
-        Returns:
-            충돌 목록 (없으면 None)
+        Vector-only (Stage 1). The NLI contradiction judgment (former Stage 2) is
+        moved to the async worker — a per-add CPU cross-encoder on the write path
+        is the L1 system-stall risk. Returns up to 3 candidates above the scaled
+        similarity threshold, each carrying a content_hash snapshot so the worker
+        can revalidate at apply time and skip rows mutated in between (C2 TOCTOU).
+
+        Returns None on no match or on any failure (graceful: never blocks save).
         """
         if self.conflict_detector is None:
             return None
@@ -644,15 +661,17 @@ class MemoryService:
             embedding_bytes = self.embedding_service.to_bytes(embedding_vector)
             embedding_json = self._embedding_to_json(embedding_bytes)
 
-            # Stage 1: Search candidates by vector similarity (active slot)
+            # Brute-force scan scoped to project_id + canonical only. A true
+            # sqlite-vec MATCH kNN is a follow-up (C5).
             active_table = await self._resolve_vector_table()
             cursor = await self.db.execute(
                 f"""
-                SELECT m.id, m.content,
+                SELECT m.id, m.content_hash,
                        vec_distance_cosine(e.embedding, ?) AS distance
                 FROM {active_table} e
                 JOIN memories m ON m.id = e.memory_id
-                WHERE m.project_id = ? OR ? IS NULL
+                WHERE (m.project_id = ? OR ? IS NULL)
+                  AND COALESCE(m.status, 'canonical') = 'canonical'
                 ORDER BY distance ASC
                 LIMIT ?
                 """,
@@ -668,42 +687,61 @@ class MemoryService:
             if not rows:
                 return None
 
-            candidates = []
+            threshold = self.conflict_detector.similarity_threshold
+            candidates: list[dict] = []
             for row in rows:
-                # Convert distance -> similarity
+                # Convert cosine distance -> similarity
                 similarity = max(0.0, min(1.0, 1.0 - (row[2] / 2.0)))
-                candidates.append(
-                    {
-                        "id": row[0],
-                        "content": row[1],
-                        "similarity_score": similarity,
-                    }
-                )
+                if similarity >= threshold:
+                    candidates.append(
+                        {
+                            "id": row[0],
+                            "content_hash": row[1],
+                            "similarity": similarity,
+                        }
+                    )
 
-            # Stage 2: Detect conflicts via ConflictDetectorService (blocking call -> thread)
-            import asyncio
-
-            conflicts = await asyncio.to_thread(
-                self.conflict_detector.detect_conflicts, content, candidates
-            )
-
-            if not conflicts:
-                return None
-
-            return [
-                ConflictInfo(
-                    memory_id=c.memory_id,
-                    content_preview=c.content_preview,
-                    contradiction_score=c.contradiction_score,
-                    similarity_score=c.similarity_score,
-                )
-                for c in conflicts
-            ]
+            return candidates[:3] or None
 
         except Exception as e:
-            # Conflict detection failure does not block save (graceful degradation)
-            logger.warning("Conflict detection failed (non-blocking): %s", e)
+            # Candidate scan failure does not block save (graceful degradation).
+            logger.warning("Reconcile candidate scan failed (non-blocking): %s", e)
             return None
+
+    async def _enqueue_reconcile(
+        self,
+        new_id: str,
+        new_content_hash: str,
+        candidates: list[dict],
+        project_id: Optional[str],
+    ) -> None:
+        """Enqueue (new, old) conflict pairs for the async reconcile worker.
+
+        One row per (new, old) pair: ``UNIQUE(new_memory_id, old_memory_id)``
+        holds the 1:N conflict set (C1). ``INSERT OR IGNORE`` keeps a re-add
+        idempotent. Called inside the save transaction (C2 atomicity).
+        """
+        now = datetime.utcnow().isoformat() + "Z"
+        for c in candidates:
+            await self.db.execute(
+                """
+                INSERT OR IGNORE INTO reconcile_queue
+                (id, new_memory_id, old_memory_id, project_id, similarity,
+                 new_content_hash, old_content_hash, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+                """,
+                (
+                    str(uuid4()),
+                    new_id,
+                    c["id"],
+                    project_id,
+                    c.get("similarity"),
+                    new_content_hash,
+                    c.get("content_hash"),
+                    now,
+                    now,
+                ),
+            )
 
     async def _update_vector_index(
         self, memory_id: str, embedding_bytes: bytes

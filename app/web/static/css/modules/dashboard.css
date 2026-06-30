@@ -1227,22 +1227,10 @@
   border-radius: 3px;
   font-weight: 500;
   font-family: 'SF Mono', 'Cascadia Code', monospace;
-  background: var(--bg-tertiary, #374151);
-  color: var(--text-primary);
+  background: var(--client-badge-bg, var(--bg-tertiary, #374151));
+  color: var(--client-badge-fg, var(--text-primary));
   white-space: nowrap;
 }
-.recent-item-client.client-claude_code,
-.recent-item-client.client-claude { background: #d97706; color: #fff; }
-.recent-item-client.client-claude_desktop,
-.recent-item-client.client-claude-desktop { background: #b45309; color: #fff; }
-.recent-item-client.client-codex { background: #2563eb; color: #fff; }
-.recent-item-client.client-cursor { background: #7c3aed; color: #fff; }
-.recent-item-client.client-kiro { background: #059669; color: #fff; }
-.recent-item-client.client-web { background: #0891b2; color: #fff; }
-.recent-item-client.client-vscode { background: #0284c7; color: #fff; }
-.recent-item-client.client-antigravity { background: #db2777; color: #fff; }
-.recent-item-client.client-generic { background: #64748b; color: #fff; }
-.recent-item-client.client-unknown { background: #6b7280; color: #fff; }
 
 .dash-peek-client {
   font-size: 11px;
@@ -1250,21 +1238,9 @@
   border-radius: 3px;
   font-weight: 500;
   font-family: 'SF Mono', 'Cascadia Code', monospace;
-  background: var(--bg-tertiary, #374151);
-  color: var(--text-primary);
+  background: var(--client-badge-bg, var(--bg-tertiary, #374151));
+  color: var(--client-badge-fg, var(--text-primary));
 }
-.dash-peek-client.client-claude_code,
-.dash-peek-client.client-claude { background: #d97706; color: #fff; }
-.dash-peek-client.client-claude_desktop,
-.dash-peek-client.client-claude-desktop { background: #b45309; color: #fff; }
-.dash-peek-client.client-codex { background: #2563eb; color: #fff; }
-.dash-peek-client.client-cursor { background: #7c3aed; color: #fff; }
-.dash-peek-client.client-kiro { background: #059669; color: #fff; }
-.dash-peek-client.client-web { background: #0891b2; color: #fff; }
-.dash-peek-client.client-vscode { background: #0284c7; color: #fff; }
-.dash-peek-client.client-antigravity { background: #db2777; color: #fff; }
-.dash-peek-client.client-generic { background: #64748b; color: #fff; }
-.dash-peek-client.client-unknown { background: #6b7280; color: #fff; }
 
 .recent-item-content {
   flex: 1;

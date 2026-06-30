@@ -24,7 +24,7 @@ TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
 IDE_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 
 # Resolve the stable project id.
-PROJECT_DIR="$(mem_mesh_project_id)"
+PROJECT_DIR="$(mem_mesh_project_id_from_input "$INPUT")"
 [ -z "$PROJECT_DIR" ] && exit 0
 
 # ── Analyze transcript for unsaved important content ──

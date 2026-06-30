@@ -25,7 +25,7 @@ if [ -n "$HOOK_TOKEN" ]; then
 fi
 
 INPUT=$(cat)
-PROJECT_DIR="$(mem_mesh_project_id)"
+PROJECT_DIR="$(mem_mesh_project_id_from_input "$INPUT")"
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   --arg pid "$PROJECT_DIR" \

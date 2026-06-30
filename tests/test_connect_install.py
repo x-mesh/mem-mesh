@@ -26,7 +26,7 @@ def _request() -> Request:
     )
 
 
-def test_all_installer_payload_includes_kiro_and_antigravity() -> None:
+def test_all_installer_payload_includes_kiro_antigravity_and_agy_hooks() -> None:
     payload = connect._bootstrap_payload(
         target="all",
         url="http://localhost:8000",
@@ -35,16 +35,21 @@ def test_all_installer_payload_includes_kiro_and_antigravity() -> None:
         token=None,
     )
 
-    assert {"codex", "claude", "kiro", "antigravity"} <= set(payload["clients"])
+    assert {"codex", "claude", "kiro", "antigravity", "agy"} <= set(payload["clients"])
     assert payload["rules_installed"] is True
 
     kiro = payload["clients"]["kiro"]
+    assert kiro["hooks_dir"] == "~/.kiro/mem-mesh-hooks"
     assert kiro["mcp_json_path"] == "~/.kiro/settings/mcp.json"
-    assert kiro["kiro_hooks_json_path"] == "~/.kiro/settings/hooks.json"
     assert kiro["mcp_json"]["mcpServers"][MCP_SERVER_KEY]["env"] == {
         "MEM_MESH_CLIENT": "kiro"
     }
+    assert "mem-mesh-save-response.kiro.hook" in kiro["kiro_hook_files"]
     assert "auto-create-pin-on-task.kiro.hook" in kiro["kiro_hook_files"]
+    assert (
+        kiro["kiro_hook_files"]["mem-mesh-save-response.kiro.hook"]["when"]["type"]
+        == "agentStop"
+    )
     assert (
         "pin_add"
         in kiro["kiro_hook_files"]["auto-create-pin-on-task.kiro.hook"]["then"][
@@ -57,22 +62,43 @@ def test_all_installer_payload_includes_kiro_and_antigravity() -> None:
     )
 
     antigravity = payload["clients"]["antigravity"]
+    assert antigravity["hooks_dir"] == "~/.gemini/antigravity/hooks"
+    assert antigravity["grouped_hooks_json_path"] == "~/.gemini/antigravity/hooks.json"
+    assert (
+        antigravity["grouped_hooks_json"]["mem-mesh"]["Stop"][0]["command"]
+        == "__HOME__/.gemini/antigravity/hooks/mem-mesh-stop.sh"
+    )
     assert antigravity["mcp_json_path"] == "~/.antigravity/mcp.json"
-    assert "hooks_dir" not in antigravity
     assert antigravity["mcp_json"]["mcpServers"][MCP_SERVER_KEY]["env"] == {
         "MEM_MESH_CLIENT": "antigravity"
     }
+
+    agy = payload["clients"]["agy"]
+    assert agy["hooks_dir"] == "~/.gemini/antigravity-cli/hooks"
+    assert agy["grouped_hooks_json_path"] == "~/.gemini/config/hooks.json"
+    assert (
+        agy["grouped_hooks_json"]["mem-mesh"]["Stop"][0]["command"]
+        == "__HOME__/.gemini/antigravity-cli/hooks/mem-mesh-stop.sh"
+    )
+    assert (
+        agy["grouped_hooks_json"]["mem-mesh"]["PostToolUse"][0]["hooks"][0]["command"]
+        == "__HOME__/.gemini/antigravity-cli/hooks/mem-mesh-post-tool-use.sh"
+    )
 
 
 def test_connect_installer_accepts_kiro_and_antigravity_targets() -> None:
     kiro_script = connect.build_install_script(_request(), target="kiro")
     antigravity_script = connect.build_install_script(_request(), target="antigravity")
+    agy_script = connect.build_install_script(_request(), target="agy")
 
-    assert "merge_kiro_hooks_json" in kiro_script
     assert "write_hook_files" in kiro_script
     assert "hook rules: session_resume" in kiro_script
     assert "mem-mesh client install complete" in antigravity_script
-    assert "hook rules: not installed for this MCP-only target" in antigravity_script
+    assert "merge_grouped_hooks_json" in antigravity_script
+    assert "hook rules: session_resume" in antigravity_script
+    assert "mem-mesh client install complete" in agy_script
+    assert "merge_grouped_hooks_json" in agy_script
+    assert "hook rules: session_resume" in agy_script
 
 
 @pytest.mark.asyncio

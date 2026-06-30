@@ -41,6 +41,19 @@
   --warning: #f59e0b;
   --error: #ef4444;
   --info: #3b82f6;
+
+  /* Client badge colors - shared across dashboard, memory list, and detail pages */
+  --client-claude: #b45309;
+  --client-claude-desktop: #92400e;
+  --client-codex: #2563eb;
+  --client-cursor: #7c3aed;
+  --client-kiro: #047857;
+  --client-web: #0e7490;
+  --client-vscode: #0369a1;
+  --client-antigravity: #be185d;
+  --client-agy: #0f766e;
+  --client-generic: #64748b;
+  --client-unknown: #6b7280;
   
   /* Light Theme Colors - Very clean */
   --bg-primary: #ffffff;

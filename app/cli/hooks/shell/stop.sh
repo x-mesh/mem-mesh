@@ -28,7 +28,7 @@ INPUT=$(cat)
 ACTIVE=$(printf '%s' "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null) || ACTIVE="false"
 [ "$ACTIVE" = "true" ] && { mem_mesh_log "stop" "skip" "stop_hook_active"; exit 0; }
 
-PROJECT_DIR="$(mem_mesh_project_id)"
+PROJECT_DIR="$(mem_mesh_project_id_from_input "$INPUT")"
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   --arg pid "$PROJECT_DIR" \

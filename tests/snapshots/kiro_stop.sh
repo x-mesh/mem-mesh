@@ -1,24 +1,32 @@
 #!/bin/bash
 # mem-mesh-hooks prompt-version: 23
-# Kiro agentResponse hook: save response to mem-mesh
-# Kiro has LLM access for categorization — no keyword matching needed here.
-# Category is set to code_snippet by default; Kiro's LLM handles filtering.
+# Agent response hook: save response to mem-mesh.
+# Used by Kiro and other command-hook clients that provide the final response
+# through an environment variable or stdin JSON.
 
 set -euo pipefail
 # --- mem-mesh project id resolution ------------------------------------------
 mem_mesh_project_id() {
+  _mm_start="${1:-}"
   if [ -n "${MEM_MESH_PROJECT_ID:-}" ]; then
     printf '%s\n' "$MEM_MESH_PROJECT_ID"
     return 0
   fi
 
-  _mm_pid="$(git config --local --get mem-mesh.project-id 2>/dev/null || true)"
+  _mm_pid="$(_mm_git "$_mm_start" config --local --get mem-mesh.project-id 2>/dev/null || true)"
   if [ -n "$_mm_pid" ]; then
     printf '%s\n' "$_mm_pid"
     return 0
   fi
 
-  _mm_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  _mm_root="$(_mm_git "$_mm_start" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -z "$_mm_root" ]; then
+    if [ -n "$_mm_start" ] && [ -d "$_mm_start" ]; then
+      _mm_root="$(_mm_cd_pwd "$_mm_start")"
+    else
+      _mm_root="$(pwd)"
+    fi
+  fi
   _mm_file="${_mm_root}/.mem-mesh/project-id"
   if [ -f "$_mm_file" ]; then
     _mm_pid="$(sed -n '1{s/[[:space:]]*$//;p;}' "$_mm_file" 2>/dev/null || true)"
@@ -33,6 +41,50 @@ mem_mesh_project_id() {
     printf '%s\n' "$_mm_base"
   else
     printf '%s\n' "unknown"
+  fi
+}
+
+_mm_cd_pwd() {
+  (cd "$1" 2>/dev/null && pwd) || printf '%s\n' "$1"
+}
+
+_mm_git() {
+  _mm_git_start="${1:-}"
+  shift || true
+  if [ -n "$_mm_git_start" ] && [ -d "$_mm_git_start" ]; then
+    git -C "$_mm_git_start" "$@"
+  else
+    git "$@"
+  fi
+}
+
+mem_mesh_hook_workspace_path() {
+  printf '%s' "${1:-}" | jq -r '
+    [
+      .workspace.current_dir,
+      .cwd,
+      (if (.workspace_roots // empty) | type == "array" then .workspace_roots[0] else .workspace_roots end),
+      (if (.workspaceRoots // empty) | type == "array" then .workspaceRoots[0] else .workspaceRoots end),
+      (if (.workspacePaths // empty) | type == "array" then .workspacePaths[0] else .workspacePaths end),
+      (if (.workspace_paths // empty) | type == "array" then .workspace_paths[0] else .workspace_paths end),
+      .workspacePath,
+      .workspace_path,
+      .current_dir,
+      .project_dir,
+      .workspace.project_dir
+    ]
+    | map(select(type == "string" and . != ""))
+    | .[0] // empty
+  ' 2>/dev/null || true
+}
+
+mem_mesh_project_id_from_input() {
+  _mm_input="${1:-}"
+  _mm_workspace="$(mem_mesh_hook_workspace_path "$_mm_input")"
+  if [ -n "$_mm_workspace" ] && [ -d "$_mm_workspace" ]; then
+    mem_mesh_project_id "$_mm_workspace"
+  else
+    mem_mesh_project_id
   fi
 }
 
@@ -90,8 +142,41 @@ AUTH=()
 AUTH_STATE=absent
 if [ -n "$HOOK_TOKEN" ]; then AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}"); AUTH_STATE=present; fi
 
+RAW_INPUT="$(cat)"
+HOOK_WORKSPACE_PATH="$(printf '%s' "$RAW_INPUT" | jq -r '
+  [.workspacePaths, .workspace_paths, .workspacePath, .workspace_path, .cwd]
+  | map(if type == "array" then .[0] elif type == "string" then . else empty end)
+  | map(select(. != null and . != ""))
+  | .[0] // empty
+' 2>/dev/null || true)"
 RESPONSE="${KIRO_RESULT:-}"
-[ ${#RESPONSE} -lt 50 ] && { mem_mesh_log "response" "skip" "too-short len=${#RESPONSE}"; exit 0; }
+if [ -z "$RESPONSE" ]; then
+  RESPONSE="$(printf '%s' "$RAW_INPUT" | jq -r '
+    .response
+    // .assistant_response
+    // .agentResponse
+    // .assistantResponse
+    // .lastAssistantMessage
+    // .last_assistant_message
+    // .result
+    // .content
+    // .text
+    // empty
+  ' 2>/dev/null || true)"
+fi
+if [ -z "$RESPONSE" ]; then
+  TRANSCRIPT_PATH="$(printf '%s' "$RAW_INPUT" | jq -r '.transcriptPath // empty' 2>/dev/null || true)"
+  if [ -n "$TRANSCRIPT_PATH" ] && [ -r "$TRANSCRIPT_PATH" ]; then
+    RESPONSE="$(jq -rs '
+      [.[] | select(.source == "MODEL" and ((.content // "") != "")) | .content]
+      | last // empty
+    ' "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+  fi
+fi
+if [ -z "$RESPONSE" ] && [ -n "$RAW_INPUT" ]; then
+  RESPONSE="$(printf '%s' "$RAW_INPUT" | jq -c . 2>/dev/null || printf '%s' "$RAW_INPUT")"
+fi
+[ ${#RESPONSE} -lt 100 ] && { mem_mesh_log "response" "skip" "too-short len=${#RESPONSE}"; exit 0; }
 
 # Noise guard: skip system artifacts (parity with keywords.is_noise / server _is_noise)
 if printf '%s' "$RESPONSE" | grep -qF -e '<task-notification>' -e '</task-notification>' -e '<task-id>' -e '<tool-use-id>' -e '<system-reminder>'; then
@@ -99,7 +184,8 @@ if printf '%s' "$RESPONSE" | grep -qF -e '<task-notification>' -e '</task-notifi
   exit 0
 fi
 
-PROJECT_DIR="$(mem_mesh_project_id)"
+PROJECT_DIR="$(mem_mesh_project_id_from_input "$RAW_INPUT")"
+[ -n "$PROJECT_DIR" ] || PROJECT_DIR="unknown"
 
 # Char-safe truncation: jq slices by Unicode codepoint (no UTF-8 byte corruption)
 SUMMARY=$(printf '%s' "$RESPONSE" | jq -Rrs '.[0:9500]')
@@ -110,13 +196,14 @@ PAYLOAD=$(jq -n \
   --arg category "code_snippet" \
   --arg source "kiro-hook" \
   --arg client "kiro" \
+  --arg ide "kiro" \
   '{
     content: $content,
     project_id: $project_id,
     category: $category,
     source: $source,
     client: $client,
-    tags: ["auto-save", "kiro"]
+    tags: ["auto-save", $ide]
   }')
 
 CURL_EXIT=0

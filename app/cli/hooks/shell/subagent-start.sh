@@ -26,7 +26,7 @@ case "$AGENT_TYPE" in
   Explore|Glob|Grep|Read) mem_mesh_log "subagent-start" "skip" "lightweight agent=$AGENT_TYPE"; exit 0 ;;
 esac
 
-PROJECT_DIR="$(mem_mesh_project_id)"
+PROJECT_DIR="$(mem_mesh_project_id_from_input "$INPUT")"
 
 mem_mesh_logv "subagent-start" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN") agent=$AGENT_TYPE"
 

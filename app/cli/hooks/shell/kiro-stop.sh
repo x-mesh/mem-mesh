@@ -1,8 +1,8 @@
 #!/bin/bash
 __VERSION_MARKER__
-# Kiro agentResponse hook: save response to mem-mesh
-# Kiro has LLM access for categorization — no keyword matching needed here.
-# Category is set to code_snippet by default; Kiro's LLM handles filtering.
+# Agent response hook: save response to mem-mesh.
+# Used by Kiro and other command-hook clients that provide the final response
+# through an environment variable or stdin JSON.
 
 set -euo pipefail
 __PROJECT_ID_RESOLVER__
@@ -16,8 +16,41 @@ AUTH=()
 AUTH_STATE=absent
 if [ -n "$HOOK_TOKEN" ]; then AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}"); AUTH_STATE=present; fi
 
+RAW_INPUT="$(cat)"
+HOOK_WORKSPACE_PATH="$(printf '%s' "$RAW_INPUT" | jq -r '
+  [.workspacePaths, .workspace_paths, .workspacePath, .workspace_path, .cwd]
+  | map(if type == "array" then .[0] elif type == "string" then . else empty end)
+  | map(select(. != null and . != ""))
+  | .[0] // empty
+' 2>/dev/null || true)"
 RESPONSE="${KIRO_RESULT:-}"
-[ ${#RESPONSE} -lt 50 ] && { mem_mesh_log "response" "skip" "too-short len=${#RESPONSE}"; exit 0; }
+if [ -z "$RESPONSE" ]; then
+  RESPONSE="$(printf '%s' "$RAW_INPUT" | jq -r '
+    .response
+    // .assistant_response
+    // .agentResponse
+    // .assistantResponse
+    // .lastAssistantMessage
+    // .last_assistant_message
+    // .result
+    // .content
+    // .text
+    // empty
+  ' 2>/dev/null || true)"
+fi
+if [ -z "$RESPONSE" ]; then
+  TRANSCRIPT_PATH="$(printf '%s' "$RAW_INPUT" | jq -r '.transcriptPath // empty' 2>/dev/null || true)"
+  if [ -n "$TRANSCRIPT_PATH" ] && [ -r "$TRANSCRIPT_PATH" ]; then
+    RESPONSE="$(jq -rs '
+      [.[] | select(.source == "MODEL" and ((.content // "") != "")) | .content]
+      | last // empty
+    ' "$TRANSCRIPT_PATH" 2>/dev/null || true)"
+  fi
+fi
+if [ -z "$RESPONSE" ] && [ -n "$RAW_INPUT" ]; then
+  RESPONSE="$(printf '%s' "$RAW_INPUT" | jq -c . 2>/dev/null || printf '%s' "$RAW_INPUT")"
+fi
+[ ${#RESPONSE} -lt 100 ] && { mem_mesh_log "response" "skip" "too-short len=${#RESPONSE}"; exit 0; }
 
 # Noise guard: skip system artifacts (parity with keywords.is_noise / server _is_noise)
 if printf '%s' "$RESPONSE" | grep -qF -e '<task-notification>' -e '</task-notification>' -e '<task-id>' -e '<tool-use-id>' -e '<system-reminder>'; then
@@ -25,24 +58,26 @@ if printf '%s' "$RESPONSE" | grep -qF -e '<task-notification>' -e '</task-notifi
   exit 0
 fi
 
-PROJECT_DIR="$(mem_mesh_project_id)"
+PROJECT_DIR="$(mem_mesh_project_id_from_input "$RAW_INPUT")"
+[ -n "$PROJECT_DIR" ] || PROJECT_DIR="unknown"
 
 # Char-safe truncation: jq slices by Unicode codepoint (no UTF-8 byte corruption)
 SUMMARY=$(printf '%s' "$RESPONSE" | jq -Rrs '.[0:9500]')
 
 PAYLOAD=$(jq -n \
-  --arg content "[kiro response] $SUMMARY" \
+  --arg content "[__IDE_TAG__ response] $SUMMARY" \
   --arg project_id "$PROJECT_DIR" \
   --arg category "code_snippet" \
-  --arg source "kiro-hook" \
-  --arg client "kiro" \
+  --arg source "__SOURCE_TAG__" \
+  --arg client "__CLIENT_TAG__" \
+  --arg ide "__IDE_TAG__" \
   '{
     content: $content,
     project_id: $project_id,
     category: $category,
     source: $source,
     client: $client,
-    tags: ["auto-save", "kiro"]
+    tags: ["auto-save", $ide]
   }')
 
 CURL_EXIT=0

@@ -85,7 +85,16 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
     install_parser.add_argument(
         "--target",
-        choices=["claude", "kiro", "cursor", "codex", "all", "auto"],
+        choices=[
+            "claude",
+            "kiro",
+            "cursor",
+            "codex",
+            "antigravity",
+            "agy",
+            "all",
+            "auto",
+        ],
         default="auto",
         help="Target IDE (default: auto-detect)",
     )
@@ -189,7 +198,9 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     hooks_install = hooks_sub.add_parser("install", help="Install hooks")
     hooks_install.add_argument(
-        "--target", choices=["claude", "kiro", "cursor", "codex", "all"], default="all"
+        "--target",
+        choices=["claude", "kiro", "cursor", "codex", "antigravity", "agy", "all"],
+        default="all",
     )
     hooks_install.add_argument("--url", default=None, help="API URL")
     hooks_install.add_argument(
@@ -218,7 +229,9 @@ def main(argv: Optional[List[str]] = None) -> None:
     hooks_install.add_argument("-i", "--interactive", action="store_true")
 
     hooks_sub.add_parser("uninstall", help="Uninstall hooks").add_argument(
-        "--target", choices=["claude", "kiro", "cursor", "codex", "all"], default="all"
+        "--target",
+        choices=["claude", "kiro", "cursor", "codex", "antigravity", "agy", "all"],
+        default="all",
     )
     hooks_sub.add_parser("status", help="Show hook status")
     hooks_sub.add_parser("doctor", help="Run hook diagnostics")

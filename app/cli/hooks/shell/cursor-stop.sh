@@ -29,7 +29,7 @@ INPUT=$(cat)
 ACTIVE=$(printf '%s' "$INPUT" | jq -r '.stop_hook_active // .stopHookActive // false' 2>/dev/null) || ACTIVE="false"
 [ "$ACTIVE" = "true" ] && { mem_mesh_log "stop" "skip" "stop_hook_active"; exit 0; }
 
-PROJECT_DIR="$(mem_mesh_project_id)"
+PROJECT_DIR="$(mem_mesh_project_id_from_input "$INPUT")"
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 
 # Normalize Cursor camelCase fields to snake_case and inject project_id.

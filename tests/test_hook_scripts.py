@@ -13,8 +13,12 @@ import pytest
 
 from app.cli.hooks.renderer import _render_template
 from app.cli.hooks.templates import (
+    CURSOR_SESSION_START_TEMPLATE,
+    CURSOR_STOP_TEMPLATE,
     KIRO_STOP_HOOK_TEMPLATE,
+    POST_TOOL_USE_HOOK_TEMPLATE,
     PRECOMPACT_HOOK_TEMPLATE,
+    SESSION_END_HOOK_TEMPLATE,
     SESSION_START_HOOK_TEMPLATE,
     STOP_DECIDE_HOOK_TEMPLATE,
     SUBAGENT_START_HOOK_TEMPLATE,
@@ -74,6 +78,119 @@ def _run_hook(
         env=run_env,
         cwd=str(cwd) if cwd else None,
     )
+
+
+# ---------------------------------------------------------------------------
+# post-tool-use tests
+# ---------------------------------------------------------------------------
+
+
+def test_post_tool_use_empty_payload_skips_curl(
+    tmp_path: Path, hook_api_server
+) -> None:
+    state, url = hook_api_server
+    script = _render_and_write(
+        tmp_path,
+        POST_TOOL_USE_HOOK_TEMPLATE,
+        source_tag="agy-hook",
+        client_tag="agy",
+        project_id="test-project",
+    )
+
+    result = _run_hook(script, {}, api_url=url)
+
+    assert result.returncode == 0
+    assert "last_payload" not in state
+
+
+@pytest.mark.parametrize(
+    ("raw_tool", "expected"),
+    [
+        ("write_to_file", "Write"),
+        ("replace_file_content", "Edit"),
+        ("multi_replace_file_content", "MultiEdit"),
+    ],
+)
+def test_post_tool_use_normalizes_agy_payload(
+    tmp_path: Path, hook_api_server, raw_tool: str, expected: str
+) -> None:
+    state, url = hook_api_server
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".mem-mesh").mkdir()
+    (workspace / ".mem-mesh" / "project-id").write_text(
+        "workspace-project\n", encoding="utf-8"
+    )
+    script = _render_and_write(
+        tmp_path,
+        POST_TOOL_USE_HOOK_TEMPLATE,
+        source_tag="agy-hook",
+        client_tag="agy",
+        project_id="test-project",
+    )
+
+    result = _run_hook(
+        script,
+        {
+            "sessionId": "agy-session-1",
+            "toolName": raw_tool,
+            "cwd": str(workspace),
+        },
+        api_url=url,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0
+    assert state["last_payload"]["project_id"] == "workspace-project"
+    assert state["last_payload"]["client"] == "agy"
+    assert state["last_payload"]["hook_source"] == "agy-hook"
+    assert state["last_payload"]["session_id"] == "agy-session-1"
+    assert state["last_payload"]["tool_name"] == expected
+
+
+def test_post_tool_use_accepts_agy_v2_tool_call_payload(
+    tmp_path: Path, hook_api_server
+) -> None:
+    state, url = hook_api_server
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".mem-mesh").mkdir()
+    (workspace / ".mem-mesh" / "project-id").write_text(
+        "workspace-project\n", encoding="utf-8"
+    )
+    config_cwd = tmp_path / "config-cwd"
+    config_cwd.mkdir()
+    script = _render_and_write(
+        tmp_path,
+        POST_TOOL_USE_HOOK_TEMPLATE,
+        source_tag="agy-hook",
+        client_tag="agy",
+        project_id="test-project",
+    )
+
+    result = _run_hook(
+        script,
+        {
+            "conversationId": "agy-conversation-1",
+            "modelName": "gemini-test",
+            "stepIdx": 2,
+            "workspacePaths": [str(workspace)],
+            "toolCall": {
+                "name": "run_command",
+                "args": {"cmd": "printf agy-final-hook-probe"},
+            },
+            "error": None,
+        },
+        api_url=url,
+        cwd=config_cwd,
+    )
+
+    assert result.returncode == 0
+    assert state["last_payload"]["project_id"] == "workspace-project"
+    assert state["last_payload"]["client"] == "agy"
+    assert state["last_payload"]["hook_source"] == "agy-hook"
+    assert state["last_payload"]["session_id"] == "agy-conversation-1"
+    assert state["last_payload"]["tool_name"] == "run_command"
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +300,42 @@ def test_stop_decide_already_saved_via_mcp_exits(tmp_path: Path) -> None:
     assert result.returncode == 0
 
 
+def test_cursor_stop_uses_workspace_project_id(tmp_path: Path, hook_api_server) -> None:
+    state, url = hook_api_server
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".mem-mesh").mkdir()
+    (workspace / ".mem-mesh" / "project-id").write_text(
+        "workspace-project\n", encoding="utf-8"
+    )
+    script = _render_and_write(
+        tmp_path,
+        CURSOR_STOP_TEMPLATE,
+        source_tag="cursor-hook",
+        client_tag="cursor",
+        project_id="test-project",
+    )
+
+    result = _run_hook(
+        script,
+        {
+            "stopHookActive": False,
+            "lastAssistantMessage": (
+                "Cursor agent stop hook 검증용 응답입니다. workspace.current_dir "
+                "기준으로 project_id가 workspace-project가 되어야 합니다."
+            ),
+            "workspace_roots": [str(workspace)],
+        },
+        api_url=url,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0
+    assert state["last_payload"]["project_id"] == "workspace-project"
+    assert state["last_payload"]["client"] == "cursor"
+    assert state["last_payload"]["last_assistant_message"].startswith("Cursor agent")
+
+
 # ---------------------------------------------------------------------------
 # session-start tests
 # ---------------------------------------------------------------------------
@@ -254,6 +407,41 @@ def test_session_start_uses_git_config_project_id(
     assert state["last_payload"]["project_id"] == "canonical-project"
 
 
+def test_cursor_session_start_uses_workspace_project_id(
+    tmp_path: Path, hook_api_server
+) -> None:
+    state, url = hook_api_server
+    state["response"] = {}
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".mem-mesh").mkdir()
+    (workspace / ".mem-mesh" / "project-id").write_text(
+        "workspace-project\n", encoding="utf-8"
+    )
+    script = _render_and_write(
+        tmp_path,
+        CURSOR_SESSION_START_TEMPLATE,
+        source_tag="cursor-hook",
+        client_tag="cursor",
+        project_id="test-project",
+    )
+
+    result = _run_hook(
+        script,
+        {
+            "sessionId": "cursor-session-1",
+            "workspace_roots": [str(workspace)],
+        },
+        api_url=url,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0
+    assert state["last_payload"]["project_id"] == "workspace-project"
+    assert state["last_payload"]["client"] == "cursor"
+    assert state["last_payload"]["session_id"] == "cursor-session-1"
+
+
 def test_codex_session_start_compact_stdout_keeps_full_payload(
     tmp_path: Path, hook_api_server
 ) -> None:
@@ -319,6 +507,103 @@ def test_kiro_stop_decision_keyword_triggers_save(tmp_path: Path) -> None:
     assert result.returncode == 0
 
 
+def test_kiro_stop_extracts_agy_transcript_response(
+    tmp_path: Path, hook_api_server
+) -> None:
+    state, url = hook_api_server
+    script = _render_and_write(
+        tmp_path,
+        KIRO_STOP_HOOK_TEMPLATE,
+        source_tag="agy-hook",
+        client_tag="agy",
+        ide_tag="agy",
+        project_id="test-project",
+    )
+    transcript = tmp_path / "transcript_full.jsonl"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".mem-mesh").mkdir()
+    (workspace / ".mem-mesh" / "project-id").write_text(
+        "workspace-project\n", encoding="utf-8"
+    )
+    config_cwd = tmp_path / "config-cwd"
+    config_cwd.mkdir()
+    expected = (
+        "아키텍처 결정을 기록합니다. agy Stop payload는 응답 본문 대신 "
+        "transcriptPath를 제공하므로 마지막 MODEL content를 저장해야 합니다. "
+        "이 회귀 테스트는 100자 미만 응답을 저장하지 않는 hook guard를 통과하도록 "
+        "충분히 긴 실제 응답 형태를 사용합니다."
+    )
+    transcript.write_text(
+        "\n".join(
+            [
+                json.dumps({"source": "USER_EXPLICIT", "content": "요청"}),
+                json.dumps({"source": "MODEL", "content": expected}),
+                json.dumps({"source": "SYSTEM", "content": "{{ CHECKPOINT }}"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = _run_hook(
+        script,
+        {"transcriptPath": str(transcript), "workspacePaths": [str(workspace)]},
+        api_url=url,
+        cwd=config_cwd,
+    )
+
+    assert result.returncode == 0
+    assert state["last_payload"]["project_id"] == "workspace-project"
+    assert state["last_payload"]["client"] == "agy"
+    assert state["last_payload"]["source"] == "agy-hook"
+    assert expected in state["last_payload"]["content"]
+    assert str(transcript) not in state["last_payload"]["content"]
+    assert '"transcriptPath"' not in state["last_payload"]["content"]
+
+
+def test_kiro_stop_extracts_cli_assistant_response(
+    tmp_path: Path, hook_api_server
+) -> None:
+    state, url = hook_api_server
+    script = _render_and_write(
+        tmp_path,
+        KIRO_STOP_HOOK_TEMPLATE,
+        source_tag="kiro-hook",
+        client_tag="kiro",
+        ide_tag="kiro",
+        project_id="test-project",
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".mem-mesh").mkdir()
+    (workspace / ".mem-mesh" / "project-id").write_text(
+        "workspace-project\n", encoding="utf-8"
+    )
+    expected = (
+        "Kiro CLI custom agent stop hook 검증입니다. 실제 kiro-cli 2.10.0 "
+        "payload는 assistant_response 필드에 최종 응답을 담으므로, hook이 이 필드를 "
+        "읽어 mem-mesh에 저장해야 합니다. 이 문장은 100자 guard를 통과합니다."
+    )
+
+    result = _run_hook(
+        script,
+        {
+            "hook_event_name": "stop",
+            "cwd": str(workspace),
+            "assistant_response": expected,
+        },
+        api_url=url,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0
+    assert state["last_payload"]["project_id"] == "workspace-project"
+    assert state["last_payload"]["client"] == "kiro"
+    assert state["last_payload"]["source"] == "kiro-hook"
+    assert expected in state["last_payload"]["content"]
+
+
 # ---------------------------------------------------------------------------
 # user-prompt-submit tests
 # ---------------------------------------------------------------------------
@@ -371,6 +656,71 @@ def test_user_prompt_submit_empty_prompt_exits(tmp_path: Path) -> None:
     assert result.stdout.strip() == ""
 
 
+def test_user_prompt_submit_uses_workspace_project_id(
+    tmp_path: Path, hook_api_server
+) -> None:
+    state, url = hook_api_server
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".mem-mesh").mkdir()
+    (workspace / ".mem-mesh" / "project-id").write_text(
+        "workspace-project\n", encoding="utf-8"
+    )
+    script = _render_and_write(
+        tmp_path,
+        USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
+        source_tag="cursor-hook",
+        client_tag="cursor",
+        project_id="test-project",
+    )
+
+    result = _run_hook(
+        script,
+        {
+            "prompt": (
+                "이전에 결정한 아키텍처와 저장된 메모리를 찾아줘. Cursor agent "
+                "beforeSubmitPrompt가 workspace.current_dir 기준 project_id를 써야 합니다."
+            ),
+            "workspace_roots": [str(workspace)],
+        },
+        api_url=url,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0
+    assert state["last_payload"]["project_id"] == "workspace-project"
+    assert state["last_payload"]["client"] == "cursor"
+
+
+def test_session_end_uses_workspace_project_id(tmp_path: Path, hook_api_server) -> None:
+    state, url = hook_api_server
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".mem-mesh").mkdir()
+    (workspace / ".mem-mesh" / "project-id").write_text(
+        "workspace-project\n", encoding="utf-8"
+    )
+    script = _render_and_write(
+        tmp_path,
+        SESSION_END_HOOK_TEMPLATE,
+        source_tag="cursor-hook",
+        client_tag="cursor",
+        project_id="test-project",
+    )
+
+    result = _run_hook(
+        script,
+        {"workspace_roots": [str(workspace)]},
+        api_url=url,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0
+    assert state["last_path"].endswith(
+        "/api/work/sessions/end-by-project/workspace-project"
+    )
+
+
 # ---------------------------------------------------------------------------
 # user-prompt-submit pin reminder tests
 # ---------------------------------------------------------------------------
@@ -391,6 +741,7 @@ def hook_api_server():
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):  # noqa: N802 — BaseHTTPRequestHandler contract
+            state["last_path"] = self.path
             length = int(self.headers.get("Content-Length", 0) or 0)
             raw = self.rfile.read(length)
             state["last_body"] = raw.decode("utf-8")

@@ -29,9 +29,11 @@ TARGET_LABELS = {
     "kiro": "Kiro",
     "cursor": "Cursor",
     "codex": "Codex",
+    "antigravity": "Antigravity IDE",
+    "agy": "agy CLI",
 }
 
-TARGET_ORDER = ["claude", "kiro", "cursor", "codex"]
+TARGET_ORDER = ["claude", "kiro", "cursor", "codex", "antigravity", "agy"]
 
 # How many times the interactive installer re-prompts for the hook token after a
 # 401 before giving up and skipping hook install (fail-fast on a wrong token).
@@ -75,6 +77,17 @@ def _detect_targets() -> list[str]:
     codex_dir = Path.home() / ".codex"
     if codex_dir.exists():
         targets.append("codex")
+    antigravity_dirs = [
+        Path.home() / ".gemini" / "antigravity",
+        Path.home() / ".antigravity",
+        Path("/Applications/Antigravity.app"),
+        Path("/Applications/Antigravity IDE.app"),
+    ]
+    if any(path.exists() for path in antigravity_dirs):
+        targets.append("antigravity")
+    agy_dir = Path.home() / ".gemini" / "antigravity-cli"
+    if agy_dir.exists() or shutil.which("agy"):
+        targets.append("agy")
 
     return targets
 

@@ -783,13 +783,9 @@ style.textContent = `
     border-radius: 4px;
     font-weight: 500;
     font-family: 'SF Mono', 'Cascadia Code', monospace;
-    background: var(--bg-tertiary, #374151);
-    color: var(--text-primary);
+    background: var(--client-badge-bg, var(--bg-tertiary, #374151));
+    color: var(--client-badge-fg, var(--text-primary));
   }
-  .client-claude_code { background: #d97706; color: #fff; }
-  .client-cursor { background: #7c3aed; color: #fff; }
-  .client-kiro { background: #059669; color: #fff; }
-  .client-web { background: #2563eb; color: #fff; }
 
   .hidden {
     display: none !important;

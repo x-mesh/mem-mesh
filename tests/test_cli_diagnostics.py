@@ -5,6 +5,7 @@ masking, the uvx-overwrite guard, mcp verify, and the top-level doctor.
 import http.server
 import json
 import threading
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -208,6 +209,154 @@ def test_hooks_doctor_client_hook_token_none(monkeypatch, tmp_path):
     monkeypatch.delenv("MEM_MESH_HOOK_TOKEN", raising=False)
 
     assert doctor._client_hook_token() == ""
+
+
+def test_hooks_doctor_detects_kiro_scripts_without_native_hook(tmp_path):
+    from app.cli.hooks import doctor
+
+    hooks_dir = tmp_path / ".kiro" / "hooks"
+    scripts_dir = tmp_path / ".kiro" / "mem-mesh-hooks"
+    scripts_dir.mkdir(parents=True)
+    (scripts_dir / "mem-mesh-stop.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+
+    issues = doctor._check_kiro_native_hook(hooks_dir, scripts_dir)
+
+    assert any(
+        "native mem-mesh-save-response.kiro.hook is missing" in i for i in issues
+    )
+
+
+def test_hooks_doctor_detects_kiro_legacy_script_in_hook_dir(tmp_path):
+    from app.cli.hooks import doctor
+
+    hooks_dir = tmp_path / ".kiro" / "hooks"
+    scripts_dir = tmp_path / ".kiro" / "mem-mesh-hooks"
+    hooks_dir.mkdir(parents=True)
+    scripts_dir.mkdir(parents=True)
+    script = scripts_dir / "mem-mesh-stop.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    (hooks_dir / "mem-mesh-stop.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (hooks_dir / "mem-mesh-save-response.kiro.hook").write_text(
+        json.dumps(
+            {
+                "name": "mem-mesh: Save Response",
+                "version": "1.0.0",
+                "when": {"type": "agentStop"},
+                "then": {"type": "runCommand", "command": str(script)},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    issues = doctor._check_kiro_native_hook(hooks_dir, scripts_dir)
+
+    assert any("legacy mem-mesh-stop.sh is inside .kiro/hooks" in i for i in issues)
+
+
+def test_hooks_doctor_detects_antigravity_scripts_without_hooks_json(tmp_path):
+    from app.cli.hooks import doctor
+
+    hooks_dir = tmp_path / ".gemini" / "antigravity" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "mem-mesh-stop.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+
+    issues = doctor._check_antigravity_hooks_json(
+        tmp_path / ".gemini" / "antigravity" / "hooks.json",
+        hooks_dir,
+        label="Antigravity IDE",
+    )
+
+    assert any("hooks.json missing while mem-mesh scripts exist" in i for i in issues)
+
+
+def test_hooks_doctor_accepts_antigravity_ide_active_config(tmp_path):
+    from app.cli.hooks import doctor
+
+    hooks_dir = tmp_path / ".gemini" / "antigravity" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    stop = hooks_dir / "mem-mesh-stop.sh"
+    post_tool = hooks_dir / "mem-mesh-post-tool-use.sh"
+    stop.write_text("#!/bin/sh\n", encoding="utf-8")
+    post_tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    hooks_json = tmp_path / ".gemini" / "antigravity" / "hooks.json"
+    hooks_json.parent.mkdir(parents=True, exist_ok=True)
+    hooks_json.write_text(
+        json.dumps(
+            {
+                "mem-mesh": {
+                    "Stop": [{"type": "command", "command": str(stop)}],
+                    "PostToolUse": [
+                        {"hooks": [{"type": "command", "command": str(post_tool)}]}
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        doctor._check_antigravity_hooks_json(
+            hooks_json, hooks_dir, label="Antigravity IDE"
+        )
+        == []
+    )
+
+
+def test_hooks_doctor_accepts_agy_cli_active_config(tmp_path):
+    from app.cli.hooks import doctor
+
+    hooks_dir = tmp_path / ".gemini" / "antigravity-cli" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    stop = hooks_dir / "mem-mesh-stop.sh"
+    post_tool = hooks_dir / "mem-mesh-post-tool-use.sh"
+    stop.write_text("#!/bin/sh\n", encoding="utf-8")
+    post_tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    hooks_json = tmp_path / ".gemini" / "antigravity-cli" / "hooks.json"
+    hooks_json.parent.mkdir(parents=True, exist_ok=True)
+    hooks_json.write_text(
+        json.dumps(
+            {
+                "mem-mesh": {
+                    "Stop": [{"type": "command", "command": str(stop)}],
+                    "PostToolUse": [
+                        {"hooks": [{"type": "command", "command": str(post_tool)}]}
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        doctor._check_antigravity_hooks_json(hooks_json, hooks_dir, label="agy CLI")
+        == []
+    )
+
+
+def test_hooks_doctor_runtime_trace_latest_and_stale_detection():
+    from app.cli.hooks import doctor
+
+    log_text = "\n".join(
+        [
+            "2026-06-24T12:08:05+0900 [cursor/stop] pid=1 fired",
+            "2026-06-30T19:39:15+0900 [claude_code/user-prompt-submit] pid=2 sent",
+            "2026-06-30T19:40:00+0900 [cursor/user-prompt-submit] pid=3 sent",
+        ]
+    )
+
+    latest = doctor._latest_hook_trace_at(log_text, "cursor")
+
+    assert latest == datetime.strptime(
+        "2026-06-30T19:40:00+0900", "%Y-%m-%dT%H:%M:%S%z"
+    )
+    assert not doctor._is_stale_hook_trace(
+        latest,
+        datetime(2026, 6, 30, 20, 0, tzinfo=latest.tzinfo),
+    )
+    assert doctor._is_stale_hook_trace(
+        latest,
+        datetime(2026, 7, 2, 20, 0, tzinfo=latest.tzinfo),
+    )
 
 
 # ── uvx-overwrite guard (the #4 footgun) ──

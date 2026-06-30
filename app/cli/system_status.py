@@ -9,11 +9,15 @@ from pathlib import Path
 
 from app.cli.hooks.colors import dim, err, header, info, ok, warn
 from app.cli.hooks.constants import (
+    AGY_HOOKS_DIR,
+    AGY_HOOKS_FILE,
+    ANTIGRAVITY_HOOKS_DIR,
+    ANTIGRAVITY_HOOKS_FILE,
     CLAUDE_HOOKS_DIR,
     CLAUDE_SETTINGS,
     CURSOR_HOOKS_DIR,
     CURSOR_SETTINGS,
-    KIRO_HOOKS_DIR,
+    KIRO_SCRIPTS_DIR,
     KIRO_SETTINGS,
 )
 from app.cli.hooks.diagnostics import (
@@ -151,15 +155,21 @@ def cmd_system_status(verbose: bool = False) -> None:
     print(header("[Hooks]"))
     for label, hooks_dir, settings_path in [
         ("Claude Code", CLAUDE_HOOKS_DIR, CLAUDE_SETTINGS),
-        ("Kiro", KIRO_HOOKS_DIR, KIRO_SETTINGS),
+        ("Kiro", KIRO_SCRIPTS_DIR, KIRO_SETTINGS),
         ("Cursor", CURSOR_HOOKS_DIR, CURSOR_SETTINGS),
+        ("Antigravity IDE", ANTIGRAVITY_HOOKS_DIR, ANTIGRAVITY_HOOKS_FILE),
+        ("agy CLI", AGY_HOOKS_DIR, AGY_HOOKS_FILE),
     ]:
         count = _count_installed_hooks(hooks_dir)
         if count == 0:
             print(f"  {label:12s}  {dim('no hooks installed')}")
             continue
-        profile = _detect_profile(hooks_dir, settings_path)
-        print(f"  {label:12s}  {ok(f'{count} hooks')} {dim(f'({profile} profile)')}")
+        if label == "Claude Code":
+            profile = _detect_profile(hooks_dir, settings_path)
+            note = f"({profile} profile)"
+        else:
+            note = "(native stop hook)"
+        print(f"  {label:12s}  {ok(f'{count} hooks')} {dim(note)}")
     print()
 
     # --- Hook token ---

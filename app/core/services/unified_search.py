@@ -873,6 +873,7 @@ class UnifiedSearchService:
             FROM memories_fts fts
             JOIN memories m ON fts.id = m.id
             WHERE fts.memories_fts MATCH ?
+              AND COALESCE(m.status, 'canonical') = 'canonical'
         """
         params = [fts_query]
 
@@ -1061,7 +1062,10 @@ class UnifiedSearchService:
         self, query: str, filters: Dict[str, Any], limit: int
     ) -> SearchResponse:
         """텍스트 기반 검색 (폴백)"""
-        base_query = "SELECT * FROM memories WHERE content LIKE ?"
+        base_query = (
+            "SELECT * FROM memories WHERE content LIKE ? "
+            "AND COALESCE(status, 'canonical') = 'canonical'"
+        )
         params = [f"%{query}%"]
 
         if filters:

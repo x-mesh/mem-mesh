@@ -26,13 +26,57 @@ if [ -n "$HOOK_TOKEN" ]; then
 fi
 
 INPUT=$(cat)
-PROJECT_DIR="$(mem_mesh_project_id)"
+HOOK_WORKSPACE_PATH="$(printf '%s' "$INPUT" | jq -r '
+  [.workspacePaths, .workspace_paths, .workspacePath, .workspace_path, .cwd]
+  | map(if type == "array" then .[0] elif type == "string" then . else empty end)
+  | map(select(. != null and . != ""))
+  | .[0] // empty
+' 2>/dev/null || true)"
+PROJECT_DIR=""
+if [ -n "$HOOK_WORKSPACE_PATH" ] && [ -d "$HOOK_WORKSPACE_PATH" ]; then
+  PROJECT_DIR="$(cd "$HOOK_WORKSPACE_PATH" 2>/dev/null && mem_mesh_project_id || true)"
+fi
+[ -n "$PROJECT_DIR" ] || PROJECT_DIR="$(mem_mesh_project_id)"
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   --arg pid "$PROJECT_DIR" \
   --arg source "__SOURCE_TAG__" \
   --arg client "__CLIENT_TAG__" \
-  '. + {project_id: $pid, hook_source: $source, client: $client}' 2>/dev/null) || PAYLOAD="$INPUT"
+  '
+  def mem_mesh_tool_name:
+    (.tool_name
+      // .toolName
+      // .toolCall.tool_name
+      // .toolCall.toolName
+      // .toolCall.name
+      // .tool_call.tool_name
+      // .tool_call.toolName
+      // .tool_call.name
+      // ""
+    ) as $name
+    | ($name | tostring | ascii_downcase) as $lower
+    | if $lower == "write_to_file" or $lower == "write" then "Write"
+      elif $lower == "replace_file_content" or $lower == "edit" then "Edit"
+      elif $lower == "multi_replace_file_content" or $lower == "multiedit" or $lower == "multi_edit" then "MultiEdit"
+      elif $lower == "notebookedit" or $lower == "notebook_edit" then "NotebookEdit"
+      else ($name | tostring)
+      end;
+
+  . + {
+    project_id: $pid,
+    hook_source: $source,
+    client: $client,
+    session_id: (.session_id // .sessionId // .conversation_id // .conversationId // .conversationID // .session.id // ""),
+    tool_name: mem_mesh_tool_name
+  }' 2>/dev/null) || PAYLOAD="$INPUT"
+
+# Validate that PAYLOAD is a non-empty valid JSON object, and contains a valid tool_name.
+# Otherwise skip curl to avoid 422 errors on empty/malformed inputs.
+VALID_JSON=$(printf '%s' "$PAYLOAD" | jq -e 'select(.tool_name != null and .tool_name != "")' 2>/dev/null || true)
+if [ -z "$VALID_JSON" ]; then
+  mem_mesh_log "post-tool-use" "skip" "empty-or-invalid-payload"
+  exit 0
+fi
 
 # Fire-and-forget: never block the session on the write-signal POST.
 CURL_EXIT=0

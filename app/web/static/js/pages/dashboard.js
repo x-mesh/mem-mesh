@@ -18,16 +18,17 @@ const CAT_ICONS = {
 const DEFAULT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
 
 const CLIENT_COLORS = {
-  claude_code: '#d97706',
-  claude: '#d97706',
-  claude_desktop: '#b45309',
-  'claude-desktop': '#b45309',
+  claude_code: '#b45309',
+  claude: '#b45309',
+  claude_desktop: '#92400e',
+  'claude-desktop': '#92400e',
   codex: '#2563eb',
   cursor: '#7c3aed',
-  kiro: '#059669',
-  web: '#0891b2',
-  vscode: '#0284c7',
-  antigravity: '#db2777',
+  kiro: '#047857',
+  web: '#0e7490',
+  vscode: '#0369a1',
+  antigravity: '#be185d',
+  agy: '#0f766e',
   generic: '#64748b',
   unknown: '#6b7280',
 };

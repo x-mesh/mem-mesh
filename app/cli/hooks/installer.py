@@ -11,7 +11,9 @@ from app.cli.hooks.constants import (
     CURSOR_HOOKS_DIR,
     CURSOR_SETTINGS,
     HOOK_PROFILES,
+    KIRO_CLI_AGENT,
     KIRO_HOOKS_DIR,
+    KIRO_SCRIPTS_DIR,
     KIRO_SETTINGS,
 )
 from app.cli.hooks.cursor_adapters import (
@@ -20,7 +22,11 @@ from app.cli.hooks.cursor_adapters import (
     adapt_cursor_subagent_start,
     adapt_cursor_subagent_stop,
 )
-from app.cli.hooks.json_ops import _merge_json_settings, _remove_hook_event
+from app.cli.hooks.json_ops import (
+    _atomic_write_text,
+    _merge_json_settings,
+    _remove_hook_event,
+)
 from app.cli.hooks.renderer import (
     _render_local_template,
     _render_template,
@@ -285,6 +291,58 @@ def _build_cursor_hooks_settings(
     return settings
 
 
+def _kiro_cli_stop_entry(script_path: Path) -> Dict[str, Any]:
+    """Build a Kiro CLI custom-agent stop hook entry."""
+    return {
+        "command": str(script_path),
+        "timeout_ms": 30000,
+        "max_output_size": 1024,
+    }
+
+
+def _write_kiro_cli_agent(agent_path: Path, script_path: Path) -> None:
+    """Write/update the Kiro CLI custom agent hook without clobbering user fields."""
+    try:
+        existing = json.loads(agent_path.read_text(encoding="utf-8"))
+        if not isinstance(existing, dict):
+            existing = {}
+    except (json.JSONDecodeError, OSError):
+        existing = {}
+
+    agent = dict(existing)
+    agent.setdefault("name", "mem-mesh")
+    agent.setdefault(
+        "description", "Kiro CLI agent with mem-mesh response persistence."
+    )
+    agent.setdefault("prompt", "")
+    agent.setdefault("tools", ["read", "write", "shell", "thinking", "todo"])
+    agent.setdefault("allowedTools", [])
+    agent.setdefault("includeMcpJson", True)
+
+    hooks = agent.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+    stop_hooks = hooks.get("stop")
+    if not isinstance(stop_hooks, list):
+        stop_hooks = []
+    stop_hooks = [
+        entry
+        for entry in stop_hooks
+        if not (
+            isinstance(entry, dict)
+            and "mem-mesh-stop.sh" in str(entry.get("command", ""))
+        )
+    ]
+    stop_hooks.append(_kiro_cli_stop_entry(script_path))
+    hooks["stop"] = stop_hooks
+    agent["hooks"] = hooks
+
+    _atomic_write_text(
+        agent_path,
+        json.dumps(agent, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+    )
+
+
 def _install_claude(
     url: str, mode: str = "api", path: str = "", profile: str = "standard"
 ) -> None:
@@ -525,7 +583,7 @@ def _install_kiro(url: str, mode: str = "api", path: str = "") -> None:
     """Install mem-mesh hooks for Kiro."""
     print("[kiro] Installing hook script...")
 
-    stop_script = KIRO_HOOKS_DIR / "mem-mesh-stop.sh"
+    stop_script = KIRO_SCRIPTS_DIR / "mem-mesh-stop.sh"
     if mode == "local":
         _write_script(
             stop_script, _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path)
@@ -543,35 +601,51 @@ def _install_kiro(url: str, mode: str = "api", path: str = "") -> None:
         )
     print(f"  -> {stop_script}")
 
-    print("[kiro] Updating hooks.json...")
-    kiro_hook_entry = {
-        "name": "mem-mesh: Save Response",
-        "trigger": "agentResponse",
-        "action": "shell",
-        "command": str(stop_script),
-        "env": {"KIRO_RESULT": "$response"},
-    }
+    print("[kiro] Writing native .kiro.hook file...")
+    hook_file = KIRO_HOOKS_DIR / "mem-mesh-save-response.kiro.hook"
+    hook_file.parent.mkdir(parents=True, exist_ok=True)
+    hook_file.write_text(
+        json.dumps(
+            {
+                "name": "mem-mesh: Save Response",
+                "version": "1.0.0",
+                "description": "Save useful agent responses to mem-mesh.",
+                "when": {"type": "agentStop"},
+                "then": {"type": "runCommand", "command": str(stop_script)},
+            },
+            indent=2,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"  -> {hook_file}")
 
-    # Load existing or create new
-    existing: Dict[str, Any] = {"hooks": []}
+    print("[kiro] Writing Kiro CLI custom agent hook...")
+    _write_kiro_cli_agent(KIRO_CLI_AGENT, stop_script)
+    print(f"  -> {KIRO_CLI_AGENT}")
+    print("  use: kiro-cli chat --agent mem-mesh")
+
+    legacy_script = KIRO_HOOKS_DIR / "mem-mesh-stop.sh"
+    if legacy_script.exists():
+        legacy_script.unlink()
+        print(f"  removed legacy {legacy_script}")
+
     if KIRO_SETTINGS.exists():
         try:
             existing = json.loads(KIRO_SETTINGS.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             existing = {"hooks": []}
-
-    hooks: List[Dict[str, Any]] = existing.get("hooks", [])
-
-    # Remove existing mem-mesh hooks, then add new
-    hooks = [h for h in hooks if not h.get("name", "").startswith("mem-mesh:")]
-    hooks.append(kiro_hook_entry)
-    existing["hooks"] = hooks
-
-    KIRO_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
-    KIRO_SETTINGS.write_text(
-        json.dumps(existing, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
-    print(f"  -> {KIRO_SETTINGS}")
+        hooks: List[Dict[str, Any]] = existing.get("hooks", [])
+        filtered = [h for h in hooks if not h.get("name", "").startswith("mem-mesh:")]
+        if filtered != hooks:
+            existing["hooks"] = filtered
+            KIRO_SETTINGS.write_text(
+                json.dumps(existing, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            print(f"  cleaned legacy mem-mesh entries from {KIRO_SETTINGS}")
 
     print("[kiro] Done.")
 

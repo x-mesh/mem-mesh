@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from .chat import router as chat_router
 from .connect import router as connect_router
+from .curation import router as curation_router
 from .hooks import router as hooks_router
 from .memories import router as memories_router
 from .oauth import router as oauth_router
@@ -29,6 +30,7 @@ router.include_router(hooks_router)
 router.include_router(security_router)
 router.include_router(connect_router)
 router.include_router(chat_router)
+router.include_router(curation_router)
 
 __all__ = [
     "router",
@@ -42,4 +44,5 @@ __all__ = [
     "security_router",
     "connect_router",
     "chat_router",
+    "curation_router",
 ]

@@ -14,14 +14,19 @@ API/token/MCP view on top.
 import os
 from typing import List, Optional
 
-from app.cli.codex_config import CODEX_HOOKS_DIR
+from app.cli.codex_config import CODEX_HOOKS_DIR, CODEX_HOOKS_FILE
 from app.cli.hooks.colors import dim, err, header, info, ok, warn
 from app.cli.hooks.constants import (
+    AGY_HOOKS_DIR,
+    AGY_HOOKS_FILE,
+    ANTIGRAVITY_HOOKS_DIR,
+    ANTIGRAVITY_HOOKS_FILE,
     CLAUDE_HOOKS_DIR,
     CLAUDE_SETTINGS,
     CURSOR_HOOKS_DIR,
     CURSOR_SETTINGS,
     KIRO_HOOKS_DIR,
+    KIRO_SCRIPTS_DIR,
     KIRO_SETTINGS,
 )
 from app.cli.hooks.diagnostics import (
@@ -505,7 +510,7 @@ def _render_conflicts(url: str, issues: List[str]) -> None:
     print()
 
 
-def _render_hooks_summary() -> None:
+def _render_hooks_summary(issues: List[str]) -> None:
     """[Hooks]: compact per-tool summary; defer the deep checks to `hooks doctor`."""
     print(header("[Hooks]"))
     # The stop-hook profile (minimal/standard/enhanced) only applies to
@@ -515,9 +520,16 @@ def _render_hooks_summary() -> None:
     # would mislabel them "minimal" — show "native stop hook" instead.
     for label, hooks_dir, settings_path, has_profile in [
         ("Claude Code", CLAUDE_HOOKS_DIR, CLAUDE_SETTINGS, True),
-        ("Kiro", KIRO_HOOKS_DIR, KIRO_SETTINGS, False),
+        ("Kiro", KIRO_SCRIPTS_DIR, KIRO_SETTINGS, False),
         ("Cursor", CURSOR_HOOKS_DIR, CURSOR_SETTINGS, False),
         ("Codex", CODEX_HOOKS_DIR, None, True),
+        (
+            "Antigravity IDE",
+            ANTIGRAVITY_HOOKS_DIR,
+            ANTIGRAVITY_HOOKS_FILE,
+            False,
+        ),
+        ("agy CLI", AGY_HOOKS_DIR, AGY_HOOKS_FILE, False),
     ]:
         if not hooks_dir.exists():
             print(f"  {label:12s}  {dim('no hooks installed')}")
@@ -531,6 +543,40 @@ def _render_hooks_summary() -> None:
             note = f"({profile} profile)"
         else:
             note = "(native stop hook)"
+        if label == "Codex":
+            from app.cli.hooks.doctor import _check_codex_hooks_json
+
+            codex_issues = _check_codex_hooks_json(CODEX_HOOKS_FILE, CODEX_HOOKS_DIR)
+            if codex_issues:
+                print(
+                    f"  {label:12s}  {err(f'{count} scripts, inactive config')} {dim(note)}"
+                )
+                issues.extend(codex_issues)
+                continue
+        elif label == "Kiro":
+            from app.cli.hooks.doctor import _check_kiro_native_hook
+
+            kiro_issues = _check_kiro_native_hook(KIRO_HOOKS_DIR, KIRO_SCRIPTS_DIR)
+            if kiro_issues:
+                print(
+                    f"  {label:12s}  {err(f'{count} scripts, inactive config')} {dim(note)}"
+                )
+                issues.extend(kiro_issues)
+                continue
+        elif label in ("Antigravity IDE", "agy CLI"):
+            from app.cli.hooks.doctor import _check_antigravity_hooks_json
+
+            ag_issues = _check_antigravity_hooks_json(
+                settings_path or ANTIGRAVITY_HOOKS_FILE,
+                hooks_dir,
+                label=label,
+            )
+            if ag_issues:
+                print(
+                    f"  {label:12s}  {err(f'{count} scripts, inactive config')} {dim(note)}"
+                )
+                issues.extend(ag_issues)
+                continue
         print(f"  {label:12s}  {ok(f'{count} hooks')} {dim(note)}")
     print(f"  {dim('→ deep hook diagnostics + live auth test: mem-mesh hooks doctor')}")
     print()
@@ -563,7 +609,7 @@ def cmd_system_doctor(verbose: bool = False) -> int:
     _render_mcp(url, verbose, issues, mcp_auth_required=_mcp_auth_required(url))
     _render_overrides(verbose, issues)
     _render_conflicts(url, issues)
-    _render_hooks_summary()
+    _render_hooks_summary(issues)
 
     # Summary — most important info last (clig.dev).
     print(header("[Summary]"))

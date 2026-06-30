@@ -18,6 +18,7 @@ class RelationType(str, Enum):
     PARENT = "parent"  # Parent-child relationship (source is parent)
     CHILD = "child"  # Child-parent relationship (source is child)
     SUPERSEDES = "supersedes"  # source replaces target
+    CONFLICTS = "conflicts"  # source contradicts target (reconcile)
     REFERENCES = "references"  # source references target
     DEPENDS_ON = "depends_on"  # source depends on target
     SIMILAR = "similar"  # Similar content

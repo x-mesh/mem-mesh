@@ -5,6 +5,12 @@ like ``from app.cli.hooks import templates, constants, installer``.
 """
 
 from app.cli.hooks.constants import (  # noqa: F401
+    AGY_CONFIG_DIR,
+    AGY_HOOKS_DIR,
+    AGY_HOOKS_FILE,
+    ANTIGRAVITY_CONFIG_DIR,
+    ANTIGRAVITY_HOOKS_DIR,
+    ANTIGRAVITY_HOOKS_FILE,
     CLAUDE_HOOKS_DIR,
     CLAUDE_SETTINGS,
     CURSOR_HOOKS_DIR,
@@ -12,7 +18,10 @@ from app.cli.hooks.constants import (  # noqa: F401
     DEFAULT_URL,
     HOME,
     HOOK_PROFILES,
+    KIRO_CLI_AGENT,
+    KIRO_CLI_AGENTS_DIR,
     KIRO_HOOKS_DIR,
+    KIRO_SCRIPTS_DIR,
     KIRO_SETTINGS,
 )
 from app.cli.hooks.installer import (  # noqa: F401

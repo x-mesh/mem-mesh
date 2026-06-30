@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 from app.cli.codex_config import (
     CODEX_CONFIG,
@@ -17,12 +17,18 @@ from app.cli.codex_config import (
 )
 from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
 from app.cli.hooks.constants import (
+    AGY_HOOKS_DIR,
+    AGY_HOOKS_FILE,
+    ANTIGRAVITY_HOOKS_DIR,
+    ANTIGRAVITY_HOOKS_FILE,
     CLAUDE_HOOKS_DIR,
     CLAUDE_SETTINGS,
     CURSOR_HOOKS_DIR,
     CURSOR_SETTINGS,
     DEFAULT_URL,
+    KIRO_CLI_AGENT,
     KIRO_HOOKS_DIR,
+    KIRO_SCRIPTS_DIR,
     KIRO_SETTINGS,
 )
 from app.cli.hooks.json_ops import _count_mem_mesh_hook_entries
@@ -137,6 +143,71 @@ def _check_kiro_hook_version(path: Path) -> str:
     if version < PROMPT_VERSION:
         return f"installed (prompt-version: {version} -> outdated)"
     return f"installed (prompt-version: {version})"
+
+
+def _count_antigravity_mem_mesh_entries(path: Path) -> int:
+    """Count mem-mesh hook commands in Antigravity's grouped hooks.json."""
+    if not path.exists():
+        return 0
+    try:
+        data: Any = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return 0
+    if not isinstance(data, dict):
+        return 0
+
+    count = 0
+    for group_name, group in data.items():
+        if not isinstance(group, dict):
+            continue
+        group_is_mem_mesh = "mem-mesh" in str(group_name)
+        for entries in group.values():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                command = str(entry.get("command", ""))
+                if command and (group_is_mem_mesh or "mem-mesh" in command):
+                    count += 1
+                for hook in entry.get("hooks", []):
+                    if not isinstance(hook, dict):
+                        continue
+                    command = str(hook.get("command", ""))
+                    if group_is_mem_mesh or "mem-mesh" in command:
+                        count += 1
+    return count
+
+
+def _print_antigravity_like_status(
+    label: str, hooks_dir: Path, settings_path: Path
+) -> None:
+    """Print status for Antigravity IDE / agy CLI hook layouts."""
+    print(header(f"[{label}]"))
+    stop_script = hooks_dir / "mem-mesh-stop.sh"
+    post_tool_script = hooks_dir / "mem-mesh-post-tool-use.sh"
+    print(f"  stop hook:    {_colorize_status(_check_script_version(stop_script))}")
+    print(
+        f"  postToolUse:  {_colorize_status(_check_script_version(post_tool_script))}"
+    )
+    target_url = _extract_url_from_script(stop_script) or _extract_url_from_script(
+        post_tool_script
+    )
+    if target_url:
+        print(f"  target URL:   {info(target_url)}")
+    if settings_path.exists():
+        try:
+            count = _count_antigravity_mem_mesh_entries(settings_path)
+            if count > 0:
+                print(
+                    f"  hooks.json:   {ok(f'configured (mem-mesh entries: {count})')}"
+                )
+            else:
+                print(f"  hooks.json:   {err('not configured (mem-mesh entries: 0)')}")
+        except (json.JSONDecodeError, OSError):
+            print(f"  hooks.json:   {err('parse error')}")
+    else:
+        print(f"  hooks.json:   {dim('not found')}")
 
 
 def _has_prompt_stop_hook(settings_path: Path) -> bool:
@@ -429,28 +500,56 @@ def cmd_status() -> None:
 
     # Kiro
     print(header("[Kiro]"))
-    kiro_stop = KIRO_HOOKS_DIR / "mem-mesh-stop.sh"
+    kiro_stop = KIRO_SCRIPTS_DIR / "mem-mesh-stop.sh"
+    kiro_hook_file = KIRO_HOOKS_DIR / "mem-mesh-save-response.kiro.hook"
+    kiro_legacy_stop = KIRO_HOOKS_DIR / "mem-mesh-stop.sh"
     print(f"  stop hook:   {_colorize_status(_check_script_version(kiro_stop))}")
+    if kiro_legacy_stop.exists():
+        print(f"  legacy .sh:  {err('present in .kiro/hooks (inactive/parser risk)')}")
 
     kiro_url = _extract_url_from_script(kiro_stop)
     if kiro_url:
         print(f"  target URL:  {info(kiro_url)}")
 
-    if KIRO_SETTINGS.exists():
+    if kiro_hook_file.exists():
         try:
-            data = json.loads(KIRO_SETTINGS.read_text(encoding="utf-8"))
-            mem_hooks = [
-                h
-                for h in data.get("hooks", [])
-                if h.get("name", "").startswith("mem-mesh:")
-            ]
-            print(
-                f"  hooks.json:  {ok(f'{len(mem_hooks)} mem-mesh hook(s) registered')}"
-            )
+            data = json.loads(kiro_hook_file.read_text(encoding="utf-8"))
+            when_type = (data.get("when") or {}).get("type")
+            command = (data.get("then") or {}).get("command", "")
+            if when_type == "agentStop" and "mem-mesh-stop.sh" in command:
+                print(f"  .kiro.hook: {ok('configured (agentStop)')}")
+            else:
+                print(
+                    f"  .kiro.hook: {err('present but not active mem-mesh agentStop')}"
+                )
         except (json.JSONDecodeError, OSError):
-            print(f"  hooks.json: {err('parse error')}")
+            print(f"  .kiro.hook: {err('parse error')}")
     else:
-        print(f"  hooks.json: {dim('not found')}")
+        print(
+            f"  .kiro.hook: {err('not configured') if kiro_stop.exists() else dim('not found')}"
+        )
+
+    if KIRO_SETTINGS.exists():
+        print(f"  legacy hooks.json: {dim('ignored by modern Kiro hooks')}")
+
+    if KIRO_CLI_AGENT.exists():
+        try:
+            data = json.loads(KIRO_CLI_AGENT.read_text(encoding="utf-8"))
+            hooks = data.get("hooks", {}) if isinstance(data, dict) else {}
+            stop_hooks = hooks.get("stop", []) if isinstance(hooks, dict) else []
+            configured = any(
+                isinstance(entry, dict)
+                and "mem-mesh-stop.sh" in str(entry.get("command", ""))
+                for entry in stop_hooks
+            )
+            if configured:
+                print(f"  kiro-cli:   {ok('configured (--agent mem-mesh)')}")
+            else:
+                print(f"  kiro-cli:   {err('agent exists but stop hook missing')}")
+        except (json.JSONDecodeError, OSError):
+            print(f"  kiro-cli:   {err('agent parse error')}")
+    else:
+        print(f"  kiro-cli:   {dim('custom agent not found')}")
 
     print()
 
@@ -535,6 +634,15 @@ def cmd_status() -> None:
         print(f"  MCP config:   {warn('config exists, mem-mesh missing')}")
     else:
         print(f"  MCP config:   {dim('not found')}")
+
+    print()
+
+    # Antigravity IDE / agy CLI
+    _print_antigravity_like_status(
+        "Antigravity IDE", ANTIGRAVITY_HOOKS_DIR, ANTIGRAVITY_HOOKS_FILE
+    )
+    print()
+    _print_antigravity_like_status("agy CLI", AGY_HOOKS_DIR, AGY_HOOKS_FILE)
 
     # Project-local hooks
     project_root = _find_project_root()

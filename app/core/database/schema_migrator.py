@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Current schema version - increment when adding new migrations
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 11
 
 
 class SchemaMigrator:
@@ -43,6 +43,7 @@ class SchemaMigrator:
             8: self._migration_v8_pin_staging_column,
             9: self._migration_v9_content_bytes,
             10: self._migration_v10_access_tracking,
+            11: self._migration_v11_reconcile,
         }
 
     async def migrate(self) -> None:
@@ -321,3 +322,52 @@ class SchemaMigrator:
             logger.info(
                 "Added access_count/last_accessed_at on memories via migration v10"
             )
+
+    async def _migration_v11_reconcile(self, migrator: "SchemaMigrator") -> None:
+        """Write-time reconcile foundation (SSOT #3).
+
+        - memories.status: 'canonical' (default, search-visible) | 'deprecated'
+          (superseded, hidden after human approval). Backfill-safe default so
+          existing rows and add_memory inserts stay valid.
+        - reconcile_queue: mirrors relay_queue_item's lease columns (status/
+          attempts/next_attempt_at/locked_by/locked_at/last_error) for the async
+          reconcile worker. UNIQUE(new_memory_id, old_memory_id) holds the
+          many-to-many conflict set (one new vs N old) — a per-pair row, not
+          UNIQUE(new_memory_id) which would silent-drop the 2nd+ candidate (C1).
+          new/old content_hash snapshots let the worker revalidate at apply time
+          and skip rows whose memories were edited/deleted in between (C2 TOCTOU).
+        """
+        if await self._table_exists("memories"):
+            await self._add_column_if_missing(
+                "memories", "status", "TEXT", "'canonical'"
+            )
+            await self.connection.execute(
+                "UPDATE memories SET status = 'canonical' WHERE status IS NULL"
+            )
+        await self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS reconcile_queue (
+                id TEXT PRIMARY KEY,
+                new_memory_id TEXT NOT NULL,
+                old_memory_id TEXT NOT NULL,
+                project_id TEXT,
+                similarity REAL,
+                new_content_hash TEXT,
+                old_content_hash TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at REAL NOT NULL DEFAULT 0,
+                locked_by TEXT,
+                locked_at REAL,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(new_memory_id, old_memory_id),
+                FOREIGN KEY (new_memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+                FOREIGN KEY (old_memory_id) REFERENCES memories(id) ON DELETE CASCADE
+            )
+            """)
+        await self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reconcile_queue_claim "
+            "ON reconcile_queue(status, next_attempt_at, created_at)"
+        )
+        logger.info("Added memories.status + reconcile_queue via migration v11")

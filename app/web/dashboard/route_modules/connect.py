@@ -34,6 +34,8 @@ _HOOK_SETTINGS_PATH = {
     "cursor": "~/.cursor/settings.json (hooks)",
     "kiro": "~/.kiro/settings/hooks.json + ~/.kiro/hooks/*.kiro.hook",
     "codex": "~/.codex/hooks.json (installer managed)",
+    "antigravity": "~/.gemini/antigravity/hooks.json",
+    "agy": "~/.gemini/config/hooks.json",
 }
 _MCP_CONFIG_PATH = {
     "claude-desktop": "~/Library/Application Support/Claude/claude_desktop_config.json",
@@ -45,7 +47,7 @@ _MCP_CONFIG_PATH = {
     "generic": "your MCP client's config file",
 }
 
-_INSTALL_TARGETS = {"codex", "claude", "kiro", "antigravity", "all"}
+_INSTALL_TARGETS = {"codex", "claude", "kiro", "antigravity", "agy", "all"}
 
 
 def _server_url(request: Request, override: Optional[str] = None) -> str:
@@ -102,8 +104,10 @@ def _bootstrap_payload(
         SUBAGENT_STOP_HOOK_TEMPLATE,
         TASK_COMPLETED_HOOK_TEMPLATE,
         USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
+        _build_antigravity_hooks_settings,
         _build_claude_hooks_settings,
         _build_codex_hooks_settings,
+        _build_kiro_agent_stop_hook,
         _render_template,
     )
     from app.cli.mcp_config import MCP_SERVER_KEY, generate_mcp_entry
@@ -310,7 +314,7 @@ def _bootstrap_payload(
             generate_mcp_entry("http", url, tool_key="kiro"), mcp_auth_on, token
         )
         clients["kiro"] = {
-            "hooks_dir": "~/.kiro/hooks",
+            "hooks_dir": "~/.kiro/mem-mesh-hooks",
             "scripts": {
                 "mem-mesh-stop.sh": _render_template(
                     KIRO_STOP_HOOK_TEMPLATE,
@@ -320,20 +324,11 @@ def _bootstrap_payload(
                     client_tag="kiro",
                 )
             },
-            "kiro_hooks_json_path": "~/.kiro/settings/hooks.json",
-            "kiro_hooks_json": {
-                "hooks": [
-                    {
-                        "name": "mem-mesh: Save Response",
-                        "trigger": "agentResponse",
-                        "action": "shell",
-                        "command": "__HOME__/.kiro/hooks/mem-mesh-stop.sh",
-                        "env": {"KIRO_RESULT": "$response"},
-                    }
-                ]
-            },
             "kiro_hook_files_dir": "~/.kiro/hooks",
             "kiro_hook_files": {
+                "mem-mesh-save-response.kiro.hook": _build_kiro_agent_stop_hook(
+                    Path("__HOME__/.kiro/mem-mesh-hooks/mem-mesh-stop.sh")
+                ),
                 "auto-save-conversations.kiro.hook": render_kiro_auto_save(),
                 "auto-create-pin-on-task.kiro.hook": render_kiro_auto_create_pin(),
                 "load-project-context.kiro.hook": render_kiro_load_context(),
@@ -343,12 +338,58 @@ def _bootstrap_payload(
         }
 
     if target in ("antigravity", "all"):
+        antigravity_hooks_dir = Path("__HOME__/.gemini/antigravity/hooks")
         antigravity_entry = _with_mcp_auth(
             generate_mcp_entry("http", url, tool_key="antigravity"), mcp_auth_on, token
         )
         clients["antigravity"] = {
+            "hooks_dir": "~/.gemini/antigravity/hooks",
+            "scripts": {
+                "mem-mesh-stop.sh": _render_template(
+                    KIRO_STOP_HOOK_TEMPLATE,
+                    url,
+                    source_tag="antigravity-hook",
+                    ide_tag="antigravity",
+                    client_tag="antigravity",
+                ),
+                "mem-mesh-post-tool-use.sh": _render_template(
+                    POST_TOOL_USE_HOOK_TEMPLATE,
+                    url,
+                    source_tag="antigravity-hook",
+                    ide_tag="antigravity",
+                    client_tag="antigravity",
+                ),
+            },
+            "grouped_hooks_json_path": "~/.gemini/antigravity/hooks.json",
+            "grouped_hooks_json": _build_antigravity_hooks_settings(
+                antigravity_hooks_dir
+            ),
             "mcp_json_path": "~/.antigravity/mcp.json",
             "mcp_json": {"mcpServers": {MCP_SERVER_KEY: antigravity_entry}},
+        }
+
+    if target in ("agy", "all"):
+        agy_hooks_dir = Path("__HOME__/.gemini/antigravity-cli/hooks")
+        clients["agy"] = {
+            "hooks_dir": "~/.gemini/antigravity-cli/hooks",
+            "scripts": {
+                "mem-mesh-stop.sh": _render_template(
+                    KIRO_STOP_HOOK_TEMPLATE,
+                    url,
+                    source_tag="agy-hook",
+                    ide_tag="agy",
+                    client_tag="agy",
+                ),
+                "mem-mesh-post-tool-use.sh": _render_template(
+                    POST_TOOL_USE_HOOK_TEMPLATE,
+                    url,
+                    source_tag="agy-hook",
+                    ide_tag="agy",
+                    client_tag="agy",
+                ),
+            },
+            "grouped_hooks_json_path": "~/.gemini/config/hooks.json",
+            "grouped_hooks_json": _build_antigravity_hooks_settings(agy_hooks_dir),
         }
 
     return {
@@ -359,7 +400,9 @@ def _bootstrap_payload(
         "token_revealed": bool(token),
         "mcp_auth_on": mcp_auth_on,
         "rules_installed": any(
-            client.get("hooks_json_path") or client.get("kiro_hook_files_dir")
+            client.get("hooks_json_path")
+            or client.get("kiro_hook_files_dir")
+            or client.get("grouped_hooks_json_path")
             for client in clients.values()
         ),
         "clients": clients,
@@ -473,6 +516,17 @@ def merge_hooks_json(path, incoming):
     write_json(path, existing)
 
 
+def merge_grouped_hooks_json(path, incoming):
+    existing = read_json(path, {{}})
+    if not isinstance(existing, dict):
+        existing = {{}}
+    for key in list(existing.keys()):
+        if "mem-mesh" in str(key):
+            existing.pop(key, None)
+    existing.update(incoming)
+    write_json(path, existing)
+
+
 def merge_mcp_json(path, incoming):
     existing = read_json(path, {{"mcpServers": {{}}}})
     if not isinstance(existing, dict):
@@ -570,6 +624,10 @@ for name, client in payload["clients"].items():
 
     if client.get("hooks_json_path"):
         merge_hooks_json(expand(client["hooks_json_path"]), subst(client["hooks_json"]))
+    if client.get("grouped_hooks_json_path"):
+        merge_grouped_hooks_json(
+            expand(client["grouped_hooks_json_path"]), subst(client["grouped_hooks_json"])
+        )
     if client.get("kiro_hooks_json_path"):
         merge_kiro_hooks_json(
             expand(client["kiro_hooks_json_path"]), subst(client["kiro_hooks_json"])

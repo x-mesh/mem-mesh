@@ -17,7 +17,12 @@ AUTH_STATE=absent
 if [ -n "$HOOK_TOKEN" ]; then AUTH+=(-H "Authorization: Bearer ${HOOK_TOKEN}"); AUTH_STATE=present; fi
 
 # Resolve the stable project id.
-PROJECT_DIR="$(mem_mesh_project_id)"
+INPUT="$(cat)"
+if command -v jq >/dev/null 2>&1; then
+  PROJECT_DIR="$(mem_mesh_project_id_from_input "$INPUT")"
+else
+  PROJECT_DIR="$(mem_mesh_project_id)"
+fi
 [ -z "$PROJECT_DIR" ] && { mem_mesh_log "session-end" "abort" "no project dir"; exit 0; }
 
 # End the most recent active session for this project

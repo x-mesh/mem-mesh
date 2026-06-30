@@ -264,8 +264,12 @@ class Database:
                     """
                     params = [embedding_json, inner_limit]
 
+                    # Reconcile: hide deprecated (superseded) memories from search.
+                    # Applied unconditionally, not only when other filters exist.
+                    filter_conditions = [
+                        "COALESCE(m.status, 'canonical') = 'canonical'"
+                    ]
                     if filters:
-                        filter_conditions = []
                         if filters.get("project_id"):
                             filter_conditions.append("m.project_id = ?")
                             params.append(filters["project_id"])
@@ -273,8 +277,7 @@ class Database:
                             filter_conditions.append("m.category = ?")
                             params.append(filters["category"])
 
-                        if filter_conditions:
-                            base_query += f" WHERE {' AND '.join(filter_conditions)}"
+                    base_query += f" WHERE {' AND '.join(filter_conditions)}"
 
                     base_query += f" ORDER BY ve.distance LIMIT {limit}"
 
@@ -328,7 +331,10 @@ class Database:
             raise RuntimeError("Database not connected")
 
         try:
-            base_query = "SELECT * FROM memories WHERE 1=1"
+            base_query = (
+                "SELECT * FROM memories WHERE 1=1 "
+                "AND COALESCE(status, 'canonical') = 'canonical'"
+            )
             params = []
 
             if filters:
@@ -380,7 +386,10 @@ class Database:
             raise RuntimeError("Database not connected")
 
         try:
-            base_query = "SELECT COUNT(*) as count FROM memories WHERE 1=1"
+            base_query = (
+                "SELECT COUNT(*) as count FROM memories WHERE 1=1 "
+                "AND COALESCE(status, 'canonical') = 'canonical'"
+            )
             params = []
 
             if filters:
@@ -414,8 +423,8 @@ class Database:
         await self.execute(
             """
             INSERT INTO memories
-            (id, content, content_hash, project_id, category, source, client, embedding, tags, created_at, updated_at, content_bytes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, content, content_hash, project_id, category, status, source, client, embedding, tags, created_at, updated_at, content_bytes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 data["id"],
@@ -423,6 +432,7 @@ class Database:
                 data["content_hash"],
                 data.get("project_id"),
                 data.get("category", "task"),
+                data.get("status", "canonical"),
                 data.get("source", "unknown"),
                 data.get("client"),
                 data.get("embedding"),

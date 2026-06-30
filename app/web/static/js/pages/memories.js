@@ -2921,14 +2921,10 @@ style.textContent = `
     border-radius: 3px;
     font-weight: 500;
     font-family: 'SF Mono', 'Cascadia Code', monospace;
-    background: var(--bg-tertiary, #374151);
-    color: var(--text-primary);
+    background: var(--client-badge-bg, var(--bg-tertiary, #374151));
+    color: var(--client-badge-fg, var(--text-primary));
     white-space: nowrap;
   }
-  .mem-client-badge.client-claude_code { background: #d97706; color: #fff; }
-  .mem-client-badge.client-cursor { background: #7c3aed; color: #fff; }
-  .mem-client-badge.client-kiro { background: #059669; color: #fff; }
-  .mem-client-badge.client-web { background: #2563eb; color: #fff; }
 
   /* ── P2: Source select ────────────────── */
   .mem-source-select {

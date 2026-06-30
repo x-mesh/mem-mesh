@@ -83,6 +83,65 @@
   padding: 0;
 }
 
+/* Shared client badge palette */
+.client-claude_code,
+.client-claude-code,
+.client-claude {
+  --client-badge-bg: var(--client-claude);
+  --client-badge-fg: #fff;
+}
+
+.client-claude_desktop,
+.client-claude-desktop {
+  --client-badge-bg: var(--client-claude-desktop);
+  --client-badge-fg: #fff;
+}
+
+.client-codex {
+  --client-badge-bg: var(--client-codex);
+  --client-badge-fg: #fff;
+}
+
+.client-cursor {
+  --client-badge-bg: var(--client-cursor);
+  --client-badge-fg: #fff;
+}
+
+.client-kiro {
+  --client-badge-bg: var(--client-kiro);
+  --client-badge-fg: #fff;
+}
+
+.client-web {
+  --client-badge-bg: var(--client-web);
+  --client-badge-fg: #fff;
+}
+
+.client-vscode {
+  --client-badge-bg: var(--client-vscode);
+  --client-badge-fg: #fff;
+}
+
+.client-antigravity {
+  --client-badge-bg: var(--client-antigravity);
+  --client-badge-fg: #fff;
+}
+
+.client-agy {
+  --client-badge-bg: var(--client-agy);
+  --client-badge-fg: #fff;
+}
+
+.client-generic {
+  --client-badge-bg: var(--client-generic);
+  --client-badge-fg: #fff;
+}
+
+.client-unknown {
+  --client-badge-bg: var(--client-unknown);
+  --client-badge-fg: #fff;
+}
+
 .sidebar {
   position: fixed;
   top: 0;
@@ -517,4 +576,3 @@ a:focus {
 [data-theme="dark"] .migration-dismiss {
   color: #fde68a;
 }
-

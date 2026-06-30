@@ -20,6 +20,7 @@ class Memory(BaseModel):
     content_hash: str = Field(default="")
     project_id: Optional[str] = Field(default=None)
     category: str = Field(default="task")
+    status: str = Field(default="canonical")  # reconcile: canonical|deprecated
     source: str
     client: Optional[str] = Field(default=None)
     embedding: bytes

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mem-mesh-hooks: Install/uninstall mem-mesh hooks for Claude Code, Kiro, and Cursor.
+"""mem-mesh-hooks: Install/uninstall mem-mesh hooks for AI coding tools.
 
 Prompts and behavioral rules are defined in app.cli.prompts.behaviors (single
 source of truth).  IDE-specific renderers in app.cli.prompts.renderers transform
@@ -732,6 +732,41 @@ def _remove_kiro_mem_mesh_hooks(path: Path) -> None:
     _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
+def _remove_kiro_cli_agent_hook(path: Path) -> None:
+    """Remove mem-mesh stop hook entries from a Kiro CLI custom agent."""
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    if not isinstance(data, dict):
+        return
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return
+    stop_hooks = hooks.get("stop")
+    if not isinstance(stop_hooks, list):
+        return
+    filtered = [
+        entry
+        for entry in stop_hooks
+        if not (
+            isinstance(entry, dict)
+            and "mem-mesh-stop.sh" in str(entry.get("command", ""))
+        )
+    ]
+    if filtered == stop_hooks:
+        return
+    if filtered:
+        hooks["stop"] = filtered
+    else:
+        hooks.pop("stop", None)
+    if not hooks:
+        data.pop("hooks", None)
+    _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+
+
 # ---------------------------------------------------------------------------
 # Install / Uninstall commands
 # ---------------------------------------------------------------------------
@@ -742,10 +777,21 @@ CLAUDE_HOOKS_DIR = HOME / ".claude" / "hooks"
 CLAUDE_SETTINGS = HOME / ".claude" / "settings.json"
 
 KIRO_HOOKS_DIR = HOME / ".kiro" / "hooks"
+KIRO_SCRIPTS_DIR = HOME / ".kiro" / "mem-mesh-hooks"
 KIRO_SETTINGS = HOME / ".kiro" / "settings" / "hooks.json"
+KIRO_CLI_AGENTS_DIR = HOME / ".kiro" / "agents"
+KIRO_CLI_AGENT = KIRO_CLI_AGENTS_DIR / "mem-mesh.json"
 
 CURSOR_HOOKS_DIR = HOME / ".cursor" / "hooks"
 CURSOR_SETTINGS = HOME / ".cursor" / "hooks.json"
+
+ANTIGRAVITY_CONFIG_DIR = HOME / ".gemini" / "antigravity"
+ANTIGRAVITY_HOOKS_DIR = ANTIGRAVITY_CONFIG_DIR / "hooks"
+ANTIGRAVITY_HOOKS_FILE = ANTIGRAVITY_CONFIG_DIR / "hooks.json"
+
+AGY_CONFIG_DIR = HOME / ".gemini" / "antigravity-cli"
+AGY_HOOKS_DIR = AGY_CONFIG_DIR / "hooks"
+AGY_HOOKS_FILE = HOME / ".gemini" / "config" / "hooks.json"
 
 
 def _build_codex_hooks_settings(
@@ -934,6 +980,139 @@ def _build_cursor_hooks_settings(
         }
     ]
     return settings
+
+
+def _build_kiro_agent_stop_hook(script_path: Path) -> Dict[str, Any]:
+    """Build Kiro's native `.kiro.hook` file for response persistence."""
+    return {
+        "name": "mem-mesh: Save Response",
+        "version": "1.0.0",
+        "description": "Save useful agent responses to mem-mesh.",
+        "when": {"type": "agentStop"},
+        "then": {
+            "type": "runCommand",
+            "command": str(script_path),
+        },
+    }
+
+
+def _kiro_cli_stop_entry(script_path: Path) -> Dict[str, Any]:
+    """Build a Kiro CLI custom-agent stop hook entry."""
+    return {
+        "command": str(script_path),
+        "timeout_ms": 30000,
+        "max_output_size": 1024,
+    }
+
+
+def _write_kiro_cli_agent(agent_path: Path, script_path: Path) -> None:
+    """Write/update the Kiro CLI custom agent hook without clobbering user fields."""
+    try:
+        existing = json.loads(agent_path.read_text(encoding="utf-8"))
+        if not isinstance(existing, dict):
+            existing = {}
+    except (json.JSONDecodeError, OSError):
+        existing = {}
+
+    agent = dict(existing)
+    agent.setdefault("name", "mem-mesh")
+    agent.setdefault(
+        "description", "Kiro CLI agent with mem-mesh response persistence."
+    )
+    agent.setdefault("prompt", "")
+    agent.setdefault("tools", ["read", "write", "shell", "thinking", "todo"])
+    agent.setdefault("allowedTools", [])
+    agent.setdefault("includeMcpJson", True)
+
+    hooks = agent.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+    stop_hooks = hooks.get("stop")
+    if not isinstance(stop_hooks, list):
+        stop_hooks = []
+    stop_hooks = [
+        entry
+        for entry in stop_hooks
+        if not (
+            isinstance(entry, dict)
+            and "mem-mesh-stop.sh" in str(entry.get("command", ""))
+        )
+    ]
+    stop_hooks.append(_kiro_cli_stop_entry(script_path))
+    hooks["stop"] = stop_hooks
+    agent["hooks"] = hooks
+
+    _atomic_write_text(
+        agent_path,
+        json.dumps(agent, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+    )
+
+
+def _build_antigravity_hooks_settings(hooks_dir: Path) -> Dict[str, Any]:
+    """Build Antigravity-style hooks.json using absolute command hooks."""
+    return {
+        "mem-mesh": {
+            "PreInvocation": None,
+            "PostInvocation": None,
+            "Stop": [
+                {
+                    "type": "command",
+                    "command": str(hooks_dir / "mem-mesh-stop.sh"),
+                    "timeout": 10,
+                }
+            ],
+            "PreToolUse": None,
+            "PostToolUse": [
+                {
+                    "matcher": (
+                        "write_to_file|replace_file_content|"
+                        "multi_replace_file_content|edit|write|run_command"
+                    ),
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": str(hooks_dir / "mem-mesh-post-tool-use.sh"),
+                            "timeout": 5,
+                        }
+                    ],
+                }
+            ],
+        }
+    }
+
+
+def _merge_antigravity_hooks_settings(
+    settings_path: Path, patch: Dict[str, Any], *, force: bool = False
+) -> None:
+    """Merge Antigravity hook groups, preserving non-mem-mesh groups."""
+    data = _load_settings_or_raise(settings_path, force=force)
+    if not isinstance(data, dict):
+        data = {}
+    for key in list(data.keys()):
+        if "mem-mesh" in str(key):
+            data.pop(key, None)
+    data.update(patch)
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write_text(
+        settings_path,
+        json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+    )
+
+
+def _remove_antigravity_mem_mesh_hooks(path: Path) -> None:
+    """Remove mem-mesh hook groups from Antigravity hooks.json."""
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    if not isinstance(data, dict):
+        return
+    for key in list(data.keys()):
+        if "mem-mesh" in str(key):
+            data.pop(key, None)
+    _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
 def _install_claude(
@@ -1265,18 +1444,25 @@ def _install_kiro(
     """Install mem-mesh hooks for Kiro.
 
     ``base_dir`` selects the install root: project scope writes under
-    ``<base_dir>/.kiro``, while global scope (``base_dir is None``) keeps the
-    legacy module-level ``HOME/.kiro`` paths.
+    ``<base_dir>/.kiro``. Kiro reads native ``.kiro.hook`` files from
+    ``.kiro/hooks``; helper shell scripts live in a sibling directory so the
+    hook directory contains only Kiro hook files.
     """
     print("[kiro] Installing hook script...")
 
     if base_dir is not None:
         _kiro_dir = base_dir / ".kiro"
-        hooks_dir = _kiro_dir / "hooks"
+        hooks_dir = _kiro_dir / "mem-mesh-hooks"
+        legacy_script = _kiro_dir / "hooks" / "mem-mesh-stop.sh"
+        hook_file = _kiro_dir / "hooks" / "mem-mesh-save-response.kiro.hook"
         settings_path = _kiro_dir / "settings" / "hooks.json"
+        cli_agent_path: Optional[Path] = None
     else:
-        hooks_dir = KIRO_HOOKS_DIR
+        hooks_dir = KIRO_SCRIPTS_DIR
+        legacy_script = KIRO_HOOKS_DIR / "mem-mesh-stop.sh"
+        hook_file = KIRO_HOOKS_DIR / "mem-mesh-save-response.kiro.hook"
         settings_path = KIRO_SETTINGS
+        cli_agent_path: Optional[Path] = KIRO_CLI_AGENT
 
     stop_script = hooks_dir / "mem-mesh-stop.sh"
     if mode == "local":
@@ -1296,37 +1482,161 @@ def _install_kiro(
         )
     print(f"  -> {stop_script}")
 
-    print("[kiro] Updating hooks.json...")
-    kiro_hook_entry = {
-        "name": "mem-mesh: Save Response",
-        "trigger": "agentResponse",
-        "action": "shell",
-        "command": str(stop_script),
-        "env": {"KIRO_RESULT": "$response"},
-    }
+    print("[kiro] Writing native .kiro.hook file...")
+    hook_file.parent.mkdir(parents=True, exist_ok=True)
+    hook_file.write_text(
+        json.dumps(
+            _build_kiro_agent_stop_hook(stop_script),
+            indent=2,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"  -> {hook_file}")
 
-    # Load existing or create new
-    existing: Dict[str, Any] = {"hooks": []}
+    if base_dir is None and cli_agent_path is not None:
+        print("[kiro] Writing Kiro CLI custom agent hook...")
+        _write_kiro_cli_agent(cli_agent_path, stop_script)
+        print(f"  -> {cli_agent_path}")
+        print("  use: kiro-cli chat --agent mem-mesh")
+
+    if legacy_script.exists():
+        legacy_script.unlink()
+        print(f"  removed legacy {legacy_script}")
+
+    # Remove the legacy settings/hooks.json registration if it exists. Modern
+    # Kiro reads `.kiro/hooks/*.kiro.hook`; the old settings entry is inert.
+    _remove_kiro_mem_mesh_hooks(settings_path)
     if settings_path.exists():
-        try:
-            existing = json.loads(settings_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            existing = {"hooks": []}
+        print(f"  cleaned legacy mem-mesh entries from {settings_path}")
 
-    hooks: List[Dict[str, Any]] = existing.get("hooks", [])
+    print("[kiro] Done.")
 
-    # Remove existing mem-mesh hooks, then add new
-    hooks = [h for h in hooks if not h.get("name", "").startswith("mem-mesh:")]
-    hooks.append(kiro_hook_entry)
-    existing["hooks"] = hooks
 
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(
-        json.dumps(existing, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+def _install_antigravity_like(
+    label: str,
+    hooks_dir: Path,
+    settings_path: Path,
+    url: str,
+    mode: str = "api",
+    path: str = "",
+    *,
+    force: bool = False,
+    source_tag: str,
+    ide_tag: str,
+    client_tag: str,
+) -> None:
+    """Install mem-mesh hooks for Antigravity-style hooks.json clients."""
+    print(f"[{label}] Installing hook scripts...")
+
+    stop_script = hooks_dir / "mem-mesh-stop.sh"
+    post_tool_script = hooks_dir / "mem-mesh-post-tool-use.sh"
+
+    if mode == "local":
+        _write_script(
+            stop_script,
+            _render_local_template(LOCAL_STOP_HOOK_TEMPLATE, path),
+        )
+        _write_script(
+            post_tool_script,
+            _render_local_template(LOCAL_TASK_COMPLETED_HOOK_TEMPLATE, path),
+        )
+    else:
+        _write_script(
+            stop_script,
+            _render_template(
+                KIRO_STOP_HOOK_TEMPLATE,
+                url,
+                source_tag=source_tag,
+                ide_tag=ide_tag,
+                client_tag=client_tag,
+            ),
+        )
+        _write_script(
+            post_tool_script,
+            _render_template(
+                POST_TOOL_USE_HOOK_TEMPLATE,
+                url,
+                source_tag=source_tag,
+                ide_tag=ide_tag,
+                client_tag=client_tag,
+            ),
+        )
+
+    print(f"  -> {stop_script}")
+    print(f"  -> {post_tool_script}")
+
+    print(f"[{label}] Updating hooks.json...")
+    _merge_antigravity_hooks_settings(
+        settings_path,
+        _build_antigravity_hooks_settings(hooks_dir),
+        force=force,
     )
     print(f"  -> {settings_path}")
 
-    print("[kiro] Done.")
+    print(f"[{label}] Done.")
+
+
+def _install_antigravity(
+    url: str,
+    mode: str = "api",
+    path: str = "",
+    *,
+    force: bool = False,
+    base_dir: Optional[Path] = None,
+) -> None:
+    """Install mem-mesh hooks for Antigravity IDE."""
+    if base_dir is not None:
+        root = base_dir / ".agents"
+        hooks_dir = root / "hooks"
+        settings_path = root / "hooks.json"
+    else:
+        hooks_dir = ANTIGRAVITY_HOOKS_DIR
+        settings_path = ANTIGRAVITY_HOOKS_FILE
+    _install_antigravity_like(
+        "antigravity",
+        hooks_dir,
+        settings_path,
+        url,
+        mode,
+        path,
+        force=force,
+        source_tag="antigravity-hook",
+        ide_tag="antigravity",
+        client_tag="antigravity",
+    )
+
+
+def _install_agy(
+    url: str,
+    mode: str = "api",
+    path: str = "",
+    *,
+    force: bool = False,
+    base_dir: Optional[Path] = None,
+) -> None:
+    """Install mem-mesh hooks for Antigravity CLI (`agy`)."""
+    if base_dir is not None:
+        root = base_dir / ".agents"
+        hooks_dir = root / "hooks"
+        settings_path = root / "hooks.json"
+    else:
+        hooks_dir = AGY_HOOKS_DIR
+        settings_path = AGY_HOOKS_FILE
+    _install_antigravity_like(
+        "agy",
+        hooks_dir,
+        settings_path,
+        url,
+        mode,
+        path,
+        force=force,
+        source_tag="agy-hook",
+        ide_tag="agy",
+        client_tag="agy",
+    )
 
 
 def _install_cursor(
@@ -1724,15 +2034,50 @@ def _uninstall_claude() -> None:
 def _uninstall_kiro() -> None:
     """Remove mem-mesh hooks for Kiro."""
     print("[kiro] Removing hook scripts...")
-    script = KIRO_HOOKS_DIR / "mem-mesh-stop.sh"
-    if script.exists():
-        script.unlink()
-        print(f"  removed {script}")
+    for script in (
+        KIRO_SCRIPTS_DIR / "mem-mesh-stop.sh",
+        KIRO_HOOKS_DIR / "mem-mesh-stop.sh",
+        KIRO_HOOKS_DIR / "mem-mesh-save-response.kiro.hook",
+    ):
+        if script.exists():
+            script.unlink()
+            print(f"  removed {script}")
 
-    print("[kiro] Removing mem-mesh hooks from hooks.json...")
+    print("[kiro] Removing legacy mem-mesh hooks from hooks.json...")
     _remove_kiro_mem_mesh_hooks(KIRO_SETTINGS)
+    print("[kiro] Removing mem-mesh hook from Kiro CLI agent...")
+    _remove_kiro_cli_agent_hook(KIRO_CLI_AGENT)
 
     print("[kiro] Done.")
+
+
+def _uninstall_antigravity_from(
+    label: str, hooks_dir: Path, settings_path: Path
+) -> None:
+    """Remove mem-mesh hooks from an Antigravity-style hooks.json client."""
+    print(f"[{label}] Removing hook scripts...")
+    for name in ("mem-mesh-stop.sh", "mem-mesh-post-tool-use.sh"):
+        script = hooks_dir / name
+        if script.exists():
+            script.unlink()
+            print(f"  removed {script}")
+
+    print(f"[{label}] Removing mem-mesh hooks from hooks.json...")
+    _remove_antigravity_mem_mesh_hooks(settings_path)
+
+    print(f"[{label}] Done.")
+
+
+def _uninstall_antigravity() -> None:
+    """Remove mem-mesh hooks for Antigravity IDE."""
+    _uninstall_antigravity_from(
+        "antigravity", ANTIGRAVITY_HOOKS_DIR, ANTIGRAVITY_HOOKS_FILE
+    )
+
+
+def _uninstall_agy() -> None:
+    """Remove mem-mesh hooks for Antigravity CLI (`agy`)."""
+    _uninstall_antigravity_from("agy", AGY_HOOKS_DIR, AGY_HOOKS_FILE)
 
 
 def _uninstall_cursor() -> None:
@@ -2282,6 +2627,12 @@ def cmd_install(
         if target in ("codex", "all"):
             _install_codex(url, mode, resolved, profile, force=force, base_dir=base_dir)
             print()
+        if target in ("antigravity", "all"):
+            _install_antigravity(url, mode, resolved, force=force, base_dir=base_dir)
+            print()
+        if target in ("agy", "all"):
+            _install_agy(url, mode, resolved, force=force, base_dir=base_dir)
+            print()
     except MalformedSettingsError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1)
@@ -2302,6 +2653,12 @@ def cmd_uninstall(target: str) -> None:
         print()
     if target in ("codex", "all"):
         _uninstall_codex()
+        print()
+    if target in ("antigravity", "all"):
+        _uninstall_antigravity()
+        print()
+    if target in ("agy", "all"):
+        _uninstall_agy()
         print()
     print("Uninstallation complete.")
 
@@ -2339,9 +2696,17 @@ def cmd_interactive() -> None:
 
     # Step 1: target
     print("[1/4] Select target IDE:")
-    targets = ["Claude Code", "Kiro", "Cursor", "Codex", "All"]
-    target_keys = ["claude", "kiro", "cursor", "codex", "all"]
-    idx = _prompt_choice("", targets, default=4)
+    targets = [
+        "Claude Code",
+        "Kiro",
+        "Cursor",
+        "Codex",
+        "Antigravity IDE",
+        "agy CLI",
+        "All",
+    ]
+    target_keys = ["claude", "kiro", "cursor", "codex", "antigravity", "agy", "all"]
+    idx = _prompt_choice("", targets, default=6)
     target = target_keys[idx]
     print()
 
@@ -2410,12 +2775,12 @@ def main(argv: Optional[List[str]] = None) -> None:
         prog="mem-mesh-hooks",
         description=(
             "Install/uninstall mem-mesh hooks for Claude Code, Kiro, Cursor, "
-            "and Codex."
+            "Codex, Antigravity IDE, and agy CLI."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
-    target_choices = ["claude", "kiro", "cursor", "codex", "all"]
+    target_choices = ["claude", "kiro", "cursor", "codex", "antigravity", "agy", "all"]
 
     # install
     install_parser = subparsers.add_parser("install", help="Install hooks")
@@ -2457,8 +2822,9 @@ def main(argv: Optional[List[str]] = None) -> None:
         default="global",
         help=(
             "Install scope: global (user home — ~/.claude, ~/.kiro, ~/.cursor, "
-            "~/.codex; default) or project (<dir>/.claude, <dir>/.kiro, "
-            "<dir>/.cursor, <dir>/.codex)"
+            "~/.codex, ~/.gemini/antigravity, ~/.gemini/antigravity-cli; default) or project "
+            "(<dir>/.claude, <dir>/.kiro, <dir>/.cursor, <dir>/.codex, "
+            "<dir>/.agents)"
         ),
     )
     install_parser.add_argument(

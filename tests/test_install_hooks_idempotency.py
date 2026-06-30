@@ -128,6 +128,150 @@ def test_install_cursor_local_is_idempotent_and_no_placeholders(
     assert first_settings == second_settings
 
 
+def test_install_kiro_writes_native_hook_file_and_removes_legacy(
+    tmp_path: Path, monkeypatch
+) -> None:
+    hook_dir = tmp_path / ".kiro" / "hooks"
+    scripts_dir = tmp_path / ".kiro" / "mem-mesh-hooks"
+    settings_path = tmp_path / ".kiro" / "settings" / "hooks.json"
+    cli_agent_path = tmp_path / ".kiro" / "agents" / "mem-mesh.json"
+    legacy_script = hook_dir / "mem-mesh-stop.sh"
+    legacy_script.parent.mkdir(parents=True)
+    legacy_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": [
+                    {
+                        "name": "mem-mesh: Save Response",
+                        "trigger": "agentResponse",
+                        "action": "shell",
+                        "command": str(legacy_script),
+                    },
+                    {"name": "user hook", "trigger": "agentResponse"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(install_hooks, "KIRO_HOOKS_DIR", hook_dir)
+    monkeypatch.setattr(install_hooks, "KIRO_SCRIPTS_DIR", scripts_dir)
+    monkeypatch.setattr(install_hooks, "KIRO_SETTINGS", settings_path)
+    monkeypatch.setattr(install_hooks, "KIRO_CLI_AGENT", cli_agent_path)
+
+    install_hooks._install_kiro(url="https://example.invalid", mode="api")
+
+    script = scripts_dir / "mem-mesh-stop.sh"
+    hook_file = hook_dir / "mem-mesh-save-response.kiro.hook"
+    hook = _read_json(hook_file)
+    cli_agent = _read_json(cli_agent_path)
+    legacy_settings = _read_json(settings_path)
+
+    assert script.exists()
+    assert os.access(script, os.X_OK)
+    assert not legacy_script.exists()
+    assert hook["when"]["type"] == "agentStop"
+    assert hook["then"]["type"] == "runCommand"
+    assert hook["then"]["command"] == str(script)
+    assert cli_agent["hooks"]["stop"][0]["command"] == str(script)
+    assert cli_agent["hooks"]["stop"][0]["timeout_ms"] == 30000
+    assert cli_agent["includeMcpJson"] is True
+    assert legacy_settings["hooks"] == [
+        {"name": "user hook", "trigger": "agentResponse"}
+    ]
+
+
+def test_install_antigravity_writes_ide_hooks_json(tmp_path: Path, monkeypatch) -> None:
+    hooks_dir = tmp_path / ".gemini" / "antigravity" / "hooks"
+    settings_path = tmp_path / ".gemini" / "antigravity" / "hooks.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps({"team-policy": {"PreToolUse": []}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(install_hooks, "ANTIGRAVITY_HOOKS_DIR", hooks_dir)
+    monkeypatch.setattr(install_hooks, "ANTIGRAVITY_HOOKS_FILE", settings_path)
+
+    install_hooks._install_antigravity(url="https://example.invalid", mode="api")
+
+    data = _read_json(settings_path)
+    assert "team-policy" in data
+    assert "mem-mesh" in data
+    stop_script = hooks_dir / "mem-mesh-stop.sh"
+    post_tool_script = hooks_dir / "mem-mesh-post-tool-use.sh"
+    assert stop_script.exists()
+    assert post_tool_script.exists()
+    assert '_MM_CLIENT="antigravity"' in stop_script.read_text(encoding="utf-8")
+    assert data["mem-mesh"]["Stop"][0]["command"] == str(stop_script)
+    assert data["mem-mesh"]["PostToolUse"][0]["hooks"][0]["command"] == str(
+        post_tool_script
+    )
+
+
+def test_install_agy_writes_cli_hooks_json(tmp_path: Path, monkeypatch) -> None:
+    hooks_dir = tmp_path / ".gemini" / "antigravity-cli" / "hooks"
+    settings_path = tmp_path / ".gemini" / "antigravity-cli" / "hooks.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps({"team-policy": {"PreToolUse": []}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(install_hooks, "AGY_HOOKS_DIR", hooks_dir)
+    monkeypatch.setattr(install_hooks, "AGY_HOOKS_FILE", settings_path)
+
+    install_hooks._install_agy(url="https://example.invalid", mode="api")
+
+    data = _read_json(settings_path)
+    stop_script = hooks_dir / "mem-mesh-stop.sh"
+    post_tool_script = hooks_dir / "mem-mesh-post-tool-use.sh"
+    mem_mesh = data["mem-mesh"]
+
+    assert data["team-policy"] == {"PreToolUse": []}
+    assert "mem-mesh" in data
+    assert stop_script.exists()
+    assert post_tool_script.exists()
+    assert '_MM_CLIENT="agy"' in stop_script.read_text(encoding="utf-8")
+    assert mem_mesh["PreInvocation"] is None
+    assert mem_mesh["PostInvocation"] is None
+    assert mem_mesh["PreToolUse"] is None
+    assert "SessionStart" not in mem_mesh
+    assert "Notification" not in mem_mesh
+    assert "TaskCompleted" not in mem_mesh
+    assert mem_mesh["Stop"][0]["command"] == str(stop_script)
+    assert mem_mesh["PostToolUse"][0]["matcher"] == (
+        "write_to_file|replace_file_content|"
+        "multi_replace_file_content|edit|write|run_command"
+    )
+    assert mem_mesh["PostToolUse"][0]["hooks"][0]["command"] == str(post_tool_script)
+
+
+def test_cmd_install_agy_target_does_not_install_antigravity_ide(monkeypatch) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        "app.cli.hooks.status.server_enforces_auth",
+        lambda url: False,
+    )
+    monkeypatch.setattr(
+        install_hooks, "_install_agy", lambda *args, **kwargs: calls.append("agy")
+    )
+    monkeypatch.setattr(
+        install_hooks,
+        "_install_antigravity",
+        lambda *args, **kwargs: calls.append("antigravity"),
+    )
+
+    install_hooks.cmd_install(
+        target="agy",
+        url="https://example.invalid",
+        mode="api",
+        profile="standard",
+    )
+
+    assert calls == ["agy"]
+
+
 def test_sync_cursor_hooks_writes_project_settings_and_is_idempotent(
     tmp_path: Path,
 ) -> None:

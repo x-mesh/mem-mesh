@@ -11,7 +11,7 @@ MEM_MESH_PATH=__MEM_MESH_PATH__
 
 INPUT=$(cat)
 MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
-[ ${#MESSAGE} -lt 50 ] && exit 0
+[ ${#MESSAGE} -lt 100 ] && exit 0
 
 SUMMARY=$(printf '%s' "$MESSAGE" | python3 -c 'import sys; print(sys.stdin.read()[:9500], end="")')
 PROJECT_DIR="$(mem_mesh_project_id)"
