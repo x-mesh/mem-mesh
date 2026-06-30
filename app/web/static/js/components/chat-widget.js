@@ -606,7 +606,8 @@ export class ChatWidget extends HTMLElement {
     return String(s)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;'); // prevent href attribute breakout
   }
 
   _mdInline(text) {
@@ -616,19 +617,23 @@ export class ChatWidget extends HTMLElement {
       return `\x00C${codes.length - 1}\x00`;
     });
     t = this._mdEscape(t);
-    t = t.replace(
-      /\[([^\]\x00]+)\]\((https?:\/\/[^\s)]+)\)/g,
-      (_m, txt, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${txt}</a>`
-    );
+    // Stash links before the emphasis passes so a '*' in a URL isn't mangled.
+    const links = [];
+    t = t.replace(/\[([^\]\x00]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, txt, url) => {
+      links.push(`<a href="${url}" target="_blank" rel="noopener noreferrer">${txt}</a>`);
+      return `\x00L${links.length - 1}\x00`;
+    });
     t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     t = t.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+    t = t.replace(/\x00L(\d+)\x00/g, (_m, i) => links[+i]);
     t = t.replace(/\x00C(\d+)\x00/g, (_m, i) => `<code class="md-code">${codes[+i]}</code>`);
     return t;
   }
 
   _renderMarkdown(src) {
     const fences = [];
-    const s = String(src).replace(/```[ \t]*[\w-]*\n?([\s\S]*?)```/g, (_m, code) => {
+    // Strip NUL bytes first — they are the sentinel for code/link placeholders.
+    const s = String(src).replace(/\x00/g, '').replace(/```[ \t]*[\w-]*\n?([\s\S]*?)```/g, (_m, code) => {
       fences.push(this._mdEscape(code.replace(/\n$/, '')));
       return `\x00F${fences.length - 1}\x00`;
     });

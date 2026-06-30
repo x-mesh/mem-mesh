@@ -23,6 +23,24 @@ RELAY_ENRICHER_SYSTEM_PROMPT = (
 )
 
 
+def _enrich_language_directive(language: Optional[str]) -> str:
+    """Optional output-language directive prepended to enrichment prompts.
+
+    Empty for 'auto'/None so background relay enrichment keeps its current
+    (source-language) behavior; only the dashboard chat enrich passes a value.
+    """
+
+    normalized = (language or "").strip().lower()
+    if normalized == "korean":
+        return (
+            "Write the title and abstract field VALUES in Korean. Keep the JSON "
+            "keys, tags, and display_kind in English.\n\n"
+        )
+    if normalized == "english":
+        return "Write the title and abstract field VALUES in English.\n\n"
+    return ""
+
+
 @dataclass
 class ChatResult:
     """Provider-agnostic result of one chat completion turn.
@@ -76,10 +94,13 @@ class RelayEnricher:
 
         return base_url
 
-    async def enrich(self, content: str) -> RelayEnrichmentData:
+    async def enrich(
+        self, content: str, language: Optional[str] = None
+    ) -> RelayEnrichmentData:
         payload = await self._complete(
             user_content=(
-                "Extract a relay per-item enrichment JSON object from this "
+                _enrich_language_directive(language)
+                + "Extract a relay per-item enrichment JSON object from this "
                 "single memory. Return only JSON with keys: title, abstract, "
                 "tags, display_kind, problem, resolution, lesson, confidence.\n\n"
                 f"<memory>\n{content}\n</memory>"

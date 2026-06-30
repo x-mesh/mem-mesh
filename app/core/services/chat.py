@@ -80,6 +80,22 @@ def _language_instruction(language: Optional[str]) -> str:
     )
 
 
+def _language_directive(language: Optional[str], subject: str) -> str:
+    """Generic output-language directive for non-summarize LLM tasks.
+
+    ``language`` is 'korean' / 'english' / 'auto' (anything else → 'auto').
+    ``subject`` describes what to write (e.g. 'your replies to the user').
+    'auto' follows the source/conversation language.
+    """
+
+    normalized = (language or "auto").strip().lower()
+    if normalized == "korean":
+        return f"Write {subject} in Korean."
+    if normalized == "english":
+        return f"Write {subject} in English."
+    return f"Write {subject} in the same language as the source text."
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -122,6 +138,12 @@ class ChatService:
         value = str(getattr(settings, field, "") or "")
         source = "env" if os.environ.get(env_var) is not None else "default"
         return value, source
+
+    async def resolve_output_language(self, settings: Any) -> str:
+        """Resolve the effective chat output language (DB > env > 'auto')."""
+
+        language, _ = await self._effective_setting_value("output_language", settings)
+        return language or "auto"
 
     async def get_effective_config(self, settings: Any) -> dict[str, Any]:
         values: dict[str, str] = {}
@@ -359,14 +381,30 @@ class ChatService:
         tags: Optional[list],
         settings: Any,
         http_client: Any = None,
+        language: Optional[str] = None,
     ) -> dict:
         """Ask the chat LLM to rewrite a memory; returns a proposal dict.
 
         Does NOT write — the caller previews the diff and applies on approval.
+        ``language`` ('korean'/'english'/'auto') controls the refined content's
+        language; falls back to the stored ``chat.output_language`` setting.
         """
 
+        if not language:
+            language, _ = await self._effective_setting_value(
+                "output_language", settings
+            )
         enricher, _provider = await self._build_enricher(
             settings, http_client=http_client
+        )
+        refine_system = (
+            _REFINE_SYSTEM_PROMPT
+            + " "
+            + _language_directive(
+                language, "the refined memory content (the JSON 'content' value)"
+            )
+            + " ALWAYS keep the JSON keys and the category value in English — "
+            "never translate the keys or the category."
         )
         user = (
             f"Current category: {category or '(none)'}\n"
@@ -376,7 +414,7 @@ class ChatService:
         try:
             result = await enricher.chat(
                 [
-                    {"role": "system", "content": _REFINE_SYSTEM_PROMPT},
+                    {"role": "system", "content": refine_system},
                     {"role": "user", "content": user},
                 ]
             )
@@ -429,19 +467,30 @@ class ChatService:
             ) from exc
 
     async def enrich_memory_content(
-        self, *, content: str, settings: Any, http_client: Any = None
+        self,
+        *,
+        content: str,
+        settings: Any,
+        http_client: Any = None,
+        language: Optional[str] = None,
     ) -> dict:
         """Generate title/abstract/tags metadata for a memory.
 
         Reuses the relay enrichment adapter/prompt (``RelayEnricher.enrich``,
         inherited by the chat enricher) driven by the chat LLM credentials.
+        ``language`` ('korean'/'english'/'auto') controls the title/abstract
+        language; falls back to the stored ``chat.output_language`` setting.
         """
 
+        if not language:
+            language, _ = await self._effective_setting_value(
+                "output_language", settings
+            )
         enricher, _provider = await self._build_enricher(
             settings, http_client=http_client
         )
         try:
-            data = await enricher.enrich(content)
+            data = await enricher.enrich(content, language=language)
         except ChatProviderError:
             raise
         except Exception as exc:
