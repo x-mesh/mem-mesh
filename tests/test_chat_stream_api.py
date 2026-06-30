@@ -50,6 +50,9 @@ class _FakeService:
     async def is_enabled(self, settings):
         return True
 
+    async def resolve_output_language(self, settings):
+        return "auto"
+
     async def get_effective_config(self, settings):
         return {
             "values": {

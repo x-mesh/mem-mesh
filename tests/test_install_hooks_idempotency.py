@@ -21,8 +21,8 @@ from app.cli.hooks.renderer import (
     _shell_safe_url,
 )
 from app.cli.hooks.templates import (
-    LOCAL_SUBAGENT_START_HOOK_TEMPLATE,
     LOCAL_STOP_HOOK_TEMPLATE,
+    LOCAL_SUBAGENT_START_HOOK_TEMPLATE,
     SESSION_END_HOOK_TEMPLATE,
 )
 

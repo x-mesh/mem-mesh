@@ -76,6 +76,7 @@ from app.cli.hooks.templates import (
     TASK_COMPLETED_HOOK_TEMPLATE,
     USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
 )
+from app.cli.project_identity import SHELL_PROJECT_ID_RESOLVER
 from app.cli.prompts.behaviors import PROMPT_VERSION, REFLECT_CONFIG
 from app.cli.prompts.renderers import (
     VERSION_MARKER,
@@ -89,7 +90,6 @@ from app.cli.prompts.renderers import (
     render_reflect_prompt,
     render_rules_text,
 )
-from app.cli.project_identity import SHELL_PROJECT_ID_RESOLVER
 from app.core.config import HOOK_TOKEN_FILE
 
 DEFAULT_URL = "http://localhost:8000"

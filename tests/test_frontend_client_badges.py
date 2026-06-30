@@ -3,7 +3,6 @@
 import re
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CLIENT_TOKENS = (
     "--client-claude",
@@ -27,9 +26,7 @@ def _read(path: str) -> str:
 def _luminance(hex_color: str) -> float:
     values = [int(hex_color[i : i + 2], 16) / 255 for i in (1, 3, 5)]
     linear = [
-        value / 12.92
-        if value <= 0.03928
-        else ((value + 0.055) / 1.055) ** 2.4
+        value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
         for value in values
     ]
     return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]

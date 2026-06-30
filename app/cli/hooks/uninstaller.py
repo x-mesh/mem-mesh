@@ -1,5 +1,7 @@
 """IDE-specific hook uninstallation logic."""
 
+import json
+
 from app.cli.hooks.constants import (
     CLAUDE_HOOKS_DIR,
     CLAUDE_SETTINGS,
@@ -15,7 +17,6 @@ from app.cli.hooks.json_ops import (
     _remove_kiro_mem_mesh_hooks,
     _remove_mem_mesh_hooks_from_json,
 )
-import json
 
 
 def _uninstall_claude() -> None:

@@ -99,6 +99,21 @@ class TestErrorCentralization:
         source = ERRORS_MODULE.read_text(encoding="utf-8")
         tree = ast.parse(source)
 
+        bases_of = {
+            node.name: [b.id for b in node.bases if isinstance(b, ast.Name)]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef)
+        }
+
+        def inherits_memmesh(name, seen):
+            if name in seen:
+                return False
+            seen.add(name)
+            for base in bases_of.get(name, []):
+                if base == "MemMeshError" or inherits_memmesh(base, seen):
+                    return True
+            return False
+
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
                 continue
@@ -107,10 +122,6 @@ class TestErrorCentralization:
             if node.name == "MemMeshError":
                 continue
 
-            base_names = []
-            for base in node.bases:
-                if isinstance(base, ast.Name):
-                    base_names.append(base.id)
-            assert (
-                "MemMeshError" in base_names
+            assert inherits_memmesh(
+                node.name, set()
             ), f"{node.name} (line {node.lineno}) must inherit from MemMeshError"

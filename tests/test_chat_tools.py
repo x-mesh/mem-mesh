@@ -5,7 +5,6 @@ import pytest
 from app.core.services.chat_tools import (
     READ_ONLY_TOOLS,
     REGISTRY,
-    ChatTool,
     SearchToolInput,
     execute_tool,
     render_tools,

@@ -5,18 +5,17 @@ idempotent ingest, append-only raw events, current projection semantics,
 secret guard before persistence, and durable SQLite queue claiming.
 """
 
+import logging
 import os
 import tempfile
-import logging
 import time
 from contextlib import asynccontextmanager
 
 import pytest
+from pydantic import ValidationError
 
 from app.core.database.base import Database
 from app.core.database.models import Memory
-from pydantic import ValidationError
-
 from app.core.schemas.relay import RelayIngestRequest, RelaySettingsUpdateRequest
 from app.core.services.relay import (
     RelayDeliveryConflict,
