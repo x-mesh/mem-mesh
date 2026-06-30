@@ -182,6 +182,73 @@ class ChatService:
         except Exception as exc:  # RuntimeError(HTTP), httpx errors, parse errors
             raise ChatProviderError(str(exc)) from exc
 
+    async def agent_complete(
+        self,
+        messages: List[dict],
+        settings: Any,
+        handlers: Any,
+        *,
+        tools: Any = None,
+        max_steps: int = 5,
+        http_client: Any = None,
+    ) -> dict:
+        """Run a bounded tool-using agent loop over the user's memories.
+
+        ``handlers`` is the shared MCPToolHandlers instance; read-only tools
+        auto-execute through it. Returns ``{text, tool_calls, steps, truncated}``.
+        """
+
+        from .chat_agent import ChatAgentLoop
+
+        enricher, provider = await self._build_enricher(
+            settings, http_client=http_client
+        )
+        loop = ChatAgentLoop(
+            enricher=enricher,
+            provider=provider,
+            handlers=handlers,
+            tools=tools,
+            max_steps=max_steps,
+        )
+        try:
+            return await loop.run(messages)
+        except (ChatNotConfiguredError, ChatProviderError):
+            raise
+        except Exception as exc:
+            raise ChatProviderError(str(exc)) from exc
+
+    async def agent_events(
+        self,
+        messages: List[dict],
+        settings: Any,
+        handlers: Any,
+        *,
+        tools: Any = None,
+        max_steps: int = 5,
+        http_client: Any = None,
+    ):
+        """Async generator of agent-loop events for SSE streaming.
+
+        Raises ChatNotConfiguredError eagerly (before any event) when no key is
+        set, so the route can return a clean HTTP error instead of a half-open
+        stream.
+        """
+
+        from .chat_agent import ChatAgentLoop
+
+        enricher, provider = await self._build_enricher(
+            settings, http_client=http_client
+        )
+        loop = ChatAgentLoop(
+            enricher=enricher,
+            provider=provider,
+            handlers=handlers,
+            tools=tools,
+            max_steps=max_steps,
+        )
+        async for event in loop.run_events(messages):
+            yield event
+
     async def test_connection(
         self,
         settings: Any,

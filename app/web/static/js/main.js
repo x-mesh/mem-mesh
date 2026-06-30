@@ -31,6 +31,7 @@ import { AlertPanel } from './components/alert-panel.js';
 
 // Import chart components
 import './components/chroma-charts.js';
+import './components/chat-widget.js';
 
 // Import pages
 import { DashboardPage } from './pages/dashboard.js';
@@ -100,6 +101,9 @@ class App {
       // Start router
       this.router.start();
 
+      // Mount the floating chat assistant once, globally across all pages
+      this.mountChatWidget();
+
       // P5: 전역 WebSocket 연결 — 모든 페이지에서 실시간 업데이트 수신
       wsClient.connect().catch(err => {
         console.warn('Initial WebSocket connection failed:', err);
@@ -116,6 +120,19 @@ class App {
     }
   }
   
+  /**
+   * Mount the floating chat assistant widget once (global across pages).
+   */
+  mountChatWidget() {
+    try {
+      if (!document.querySelector('chat-widget')) {
+        document.body.appendChild(document.createElement('chat-widget'));
+      }
+    } catch (error) {
+      console.warn('Failed to mount chat widget:', error);
+    }
+  }
+
   /**
    * Register all pages
    */

@@ -85,6 +85,34 @@ class ChatCompleteResponse(BaseModel):
     tool_calls: List[ChatToolCall] = Field(default_factory=list)
 
 
+class ChatAgentRequest(BaseModel):
+    messages: List[ChatMessageInput] = Field(min_length=1)
+    project_id: Optional[str] = Field(default=None, max_length=100)
+    page_memory_id: Optional[str] = Field(default=None, max_length=100)
+    max_steps: int = Field(default=5, ge=1, le=8)
+
+
+class ChatStreamRequest(BaseModel):
+    messages: List[ChatMessageInput] = Field(min_length=1)
+    session_id: Optional[str] = Field(default=None, max_length=64)
+    project_id: Optional[str] = Field(default=None, max_length=100)
+    page_memory_id: Optional[str] = Field(default=None, max_length=100)
+    max_steps: int = Field(default=5, ge=1, le=8)
+
+
+class ChatToolCallTrace(BaseModel):
+    name: Optional[str] = None
+    arguments: dict = Field(default_factory=dict)
+    result: dict = Field(default_factory=dict)
+
+
+class ChatAgentResponse(BaseModel):
+    text: str = ""
+    steps: int = 0
+    truncated: bool = False
+    tool_calls: List[ChatToolCallTrace] = Field(default_factory=list)
+
+
 class ChatTestResponse(BaseModel):
     ok: bool
     provider: str

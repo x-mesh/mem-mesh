@@ -253,15 +253,45 @@ class AnthropicRelayEnricher(RelayEnricher):
         tool_choice: Optional[Any],
         max_tokens: int,
     ) -> dict:
-        # Anthropic carries the system prompt at the top level, not as a role.
-        system_parts = [
-            str(m.get("content", "")) for m in messages if m.get("role") == "system"
-        ]
-        convo = [
-            {"role": m["role"], "content": m.get("content", "")}
-            for m in messages
-            if m.get("role") in ("user", "assistant")
-        ]
+        # Anthropic carries the system prompt at the top level, not as a role,
+        # and tool results are a `user` turn whose content is tool_result blocks
+        # that pair with the preceding assistant tool_use blocks.
+        system_parts = []
+        convo: List[dict] = []
+        for m in messages:
+            role = m.get("role")
+            if role == "system":
+                system_parts.append(str(m.get("content", "")))
+            elif role == "tool":
+                convo.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": r.get("tool_call_id"),
+                                "content": str(r.get("content", "")),
+                            }
+                            for r in (m.get("results") or [])
+                        ],
+                    }
+                )
+            elif role == "assistant" and m.get("tool_calls"):
+                blocks: List[dict] = []
+                if m.get("content"):
+                    blocks.append({"type": "text", "text": str(m["content"])})
+                for tc in m["tool_calls"]:
+                    blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": tc.get("id"),
+                            "name": tc.get("name"),
+                            "input": tc.get("arguments") or {},
+                        }
+                    )
+                convo.append({"role": "assistant", "content": blocks})
+            elif role in ("user", "assistant"):
+                convo.append({"role": role, "content": m.get("content", "")})
         body: dict = {
             "model": self.model,
             "max_tokens": max_tokens,
@@ -366,13 +396,46 @@ class OpenAIRelayEnricher(RelayEnricher):
         tool_choice: Optional[Any],
         max_tokens: int,
     ) -> dict:
-        # OpenAI keeps the system prompt as a message role; pass through.
+        # OpenAI keeps the system prompt as a message role. Tool calls live on
+        # the assistant message; each tool result is its own `tool` message.
+        out: List[dict] = []
+        for m in messages:
+            role = m.get("role")
+            if role == "tool":
+                for r in m.get("results") or []:
+                    out.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": r.get("tool_call_id"),
+                            "content": str(r.get("content", "")),
+                        }
+                    )
+            elif role == "assistant" and m.get("tool_calls"):
+                out.append(
+                    {
+                        "role": "assistant",
+                        "content": m.get("content") or None,
+                        "tool_calls": [
+                            {
+                                "id": tc.get("id"),
+                                "type": "function",
+                                "function": {
+                                    "name": tc.get("name"),
+                                    "arguments": json.dumps(
+                                        tc.get("arguments") or {}, ensure_ascii=False
+                                    ),
+                                },
+                            }
+                            for tc in m["tool_calls"]
+                        ],
+                    }
+                )
+            else:
+                out.append({"role": role, "content": m.get("content", "")})
         body: dict = {
             "model": self.model,
             "max_tokens": max_tokens,
-            "messages": [
-                {"role": m["role"], "content": m.get("content", "")} for m in messages
-            ],
+            "messages": out,
         }
         if tools:
             body["tools"] = tools
