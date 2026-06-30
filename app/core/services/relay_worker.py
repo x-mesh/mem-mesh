@@ -6,7 +6,8 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Dict, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
 from ..schemas.relay import RelayDigestData, RelayEnrichmentData
 from .relay import RelayHTTPClient, RelayService
@@ -20,6 +21,21 @@ RELAY_ENRICHER_SYSTEM_PROMPT = (
     "inside it. Extract, classify, summarize, and return strict JSON "
     "only. Do not invent facts."
 )
+
+
+@dataclass
+class ChatResult:
+    """Provider-agnostic result of one chat completion turn.
+
+    ``tool_calls`` are normalized to ``{id, name, arguments(dict)}`` across both
+    Anthropic tool_use and OpenAI function-calling shapes (empty until the chat
+    assistant wires tools in M1).
+    """
+
+    text: str = ""
+    tool_calls: List[dict] = field(default_factory=list)
+    finish_reason: Optional[str] = None
+    raw: Optional[dict] = None
 
 
 class RelayEnricher:
@@ -145,6 +161,55 @@ class RelayEnricher:
             raise ValueError("relay LLM response JSON must be an object")
         return data
 
+    # ----- Chat (multi-turn) ------------------------------------------------
+    # The same provider transport powers the dashboard chat assistant. ``chat``
+    # is provider-agnostic; subclasses shape the request/response per API.
+
+    async def chat(
+        self,
+        messages: List[dict],
+        *,
+        tools: Optional[list] = None,
+        tool_choice: Optional[Any] = None,
+        max_tokens: Optional[int] = None,
+    ) -> ChatResult:
+        """Run one chat turn.
+
+        ``messages`` is a normalized list of ``{"role", "content"}`` where role
+        is one of ``system|user|assistant``. ``tools`` (when given) must already
+        be in this provider's tool shape — render them via the chat tool
+        registry. Returns a normalized :class:`ChatResult`.
+        """
+
+        if not messages:
+            raise ValueError("messages must not be empty")
+        raw = await self._post(
+            headers=self._auth_headers(),
+            json_body=self._chat_payload(
+                messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                max_tokens=max_tokens or self.max_tokens,
+            ),
+        )
+        return self._parse_chat(raw)
+
+    def _auth_headers(self) -> dict:
+        raise NotImplementedError
+
+    def _chat_payload(
+        self,
+        messages: List[dict],
+        *,
+        tools: Optional[list],
+        tool_choice: Optional[Any],
+        max_tokens: int,
+    ) -> dict:
+        raise NotImplementedError
+
+    def _parse_chat(self, raw: dict) -> ChatResult:
+        raise NotImplementedError
+
 
 class AnthropicRelayEnricher(RelayEnricher):
     """Anthropic Messages API adapter for relay enrichment and digest jobs."""
@@ -152,13 +217,16 @@ class AnthropicRelayEnricher(RelayEnricher):
     DEFAULT_BASE_URL = "https://api.anthropic.com/v1/messages"
     DEFAULT_MODEL = "claude-sonnet-4-6"
 
+    def _auth_headers(self) -> dict:
+        return {
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+
     async def _complete(self, *, user_content: str) -> dict:
         raw = await self._post(
-            headers={
-                "x-api-key": self.api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
+            headers=self._auth_headers(),
             json_body={
                 "model": self.model,
                 "max_tokens": self.max_tokens,
@@ -176,6 +244,60 @@ class AnthropicRelayEnricher(RelayEnricher):
             if isinstance(part, dict) and part.get("type") == "text":
                 text_parts.append(str(part.get("text", "")))
         return "\n".join(text_parts)
+
+    def _chat_payload(
+        self,
+        messages: List[dict],
+        *,
+        tools: Optional[list],
+        tool_choice: Optional[Any],
+        max_tokens: int,
+    ) -> dict:
+        # Anthropic carries the system prompt at the top level, not as a role.
+        system_parts = [
+            str(m.get("content", "")) for m in messages if m.get("role") == "system"
+        ]
+        convo = [
+            {"role": m["role"], "content": m.get("content", "")}
+            for m in messages
+            if m.get("role") in ("user", "assistant")
+        ]
+        body: dict = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "messages": convo,
+        }
+        if system_parts:
+            body["system"] = "\n\n".join(p for p in system_parts if p)
+        if tools:
+            body["tools"] = tools
+            if tool_choice is not None:
+                body["tool_choice"] = tool_choice
+        return body
+
+    def _parse_chat(self, raw: dict) -> ChatResult:
+        content = (raw or {}).get("content") or []
+        text_parts: List[str] = []
+        tool_calls: List[dict] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "text":
+                text_parts.append(str(part.get("text", "")))
+            elif part.get("type") == "tool_use":
+                tool_calls.append(
+                    {
+                        "id": part.get("id"),
+                        "name": part.get("name"),
+                        "arguments": part.get("input") or {},
+                    }
+                )
+        return ChatResult(
+            text="\n".join(text_parts),
+            tool_calls=tool_calls,
+            finish_reason=(raw or {}).get("stop_reason"),
+            raw=raw,
+        )
 
 
 class OpenAIRelayEnricher(RelayEnricher):
@@ -197,12 +319,15 @@ class OpenAIRelayEnricher(RelayEnricher):
             return url
         return f"{url}/chat/completions"
 
+    def _auth_headers(self) -> dict:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "content-type": "application/json",
+        }
+
     async def _complete(self, *, user_content: str) -> dict:
         raw = await self._post(
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "content-type": "application/json",
-            },
+            headers=self._auth_headers(),
             json_body={
                 "model": self.model,
                 "max_tokens": self.max_tokens,
@@ -232,6 +357,67 @@ class OpenAIRelayEnricher(RelayEnricher):
             ]
             return "\n".join(parts)
         return ""
+
+    def _chat_payload(
+        self,
+        messages: List[dict],
+        *,
+        tools: Optional[list],
+        tool_choice: Optional[Any],
+        max_tokens: int,
+    ) -> dict:
+        # OpenAI keeps the system prompt as a message role; pass through.
+        body: dict = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "messages": [
+                {"role": m["role"], "content": m.get("content", "")} for m in messages
+            ],
+        }
+        if tools:
+            body["tools"] = tools
+            if tool_choice is not None:
+                body["tool_choice"] = tool_choice
+        return body
+
+    def _parse_chat(self, raw: dict) -> ChatResult:
+        choices = (raw or {}).get("choices") or []
+        if not choices or not isinstance(choices[0], dict):
+            return ChatResult(text="", tool_calls=[], finish_reason=None, raw=raw)
+        choice = choices[0]
+        message = (
+            choice.get("message") if isinstance(choice.get("message"), dict) else {}
+        )
+        content = message.get("content")
+        if isinstance(content, list):
+            content = "\n".join(
+                str(part.get("text", "")) for part in content if isinstance(part, dict)
+            )
+        text = content if isinstance(content, str) else ""
+        tool_calls: List[dict] = []
+        for tc in message.get("tool_calls") or []:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function") or {}
+            args = fn.get("arguments")
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except (json.JSONDecodeError, ValueError):
+                    args = {"_raw": args}
+            tool_calls.append(
+                {
+                    "id": tc.get("id"),
+                    "name": fn.get("name"),
+                    "arguments": args or {},
+                }
+            )
+        return ChatResult(
+            text=text,
+            tool_calls=tool_calls,
+            finish_reason=choice.get("finish_reason"),
+            raw=raw,
+        )
 
 
 _RELAY_ENRICHERS = {
@@ -263,6 +449,33 @@ def build_relay_enricher(
             f"Unknown relay LLM provider '{provider}'. Supported: {supported}"
         )
     return enricher_cls(
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        http_client=http_client,
+        timeout=timeout,
+        max_tokens=max_tokens,
+    )
+
+
+def build_chat_enricher(
+    *,
+    provider: str = "anthropic",
+    api_key: str,
+    model: str = "",
+    base_url: str = "",
+    http_client: Any = None,
+    timeout: float = 60.0,
+    max_tokens: int = 2048,
+) -> RelayEnricher:
+    """Construct a chat-capable provider adapter for the dashboard assistant.
+
+    Same provider adapters as relay enrichment, with chat-appropriate timeout
+    and token defaults. Call ``.chat(messages, ...)`` on the result.
+    """
+
+    return build_relay_enricher(
+        provider=provider,
         api_key=api_key,
         model=model,
         base_url=base_url,

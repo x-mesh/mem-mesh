@@ -22,6 +22,10 @@ class ErrorCode:
     RELAY_SECRET_BLOCKED = "RELAY_SECRET_BLOCKED"
     RELAY_TYPE_GATE_BLOCKED = "RELAY_TYPE_GATE_BLOCKED"
     RELAY_UNAUTHORIZED = "RELAY_UNAUTHORIZED"
+    CHAT_NOT_CONFIGURED = "CHAT_NOT_CONFIGURED"
+
+    # 502 Bad Gateway
+    CHAT_PROVIDER_ERROR = "CHAT_PROVIDER_ERROR"
 
     # 404 Not Found
     MEMORY_NOT_FOUND = "MEMORY_NOT_FOUND"
@@ -58,6 +62,8 @@ ERROR_HTTP_STATUS = {
     ErrorCode.RELAY_SECRET_BLOCKED: 400,
     ErrorCode.RELAY_TYPE_GATE_BLOCKED: 403,
     ErrorCode.RELAY_UNAUTHORIZED: 401,
+    ErrorCode.CHAT_NOT_CONFIGURED: 400,
+    ErrorCode.CHAT_PROVIDER_ERROR: 502,
     ErrorCode.MEMORY_NOT_FOUND: 404,
     ErrorCode.PIN_NOT_FOUND: 404,
     ErrorCode.SESSION_NOT_FOUND: 404,
@@ -86,6 +92,8 @@ ERROR_JSONRPC_CODE = {
     ErrorCode.RELAY_SECRET_BLOCKED: -32602,
     ErrorCode.RELAY_TYPE_GATE_BLOCKED: -32602,
     ErrorCode.RELAY_UNAUTHORIZED: -32603,
+    ErrorCode.CHAT_NOT_CONFIGURED: -32602,
+    ErrorCode.CHAT_PROVIDER_ERROR: -32603,
     ErrorCode.MEMORY_NOT_FOUND: -32602,
     ErrorCode.PIN_NOT_FOUND: -32602,
     ErrorCode.SESSION_NOT_FOUND: -32602,
@@ -216,6 +224,22 @@ class RelayTypeGateBlocked(RelayError):
     """Memory kind/status is not allowed to flow to team scope."""
 
     error_code = ErrorCode.RELAY_TYPE_GATE_BLOCKED
+
+
+class ChatError(MemMeshError):
+    """Base chat assistant error."""
+
+
+class ChatNotConfiguredError(ChatError):
+    """Chat assistant LLM provider/key is not configured."""
+
+    error_code = ErrorCode.CHAT_NOT_CONFIGURED
+
+
+class ChatProviderError(ChatError):
+    """The upstream chat LLM provider returned an error or unreachable response."""
+
+    error_code = ErrorCode.CHAT_PROVIDER_ERROR
 
 
 class InvalidImportanceError(MemMeshError):

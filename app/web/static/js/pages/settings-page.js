@@ -23,6 +23,7 @@ export class SettingsPage extends HTMLElement {
         this.loadAccessStatus();
         this.loadStatus();
         this.loadRulesIndex();
+        this.loadChatSettings();
     }
 
     disconnectedCallback() {
@@ -89,6 +90,45 @@ export class SettingsPage extends HTMLElement {
               <div class="settings-loading"><div class="settings-spinner"></div><span>Loading status...</span></div>
             </div>
             <p class="env-foot"><span class="env-src env-src-env">env</span> set via <code>.env</code> (read-only here) &middot; <span class="env-src env-src-db">db</span> set from dashboard &middot; <span class="env-src env-src-default">default</span> unset. These reflect this <strong>server's</strong> configuration, not a client setting — clients no longer read these env vars: the hook token is baked into each tool's config and lives in <code>~/.mem-mesh/hook_token</code>. Toggle <strong>On/Off</strong> below to change auth (env-pinned rows are read-only); passwords &amp; OAuth clients are managed on the <a href="/security" data-route="/security">Security</a> page.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Assistant -->
+      <div class="settings-section" id="settings-chat">
+        <div class="section-header">
+          <span class="section-label">Chat Assistant</span>
+        </div>
+        <div class="section-body">
+          <p class="section-desc">Configure an OpenAI/Anthropic-compatible API for the dashboard chat assistant. The key is stored on the server and never returned to the browser.</p>
+          <div class="chat-settings-grid">
+            <label class="chat-field">
+              <span>Provider</span>
+              <select id="chat-provider">
+                <option value="anthropic">anthropic</option>
+                <option value="openai">openai</option>
+              </select>
+            </label>
+            <label class="chat-field">
+              <span>Model</span>
+              <input id="chat-model" type="text" placeholder="provider default">
+            </label>
+            <label class="chat-field chat-field-wide">
+              <span>API Key</span>
+              <div class="chat-key-row">
+                <input id="chat-api-key" type="password" autocomplete="new-password" placeholder="enter key to set">
+                <button type="button" class="settings-btn" id="chat-key-toggle">Show</button>
+              </div>
+            </label>
+            <label class="chat-field chat-field-wide">
+              <span>Base URL</span>
+              <input id="chat-base-url" type="url" placeholder="empty = provider default (e.g. https://api.groq.com/openai/v1)">
+            </label>
+          </div>
+          <div class="chat-actions">
+            <button class="settings-btn-primary" id="chat-save-btn">Save</button>
+            <button class="settings-btn" id="chat-test-btn">Test</button>
+            <span id="chat-settings-meta" class="env-foot"></span>
           </div>
         </div>
       </div>
@@ -284,6 +324,9 @@ export class SettingsPage extends HTMLElement {
 
     bindEvents() {
         this.querySelector('#refresh-access-btn')?.addEventListener('click', () => this.loadAccessStatus());
+        this.querySelector('#chat-save-btn')?.addEventListener('click', () => this.saveChatSettings());
+        this.querySelector('#chat-test-btn')?.addEventListener('click', () => this.testChatConnection());
+        this.querySelector('#chat-key-toggle')?.addEventListener('click', () => this.toggleChatKeyVisibility());
         this.querySelector('#refresh-status-btn')?.addEventListener('click', () => this.loadStatus());
         this.querySelector('#change-model-btn')?.addEventListener('click', () => {
             window.history.pushState({}, '', '/onboarding');
@@ -376,6 +419,108 @@ export class SettingsPage extends HTMLElement {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.message || data.detail || `HTTP ${res.status}`);
         return data;
+    }
+
+    // ── Chat Assistant settings ──
+
+    async loadChatSettings() {
+        const meta = this.querySelector('#chat-settings-meta');
+        try {
+            const data = await this.fetchSecurityJSON('/api/chat/v1/settings');
+            this.applyChatSettings(data);
+        } catch (error) {
+            if (meta) meta.textContent = `Failed to load: ${error.message}`;
+        }
+    }
+
+    applyChatSettings(data) {
+        if (!data) return;
+        const provider = this.querySelector('#chat-provider');
+        if (provider) provider.value = (data.llm_provider && data.llm_provider.value) || 'anthropic';
+        const model = this.querySelector('#chat-model');
+        if (model) model.value = (data.llm_model && data.llm_model.value) || '';
+        const baseUrl = this.querySelector('#chat-base-url');
+        if (baseUrl) baseUrl.value = (data.llm_base_url && data.llm_base_url.value) || '';
+        const key = this.querySelector('#chat-api-key');
+        const configured = data.llm_api_key && data.llm_api_key.configured;
+        if (key) {
+            key.value = '';
+            key.placeholder = configured ? 'configured — enter new key to replace' : 'enter key to set';
+        }
+        const meta = this.querySelector('#chat-settings-meta');
+        if (meta) {
+            const src = (data.llm_provider && data.llm_provider.source) || 'default';
+            meta.innerHTML = `provider <span class="env-src env-src-${src}">${src}</span> &middot; key ${configured ? 'configured' : 'not set'}`;
+        }
+    }
+
+    async saveChatSettings() {
+        const payload = {
+            llm_provider: this.querySelector('#chat-provider')?.value || 'anthropic',
+            llm_model: this.querySelector('#chat-model')?.value.trim() || '',
+            llm_base_url: this.querySelector('#chat-base-url')?.value.trim() || '',
+        };
+        const key = this.querySelector('#chat-api-key')?.value.trim();
+        if (key) payload.llm_api_key = key;
+        const btn = this.querySelector('#chat-save-btn');
+        if (btn) btn.disabled = true;
+        try {
+            const res = await fetch('/api/chat/v1/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+            this.applyChatSettings(data);
+            showToast('Chat settings saved.', 'success');
+        } catch (error) {
+            showToast(`Save failed: ${error.message}`, 'error');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    toggleChatKeyVisibility() {
+        const input = this.querySelector('#chat-api-key');
+        const btn = this.querySelector('#chat-key-toggle');
+        if (!input) return;
+        const reveal = input.type === 'password';
+        input.type = reveal ? 'text' : 'password';
+        if (btn) btn.textContent = reveal ? 'Hide' : 'Show';
+    }
+
+    async testChatConnection() {
+        const btn = this.querySelector('#chat-test-btn');
+        const meta = this.querySelector('#chat-settings-meta');
+        if (btn) btn.disabled = true;
+        if (meta) meta.textContent = 'Testing…';
+        // Verify the values currently in the form (incl. a freshly typed key)
+        // without saving; blanks fall back to the stored config server-side.
+        const body = {
+            provider: this.querySelector('#chat-provider')?.value || undefined,
+            model: this.querySelector('#chat-model')?.value.trim() || undefined,
+            base_url: this.querySelector('#chat-base-url')?.value.trim() || undefined,
+        };
+        const key = this.querySelector('#chat-api-key')?.value.trim();
+        if (key) body.api_key = key;
+        try {
+            const res = await fetch('/api/chat/v1/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+            const sample = (data.sample || '').slice(0, 60);
+            if (meta) meta.textContent = `OK — ${data.provider}/${data.model}${sample ? `: "${sample}"` : ''}`;
+            showToast('Chat connection OK.', 'success');
+        } catch (error) {
+            if (meta) meta.textContent = `Test failed: ${error.message}`;
+            showToast(`Chat test failed: ${error.message}`, 'error');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
     }
 
     async loadAccessStatus() {
@@ -1361,6 +1506,79 @@ style.textContent = `
 
 .settings-btn:hover {
   background: var(--bg-tertiary);
+}
+
+/* Chat assistant settings */
+
+.chat-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.chat-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-field-wide {
+  grid-column: 1 / -1;
+}
+
+.chat-field > span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.chat-field select,
+.chat-field input {
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.chat-actions .settings-btn-primary {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 6px 16px;
+}
+
+.chat-actions .env-foot {
+  margin: 0;
+}
+
+.chat-key-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: stretch;
+}
+
+.chat-key-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chat-key-row .settings-btn {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+}
+
+@media (max-width: 640px) {
+  .chat-settings-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Migration progress */

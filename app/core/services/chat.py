@@ -1,0 +1,215 @@
+"""Chat assistant service.
+
+M0 scope: provider/config resolution + a single non-streaming chat turn, with
+no memory tool-calling yet. Config lives in the ``chat_llm_*`` namespace
+(separate from ``relay_llm_*``) so the assistant can use a different
+provider/model than relay enrichment, while reusing the same provider adapters
+via :func:`build_chat_enricher`.
+
+Resolution precedence mirrors relay: DB (``chat.llm_*``) over env
+(``MEM_MESH_CHAT_LLM_*``) over the Settings default.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from datetime import datetime, timezone
+from typing import Any, List, Optional
+
+from ..errors import ChatNotConfiguredError, ChatProviderError
+from ..schemas.chat import ChatSettingsResponse, ChatSettingsUpdateRequest
+from ..schemas.relay import RelaySettingValue
+from .relay_worker import ChatResult, build_chat_enricher
+
+logger = logging.getLogger(__name__)
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class ChatService:
+    """Resolve chat LLM config and run chat turns for the dashboard assistant."""
+
+    CONFIG_KEYS = {
+        "llm_provider": "chat.llm_provider",
+        "llm_api_key": "chat.llm_api_key",
+        "llm_model": "chat.llm_model",
+        "llm_base_url": "chat.llm_base_url",
+    }
+    SETTING_FIELDS = {
+        "llm_provider": ("chat_llm_provider", "MEM_MESH_CHAT_LLM_PROVIDER"),
+        "llm_api_key": ("chat_llm_api_key", "MEM_MESH_CHAT_LLM_API_KEY"),
+        "llm_model": ("chat_llm_model", "MEM_MESH_CHAT_LLM_MODEL"),
+        "llm_base_url": ("chat_llm_base_url", "MEM_MESH_CHAT_LLM_BASE_URL"),
+    }
+
+    def __init__(self, db: Any):
+        self.db = db
+
+    async def _effective_setting_value(
+        self, key: str, settings: Any
+    ) -> tuple[str, str]:
+        db_value = await self.db.get_app_config(self.CONFIG_KEYS[key])
+        if db_value is not None:
+            return str(db_value), "db"
+
+        field, env_var = self.SETTING_FIELDS[key]
+        value = str(getattr(settings, field, "") or "")
+        source = "env" if os.environ.get(env_var) is not None else "default"
+        return value, source
+
+    async def get_effective_config(self, settings: Any) -> dict[str, Any]:
+        values: dict[str, str] = {}
+        sources: dict[str, str] = {}
+        for key in self.SETTING_FIELDS:
+            value, source = await self._effective_setting_value(key, settings)
+            values[key] = value
+            sources[key] = source
+        return {"values": values, "sources": sources}
+
+    async def is_configured(self, settings: Any) -> bool:
+        value, _ = await self._effective_setting_value("llm_api_key", settings)
+        return bool(value)
+
+    # ----- dashboard admin settings -----------------------------------------
+
+    async def _db_backed_setting(
+        self, *, key: str, label: str, settings: Any, secret: bool = False
+    ) -> RelaySettingValue:
+        value, source = await self._effective_setting_value(key, settings)
+        _field, env_var = self.SETTING_FIELDS[key]
+        return RelaySettingValue(
+            key=key,
+            label=label,
+            value=None if secret else value,
+            configured=bool(value),
+            source=source,
+            env_var=env_var,
+            env_pinned=os.environ.get(env_var) is not None,
+            secret=secret,
+        )
+
+    async def get_admin_settings(self, settings: Any) -> ChatSettingsResponse:
+        return ChatSettingsResponse(
+            generated_at=_utc_now(),
+            llm_provider=await self._db_backed_setting(
+                key="llm_provider", label="Chat LLM provider", settings=settings
+            ),
+            llm_api_key=await self._db_backed_setting(
+                key="llm_api_key",
+                label="Chat LLM API key",
+                settings=settings,
+                secret=True,
+            ),
+            llm_model=await self._db_backed_setting(
+                key="llm_model", label="Chat LLM model", settings=settings
+            ),
+            llm_base_url=await self._db_backed_setting(
+                key="llm_base_url", label="Chat LLM endpoint", settings=settings
+            ),
+        )
+
+    async def update_admin_settings(
+        self, request: ChatSettingsUpdateRequest, settings: Any
+    ) -> ChatSettingsResponse:
+        for key in ("llm_provider", "llm_api_key", "llm_model", "llm_base_url"):
+            value = getattr(request, key)
+            if value is None:
+                continue
+            cleaned = str(value).strip()
+            if cleaned:
+                await self.db.set_app_config(self.CONFIG_KEYS[key], cleaned)
+            else:
+                await self.db.delete_app_config(self.CONFIG_KEYS[key])
+        return await self.get_admin_settings(settings)
+
+    async def _build_enricher(
+        self,
+        settings: Any,
+        *,
+        overrides: Optional[dict] = None,
+        http_client: Any = None,
+    ):
+        effective = await self.get_effective_config(settings)
+        values = dict(effective["values"])
+        if overrides:
+            for key in ("llm_provider", "llm_api_key", "llm_model", "llm_base_url"):
+                value = overrides.get(key)
+                if value:  # only non-empty overrides win; blanks fall back
+                    values[key] = value
+        if not values["llm_api_key"]:
+            raise ChatNotConfiguredError("Chat assistant LLM API key is not configured")
+        provider = values["llm_provider"] or "anthropic"
+        return (
+            build_chat_enricher(
+                provider=provider,
+                api_key=values["llm_api_key"],
+                model=values["llm_model"],
+                base_url=values["llm_base_url"],
+                http_client=http_client,
+                timeout=settings.chat_llm_timeout,
+                max_tokens=settings.chat_llm_max_tokens,
+            ),
+            provider,
+        )
+
+    async def complete(
+        self,
+        messages: List[dict],
+        settings: Any,
+        *,
+        tools: Optional[list] = None,
+        tool_choice: Optional[Any] = None,
+        max_tokens: Optional[int] = None,
+        http_client: Any = None,
+    ) -> ChatResult:
+        """Run one chat turn; provider failures surface as ChatProviderError."""
+
+        enricher, _provider = await self._build_enricher(
+            settings, http_client=http_client
+        )
+        try:
+            return await enricher.chat(
+                messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                max_tokens=max_tokens,
+            )
+        except ChatProviderError:
+            raise
+        except Exception as exc:  # RuntimeError(HTTP), httpx errors, parse errors
+            raise ChatProviderError(str(exc)) from exc
+
+    async def test_connection(
+        self,
+        settings: Any,
+        *,
+        overrides: Optional[dict] = None,
+        http_client: Any = None,
+    ) -> dict:
+        """Send a tiny ping to validate auth/base_url/model end to end.
+
+        ``overrides`` (non-empty fields) let the dashboard verify a key/provider
+        typed into the form before it is saved.
+        """
+
+        enricher, provider = await self._build_enricher(
+            settings, overrides=overrides, http_client=http_client
+        )
+        try:
+            result = await enricher.chat(
+                [{"role": "user", "content": "ping"}], max_tokens=16
+            )
+        except ChatProviderError:
+            raise
+        except Exception as exc:
+            raise ChatProviderError(str(exc)) from exc
+        return {
+            "ok": True,
+            "provider": provider,
+            "model": enricher.model,
+            "base_url": enricher.base_url,
+            "sample": (result.text or "")[:200],
+        }

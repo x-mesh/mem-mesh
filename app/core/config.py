@@ -444,6 +444,41 @@ class Settings(BaseSettings):
         description="Prompt version stamped on relay enrichment and digest outputs",
     )
 
+    # Chat assistant LLM settings (separate namespace from relay_llm so the
+    # dashboard chat assistant can use a different provider/model than relay
+    # enrichment). Reuses the same provider adapters via build_chat_enricher.
+    chat_llm_provider: str = Field(
+        default="anthropic",
+        description="LLM provider for the chat assistant: 'anthropic' or 'openai'",
+    )
+    chat_llm_api_key: str = Field(
+        default="",
+        description="API key for the chat assistant LLM",
+    )
+    chat_llm_model: str = Field(
+        default="",
+        description=(
+            "Model used by the chat assistant; empty uses the provider default "
+            "(anthropic: claude-sonnet-4-6, openai: gpt-4o-mini)"
+        ),
+    )
+    chat_llm_base_url: str = Field(
+        default="",
+        description=(
+            "LLM endpoint for the chat assistant; empty uses the provider default"
+        ),
+    )
+    chat_llm_timeout: float = Field(
+        default=60.0,
+        ge=1.0,
+        description="Timeout for chat assistant LLM calls in seconds",
+    )
+    chat_llm_max_tokens: int = Field(
+        default=2048,
+        ge=1,
+        description="Max output tokens per chat assistant turn",
+    )
+
     @field_validator("storage_mode")
     @classmethod
     def validate_storage_mode(cls, v: str) -> str:
@@ -459,6 +494,15 @@ class Settings(BaseSettings):
         normalized = (v or "anthropic").strip().lower()
         if normalized not in ("anthropic", "openai"):
             raise ValueError("relay_llm_provider must be 'anthropic' or 'openai'")
+        return normalized
+
+    @field_validator("chat_llm_provider")
+    @classmethod
+    def validate_chat_llm_provider(cls, v: str) -> str:
+        """Validate chat assistant LLM provider is one of the supported adapters."""
+        normalized = (v or "anthropic").strip().lower()
+        if normalized not in ("anthropic", "openai"):
+            raise ValueError("chat_llm_provider must be 'anthropic' or 'openai'")
         return normalized
 
     @field_validator("log_level")
