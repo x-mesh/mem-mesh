@@ -6,27 +6,38 @@ services:
     image: mem-mesh:dev
     container_name: mem-mesh-dev
     ports:
-      - "8000:8000"
+      # 호스트:컨테이너 포트를 .env 의 MEM_MESH_SERVER_PORT 로 제어 (없으면 8000).
+      - "${MEM_MESH_SERVER_PORT:-8000}:${MEM_MESH_SERVER_PORT:-8000}"
     volumes:
       - .:/app
       - /app/__pycache__
       - /app/.pytest_cache
       - /app/.hypothesis
       - model-cache:/home/memmesh/.cache/huggingface
+    # .env 파일이 있을 때만 이 compose 가 동작하도록 강제.
+    # 파일이 없으면 `docker compose` 명령이 에러로 중단됨 (Compose v2.24.0+).
+    env_file:
+      - path: .env
+        required: true
     environment:
       # Pydantic Settings reads MEM_MESH_-prefixed vars only (env_prefix in
       # app/core/config.py); the old unprefixed names were silently ignored.
+      #
+      # 모든 값은 .env 를 기본으로 하고( ${VAR} ), 미설정 시 아래 dev/컨테이너
+      # 기본값으로 폴백한다. 즉 .env 가 1순위, 여기 기본값이 2순위.
+      # 주의: HOST / 각 경로 기본값은 "컨테이너 전용" 이므로, .env 에서 덮어쓸
+      # 때는 반드시 컨테이너에서 유효한 값(0.0.0.0, /app/... )을 써야 한다.
       - MEM_MESH_DATABASE_PATH=/app/data/memories.db
-      - MEM_MESH_LOG_LEVEL=DEBUG
-      - MEM_MESH_LOG_FORMAT=text
+      - MEM_MESH_LOG_LEVEL=${MEM_MESH_LOG_LEVEL:-DEBUG}
+      - MEM_MESH_LOG_FORMAT=${MEM_MESH_LOG_FORMAT:-text}
       - PYTHONUNBUFFERED=1
-      - MEM_MESH_SERVER_HOST=0.0.0.0
-      - MEM_MESH_SERVER_PORT=8000
-      - MEM_MESH_SERVER_WORKERS=3
+      - MEM_MESH_SERVER_HOST=${MEM_MESH_SERVER_HOST:-0.0.0.0}
+      - MEM_MESH_SERVER_PORT=${MEM_MESH_SERVER_PORT:-8000}
+      - MEM_MESH_SERVER_WORKERS=${MEM_MESH_SERVER_WORKERS:-3}
       # Logs reach host ./logs through the .:/app bind above (/app/logs ==
       # ./logs), so no extra volume line is needed — just turn on file output.
-      - MEM_MESH_LOG_OUTPUT=both
-      - MEM_MESH_LOG_FILE=/app/logs/mem-mesh.log
+      - MEM_MESH_LOG_OUTPUT=${MEM_MESH_LOG_OUTPUT:-both}
+      - MEM_MESH_LOG_FILE=${MEM_MESH_LOG_FILE:-/app/logs/mem-mesh.log}
 
     stdin_open: true
     tty: true
