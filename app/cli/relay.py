@@ -104,7 +104,7 @@ async def _run_relay_worker(
     verbose: bool = False,
 ) -> dict:
     enabled = {task.strip() for task in tasks.split(",") if task.strip()}
-    unknown = enabled - {"outbox", "item", "aggregate"}
+    unknown = enabled - {"outbox", "item", "aggregate", "reconcile"}
     if unknown:
         raise ValueError(f"unknown relay worker task(s): {', '.join(sorted(unknown))}")
     if not enabled:
@@ -205,12 +205,13 @@ async def _run_relay_worker_instance(
         effective = await service.get_effective_config(settings)
         relay_config = effective["values"]
         relay_sources = effective["sources"]
-        needs_llm = bool(enabled & {"item", "aggregate"})
+        needs_llm = bool(enabled & {"item", "aggregate", "reconcile"})
         text_enricher = None
         if needs_llm:
             if not relay_config["llm_api_key"]:
                 raise ValueError(
-                    "Relay LLM API key is required for item/aggregate relay tasks"
+                    "Relay LLM API key is required for item/aggregate/reconcile "
+                    "relay tasks"
                 )
             text_enricher = build_relay_enricher(
                 provider=relay_config["llm_provider"],
@@ -238,6 +239,41 @@ async def _run_relay_worker_instance(
             )
             outbox_bearer_token = relay_config["hub_token"]
 
+        # F2 reconcile worker: drains reconcile_queue (populated by the write-time
+        # F1 gate) → NLI pre-gate → LLM judgment → PROPOSED relations for the
+        # human curation gate (F4). Off unless the task is enabled AND conflict
+        # detection is on (the NLI model is loaded here, not on the write path).
+        reconcile_service = None
+        conflict_detector = None
+        if "reconcile" in enabled:
+            if not settings.enable_conflict_detection:
+                raise ValueError(
+                    "reconcile task requires enable_conflict_detection=true"
+                )
+            from app.core.services.conflict_detector import ConflictDetectorService
+            from app.core.services.reconcile import ReconcileService
+
+            es = embedding_service or EmbeddingService(
+                model_name=settings.embedding_model,
+                preload=False,
+                defer_loading=False,
+            )
+            conflict_detector = ConflictDetectorService(
+                model_name=settings.conflict_nli_model,
+                preload=True,
+                contradiction_threshold=settings.conflict_contradiction_threshold,
+                similarity_threshold=es.scaled_threshold(
+                    settings.conflict_similarity_threshold
+                ),
+                max_candidates=settings.conflict_max_candidates,
+            )
+            reconcile_service = ReconcileService(
+                db,
+                max_attempts=max_attempts,
+                backoff_max_seconds=backoff_max,
+                lease_seconds=lease_seconds,
+            )
+
         worker = RelayWorker(
             service=service,
             worker_id=worker_id,
@@ -248,6 +284,9 @@ async def _run_relay_worker_instance(
             outbox_bearer_token=outbox_bearer_token,
             prompt_version=relay_config["prompt_version"],
             lease_seconds=lease_seconds,
+            reconcile_service=reconcile_service,
+            reconcile_enricher=text_enricher if "reconcile" in enabled else None,
+            conflict_detector=conflict_detector,
         )
 
         if once:
