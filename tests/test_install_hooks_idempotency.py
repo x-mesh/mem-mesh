@@ -10,6 +10,7 @@ import pytest
 
 from app.cli import install_hooks
 from app.cli.hooks.json_ops import (
+    _count_mem_mesh_hook_entries,
     _is_mem_mesh_hook,
     _remove_mem_mesh_hooks_from_json,
 )
@@ -772,6 +773,86 @@ def test_install_codex_api_writes_command_hooks_and_mcp_config(
     )
     assert hooks_path.read_text(encoding="utf-8") == first_hooks
     assert config_path.read_text(encoding="utf-8") == first_config
+
+
+def test_uvx_mem_mesh_hooks_install_codex_writes_active_hooks(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """`uvx mem-mesh hooks install` should repair Codex hooks.json, not only MCP."""
+    import app.cli.main as main_mod
+    from app.cli.hooks import status as hook_status
+
+    monkeypatch.setattr(hook_status, "server_enforces_auth", lambda _url: False)
+
+    codex_dir = tmp_path / ".codex"
+    hooks_file = codex_dir / "hooks.json"
+    hooks_file.parent.mkdir(parents=True)
+    hooks_file.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PostToolUse": [
+                        {
+                            "matcher": "Skill",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": (
+                                        'node "$HOME/.codex/xm/hooks/'
+                                        'trace-session.mjs" post'
+                                    ),
+                                }
+                            ],
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    main_mod.main(
+        [
+            "hooks",
+            "install",
+            "--target",
+            "codex",
+            "--url",
+            "https://mem.example.com",
+            "--scope",
+            "project",
+            "--dir",
+            str(tmp_path),
+        ]
+    )
+
+    hooks_dir = codex_dir / "hooks"
+    data = _read_json(hooks_file)
+    post_tool_commands = [
+        hook["command"]
+        for entry in data["hooks"]["PostToolUse"]
+        for hook in entry["hooks"]
+    ]
+
+    assert _count_mem_mesh_hook_entries(hooks_file) == 7
+    assert 'node "$HOME/.codex/xm/hooks/trace-session.mjs" post' in post_tool_commands
+    assert any(
+        command.endswith("mem-mesh-post-tool-use.sh") for command in post_tool_commands
+    )
+    assert (hooks_dir / "mem-mesh-session-start.sh").exists()
+    assert (hooks_dir / "mem-mesh-post-tool-use.sh").exists()
+
+    post_tool_script = (hooks_dir / "mem-mesh-post-tool-use.sh").read_text(
+        encoding="utf-8"
+    )
+    assert '_MM_CLIENT="codex"' in post_tool_script
+    assert '--arg source "codex-hook"' in post_tool_script
+    assert '--arg client "codex"' in post_tool_script
+
+    config_text = (codex_dir / "config.toml").read_text(encoding="utf-8")
+    assert "[mcp_servers.mem-mesh]" in config_text
+    assert 'url = "https://mem.example.com/mcp/sse"' in config_text
 
 
 def test_install_codex_local_uses_stdio_mcp_and_no_post_tool_hook(

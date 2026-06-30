@@ -16,6 +16,14 @@ import pytest
 # ---- Hook templates ----------------------------------------------------------
 
 
+def test_uvx_entrypoints_expose_unified_cli_and_hook_installer():
+    """`uvx mem-mesh ...` must keep routing through the packaged CLI."""
+    text = Path("pyproject.toml").read_text(encoding="utf-8")
+
+    assert 'mem-mesh = "app.cli.main:main"' in text
+    assert 'mem-mesh-hooks = "app.cli.install_hooks:main"' in text
+
+
 def test_shell_hook_templates_packaged():
     """All shell templates referenced by the hook installer must be on disk."""
     from app.cli.hooks.renderer import _SHELL_DIR

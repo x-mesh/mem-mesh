@@ -877,6 +877,52 @@ def test_hooks_setup_token_no_longer_routed():
     assert exc.value.code != 0  # argparse: invalid choice 'setup-token'
 
 
+def test_uvx_main_routes_hooks_install_with_resolved_url(monkeypatch):
+    """`uvx mem-mesh hooks install` should use the configured hook API URL."""
+    import app.cli.main as main_mod
+    from app.cli import install_hooks
+    from app.cli.hooks import status as hook_status
+
+    seen = {}
+    monkeypatch.setattr(
+        hook_status,
+        "resolve_api_url",
+        lambda baked_url=None: ("https://memory.example.com", "~/.mem-mesh/api_url"),
+    )
+    monkeypatch.setattr(
+        install_hooks,
+        "cmd_install",
+        lambda *args, **kwargs: seen.update(args=args, kwargs=kwargs),
+    )
+
+    main_mod.main(
+        [
+            "hooks",
+            "install",
+            "--target",
+            "codex",
+            "--scope",
+            "project",
+            "--dir",
+            "/tmp/repo",
+            "--force",
+        ]
+    )
+
+    assert seen["args"] == (
+        "codex",
+        "https://memory.example.com",
+        "api",
+        "",
+        "standard",
+    )
+    assert seen["kwargs"] == {
+        "force": True,
+        "scope": "project",
+        "dir_path": "/tmp/repo",
+    }
+
+
 def test_doctor_mcp_flags_url_split(monkeypatch, capsys):
     """[MCP] warns when an entry's host differs from the hook [API] host."""
     from types import SimpleNamespace
