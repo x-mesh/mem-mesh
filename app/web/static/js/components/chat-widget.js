@@ -55,6 +55,10 @@ export class ChatWidget extends HTMLElement {
     window.addEventListener('memmesh:chat-settings-changed', () =>
       this._checkAvailability()
     );
+    // Live-refresh the context chip when SPA navigation changes the page while open.
+    window.addEventListener('memmesh:page-changed', () => {
+      if (this.open) this._capturePageContext();
+    });
   }
 
   async _checkAvailability() {
@@ -130,6 +134,7 @@ export class ChatWidget extends HTMLElement {
     window.addEventListener('pointermove', (e) => this._onMove(e));
     window.addEventListener('pointerup', () => this._onUp());
     this.shadowRoot.querySelector('.close').addEventListener('click', () => this._toggle(false));
+    this.shadowRoot.querySelector('.digest-btn').addEventListener('click', () => this._submitDigest());
     this._els.send.addEventListener('click', () => this._submit());
     this._els.input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -140,8 +145,8 @@ export class ChatWidget extends HTMLElement {
   }
 
   _onDown(e, mode) {
-    // don't start a drag when interacting with the close button
-    if (mode === 'panel' && e.target.closest('.close')) return;
+    // don't start a drag when interacting with header buttons
+    if (mode === 'panel' && e.target.closest('.close, .digest-btn')) return;
     const rect = this.getBoundingClientRect();
     this._drag = {
       mode,
@@ -252,16 +257,64 @@ export class ChatWidget extends HTMLElement {
     this.pageContext = page;
     this._els.chip.textContent = chip;
     this._els.chip.style.display = chip ? '' : 'none';
+
+    // On a memory page, enrich the id-only chip with the memory's title.
+    if (page.memory_id) this._enrichChipWithTitle(page.memory_id);
+  }
+
+  async _enrichChipWithTitle(memoryId) {
+    try {
+      const memory = await window.app?.apiClient?.getMemory(memoryId);
+      // Page may have changed during the fetch — keep the chip in sync.
+      if (!memory || this.pageContext?.memory_id !== memoryId) return;
+      const title = this._memoryTitle(memory);
+      if (title) this._els.chip.textContent = `📄 ${title} (${memoryId.slice(0, 8)})`;
+    } catch {
+      /* leave the id-only chip in place on failure */
+    }
+  }
+
+  _memoryTitle(memory) {
+    const raw = (memory.title || memory.content || '').trim();
+    if (!raw) return '';
+    const firstLine = raw.split('\n')[0].trim();
+    return firstLine.length > 40 ? `${firstLine.slice(0, 40)}…` : firstLine;
+  }
+
+  // On a memory page the route carries no project; borrow it from the memory
+  // so tools that require project_id (weekly_review, list_pins) can run.
+  async _ensureProjectId() {
+    const pc = this.pageContext;
+    if (!pc || pc.project_id || !pc.memory_id) return;
+    try {
+      const memory = await window.app?.apiClient?.getMemory(pc.memory_id);
+      if (memory?.project_id && this.pageContext?.memory_id === pc.memory_id) {
+        this.pageContext.project_id = memory.project_id;
+      }
+    } catch {
+      /* leave it unset; the backend will ask the user to name a project */
+    }
   }
 
   // ----- chat -----------------------------------------------------------
 
-  async _submit() {
-    const text = this._els.input.value.trim();
+  _submitDigest() {
+    this._submit(
+      'Give me a digest of recent activity over the last 14 days: key decisions, ' +
+        'notable bugs/incidents, open work pins, and recurring themes. Use ' +
+        'weekly_review and search to gather the data, then summarize concisely ' +
+        'and cite memory ids.',
+      '📊 Digest of recent activity (last 14 days)'
+    );
+  }
+
+  async _submit(overrideText, displayText) {
+    const text = overrideText || this._els.input.value.trim();
     if (!text || this.busy) return;
-    this._els.input.value = '';
+    if (!overrideText) this._els.input.value = '';
     this._capturePageContext(); // refresh in case the user navigated
-    this._addMessage('user', text);
+    await this._ensureProjectId(); // adopt the memory's project for digest/list_pins
+    this._addMessage('user', displayText || text);
     const bubble = this._addMessage('assistant', '');
     this._gotDelta = false;
     this._setBusy(true);
@@ -616,6 +669,8 @@ export class ChatWidget extends HTMLElement {
           border: none; background: transparent; font-size: 18px; cursor: pointer;
           color: #6b7280; line-height: 1;
         }
+        .header-actions { display: flex; align-items: center; gap: 6px; }
+        .digest-btn { border: none; background: transparent; font-size: 15px; cursor: pointer; line-height: 1; padding: 2px; }
         .context-chip {
           margin: 8px 14px 0; padding: 4px 8px; align-self: flex-start;
           background: #eff6ff; color: #1d4ed8; border-radius: 8px; font-size: 11.5px;
@@ -676,7 +731,10 @@ export class ChatWidget extends HTMLElement {
         <div class="grip" title="Drag to resize"></div>
         <div class="header">
           <span>Memory Assistant</span>
-          <button class="close" title="Close">×</button>
+          <span class="header-actions">
+            <button class="digest-btn" title="Digest recent activity">📊</button>
+            <button class="close" title="Close">×</button>
+          </span>
         </div>
         <div class="context-chip" style="display:none"></div>
         <div class="messages"></div>

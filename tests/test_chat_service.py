@@ -389,3 +389,38 @@ async def test_enrich_memory_content_via_relay_enrich():
         assert out["title"] == "T"
         assert out["abstract"] == "A"
         assert out["tags"] == ["x", "y"]
+
+
+@pytest.mark.asyncio
+async def test_merge_memories_content_parses_json():
+    async with _temp_db() as db:
+        service = ChatService(db)
+        http = _FakeHTTPClient(
+            _FakeHTTPResponse(
+                payload={
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                '{"content":"## merged\\nconsolidated","category":"decision",'
+                                '"tags":["a"],"summary":"s"}'
+                            ),
+                        }
+                    ]
+                }
+            )
+        )
+        out = await service.merge_memories_content(
+            memories=[
+                {"content": "one", "category": "task", "tags": ["x"]},
+                {"content": "two", "category": "bug", "tags": ["y"]},
+            ],
+            settings=_settings(chat_llm_api_key="k"),
+            http_client=http,
+        )
+        assert out["category"] == "decision"
+        assert "merged" in out["content"]
+        # both memories were included in the prompt
+        sent = http.calls[0]["json"]
+        body = str(sent)
+        assert "one" in body and "two" in body

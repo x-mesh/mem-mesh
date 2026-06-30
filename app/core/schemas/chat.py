@@ -222,3 +222,49 @@ class ChatEnrichResponse(BaseModel):
     model: str = ""
     merged_tags: List[str] = Field(default_factory=list)
     created_at: Optional[str] = None
+
+
+class ChatDedupScanRequest(BaseModel):
+    memory_id: str = Field(min_length=1, max_length=100)
+    limit: int = Field(default=5, ge=1, le=20)
+    min_similarity: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        description="Min text-overlap ratio (difflib) to count as a duplicate",
+    )
+
+
+class ChatDedupCandidate(BaseModel):
+    id: str
+    content_preview: str = ""
+    category: Optional[str] = None
+    score: Optional[float] = None
+
+
+class ChatDedupScanResponse(BaseModel):
+    memory_id: str
+    candidates: List[ChatDedupCandidate] = Field(default_factory=list)
+
+
+class ChatDedupMergePreviewRequest(BaseModel):
+    memory_ids: List[str] = Field(min_length=2, max_length=10)
+
+
+class ChatDedupMergePreviewResponse(BaseModel):
+    sources: List[str] = Field(default_factory=list)
+    proposed: ChatMemoryProposal
+
+
+class ChatDedupMergeApplyRequest(BaseModel):
+    primary_id: str = Field(min_length=1, max_length=100)
+    duplicate_ids: List[str] = Field(min_length=1, max_length=10)
+    content: str = Field(min_length=10, max_length=50000)
+    category: Optional[str] = Field(default=None, max_length=50)
+    tags: Optional[List[str]] = None
+
+
+class ChatDedupMergeApplyResponse(BaseModel):
+    primary_id: str
+    superseded: List[str] = Field(default_factory=list)
+    deleted: List[str] = Field(default_factory=list)

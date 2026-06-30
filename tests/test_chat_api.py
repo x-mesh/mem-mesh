@@ -398,3 +398,181 @@ async def test_chat_enrich_stores_and_merges_tags():
             # unknown memory on POST -> 404
             r404 = await client.post("/api/chat/v1/enrich", json={"memory_id": "nope"})
             assert r404.status_code == 404
+
+
+class _DedupMem:
+    def __init__(self, mid, content, category="task", tags='["x"]'):
+        self.id = mid
+        self.content = content
+        self.category = category
+        self.tags = tags
+
+
+class _DedupMemoryService:
+    def __init__(self, mems):
+        self.mems = dict(mems)
+        self.updated = None
+        self.deleted = []
+
+    async def get(self, mid):
+        return self.mems.get(mid)
+
+    async def update(self, mid, content=None, category=None, tags=None):
+        self.updated = {
+            "id": mid,
+            "content": content,
+            "category": category,
+            "tags": tags,
+        }
+
+    async def delete(self, mid):
+        self.deleted.append(mid)
+        self.mems.pop(mid, None)
+
+
+class _DedupHandlers:
+    def __init__(self):
+        self.links = []
+
+    async def link(self, source_id, target_id, relation_type="related"):
+        self.links.append((source_id, target_id, relation_type))
+        return {"ok": True}
+
+
+class _SR:
+    def __init__(self, id, content, category=None, similarity_score=None):
+        self.id = id
+        self.content = content
+        self.category = category
+        self.similarity_score = similarity_score
+
+
+class _DedupSearchService:
+    def __init__(self, results):
+        class _Resp:
+            pass
+
+        self._resp = _Resp()
+        self._resp.results = results
+
+    async def search(self, **kwargs):
+        return self._resp
+
+
+class _DedupChatService:
+    async def is_configured(self, s):
+        return True
+
+    async def is_enabled(self, s):
+        return True
+
+    async def merge_memories_content(self, *, memories, settings):
+        return {
+            "content": "## merged\nconsolidated content",
+            "category": "decision",
+            "tags": ["a", "b"],
+            "summary": "s",
+        }
+
+
+@pytest.mark.asyncio
+async def test_chat_dedup_scan_excludes_self():
+    from app.web.common.dependencies import get_memory_service, get_search_service
+    from app.web.dashboard.route_modules import chat as chat_route
+
+    src = "The quick brown fox jumps over the lazy dog every single morning."
+    async with _temp_db() as db:
+        memsvc = _DedupMemoryService({"m1": _DedupMem("m1", src)})
+        search_svc = _DedupSearchService(
+            [
+                _SR("m1", src, similarity_score=1.0),  # self -> excluded
+                _SR(
+                    "m2", src + " ", category="task", similarity_score=0.99
+                ),  # near-dup
+                _SR(
+                    "m3",
+                    "Completely unrelated note about database indexing and caching.",
+                    similarity_score=0.98,  # high cosine but different text -> filtered
+                ),
+            ]
+        )
+        app = FastAPI()
+        app.include_router(chat_route.router, prefix="/api")
+        app.dependency_overrides[get_database] = lambda: db
+        app.dependency_overrides[get_memory_service] = lambda: memsvc
+        app.dependency_overrides[get_search_service] = lambda: search_svc
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            r = await client.post(
+                "/api/chat/v1/dedup/scan", json={"memory_id": "m1", "limit": 5}
+            )
+            assert r.status_code == 200
+            cands = r.json()["candidates"]
+            # only the near-exact duplicate survives the text-overlap filter
+            assert [c["id"] for c in cands] == ["m2"]
+            assert cands[0]["score"] >= 0.9
+
+
+@pytest.mark.asyncio
+async def test_chat_dedup_merge_preview_and_apply(monkeypatch):
+    from app.web.common.dependencies import get_memory_service
+    from app.web.dashboard.route_modules import chat as chat_route
+
+    async with _temp_db() as db:
+        memsvc = _DedupMemoryService(
+            {
+                "m1": _DedupMem("m1", "primary content"),
+                "m2": _DedupMem("m2", "dup two"),
+                "m3": _DedupMem("m3", "dup three"),
+            }
+        )
+        handlers = _DedupHandlers()
+        app = FastAPI()
+        app.include_router(chat_route.router, prefix="/api")
+        app.dependency_overrides[get_database] = lambda: db
+        app.dependency_overrides[chat_route.get_chat_service] = (
+            lambda: _DedupChatService()
+        )
+        app.dependency_overrides[get_memory_service] = lambda: memsvc
+        monkeypatch.setattr(chat_route.mcp_sse, "get_tool_handlers", lambda: handlers)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            # preview
+            pv = await client.post(
+                "/api/chat/v1/dedup/merge-preview",
+                json={"memory_ids": ["m1", "m2", "m3"]},
+            )
+            assert pv.status_code == 200
+            assert pv.json()["proposed"]["category"] == "decision"
+            assert "merged" in pv.json()["proposed"]["content"]
+
+            # primary cannot be a duplicate
+            bad = await client.post(
+                "/api/chat/v1/dedup/merge-apply",
+                json={
+                    "primary_id": "m1",
+                    "duplicate_ids": ["m1"],
+                    "content": "merged content here",
+                },
+            )
+            assert bad.status_code == 400
+
+            # apply
+            ap = await client.post(
+                "/api/chat/v1/dedup/merge-apply",
+                json={
+                    "primary_id": "m1",
+                    "duplicate_ids": ["m2", "m3"],
+                    "content": "merged consolidated content",
+                    "category": "decision",
+                    "tags": ["a"],
+                },
+            )
+            assert ap.status_code == 200
+            body = ap.json()
+            assert set(body["deleted"]) == {"m2", "m3"}
+            assert set(body["superseded"]) == {"m2", "m3"}
+            assert memsvc.updated["id"] == "m1"
+            assert memsvc.updated["content"] == "merged consolidated content"
+            assert set(memsvc.deleted) == {"m2", "m3"}
+            assert ("m1", "m2", "supersedes") in handlers.links

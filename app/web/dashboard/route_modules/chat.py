@@ -5,6 +5,7 @@ non-streaming completion. M1b adds /agent — a bounded tool-using loop over the
 user's memories via the shared MCPToolHandlers. SSE streaming arrives in M1c.
 """
 
+import difflib
 import json
 import logging
 
@@ -19,6 +20,13 @@ from app.core.schemas.chat import (
     ChatAgentResponse,
     ChatCompleteRequest,
     ChatCompleteResponse,
+    ChatDedupCandidate,
+    ChatDedupMergeApplyRequest,
+    ChatDedupMergeApplyResponse,
+    ChatDedupMergePreviewRequest,
+    ChatDedupMergePreviewResponse,
+    ChatDedupScanRequest,
+    ChatDedupScanResponse,
     ChatEnrichRequest,
     ChatEnrichResponse,
     ChatMemoryProposal,
@@ -42,7 +50,11 @@ from app.core.services.chat import ChatService
 from app.core.services.chat_store import ChatStore
 from app.core.services.enrich_store import EnrichmentStore
 
-from ...common.dependencies import get_database, get_memory_service
+from ...common.dependencies import (
+    get_database,
+    get_memory_service,
+    get_search_service,
+)
 from ...mcp import sse as mcp_sse
 
 logger = logging.getLogger(__name__)
@@ -302,6 +314,21 @@ async def chat_stream(
     return EventSourceResponse(event_generator())
 
 
+def _text_similarity(a: str, b: str) -> float:
+    """Whitespace-normalized character-overlap ratio (0..1) of two texts.
+
+    A near-exact duplicate scores ~1.0; memories that merely share structure
+    (headings, dates) score much lower than their embedding cosine would.
+    Capped at 4000 chars per side so the ratio stays cheap.
+    """
+
+    na = " ".join((a or "").split())[:4000]
+    nb = " ".join((b or "").split())[:4000]
+    if not na or not nb:
+        return 0.0
+    return difflib.SequenceMatcher(None, na, nb).ratio()
+
+
 def _parse_tags(raw) -> list:
     if not raw:
         return []
@@ -538,4 +565,158 @@ async def get_chat_enrich(
         model=saved.get("model", ""),
         merged_tags=saved.get("tags", []),
         created_at=saved.get("created_at"),
+    )
+
+
+@router.post("/dedup/scan", response_model=ChatDedupScanResponse)
+async def chat_dedup_scan(
+    payload: ChatDedupScanRequest,
+    memory_service=Depends(get_memory_service),
+    search_service=Depends(get_search_service),
+) -> ChatDedupScanResponse:
+    """Find likely-duplicate memories via hybrid search (read-only)."""
+
+    memory = await memory_service.get(payload.memory_id)
+    if memory is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+
+    # Embedding search recalls broadly (structure-similar memories score high),
+    # so re-rank by ACTUAL text overlap and keep only near-exact duplicates.
+    query = (memory.content or "")[:500]
+    response = await search_service.search(
+        query=query,
+        limit=max(payload.limit * 4, 20),
+        search_mode="hybrid",
+        min_quality_score=0.0,
+        record_access=False,
+    )
+    scored = []
+    for r in getattr(response, "results", None) or []:
+        rid = getattr(r, "id", None)
+        if not rid or rid == payload.memory_id:
+            continue
+        content = str(getattr(r, "content", "") or "")
+        text_sim = _text_similarity(memory.content, content)
+        if text_sim < payload.min_similarity:
+            continue
+        scored.append(
+            (
+                text_sim,
+                ChatDedupCandidate(
+                    id=rid,
+                    content_preview=content[:200],
+                    category=getattr(r, "category", None),
+                    score=round(text_sim, 4),
+                ),
+            )
+        )
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    candidates = [c for _sim, c in scored[: payload.limit]]
+    return ChatDedupScanResponse(memory_id=payload.memory_id, candidates=candidates)
+
+
+@router.post("/dedup/merge-preview", response_model=ChatDedupMergePreviewResponse)
+async def chat_dedup_merge_preview(
+    payload: ChatDedupMergePreviewRequest,
+    service: ChatService = Depends(get_chat_service),
+    memory_service=Depends(get_memory_service),
+) -> ChatDedupMergePreviewResponse:
+    """Propose a single merged memory from several (dry-run; no write)."""
+
+    settings = get_settings()
+    if not await service.is_configured(settings):
+        raise HTTPException(
+            status_code=400, detail="Chat assistant LLM API key is not configured"
+        )
+    if not await service.is_enabled(settings):
+        raise HTTPException(
+            status_code=403, detail="Chat assistant is disabled in settings"
+        )
+    memories = []
+    for mid in payload.memory_ids:
+        mem = await memory_service.get(mid)
+        if mem is None:
+            raise HTTPException(status_code=404, detail=f"Memory not found: {mid}")
+        memories.append(
+            {
+                "content": mem.content,
+                "category": mem.category,
+                "tags": _parse_tags(getattr(mem, "tags", None)),
+            }
+        )
+    try:
+        proposed = await service.merge_memories_content(
+            memories=memories, settings=settings
+        )
+    except ChatError as exc:
+        raise HTTPException(status_code=exc.http_status, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Chat merge preview failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return ChatDedupMergePreviewResponse(
+        sources=list(payload.memory_ids),
+        proposed=ChatMemoryProposal(
+            content=redact_secrets(str(proposed.get("content", ""))),
+            category=proposed.get("category"),
+            tags=_parse_tags(proposed.get("tags")),
+            summary=proposed.get("summary"),
+        ),
+    )
+
+
+@router.post("/dedup/merge-apply", response_model=ChatDedupMergeApplyResponse)
+async def chat_dedup_merge_apply(
+    payload: ChatDedupMergeApplyRequest,
+    memory_service=Depends(get_memory_service),
+) -> ChatDedupMergeApplyResponse:
+    """Apply an approved merge: update the primary, supersede + delete the
+    duplicates. Destructive — only call after explicit user approval."""
+
+    if payload.primary_id in payload.duplicate_ids:
+        raise HTTPException(
+            status_code=400, detail="primary_id cannot also be a duplicate_id"
+        )
+    primary = await memory_service.get(payload.primary_id)
+    if primary is None:
+        raise HTTPException(status_code=404, detail="Primary memory not found")
+
+    content = redact_secrets(payload.content)
+    try:
+        await memory_service.update(
+            payload.primary_id,
+            content=content,
+            category=payload.category,
+            tags=payload.tags,
+        )
+    except Exception as exc:
+        logger.exception("Merge apply: primary update failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    try:
+        handlers = mcp_sse.get_tool_handlers()
+    except Exception:
+        handlers = None
+
+    superseded: list = []
+    deleted: list = []
+    for dup_id in payload.duplicate_ids:
+        if await memory_service.get(dup_id) is None:
+            continue
+        if handlers is not None:
+            try:
+                await handlers.link(
+                    payload.primary_id, dup_id, relation_type="supersedes"
+                )
+                superseded.append(dup_id)
+            except Exception:
+                logger.exception("Merge apply: supersede link failed for %s", dup_id)
+        try:
+            await memory_service.delete(dup_id)
+            deleted.append(dup_id)
+        except Exception:
+            logger.exception("Merge apply: delete failed for %s", dup_id)
+
+    return ChatDedupMergeApplyResponse(
+        primary_id=payload.primary_id, superseded=superseded, deleted=deleted
     )

@@ -118,6 +118,8 @@ class MemoryDetailPage extends HTMLElement {
       this.refineMemory();
     } else if (target.classList.contains('enrich-btn')) {
       this.enrichMemory();
+    } else if (target.classList.contains('dedup-btn')) {
+      this.dedupeMemory();
     } else if (target.classList.contains('back-btn')) {
       this.goBack();
     } else if (target.classList.contains('share-btn')) {
@@ -417,6 +419,189 @@ class MemoryDetailPage extends HTMLElement {
     }
   }
   
+  /**
+   * Find duplicate memories and merge them (AI), with approval. Flow:
+   * scan (similar memories) -> select -> merge-preview (AI) -> apply (updates
+   * this memory, deletes the selected duplicates). Destructive on apply only.
+   */
+  async dedupeMemory() {
+    if (!this.memoryId) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'dd-overlay';
+    overlay.innerHTML = this._dedupTemplate();
+    document.body.appendChild(overlay);
+    overlay.querySelector('.dd-close').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+    const body = overlay.querySelector('.dd-body');
+    body.innerHTML = '<div class="dd-status">🔀 Searching for similar memories…</div>';
+    try {
+      const res = await fetch('/api/chat/v1/dedup/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memory_id: this.memoryId, limit: 8 }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      this._renderDedupCandidates(overlay, data.candidates || []);
+    } catch (err) {
+      body.innerHTML = `<div class="dd-status dd-error">${this.escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  _renderDedupCandidates(overlay, candidates) {
+    const body = overlay.querySelector('.dd-body');
+    const actions = overlay.querySelector('.dd-foot-actions');
+    if (!candidates.length) {
+      body.innerHTML = '<div class="dd-status">No similar memories found.</div>';
+      actions.innerHTML = '<button class="dd-cancel">Close</button>';
+      overlay.querySelector('.dd-cancel').addEventListener('click', () => overlay.remove());
+      return;
+    }
+    body.innerHTML = `
+      <p class="dd-hint">Select duplicates to merge into <b>this</b> memory. Selected ones are deleted on apply.</p>
+      ${candidates
+        .map(
+          (c) => `
+        <label class="dd-cand">
+          <input type="checkbox" class="dd-check" value="${this.escapeHtml(c.id)}">
+          <span class="dd-cand-body">
+            <span class="dd-cand-meta">${this.escapeHtml(c.category || '')}${c.score != null ? ` · ${Number(c.score).toFixed(2)}` : ''}</span>
+            <span class="dd-cand-text">${this.escapeHtml(c.content_preview || '')}</span>
+          </span>
+        </label>`
+        )
+        .join('')}`;
+    actions.innerHTML =
+      '<button class="dd-cancel">Cancel</button><button class="dd-merge">Merge selected</button>';
+    overlay.querySelector('.dd-cancel').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('.dd-merge').addEventListener('click', () => this._dedupPreview(overlay));
+  }
+
+  async _dedupPreview(overlay) {
+    const ids = [...overlay.querySelectorAll('.dd-check:checked')].map((c) => c.value);
+    const msg = overlay.querySelector('.dd-foot-msg');
+    if (!ids.length) {
+      msg.textContent = 'Select at least one duplicate.';
+      return;
+    }
+    const body = overlay.querySelector('.dd-body');
+    body.innerHTML = '<div class="dd-status">✨ Merging with AI…</div>';
+    overlay.querySelector('.dd-foot-actions').innerHTML = '';
+    msg.textContent = '';
+    try {
+      const res = await fetch('/api/chat/v1/dedup/merge-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memory_ids: [this.memoryId, ...ids] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      this._renderDedupPreview(overlay, data.proposed || {}, ids);
+    } catch (err) {
+      body.innerHTML = `<div class="dd-status dd-error">${this.escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  _renderDedupPreview(overlay, p, ids) {
+    const body = overlay.querySelector('.dd-body');
+    const actions = overlay.querySelector('.dd-foot-actions');
+    const CATS = ['decision', 'bug', 'incident', 'idea', 'code_snippet', 'task'];
+    body.innerHTML = `
+      <div class="dd-warn">⚠ Applying updates this memory and DELETES ${ids.length} duplicate(s). This cannot be undone.</div>
+      <label class="dd-field"><span>Merged content</span><textarea class="dd-content">${this.escapeHtml(p.content || '')}</textarea></label>
+      <div class="dd-row">
+        <label class="dd-field"><span>Category</span><select class="dd-category">${CATS.map((c) => `<option value="${c}" ${p.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+        <label class="dd-field"><span>Tags</span><input class="dd-tags" value="${this.escapeHtml((p.tags || []).join(', '))}"></label>
+      </div>`;
+    actions.innerHTML =
+      '<button class="dd-cancel">Cancel</button><button class="dd-apply">Apply merge</button>';
+    overlay.querySelector('.dd-cancel').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('.dd-apply').addEventListener('click', () => this._dedupApply(overlay, ids));
+  }
+
+  async _dedupApply(overlay, ids) {
+    const content = overlay.querySelector('.dd-content')?.value.trim() || '';
+    const category = overlay.querySelector('.dd-category')?.value;
+    const tags = (overlay.querySelector('.dd-tags')?.value || '')
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const msg = overlay.querySelector('.dd-foot-msg');
+    if (content.length < 10) {
+      msg.textContent = 'Content is too short.';
+      return;
+    }
+    const btn = overlay.querySelector('.dd-apply');
+    btn.disabled = true;
+    msg.textContent = 'Merging…';
+    try {
+      const res = await fetch('/api/chat/v1/dedup/merge-apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          primary_id: this.memoryId,
+          duplicate_ids: ids,
+          content,
+          category,
+          tags,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      overlay.remove();
+      this.loadMemoryData();
+    } catch (err) {
+      msg.textContent = `Merge failed: ${err.message}`;
+      btn.disabled = false;
+    }
+  }
+
+  _dedupTemplate() {
+    return `
+      <style>
+        .dd-overlay { position: fixed; inset: 0; z-index: 2147483600; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; padding: 24px; }
+        .dd-modal { width: min(720px, 96vw); max-height: 88vh; display: flex; flex-direction: column; background: var(--bg-primary, #fff); color: var(--text-primary, #111827); border: 1px solid var(--border-color, #e5e7eb); border-radius: 14px; box-shadow: 0 24px 60px rgba(0,0,0,0.35); overflow: hidden; }
+        .dd-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border-color, #eee); font-weight: 600; }
+        .dd-close { border: none; background: transparent; font-size: 22px; cursor: pointer; color: #6b7280; }
+        .dd-body { padding: 16px 18px; overflow-y: auto; }
+        .dd-status { padding: 24px; text-align: center; color: #6b7280; }
+        .dd-error { color: #b91c1c; }
+        .dd-hint { font-size: 13px; color: #6b7280; margin: 0 0 10px; }
+        .dd-cand { display: flex; gap: 10px; align-items: flex-start; padding: 8px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+        .dd-cand-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .dd-cand-meta { font-size: 11px; color: #6b7280; }
+        .dd-cand-text { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+        .dd-warn { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; border-radius: 8px; padding: 8px 10px; font-size: 12.5px; margin-bottom: 12px; }
+        .dd-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #6b7280; margin-bottom: 12px; }
+        .dd-field textarea { height: 200px; resize: vertical; padding: 10px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; font: inherit; font-size: 13px; white-space: pre-wrap; }
+        .dd-row { display: flex; gap: 12px; flex-wrap: wrap; }
+        .dd-row .dd-field { flex: 1; min-width: 160px; }
+        .dd-field select, .dd-field input { padding: 7px 8px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; font: inherit; }
+        .dd-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 18px; border-top: 1px solid var(--border-color, #eee); }
+        .dd-foot-msg { font-size: 12px; color: #b91c1c; }
+        .dd-foot-actions { display: flex; gap: 8px; }
+        .dd-cancel, .dd-merge, .dd-apply { padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; border: 1px solid var(--border-color, #e5e7eb); }
+        .dd-cancel { background: transparent; color: var(--text-secondary, #374151); }
+        .dd-merge, .dd-apply { background: #111827; color: #fff; border-color: #111827; }
+        .dd-apply { background: #b91c1c; border-color: #b91c1c; }
+        .dd-apply:disabled, .dd-merge:disabled { opacity: 0.5; cursor: not-allowed; }
+        @media (max-width: 640px) { .dd-row { flex-direction: column; } }
+      </style>
+      <div class="dd-modal">
+        <div class="dd-head">
+          <span>🔀 Find & merge duplicates</span>
+          <button class="dd-close" title="Close">×</button>
+        </div>
+        <div class="dd-body"></div>
+        <div class="dd-foot">
+          <span class="dd-foot-msg"></span>
+          <span class="dd-foot-actions"></span>
+        </div>
+      </div>`;
+  }
+
   /**
    * Enrich this memory with AI metadata (title/abstract/tags). Reuses the relay
    * enrichment adapter via POST /chat/v1/enrich; new tags are merged into the
@@ -1138,6 +1323,7 @@ class MemoryDetailPage extends HTMLElement {
             </button>
             <button class="refine-btn" title="Improve with AI — rewrite content, suggest category & tags (you approve before it saves)">✨ Improve</button>
             <button class="enrich-btn" title="Enrich with AI — generate a title, abstract, and tags (merges tags into this memory)">🏷 Enrich</button>
+            <button class="dedup-btn" title="Find & merge duplicate memories with AI (you approve before anything is deleted)">🔀 Dedupe</button>
             <button class="edit-btn" title="Edit memory (Ctrl+E)">
               <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M11 4H4C3.46957 4 2.96086 4.21071 2.58579 4.58579C2.21071 4.96086 2 5.46957 2 6V20C2 20.5304 2.21071 21.0391 2.58579 21.4142C2.96086 21.7893 3.46957 22 4 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>

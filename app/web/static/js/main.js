@@ -483,7 +483,12 @@ class App {
       
       // Update app state
       this.appState.setCurrentPage(pageName);
-      
+
+      // Notify floating widgets (chat) so they can refresh their page context chip
+      window.dispatchEvent(
+        new CustomEvent('memmesh:page-changed', { detail: { page: pageName, params } })
+      );
+
     } catch (error) {
       console.error('Failed to render page:', error);
       this.hideLoading();
