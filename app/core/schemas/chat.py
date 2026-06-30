@@ -170,3 +170,40 @@ class ChatRefineApplyResponse(BaseModel):
     memory_id: str
     updated: bool = True
     content: str = ""
+
+
+SAVE_CATEGORIES = ("decision", "bug", "incident", "idea", "code_snippet")
+
+
+class ChatSummarizeRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=100000)
+
+
+class ChatMemoryProposal(BaseModel):
+    content: str = ""
+    category: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    summary: Optional[str] = None
+
+
+class ChatSummarizeResponse(BaseModel):
+    proposed: ChatMemoryProposal
+
+
+class ChatSaveMemoryRequest(BaseModel):
+    content: str = Field(min_length=10, max_length=50000)
+    category: str = Field(default="idea", max_length=50)
+    tags: Optional[List[str]] = None
+    project_id: Optional[str] = Field(default=None, max_length=100)
+
+    @field_validator("category")
+    @classmethod
+    def _valid_category(cls, value: str) -> str:
+        normalized = (value or "idea").strip().lower()
+        return normalized if normalized in SAVE_CATEGORIES else "idea"
+
+
+class ChatSaveMemoryResponse(BaseModel):
+    id: str
+    category: str
+    status: str = "saved"

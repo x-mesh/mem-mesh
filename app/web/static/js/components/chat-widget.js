@@ -266,15 +266,181 @@ export class ChatWidget extends HTMLElement {
     this._gotDelta = false;
     this._setBusy(true);
     this._setTool('');
+    let ok = true;
     try {
       await this._stream(text, bubble);
     } catch (err) {
+      ok = false;
       bubble.textContent = `Error: ${err.message}`;
       bubble.classList.add('error');
     } finally {
       this._setBusy(false);
       this._setTool('');
+      if (ok && bubble.textContent.trim()) {
+        this._appendSaveAction(text, bubble.textContent);
+      }
     }
+  }
+
+  _esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  _appendSaveAction(userText, answerText) {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg-actions';
+    const btn = document.createElement('button');
+    btn.className = 'save-memory-btn';
+    btn.type = 'button';
+    btn.textContent = '💾 Save as memory';
+    btn.addEventListener('click', () => this._openSaveModal(userText, answerText));
+    wrap.appendChild(btn);
+    this._els.list.appendChild(wrap);
+    this._scroll();
+  }
+
+  async _openSaveModal(userText, answerText) {
+    const overlay = document.createElement('div');
+    overlay.className = 'cm-save-overlay';
+    overlay.innerHTML = this._saveModalTemplate();
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.querySelector('.cm-close').addEventListener('click', close);
+    overlay.querySelector('.cm-cancel').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close();
+    });
+    const body = overlay.querySelector('.cm-body');
+    overlay.querySelector('.cm-save').style.display = 'none';
+    body.innerHTML = '<div class="cm-status">✨ Distilling this into a memory…</div>';
+    try {
+      const res = await fetch('/api/chat/v1/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: `User asked: ${userText}\n\nAssistant answered: ${answerText}`,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      this._renderSaveProposal(overlay, data.proposed || {});
+    } catch (err) {
+      body.innerHTML = `<div class="cm-status cm-error">${this._esc(err.message)}</div>`;
+    }
+  }
+
+  _renderSaveProposal(overlay, p) {
+    const CATS = ['decision', 'bug', 'incident', 'idea', 'code_snippet'];
+    const body = overlay.querySelector('.cm-body');
+    const saveBtn = overlay.querySelector('.cm-save');
+    body.innerHTML = `
+      <label class="cm-field">
+        <span>Content</span>
+        <textarea class="cm-content">${this._esc(p.content || '')}</textarea>
+      </label>
+      <div class="cm-row">
+        <label class="cm-field">
+          <span>Category</span>
+          <select class="cm-category">
+            ${CATS.map((c) => `<option value="${c}" ${p.category === c ? 'selected' : ''}>${c}</option>`).join('')}
+          </select>
+        </label>
+        <label class="cm-field">
+          <span>Tags</span>
+          <input class="cm-tags" type="text" value="${this._esc((p.tags || []).join(', '))}">
+        </label>
+      </div>`;
+    saveBtn.style.display = '';
+    saveBtn.onclick = () => this._saveMemory(overlay);
+  }
+
+  async _saveMemory(overlay) {
+    const content = overlay.querySelector('.cm-content')?.value.trim() || '';
+    const category = overlay.querySelector('.cm-category')?.value || 'idea';
+    const tags = (overlay.querySelector('.cm-tags')?.value || '')
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const msg = overlay.querySelector('.cm-foot-msg');
+    if (content.length < 10) {
+      msg.textContent = 'Content is too short.';
+      return;
+    }
+    const btn = overlay.querySelector('.cm-save');
+    btn.disabled = true;
+    msg.textContent = 'Saving…';
+    try {
+      const res = await fetch('/api/chat/v1/save-memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content,
+          category,
+          tags,
+          project_id: this.pageContext?.project_id || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      msg.textContent = `Saved as ${data.category} (${String(data.id).slice(0, 8)}).`;
+      msg.classList.add('cm-ok');
+      setTimeout(() => overlay.remove(), 1300);
+    } catch (err) {
+      msg.textContent = `Save failed: ${err.message}`;
+      btn.disabled = false;
+    }
+  }
+
+  _saveModalTemplate() {
+    return `
+      <style>
+        .cm-save-overlay {
+          position: fixed; inset: 0; z-index: 2147483600;
+          background: rgba(0,0,0,0.5);
+          display: flex; align-items: center; justify-content: center; padding: 24px;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .cm-modal {
+          width: min(640px, 96vw); max-height: 88vh; display: flex; flex-direction: column;
+          background: #fff; color: #111827; border: 1px solid #e5e7eb; border-radius: 14px;
+          box-shadow: 0 24px 60px rgba(0,0,0,0.35); overflow: hidden;
+        }
+        .cm-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #f0f0f0; font-weight: 600; }
+        .cm-close { border: none; background: transparent; font-size: 22px; cursor: pointer; color: #6b7280; }
+        .cm-body { padding: 16px 18px; overflow-y: auto; }
+        .cm-status { padding: 24px; text-align: center; color: #6b7280; }
+        .cm-error { color: #b91c1c; }
+        .cm-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #6b7280; margin-bottom: 12px; }
+        .cm-field textarea { height: 200px; resize: vertical; padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px; font: inherit; font-size: 13px; white-space: pre-wrap; }
+        .cm-row { display: flex; gap: 12px; flex-wrap: wrap; }
+        .cm-row .cm-field { flex: 1; min-width: 160px; }
+        .cm-field select, .cm-field input { padding: 7px 8px; border: 1px solid #e5e7eb; border-radius: 8px; font: inherit; }
+        .cm-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 18px; border-top: 1px solid #f0f0f0; }
+        .cm-foot-msg { font-size: 12px; color: #b91c1c; }
+        .cm-foot-msg.cm-ok { color: #166534; }
+        .cm-actions { display: flex; gap: 8px; }
+        .cm-cancel, .cm-save { padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; border: 1px solid #e5e7eb; }
+        .cm-cancel { background: transparent; color: #374151; }
+        .cm-save { background: #111827; color: #fff; border-color: #111827; }
+        .cm-save:disabled { opacity: 0.5; cursor: not-allowed; }
+      </style>
+      <div class="cm-modal">
+        <div class="cm-head">
+          <span>💾 Save as memory</span>
+          <button class="cm-close" title="Close">×</button>
+        </div>
+        <div class="cm-body"></div>
+        <div class="cm-foot">
+          <span class="cm-foot-msg"></span>
+          <span class="cm-actions">
+            <button class="cm-cancel">Cancel</button>
+            <button class="cm-save">Save</button>
+          </span>
+        </div>
+      </div>`;
   }
 
   async _stream(text, bubble) {
@@ -466,6 +632,12 @@ export class ChatWidget extends HTMLElement {
         .msg.user { align-self: flex-end; background: #111827; color: #fff; border-bottom-right-radius: 4px; }
         .msg.assistant { align-self: flex-start; background: #fff; border: 1px solid #e5e7eb; border-bottom-left-radius: 4px; }
         .msg.error { color: #b91c1c; border-color: #fecaca; }
+        .msg-actions { align-self: flex-start; margin-top: -4px; }
+        .save-memory-btn {
+          border: 1px solid #e5e7eb; background: #fff; color: #374151;
+          border-radius: 8px; padding: 3px 8px; font-size: 11.5px; cursor: pointer;
+        }
+        .save-memory-btn:hover { background: #f3f4f6; }
         .status {
           display: flex; align-items: center; gap: 8px;
           padding: 4px 14px; min-height: 20px; font-size: 12px; color: #6b7280;

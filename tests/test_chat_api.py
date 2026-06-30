@@ -258,3 +258,89 @@ async def test_chat_refine_and_apply():
             assert memsvc.updated["content"] == "final approved content goes here"
             assert memsvc.updated["category"] == "decision"
             assert memsvc.updated["tags"] == ["a"]
+
+
+class _FakeSaveMemoryService:
+    def __init__(self):
+        self.created = None
+
+    async def create(
+        self,
+        content=None,
+        project_id=None,
+        category=None,
+        source=None,
+        client=None,
+        tags=None,
+    ):
+        self.created = {
+            "content": content,
+            "project_id": project_id,
+            "category": category,
+            "source": source,
+            "client": client,
+            "tags": tags,
+        }
+
+        class _R:
+            id = "new-mem-id"
+            status = "saved"
+
+        return _R()
+
+
+class _FakeSaveChatService:
+    async def is_configured(self, s):
+        return True
+
+    async def is_enabled(self, s):
+        return True
+
+    async def summarize_for_memory(self, *, text, settings):
+        return {
+            "content": "## WHY\nlasting decision content",
+            "category": "decision",
+            "tags": ["a", "b"],
+            "summary": "s",
+        }
+
+
+@pytest.mark.asyncio
+async def test_chat_summarize_and_save_memory():
+    from app.web.common.dependencies import get_memory_service
+    from app.web.dashboard.route_modules import chat as chat_route
+
+    async with _temp_db() as db:
+        memsvc = _FakeSaveMemoryService()
+        app = FastAPI()
+        app.include_router(chat_route.router, prefix="/api")
+        app.dependency_overrides[get_database] = lambda: db
+        app.dependency_overrides[chat_route.get_chat_service] = (
+            lambda: _FakeSaveChatService()
+        )
+        app.dependency_overrides[get_memory_service] = lambda: memsvc
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            r = await client.post(
+                "/api/chat/v1/summarize", json={"text": "we decided X because Y"}
+            )
+            assert r.status_code == 200
+            assert r.json()["proposed"]["category"] == "decision"
+            assert r.json()["proposed"]["tags"] == ["a", "b"]
+
+            # save with an invalid category -> normalized to 'idea'
+            rs = await client.post(
+                "/api/chat/v1/save-memory",
+                json={
+                    "content": "## WHY durable content goes here",
+                    "category": "bogus",
+                    "tags": ["a"],
+                    "project_id": "p1",
+                },
+            )
+            assert rs.status_code == 200
+            assert rs.json()["id"] == "new-mem-id"
+            assert rs.json()["category"] == "idea"
+            assert memsvc.created["category"] == "idea"
+            assert memsvc.created["source"] == "chat-assistant"
+            assert memsvc.created["project_id"] == "p1"

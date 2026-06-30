@@ -330,3 +330,33 @@ async def test_refine_memory_content_bad_json_raises():
                 settings=_settings(chat_llm_api_key="k"),
                 http_client=http,
             )
+
+
+@pytest.mark.asyncio
+async def test_summarize_for_memory_parses_json():
+    async with _temp_db() as db:
+        service = ChatService(db)
+        http = _FakeHTTPClient(
+            _FakeHTTPResponse(
+                payload={
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "```json\n"
+                                '{"content":"## WHY\\nlasting decision","category":"decision",'
+                                '"tags":["x"],"summary":"s"}\n```'
+                            ),
+                        }
+                    ]
+                }
+            )
+        )
+        out = await service.summarize_for_memory(
+            text="we decided X because Y",
+            settings=_settings(chat_llm_api_key="k"),
+            http_client=http,
+        )
+        assert out["category"] == "decision"
+        assert out["tags"] == ["x"]
+        assert "WHY" in out["content"]

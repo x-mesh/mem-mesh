@@ -19,15 +19,20 @@ from app.core.schemas.chat import (
     ChatAgentResponse,
     ChatCompleteRequest,
     ChatCompleteResponse,
+    ChatMemoryProposal,
     ChatRefineApplyRequest,
     ChatRefineApplyResponse,
     ChatRefinedMemory,
     ChatRefineRequest,
     ChatRefineResponse,
+    ChatSaveMemoryRequest,
+    ChatSaveMemoryResponse,
     ChatSettingsResponse,
     ChatSettingsUpdateRequest,
     ChatStatusResponse,
     ChatStreamRequest,
+    ChatSummarizeRequest,
+    ChatSummarizeResponse,
     ChatTestRequest,
     ChatTestResponse,
 )
@@ -381,4 +386,67 @@ async def chat_refine_apply(
         raise HTTPException(status_code=500, detail=str(exc))
     return ChatRefineApplyResponse(
         memory_id=payload.memory_id, updated=True, content=content
+    )
+
+
+@router.post("/summarize", response_model=ChatSummarizeResponse)
+async def chat_summarize(
+    payload: ChatSummarizeRequest,
+    service: ChatService = Depends(get_chat_service),
+) -> ChatSummarizeResponse:
+    """Propose a durable memory distilled from chat text (dry-run; no write)."""
+
+    settings = get_settings()
+    if not await service.is_configured(settings):
+        raise HTTPException(
+            status_code=400, detail="Chat assistant LLM API key is not configured"
+        )
+    if not await service.is_enabled(settings):
+        raise HTTPException(
+            status_code=403, detail="Chat assistant is disabled in settings"
+        )
+    try:
+        proposed = await service.summarize_for_memory(
+            text=payload.text, settings=settings
+        )
+    except ChatError as exc:
+        raise HTTPException(status_code=exc.http_status, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Chat summarize failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return ChatSummarizeResponse(
+        proposed=ChatMemoryProposal(
+            content=redact_secrets(str(proposed.get("content", ""))),
+            category=proposed.get("category"),
+            tags=_parse_tags(proposed.get("tags")),
+            summary=proposed.get("summary"),
+        )
+    )
+
+
+@router.post("/save-memory", response_model=ChatSaveMemoryResponse)
+async def chat_save_memory(
+    payload: ChatSaveMemoryRequest,
+    memory_service=Depends(get_memory_service),
+) -> ChatSaveMemoryResponse:
+    """Persist a user-approved, distilled memory (secret-redacted)."""
+
+    content = redact_secrets(payload.content)
+    try:
+        result = await memory_service.create(
+            content=content,
+            project_id=payload.project_id,
+            category=payload.category,
+            source="chat-assistant",
+            client="web-ui",
+            tags=payload.tags,
+        )
+    except Exception as exc:
+        logger.exception("Chat save-memory failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+    return ChatSaveMemoryResponse(
+        id=result.id,
+        category=payload.category,
+        status=getattr(result, "status", "saved"),
     )
