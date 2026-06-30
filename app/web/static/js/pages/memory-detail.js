@@ -575,25 +575,25 @@ class MemoryDetailPage extends HTMLElement {
           animation: dd-spin 0.7s linear infinite;
         }
         @keyframes dd-spin { to { transform: rotate(360deg); } }
-        .dd-error { color: #b91c1c; }
+        .dd-error { color: var(--error-color, #b91c1c); }
         .dd-hint { font-size: 13px; color: #6b7280; margin: 0 0 10px; }
         .dd-cand { display: flex; gap: 10px; align-items: flex-start; padding: 8px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
         .dd-cand-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
         .dd-cand-meta { font-size: 11px; color: #6b7280; }
         .dd-cand-text { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
-        .dd-warn { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; border-radius: 8px; padding: 8px 10px; font-size: 12.5px; margin-bottom: 12px; }
+        .dd-warn { background: var(--error-bg, #fef2f2); color: var(--error-color, #b91c1c); border: 1px solid var(--error-color, #fecaca); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; margin-bottom: 12px; }
         .dd-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #6b7280; margin-bottom: 12px; }
-        .dd-field textarea { height: 200px; resize: vertical; padding: 10px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; font: inherit; font-size: 13px; white-space: pre-wrap; }
+        .dd-field textarea { height: 200px; resize: vertical; padding: 10px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; font: inherit; font-size: 13px; white-space: pre-wrap; background: var(--bg-primary, #fff); color: var(--text-primary, #111827); }
         .dd-row { display: flex; gap: 12px; flex-wrap: wrap; }
         .dd-row .dd-field { flex: 1; min-width: 160px; }
-        .dd-field select, .dd-field input { padding: 7px 8px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; font: inherit; }
+        .dd-field select, .dd-field input { padding: 7px 8px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; font: inherit; background: var(--bg-primary, #fff); color: var(--text-primary, #111827); }
         .dd-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 18px; border-top: 1px solid var(--border-color, #eee); }
-        .dd-foot-msg { font-size: 12px; color: #b91c1c; }
+        .dd-foot-msg { font-size: 12px; color: var(--error-color, #b91c1c); }
         .dd-foot-actions { display: flex; gap: 8px; }
         .dd-cancel, .dd-merge, .dd-apply { padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; border: 1px solid var(--border-color, #e5e7eb); }
         .dd-cancel { background: transparent; color: var(--text-secondary, #374151); }
         .dd-merge, .dd-apply { background: #111827; color: #fff; border-color: #111827; }
-        .dd-apply { background: #b91c1c; border-color: #b91c1c; }
+        .dd-apply { background: #b91c1c; border-color: var(--error-color, #b91c1c); }
         .dd-apply:disabled, .dd-merge:disabled { opacity: 0.5; cursor: not-allowed; }
         @media (max-width: 640px) { .dd-row { flex-direction: column; } }
       </style>
@@ -624,6 +624,7 @@ class MemoryDetailPage extends HTMLElement {
       btn.disabled = true;
       btn.textContent = '🏷 Enriching…';
     }
+    this._renderEnrichmentLoading();
     try {
       const res = await fetch('/api/chat/v1/enrich', {
         method: 'POST',
@@ -665,6 +666,15 @@ class MemoryDetailPage extends HTMLElement {
       ${data.title ? `<div class="enrichment-title">${this.escapeHtml(data.title)}</div>` : ''}
       ${data.abstract ? `<div class="enrichment-abstract">${this.escapeHtml(data.abstract)}</div>` : ''}
       ${(data.tags && data.tags.length) ? `<div class="enrichment-tags">${data.tags.map((t) => `<span class="tag">#${this.escapeHtml(t)}</span>`).join('')}</div>` : ''}`;
+  }
+
+  _renderEnrichmentLoading() {
+    const panel = this.querySelector('#enrichment-panel');
+    if (!panel) return;
+    panel.style.display = '';
+    panel.innerHTML =
+      '<div class="enrichment-head">🏷 AI enrichment</div>' +
+      '<div class="enrichment-status"><span class="enrichment-spinner"></span>Generating title, abstract, and tags…</div>';
   }
 
   _renderEnrichmentError(message) {
@@ -800,24 +810,24 @@ class MemoryDetailPage extends HTMLElement {
           animation: refine-spin 0.7s linear infinite;
         }
         @keyframes refine-spin { to { transform: rotate(360deg); } }
-        .refine-error { color: #b91c1c; }
-        .refine-rationale { margin-bottom: 12px; color: #1d4ed8; font-size: 13px; }
+        .refine-error { color: var(--error-color, #b91c1c); }
+        .refine-rationale { margin-bottom: 12px; color: var(--info, #1d4ed8); font-size: 13px; }
         .refine-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
         .refine-col h4 { margin: 0 0 6px; font-size: 12px; color: #6b7280; text-transform: uppercase; }
         .refine-before, .refine-after {
           width: 100%; box-sizing: border-box; height: 280px; overflow: auto;
           padding: 10px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px;
-          font: inherit; font-size: 13px; white-space: pre-wrap; word-break: break-word; background: var(--bg-secondary, #fafafa);
+          font: inherit; font-size: 13px; white-space: pre-wrap; word-break: break-word; background: var(--bg-secondary, #fafafa); color: var(--text-primary, #111827);
         }
-        .refine-after { resize: vertical; background: var(--bg-primary, #fff); }
+        .refine-after { resize: vertical; background: var(--bg-primary, #fff); color: var(--text-primary, #111827); }
         .refine-meta { display: flex; gap: 14px; margin-top: 12px; flex-wrap: wrap; }
         .refine-meta label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #6b7280; flex: 1; min-width: 160px; }
-        .refine-meta input { padding: 6px 8px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; font: inherit; }
+        .refine-meta input { padding: 6px 8px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; font: inherit; background: var(--bg-primary, #fff); color: var(--text-primary, #111827); }
         .refine-foot {
           display: flex; justify-content: space-between; align-items: center; gap: 12px;
           padding: 12px 18px; border-top: 1px solid var(--border-color, #eee);
         }
-        .refine-foot-msg { font-size: 12px; color: #b91c1c; }
+        .refine-foot-msg { font-size: 12px; color: var(--error-color, #b91c1c); }
         .refine-foot-actions { display: flex; gap: 8px; }
         .refine-cancel, .refine-apply { padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; border: 1px solid var(--border-color, #e5e7eb); }
         .refine-cancel { background: transparent; color: var(--text-secondary, #374151); }
@@ -1780,7 +1790,15 @@ style.textContent = `
   .enrichment-title { font-weight: 600; margin-bottom: 0.25rem; }
   .enrichment-abstract { font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem; }
   .enrichment-tags { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-  .enrichment-error { color: #b91c1c; font-size: 0.85rem; }
+  .enrichment-error { color: var(--error-color, #b91c1c); font-size: 0.85rem; }
+  .enrichment-status { display: flex; align-items: center; font-size: 0.85rem; color: var(--text-secondary); }
+  .enrichment-spinner {
+    width: 14px; height: 14px; border: 2px solid var(--border-color, #d1d5db);
+    border-top-color: var(--text-primary, #111827); border-radius: 50%;
+    display: inline-block; vertical-align: middle; margin-right: 8px;
+    animation: enrichment-spin 0.7s linear infinite;
+  }
+  @keyframes enrichment-spin { to { transform: rotate(360deg); } }
   
   /* Edit Mode Styles */
   .edit-form {

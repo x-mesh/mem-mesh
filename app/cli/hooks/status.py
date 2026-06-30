@@ -519,7 +519,12 @@ def cmd_status() -> None:
     if CODEX_HOOKS_FILE.exists():
         try:
             count = _count_mem_mesh_hook_entries(CODEX_HOOKS_FILE)
-            print(f"  hooks.json:   {ok(f'configured (mem-mesh entries: {count})')}")
+            if count > 0:
+                print(
+                    f"  hooks.json:   {ok(f'configured (mem-mesh entries: {count})')}"
+                )
+            else:
+                print(f"  hooks.json:   {err('not configured (mem-mesh entries: 0)')}")
         except (json.JSONDecodeError, OSError):
             print(f"  hooks.json:   {err('parse error')}")
     else:
@@ -615,6 +620,6 @@ def cmd_status() -> None:
         print(f"  Health check:   {err(message)}")
 
     print()
-    print(dim("Run 'mem-mesh-hooks install --target all' to update global hooks."))
-    print(dim("Run 'mem-mesh-hooks sync-project' to update project-local hooks."))
-    print(dim("Run 'mem-mesh-hooks doctor' for full diagnostics."))
+    print(dim("Run 'mem-mesh hooks install --target all' to update global hooks."))
+    print(dim("Run 'mem-mesh hooks sync-project' to update project-local hooks."))
+    print(dim("Run 'mem-mesh hooks doctor' for full diagnostics."))

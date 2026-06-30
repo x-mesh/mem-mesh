@@ -57,8 +57,8 @@
   height: 9px;
   margin-top: 5px;
   border-radius: 999px;
-  background: var(--info-color);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info-color), transparent 82%);
+  background: var(--info);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info), transparent 82%);
 }
 
 .relay-push-copy {

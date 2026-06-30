@@ -627,7 +627,12 @@ def _dispatch_hooks(args: argparse.Namespace) -> None:
         else:
             from app.cli.install_hooks import cmd_install
 
-            url = args.url or DEFAULT_URL
+            if args.url:
+                url = args.url
+            else:
+                from app.cli.hooks.status import resolve_api_url
+
+                url, _source = resolve_api_url(DEFAULT_URL)
             cmd_install(
                 args.target,
                 url,
