@@ -362,9 +362,10 @@ class RelaySettingsResponse(BaseModel):
     source_node_id: RelaySettingValue
     default_source_version: int = 1
     hub_token: RelaySettingValue
-    sonnet_api_key: RelaySettingValue
-    sonnet_model: RelaySettingValue
-    sonnet_base_url: RelaySettingValue
+    llm_provider: RelaySettingValue
+    llm_api_key: RelaySettingValue
+    llm_model: RelaySettingValue
+    llm_base_url: RelaySettingValue
     prompt_version: RelaySettingValue
     identities: List[RelayIdentitySummary] = Field(default_factory=list)
 
@@ -374,10 +375,23 @@ class RelaySettingsUpdateRequest(BaseModel):
     source_node_id: Optional[str] = Field(default=None, max_length=200)
     default_source_version: Optional[int] = Field(default=None, ge=0)
     hub_token: Optional[str] = Field(default=None, max_length=500)
-    sonnet_api_key: Optional[str] = Field(default=None, max_length=500)
-    sonnet_model: Optional[str] = Field(default=None, max_length=200)
-    sonnet_base_url: Optional[str] = Field(default=None, max_length=500)
+    llm_provider: Optional[str] = Field(default=None, max_length=20)
+    llm_api_key: Optional[str] = Field(default=None, max_length=500)
+    llm_model: Optional[str] = Field(default=None, max_length=200)
+    llm_base_url: Optional[str] = Field(default=None, max_length=500)
     prompt_version: Optional[str] = Field(default=None, max_length=100)
+
+    @field_validator("llm_provider")
+    @classmethod
+    def _validate_llm_provider(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        if normalized not in ("anthropic", "openai"):
+            raise ValueError("llm_provider must be 'anthropic' or 'openai'")
+        return normalized
 
 
 class RelayIdentityCreateRequest(BaseModel):

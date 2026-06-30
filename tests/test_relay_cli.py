@@ -84,9 +84,9 @@ async def test_relay_worker_verbose_reports_empty_outbox_queue(tmp_path, monkeyp
         relay_prompt_version="relay-v1",
         relay_hub_url="",
         relay_source_node_id="",
-        relay_sonnet_api_key="",
-        relay_sonnet_model="claude-sonnet-4-6",
-        relay_sonnet_base_url="https://api.anthropic.com/v1/messages",
+        relay_llm_api_key="",
+        relay_llm_model="claude-sonnet-4-6",
+        relay_llm_base_url="https://api.anthropic.com/v1/messages",
     )
     monkeypatch.setattr(relay_cli, "Settings", lambda: settings)
 

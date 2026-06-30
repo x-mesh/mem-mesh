@@ -160,20 +160,22 @@ class RelayService:
         "source_node_id": "relay.source_node_id",
         "default_source_version": "relay.default_source_version",
         "hub_token": "relay.hub_token",
-        "sonnet_api_key": "relay.sonnet_api_key",
-        "sonnet_model": "relay.sonnet_model",
-        "sonnet_base_url": "relay.sonnet_base_url",
+        "llm_provider": "relay.llm_provider",
+        "llm_api_key": "relay.llm_api_key",
+        "llm_model": "relay.llm_model",
+        "llm_base_url": "relay.llm_base_url",
         "prompt_version": "relay.prompt_version",
     }
     SETTING_FIELDS = {
         "hub_url": ("relay_hub_url", "MEM_MESH_RELAY_HUB_URL"),
         "source_node_id": ("relay_source_node_id", "MEM_MESH_RELAY_SOURCE_NODE_ID"),
         "hub_token": ("relay_hub_token", "MEM_MESH_RELAY_HUB_TOKEN"),
-        "sonnet_api_key": ("relay_sonnet_api_key", "MEM_MESH_RELAY_SONNET_API_KEY"),
-        "sonnet_model": ("relay_sonnet_model", "MEM_MESH_RELAY_SONNET_MODEL"),
-        "sonnet_base_url": (
-            "relay_sonnet_base_url",
-            "MEM_MESH_RELAY_SONNET_BASE_URL",
+        "llm_provider": ("relay_llm_provider", "MEM_MESH_RELAY_LLM_PROVIDER"),
+        "llm_api_key": ("relay_llm_api_key", "MEM_MESH_RELAY_LLM_API_KEY"),
+        "llm_model": ("relay_llm_model", "MEM_MESH_RELAY_LLM_MODEL"),
+        "llm_base_url": (
+            "relay_llm_base_url",
+            "MEM_MESH_RELAY_LLM_BASE_URL",
         ),
         "prompt_version": ("relay_prompt_version", "MEM_MESH_RELAY_PROMPT_VERSION"),
     }
@@ -1038,20 +1040,25 @@ class RelayService:
                 settings=settings,
                 secret=True,
             ),
-            sonnet_api_key=await self._db_backed_setting(
-                key="sonnet_api_key",
-                label="Sonnet API key",
+            llm_provider=await self._db_backed_setting(
+                key="llm_provider",
+                label="LLM provider",
+                settings=settings,
+            ),
+            llm_api_key=await self._db_backed_setting(
+                key="llm_api_key",
+                label="LLM API key",
                 settings=settings,
                 secret=True,
             ),
-            sonnet_model=await self._db_backed_setting(
-                key="sonnet_model",
-                label="Sonnet model",
+            llm_model=await self._db_backed_setting(
+                key="llm_model",
+                label="LLM model",
                 settings=settings,
             ),
-            sonnet_base_url=await self._db_backed_setting(
-                key="sonnet_base_url",
-                label="Sonnet endpoint",
+            llm_base_url=await self._db_backed_setting(
+                key="llm_base_url",
+                label="LLM endpoint",
                 settings=settings,
             ),
             prompt_version=await self._db_backed_setting(
@@ -1071,9 +1078,10 @@ class RelayService:
             "hub_url",
             "source_node_id",
             "hub_token",
-            "sonnet_api_key",
-            "sonnet_model",
-            "sonnet_base_url",
+            "llm_provider",
+            "llm_api_key",
+            "llm_model",
+            "llm_base_url",
             "prompt_version",
         ):
             value = getattr(request, key)

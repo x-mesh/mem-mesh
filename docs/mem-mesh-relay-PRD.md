@@ -384,7 +384,7 @@ RETURNING *;
 
 ### 11.1 모델 / 소스
 
-- **FR-42.** 텍스트 생성(제목, abstract, 분류, digest narrative)은 Sonnet(`claude-sonnet-4-6`)을 사용한다.
+- **FR-42.** 텍스트 생성(제목, abstract, 분류, digest narrative)은 설정 가능한 LLM provider를 사용한다. 기본은 Anthropic(`claude-sonnet-4-6`)이며, `relay_llm_provider=openai`로 OpenAI 호환 endpoint(OpenAI, vLLM, Together, Groq 등)를 사용할 수 있다.
 - **FR-43.** 임베딩은 mem-mesh의 sentence-transformers 기반 로컬 embedding service를 사용한다.
 - **FR-44.** 외부 LLM에는 secret guard를 통과한 payload만 보낸다. semantic masking이 도입되면 masking본만 전송한다.
 
@@ -586,7 +586,7 @@ Acceptance:
 ## 부록 B. 구현 체크리스트
 
 - [ ] Pydantic schema: ingest/search/digest/outbox payload.
-- [ ] Settings: relay enable flag, hub URL, token, worker intervals, Sonnet model, prompt version.
+- [ ] Settings: relay enable flag, hub URL, token, worker intervals, LLM provider/model/endpoint, prompt version.
 - [ ] Migration: relay identity/project/raw/current/enrichment/digest/queue tables.
 - [ ] sqlite-vec table: relay memory vector index.
 - [ ] Personal admin UI: share toggle, project mapping, token setup, dead_letter retry.

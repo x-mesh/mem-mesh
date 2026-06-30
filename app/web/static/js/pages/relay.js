@@ -521,13 +521,14 @@ export class RelayPage extends HTMLElement {
     if (!this.api) return;
     const submit = this.querySelector('#relay-worker-submit');
     const payload = {
-      sonnet_model: this.querySelector('#relay-setting-sonnet-model')?.value.trim() || '',
-      sonnet_base_url: this.querySelector('#relay-setting-sonnet-base-url')?.value.trim() || '',
+      llm_provider: this.querySelector('#relay-setting-llm-provider')?.value.trim() || '',
+      llm_model: this.querySelector('#relay-setting-llm-model')?.value.trim() || '',
+      llm_base_url: this.querySelector('#relay-setting-llm-base-url')?.value.trim() || '',
       prompt_version: this.querySelector('#relay-setting-prompt-version')?.value.trim() || '',
     };
-    const sonnetKey = this.querySelector('#relay-setting-sonnet-api-key')?.value.trim();
-    if (sonnetKey) {
-      payload.sonnet_api_key = sonnetKey;
+    const llmKey = this.querySelector('#relay-setting-llm-api-key')?.value.trim();
+    if (llmKey) {
+      payload.llm_api_key = llmKey;
     }
     submit.disabled = true;
     try {
@@ -1053,20 +1054,28 @@ export class RelayPage extends HTMLElement {
             <span class="relay-panel-meta">team hub</span>
           </div>
           <div class="relay-form-grid">
+            <label class="relay-field">
+              <span>LLM Provider</span>
+              <select id="relay-setting-llm-provider">
+                <option value="anthropic" ${(data.llm_provider.value || 'anthropic') === 'openai' ? '' : 'selected'}>anthropic</option>
+                <option value="openai" ${(data.llm_provider.value || 'anthropic') === 'openai' ? 'selected' : ''}>openai</option>
+              </select>
+              ${this.renderSettingHint(data.llm_provider)}
+            </label>
             <label class="relay-field relay-field-wide">
-              <span>Sonnet API Key</span>
+              <span>LLM API Key</span>
               <input
-                id="relay-setting-sonnet-api-key"
+                id="relay-setting-llm-api-key"
                 type="password"
                 autocomplete="new-password"
-                placeholder="${data.sonnet_api_key.configured ? 'configured, enter new key to replace' : 'required for item/aggregate workers'}"
+                placeholder="${data.llm_api_key.configured ? 'configured, enter new key to replace' : 'required for item/aggregate workers'}"
               >
-              ${this.renderSettingHint(data.sonnet_api_key)}
+              ${this.renderSettingHint(data.llm_api_key)}
             </label>
             <label class="relay-field">
-              <span>Sonnet Model</span>
-              <input id="relay-setting-sonnet-model" type="text" value="${this.escapeHtml(data.sonnet_model.value || '')}">
-              ${this.renderSettingHint(data.sonnet_model)}
+              <span>LLM Model</span>
+              <input id="relay-setting-llm-model" type="text" value="${this.escapeHtml(data.llm_model.value || '')}">
+              ${this.renderSettingHint(data.llm_model)}
             </label>
             <label class="relay-field">
               <span>Prompt Version</span>
@@ -1074,9 +1083,9 @@ export class RelayPage extends HTMLElement {
               ${this.renderSettingHint(data.prompt_version)}
             </label>
             <label class="relay-field relay-field-wide">
-              <span>Sonnet Endpoint</span>
-              <input id="relay-setting-sonnet-base-url" type="url" value="${this.escapeHtml(data.sonnet_base_url.value || '')}">
-              ${this.renderSettingHint(data.sonnet_base_url)}
+              <span>LLM Endpoint</span>
+              <input id="relay-setting-llm-base-url" type="url" placeholder="leave empty for provider default" value="${this.escapeHtml(data.llm_base_url.value || '')}">
+              ${this.renderSettingHint(data.llm_base_url)}
             </label>
           </div>
           <div class="relay-actions">
@@ -1091,9 +1100,10 @@ export class RelayPage extends HTMLElement {
             <span class="relay-panel-meta">local db first</span>
           </div>
           <div class="relay-setting-list">
-            ${this.renderSettingRow(data.sonnet_api_key)}
-            ${this.renderSettingRow(data.sonnet_model)}
-            ${this.renderSettingRow(data.sonnet_base_url)}
+            ${this.renderSettingRow(data.llm_provider)}
+            ${this.renderSettingRow(data.llm_api_key)}
+            ${this.renderSettingRow(data.llm_model)}
+            ${this.renderSettingRow(data.llm_base_url)}
             ${this.renderSettingRow(data.prompt_version)}
           </div>
         </section>

@@ -15,7 +15,9 @@ import pytest
 
 from app.core.database.base import Database
 from app.core.database.models import Memory
-from app.core.schemas.relay import RelayIngestRequest
+from pydantic import ValidationError
+
+from app.core.schemas.relay import RelayIngestRequest, RelaySettingsUpdateRequest
 from app.core.services.relay import (
     RelayDeliveryConflict,
     RelayHTTPClient,
@@ -665,8 +667,8 @@ class _VectorSearchEmbeddingService:
 
 
 class _FakeTextEnricher:
-    model = "fake-sonnet"
-    model_version = "fake-sonnet-v1"
+    model = "fake-llm"
+    model_version = "fake-llm-v1"
 
     async def enrich(self, content: str):
         return {
@@ -700,8 +702,8 @@ class _FailingOutboxSender:
 
 
 class _FakeDigestGenerator:
-    model = "fake-sonnet"
-    model_version = "fake-sonnet-v1"
+    model = "fake-llm"
+    model_version = "fake-llm-v1"
 
     def __init__(self):
         self.items_seen = None
@@ -718,8 +720,8 @@ class _FakeDigestGenerator:
 
 
 class _FailingDigestGenerator:
-    model = "fake-sonnet"
-    model_version = "fake-sonnet-v1"
+    model = "fake-llm"
+    model_version = "fake-llm-v1"
 
     async def generate(self, *, team_project_id, items):
         raise RuntimeError("temporary digest failure")
@@ -753,8 +755,8 @@ class _FakeAsyncHTTPClient:
 
 
 class _FailingTextEnricher:
-    model = "fake-sonnet"
-    model_version = "fake-sonnet-v1"
+    model = "fake-llm"
+    model_version = "fake-llm-v1"
 
     async def enrich(self, content: str):
         raise RuntimeError("temporary LLM failure")
@@ -1347,3 +1349,50 @@ async def test_auto_share_hook_noop_for_unsubscribed_project_create():
         )
 
         assert await _outbox_count(db) == 0
+
+
+def test_relay_settings_update_request_validates_llm_provider():
+    with pytest.raises(ValidationError):
+        RelaySettingsUpdateRequest(llm_provider="gemini")
+    # case/whitespace normalized
+    assert RelaySettingsUpdateRequest(llm_provider="  OpenAI ").llm_provider == "openai"
+    # None and empty pass through as unset (no change)
+    assert RelaySettingsUpdateRequest(llm_provider=None).llm_provider is None
+    assert RelaySettingsUpdateRequest(llm_provider="").llm_provider is None
+
+
+@pytest.mark.asyncio
+async def test_update_admin_settings_persists_and_normalizes_llm_provider():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+
+        resp = await service.update_admin_settings(
+            RelaySettingsUpdateRequest(
+                llm_provider="OpenAI",
+                llm_model="gpt-4o",
+                llm_base_url="https://api.groq.com/openai/v1",
+            )
+        )
+
+        assert resp.llm_provider.value == "openai"
+        assert resp.llm_model.value == "gpt-4o"
+        # persisted under the renamed DB key
+        assert await db.get_app_config("relay.llm_provider") == "openai"
+
+        effective = await service.get_effective_config(_RelaySettingsStub())
+        assert effective["values"]["llm_provider"] == "openai"
+        assert effective["sources"]["llm_provider"] == "db"
+
+
+class _RelaySettingsStub:
+    """Minimal settings object for get_effective_config env fallback."""
+
+    relay_hub_url = ""
+    relay_source_node_id = ""
+    relay_hub_token = ""
+    relay_llm_provider = "anthropic"
+    relay_llm_api_key = ""
+    relay_llm_model = ""
+    relay_llm_base_url = ""
+    relay_prompt_version = "relay-v1"

@@ -13,8 +13,8 @@ from app.core.embeddings.service import EmbeddingService
 from app.core.services.relay import RelayService
 from app.core.services.relay_worker import (
     RelayWorker,
-    SonnetRelayEnricher,
     build_http_outbox_sender,
+    build_relay_enricher,
 )
 
 
@@ -205,18 +205,19 @@ async def _run_relay_worker_instance(
         effective = await service.get_effective_config(settings)
         relay_config = effective["values"]
         relay_sources = effective["sources"]
-        needs_sonnet = bool(enabled & {"item", "aggregate"})
+        needs_llm = bool(enabled & {"item", "aggregate"})
         text_enricher = None
-        if needs_sonnet:
-            if not relay_config["sonnet_api_key"]:
+        if needs_llm:
+            if not relay_config["llm_api_key"]:
                 raise ValueError(
-                    "Relay Sonnet API key is required for item/aggregate relay tasks"
+                    "Relay LLM API key is required for item/aggregate relay tasks"
                 )
-            text_enricher = SonnetRelayEnricher(
-                api_key=relay_config["sonnet_api_key"],
-                model=relay_config["sonnet_model"],
-                base_url=relay_config["sonnet_base_url"],
-                timeout=settings.relay_sonnet_timeout,
+            text_enricher = build_relay_enricher(
+                provider=relay_config["llm_provider"],
+                api_key=relay_config["llm_api_key"],
+                model=relay_config["llm_model"],
+                base_url=relay_config["llm_base_url"],
+                timeout=settings.relay_llm_timeout,
             )
 
         embedding_service = None
@@ -378,8 +379,9 @@ async def _relay_debug_snapshot(
             "hub_url": relay_config.get("hub_url", ""),
             "source_node_id": relay_config.get("source_node_id", ""),
             "hub_token_configured": bool(relay_config.get("hub_token", "")),
-            "sonnet_api_key_configured": bool(relay_config.get("sonnet_api_key", "")),
-            "sonnet_model": relay_config.get("sonnet_model", ""),
+            "llm_provider": relay_config.get("llm_provider", ""),
+            "llm_api_key_configured": bool(relay_config.get("llm_api_key", "")),
+            "llm_model": relay_config.get("llm_model", ""),
             "prompt_version": relay_config.get("prompt_version", ""),
             "sources": relay_sources,
         },

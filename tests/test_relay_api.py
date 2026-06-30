@@ -74,8 +74,8 @@ class _FakeEmbeddingService:
 
 
 class _FakeTextEnricher:
-    model = "fake-sonnet"
-    model_version = "fake-sonnet-v1"
+    model = "fake-llm"
+    model_version = "fake-llm-v1"
 
     async def enrich(self, content: str):
         return {
@@ -88,8 +88,8 @@ class _FakeTextEnricher:
 
 
 class _FakeDigestGenerator:
-    model = "fake-sonnet"
-    model_version = "fake-sonnet-v1"
+    model = "fake-llm"
+    model_version = "fake-llm-v1"
 
     async def generate(self, *, team_project_id, items):
         return {

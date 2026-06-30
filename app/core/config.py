@@ -403,22 +403,32 @@ class Settings(BaseSettings):
         default="",
         description="Default source node id used by relay share UI",
     )
-    relay_sonnet_api_key: str = Field(
+    relay_llm_provider: str = Field(
+        default="anthropic",
+        description="LLM provider for relay enrichment: 'anthropic' or 'openai'",
+    )
+    relay_llm_api_key: str = Field(
         default="",
-        description="API key for relay Sonnet enrichment worker",
+        description="API key for relay LLM enrichment worker",
     )
-    relay_sonnet_model: str = Field(
-        default="claude-sonnet-4-6",
-        description="Model used by relay text enrichment and digest workers",
+    relay_llm_model: str = Field(
+        default="",
+        description=(
+            "Model used by relay text enrichment and digest workers; empty uses "
+            "the provider default (anthropic: claude-sonnet-4-6, openai: gpt-4o-mini)"
+        ),
     )
-    relay_sonnet_base_url: str = Field(
-        default="https://api.anthropic.com/v1/messages",
-        description="Anthropic Messages API endpoint for relay enrichment",
+    relay_llm_base_url: str = Field(
+        default="",
+        description=(
+            "LLM endpoint for relay enrichment; empty uses the provider default "
+            "(Anthropic Messages or OpenAI chat/completions)"
+        ),
     )
-    relay_sonnet_timeout: float = Field(
+    relay_llm_timeout: float = Field(
         default=30.0,
         ge=1.0,
-        description="Timeout for relay Sonnet API calls in seconds",
+        description="Timeout for relay LLM API calls in seconds",
     )
     relay_http_timeout: float = Field(
         default=10.0,
@@ -441,6 +451,15 @@ class Settings(BaseSettings):
         if v not in ("direct", "api"):
             raise ValueError("storage_mode must be 'direct' or 'api'")
         return v
+
+    @field_validator("relay_llm_provider")
+    @classmethod
+    def validate_relay_llm_provider(cls, v: str) -> str:
+        """Validate relay LLM provider is one of the supported adapters."""
+        normalized = (v or "anthropic").strip().lower()
+        if normalized not in ("anthropic", "openai"):
+            raise ValueError("relay_llm_provider must be 'anthropic' or 'openai'")
+        return normalized
 
     @field_validator("log_level")
     @classmethod
