@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.1] - 2026-06-30
+
+v1.21.0의 **반쪽 발행을 복구**하는 patch. WHY: 1.21.0은 PyPI에는 정상 발행됐지만, Docker publish 워크플로의 Test gate(`pytest tests/`)가 테스트 회귀 3건으로 실패해 **이미지가 발행되지 못했다**(Build/Merge가 skip). 회귀는 chat output-language 기능 추가 과정에서 (1) chat-stream 테스트의 fake service가 실제 `ChatService`에 새로 생긴 `resolve_output_language`를 따라가지 못했고, (2) 에러 중앙화 테스트가 `ChatError` 계층 같은 2단계 상속(`ChatNotConfiguredError(ChatError)`)을 직접-base만 검사해 거부한 데서 비롯됐다. 아울러 ruff/isort/black lint 부채로 CI도 red였다. 기능 변경 없이 테스트·lint만 정리한다.
+
+### Fixed
+- **chat-stream 테스트 fake service 동기화** — `_FakeService`에 `resolve_output_language`를 추가해 실제 `ChatService` 인터페이스와 일치시킴(`test_chat_stream_*` 2건 복구). `tests/test_chat_stream_api.py`, `app/core/services/chat.py`
+- **에러 상속 검증의 transitive 인정** — `test_all_errors_inherit_memmesh_error`가 직접 base만 보던 것을 상속 체인 재귀 탐색으로 바꿔, `ChatError`→`MemMeshError` 같은 2단계 계층을 허용. `RelayError` 계층과 동일 패턴인 chat 에러를 정당하게 통과시킨다. `tests/test_error_centralization.py`
+- **CI lint 게이트 복구** — ruff F401 unused import 3건 제거(`memory.py`/`reconcile.py`/`test_chat_tools.py`)와 isort/black 포맷 정리로 `ruff`/`isort`/`black` 체크를 green으로 되돌림. `app/`, `tests/`
+
 ## [1.21.0] - 2026-06-30
 
 대시보드에 **LLM chat assistant**를 본격 도입하고, enrichment LLM을 **multi-provider**로 확장하며, hook 설치를 **다중 IDE(Antigravity·agy·Kiro native·Cursor)**로 넓히는 minor 릴리스. WHY: (1) 그동안 메모리 검색·정제는 도구 호출로만 가능해, "이 메모리를 더 낫게 다듬어줘"·"이 대화를 메모리로 저장해줘" 같은 자연어 워크플로를 대시보드 안에서 직접 처리할 수 없었다. 그래서 tool-calling·streaming·floating widget을 갖춘 chat assistant(M0~M2)를 얹고, refine/enrich/save-as-memory/dedup을 approve 게이트와 함께 제공한다. (2) relay enrichment가 단일 벤더(Anthropic)에 묶여 있어 운영 환경별 모델 선택이 불가능했다 — provider 어댑터 + factory로 OpenAI 등으로 교체 가능하게 한다. (3) hook 설치가 Claude/Cursor/Kiro 중심이라 Antigravity·agy 등 신규 IDE에서 동작하지 않았고, project ID 해석이 IDE 경계에서 불안정했다 — hook input에서 workspace 경로를 추출하도록 resolver를 강화하고 설치/진단/제거 경로를 다중 IDE로 일반화한다. 아울러 LLM 출력 언어 설정, 중복 메모리 AI 병합(curation/reconcile), schema migrator 확장을 포함한다.
