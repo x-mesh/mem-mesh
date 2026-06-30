@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0] - 2026-06-30
+
+대시보드에 **LLM chat assistant**를 본격 도입하고, enrichment LLM을 **multi-provider**로 확장하며, hook 설치를 **다중 IDE(Antigravity·agy·Kiro native·Cursor)**로 넓히는 minor 릴리스. WHY: (1) 그동안 메모리 검색·정제는 도구 호출로만 가능해, "이 메모리를 더 낫게 다듬어줘"·"이 대화를 메모리로 저장해줘" 같은 자연어 워크플로를 대시보드 안에서 직접 처리할 수 없었다. 그래서 tool-calling·streaming·floating widget을 갖춘 chat assistant(M0~M2)를 얹고, refine/enrich/save-as-memory/dedup을 approve 게이트와 함께 제공한다. (2) relay enrichment가 단일 벤더(Anthropic)에 묶여 있어 운영 환경별 모델 선택이 불가능했다 — provider 어댑터 + factory로 OpenAI 등으로 교체 가능하게 한다. (3) hook 설치가 Claude/Cursor/Kiro 중심이라 Antigravity·agy 등 신규 IDE에서 동작하지 않았고, project ID 해석이 IDE 경계에서 불안정했다 — hook input에서 workspace 경로를 추출하도록 resolver를 강화하고 설치/진단/제거 경로를 다중 IDE로 일반화한다. 아울러 LLM 출력 언어 설정, 중복 메모리 AI 병합(curation/reconcile), schema migrator 확장을 포함한다.
+
+### Added
+- **대시보드 LLM chat assistant (M0~M2)** — tool-calling·streaming·floating widget을 갖춘 채팅 어시스턴트. 페이지 컨텍스트 인식, enable 게이팅, 스트리밍 컨트롤을 포함한다. `app/web/dashboard/route_modules`, `app/web/static/js`
+- **AI 메모리 정제/보강 워크플로** — refine(refine → diff → approve → apply), enrichment(title/abstract/tags), save-as-memory(summarize → approve → store), AI 기반 중복 병합(dedup). 모두 approve 게이트를 거친다. `app/core/services/curation.py`, `app/core/services/reconcile.py`, `app/web/dashboard/route_modules/curation.py`
+- **multi-provider LLM 지원 (relay enrichment)** — relay enricher를 provider 추상화(Anthropic/OpenAI 어댑터 + factory)로 확장해 벤더 교체가 가능하다. `app/core/services/relay_worker.py`
+- **다중 IDE hook 지원** — Antigravity·agy CLI·Kiro native·Cursor 설치/상태/진단/제거 경로 추가. hook input에서 workspace 경로를 추출해 IDE 경계를 넘어 project ID 해석을 안정화한다. atomic file write·legacy 마이그레이션 정리 포함. `app/cli/hooks/installer.py`, `app/cli/install_hooks.py`, `app/cli/hooks/doctor.py`, `app/cli/hooks/status.py`, `app/cli/project_identity.py`, `app/cli/hooks/shell/*.sh`
+- **chat 출력 언어 설정** — chat/refine/enrich/digest의 LLM 출력 언어를 설정값으로 강제. 국문 설정 시 영문 출력되던 문제 해결. chat services 전반
+- **`mem-mesh auth set-password`** — 서버 측 admin 비밀번호를 CLI에서 재설정. `app/cli`
+
+### Changed
+- **design token 통합 + enrichment UI 개선** — 대시보드 CSS/JS의 색상·스타일 토큰을 단일화하고 enrichment UI를 정비. `app/web/static/css/modules`, `app/web/static/js/pages`
+- **docker-compose.dev.yml `.env` 구성화** — 개발용 compose 파라미터를 `.env`로 외부화.
+
+### Fixed
+- **schema migrator 확장** — 신규 컬럼/관계 타입 마이그레이션 경로 추가로 기존 DB 업그레이드 시 누락을 방지. `app/core/database/schema_migrator.py`, `app/core/database/models.py`, `app/core/schemas/relations.py`
+
+### Tests
+- **hook·CLI·설치 커버리지 확대** — multi-IDE hook 스크립트, hooks doctor/status, cursor/kiro/antigravity 설치 멱등성, uvx 엔트리포인트, frontend client badge에 대한 단위 테스트 추가. `tests/test_hook_scripts.py`, `tests/test_cli_diagnostics.py`, `tests/test_install_hooks_idempotency.py`, `tests/test_connect_install.py`, `tests/snapshots/*.sh`
+
 ## [1.20.0] - 2026-06-29
 
 v1.19.0이 도입한 Relay 인프라(worker·API·CLI·fusion) 위에 **공유 UX와 continuous auto-share**를 본격적으로 얹는 minor 릴리스. WHY: 1.19.0에서 공유 진입점이 CLI·대시보드 일부에만 있어, 정작 메모리가 만들어지는 일상 워크플로(메모리 행·peek·batch·프로젝트 카드·상세 페이지)에서 한 번에 팀으로 보내기가 번거로웠다. 그래서 (1) 모든 메모리 표면에 share 진입점을 노출하고, (2) 프로젝트 단위로 "한 번 켜두면 새 메모리가 memory-write hook을 통해 자동으로 허브로 흐르는" continuous auto-share를 추가하며, (3) 공유 대상이 될 수 없는 kind는 버튼을 dim/notice 처리해 오발행을 막는다. 아울러 outbox/admin 등 부수효과 엔드포인트에 auth-or-loopback 게이트를 강제해 보안 최소선을 닫고, purge/schema 경로의 hot-loop 비용을 줄인다.
