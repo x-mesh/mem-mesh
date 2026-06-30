@@ -139,3 +139,34 @@ class ChatTestResponse(BaseModel):
     model: str
     base_url: str
     sample: str = ""
+
+
+class ChatRefineRequest(BaseModel):
+    memory_id: str = Field(min_length=1, max_length=100)
+
+
+class ChatRefinedMemory(BaseModel):
+    content: str = ""
+    category: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    summary: Optional[str] = None
+    rationale: Optional[str] = None
+
+
+class ChatRefineResponse(BaseModel):
+    memory_id: str
+    original: ChatRefinedMemory
+    proposed: ChatRefinedMemory
+
+
+class ChatRefineApplyRequest(BaseModel):
+    memory_id: str = Field(min_length=1, max_length=100)
+    content: str = Field(min_length=10, max_length=50000)
+    category: Optional[str] = Field(default=None, max_length=50)
+    tags: Optional[List[str]] = None
+
+
+class ChatRefineApplyResponse(BaseModel):
+    memory_id: str
+    updated: bool = True
+    content: str = ""

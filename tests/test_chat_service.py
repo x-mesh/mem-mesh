@@ -278,3 +278,55 @@ async def test_chat_service_wraps_provider_http_error():
                 _settings(chat_llm_api_key="bad-key"),
                 http_client=http,
             )
+
+
+@pytest.mark.asyncio
+async def test_refine_memory_content_parses_json():
+    async with _temp_db() as db:
+        service = ChatService(db)
+        http = _FakeHTTPClient(
+            _FakeHTTPResponse(
+                payload={
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "```json\n"
+                                '{"content":"## WHY\\nbecause","category":"decision",'
+                                '"tags":["auth","fix"],"summary":"s","rationale":"r"}'
+                                "\n```"
+                            ),
+                        }
+                    ]
+                }
+            )
+        )
+        out = await service.refine_memory_content(
+            content="old text",
+            category="task",
+            tags=["t1"],
+            settings=_settings(chat_llm_api_key="k"),
+            http_client=http,
+        )
+        assert out["category"] == "decision"
+        assert out["tags"] == ["auth", "fix"]
+        assert "WHY" in out["content"]
+
+
+@pytest.mark.asyncio
+async def test_refine_memory_content_bad_json_raises():
+    async with _temp_db() as db:
+        service = ChatService(db)
+        http = _FakeHTTPClient(
+            _FakeHTTPResponse(
+                payload={"content": [{"type": "text", "text": "not json at all"}]}
+            )
+        )
+        with pytest.raises(ChatProviderError, match="parse"):
+            await service.refine_memory_content(
+                content="old",
+                category="task",
+                tags=[],
+                settings=_settings(chat_llm_api_key="k"),
+                http_client=http,
+            )

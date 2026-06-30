@@ -174,3 +174,87 @@ async def test_chat_status_and_enable_toggle():
             assert s["enabled"] is False
             assert s["available"] is False
             assert await db.get_app_config("chat.enabled") == "false"
+
+
+class _FakeMem:
+    content = "old content that is plenty long enough"
+    category = "task"
+    tags = '["x"]'
+
+
+class _FakeMemoryService:
+    def __init__(self):
+        self.updated = None
+
+    async def get(self, mid):
+        return _FakeMem() if mid == "m1" else None
+
+    async def update(self, mid, content=None, category=None, tags=None):
+        self.updated = {
+            "id": mid,
+            "content": content,
+            "category": category,
+            "tags": tags,
+        }
+
+
+class _FakeRefineChatService:
+    async def is_configured(self, s):
+        return True
+
+    async def is_enabled(self, s):
+        return True
+
+    async def refine_memory_content(self, *, content, category, tags, settings):
+        return {
+            "content": "## WHY\nbetter version of the memory",
+            "category": "decision",
+            "tags": ["a", "b"],
+            "summary": "s",
+            "rationale": "r",
+        }
+
+
+@pytest.mark.asyncio
+async def test_chat_refine_and_apply():
+    from app.web.common.dependencies import get_memory_service
+    from app.web.dashboard.route_modules import chat as chat_route
+
+    async with _temp_db() as db:
+        memsvc = _FakeMemoryService()
+        app = FastAPI()
+        app.include_router(chat_route.router, prefix="/api")
+        app.dependency_overrides[get_database] = lambda: db
+        app.dependency_overrides[chat_route.get_chat_service] = (
+            lambda: _FakeRefineChatService()
+        )
+        app.dependency_overrides[get_memory_service] = lambda: memsvc
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            r = await client.post("/api/chat/v1/refine", json={"memory_id": "m1"})
+            assert r.status_code == 200
+            body = r.json()
+            assert body["original"]["content"].startswith("old content")
+            assert body["original"]["tags"] == ["x"]
+            assert body["proposed"]["category"] == "decision"
+            assert "WHY" in body["proposed"]["content"]
+            assert body["proposed"]["tags"] == ["a", "b"]
+
+            # unknown memory -> 404
+            r404 = await client.post("/api/chat/v1/refine", json={"memory_id": "nope"})
+            assert r404.status_code == 404
+
+            # apply the approved version
+            ra = await client.post(
+                "/api/chat/v1/refine/apply",
+                json={
+                    "memory_id": "m1",
+                    "content": "final approved content goes here",
+                    "category": "decision",
+                    "tags": ["a"],
+                },
+            )
+            assert ra.status_code == 200
+            assert memsvc.updated["content"] == "final approved content goes here"
+            assert memsvc.updated["category"] == "decision"
+            assert memsvc.updated["tags"] == ["a"]

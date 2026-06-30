@@ -13,11 +13,17 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import get_settings
 from app.core.errors import ChatError
+from app.core.redaction import redact_secrets
 from app.core.schemas.chat import (
     ChatAgentRequest,
     ChatAgentResponse,
     ChatCompleteRequest,
     ChatCompleteResponse,
+    ChatRefineApplyRequest,
+    ChatRefineApplyResponse,
+    ChatRefinedMemory,
+    ChatRefineRequest,
+    ChatRefineResponse,
     ChatSettingsResponse,
     ChatSettingsUpdateRequest,
     ChatStatusResponse,
@@ -28,7 +34,7 @@ from app.core.schemas.chat import (
 from app.core.services.chat import ChatService
 from app.core.services.chat_store import ChatStore
 
-from ...common.dependencies import get_database
+from ...common.dependencies import get_database, get_memory_service
 from ...mcp import sse as mcp_sse
 
 logger = logging.getLogger(__name__)
@@ -286,3 +292,93 @@ async def chat_stream(
             yield {"event": "error", "data": json.dumps({"detail": str(exc)})}
 
     return EventSourceResponse(event_generator())
+
+
+def _parse_tags(raw) -> list:
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [str(t) for t in raw]
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(t) for t in parsed]
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    return [t.strip() for t in str(raw).split(",") if t.strip()]
+
+
+@router.post("/refine", response_model=ChatRefineResponse)
+async def chat_refine(
+    payload: ChatRefineRequest,
+    service: ChatService = Depends(get_chat_service),
+    memory_service=Depends(get_memory_service),
+) -> ChatRefineResponse:
+    """Propose an AI-refined version of a memory (dry-run; no write)."""
+
+    settings = get_settings()
+    if not await service.is_configured(settings):
+        raise HTTPException(
+            status_code=400, detail="Chat assistant LLM API key is not configured"
+        )
+    if not await service.is_enabled(settings):
+        raise HTTPException(
+            status_code=403, detail="Chat assistant is disabled in settings"
+        )
+    memory = await memory_service.get(payload.memory_id)
+    if memory is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+
+    original_tags = _parse_tags(getattr(memory, "tags", None))
+    try:
+        proposed = await service.refine_memory_content(
+            content=memory.content,
+            category=memory.category,
+            tags=original_tags,
+            settings=settings,
+        )
+    except ChatError as exc:
+        raise HTTPException(status_code=exc.http_status, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Chat refine failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return ChatRefineResponse(
+        memory_id=payload.memory_id,
+        original=ChatRefinedMemory(
+            content=memory.content, category=memory.category, tags=original_tags
+        ),
+        proposed=ChatRefinedMemory(
+            content=redact_secrets(str(proposed.get("content", ""))),
+            category=proposed.get("category"),
+            tags=_parse_tags(proposed.get("tags")),
+            summary=proposed.get("summary"),
+            rationale=proposed.get("rationale"),
+        ),
+    )
+
+
+@router.post("/refine/apply", response_model=ChatRefineApplyResponse)
+async def chat_refine_apply(
+    payload: ChatRefineApplyRequest,
+    memory_service=Depends(get_memory_service),
+) -> ChatRefineApplyResponse:
+    """Apply a user-approved refinement to the memory (secret-redacted)."""
+
+    memory = await memory_service.get(payload.memory_id)
+    if memory is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    content = redact_secrets(payload.content)
+    try:
+        await memory_service.update(
+            payload.memory_id,
+            content=content,
+            category=payload.category,
+            tags=payload.tags,
+        )
+    except Exception as exc:
+        logger.exception("Chat refine apply failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+    return ChatRefineApplyResponse(
+        memory_id=payload.memory_id, updated=True, content=content
+    )

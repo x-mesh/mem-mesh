@@ -114,6 +114,8 @@ class MemoryDetailPage extends HTMLElement {
       this.cancelEdit();
     } else if (target.classList.contains('delete-btn')) {
       this.deleteMemory();
+    } else if (target.classList.contains('refine-btn')) {
+      this.refineMemory();
     } else if (target.classList.contains('back-btn')) {
       this.goBack();
     } else if (target.classList.contains('share-btn')) {
@@ -411,6 +413,166 @@ class MemoryDetailPage extends HTMLElement {
     }
   }
   
+  /**
+   * Improve this memory with AI: propose a rewrite, preview the diff, apply on
+   * approval (POST /chat/v1/refine then /refine/apply). The chat LLM provider
+   * configured in Settings is used; nothing is written until the user clicks Apply.
+   */
+  async refineMemory() {
+    if (!this.memory || !this.memoryId) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'refine-overlay';
+    overlay.innerHTML = this._refineTemplate();
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.querySelector('.refine-close').addEventListener('click', close);
+    overlay.querySelector('.refine-cancel').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close();
+    });
+
+    const body = overlay.querySelector('.refine-body');
+    overlay.querySelector('.refine-apply').style.display = 'none';
+    body.innerHTML =
+      '<div class="refine-status">✨ Asking the assistant to improve this memory…</div>';
+
+    try {
+      const res = await fetch('/api/chat/v1/refine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memory_id: this.memoryId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      this._renderRefineProposal(overlay, data);
+    } catch (err) {
+      body.innerHTML = `<div class="refine-status refine-error">${this.escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  _renderRefineProposal(overlay, data) {
+    const body = overlay.querySelector('.refine-body');
+    const applyBtn = overlay.querySelector('.refine-apply');
+    const o = data.original || {};
+    const p = data.proposed || {};
+    body.innerHTML = `
+      ${p.rationale ? `<div class="refine-rationale">💡 ${this.escapeHtml(p.rationale)}</div>` : ''}
+      <div class="refine-cols">
+        <div class="refine-col">
+          <h4>Current</h4>
+          <pre class="refine-before">${this.escapeHtml(o.content || '')}</pre>
+        </div>
+        <div class="refine-col">
+          <h4>Proposed (editable)</h4>
+          <textarea class="refine-after">${this.escapeHtml(p.content || '')}</textarea>
+        </div>
+      </div>
+      <div class="refine-meta">
+        <label>Category <input class="refine-category" type="text" value="${this.escapeHtml(p.category || o.category || '')}"></label>
+        <label>Tags <input class="refine-tags" type="text" value="${this.escapeHtml((p.tags || []).join(', '))}"></label>
+      </div>`;
+    applyBtn.style.display = '';
+    applyBtn.onclick = () => this._applyRefine(overlay);
+  }
+
+  async _applyRefine(overlay) {
+    const content = overlay.querySelector('.refine-after')?.value.trim() || '';
+    const category = overlay.querySelector('.refine-category')?.value.trim() || '';
+    const tags = (overlay.querySelector('.refine-tags')?.value || '')
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const msg = overlay.querySelector('.refine-foot-msg');
+    if (content.length < 10) {
+      msg.textContent = 'Content is too short.';
+      return;
+    }
+    const applyBtn = overlay.querySelector('.refine-apply');
+    applyBtn.disabled = true;
+    msg.textContent = 'Applying…';
+    try {
+      const res = await fetch('/api/chat/v1/refine/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          memory_id: this.memoryId,
+          content,
+          category: category || undefined,
+          tags,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      overlay.remove();
+      this.loadMemoryData();
+    } catch (err) {
+      msg.textContent = `Apply failed: ${err.message}`;
+      applyBtn.disabled = false;
+    }
+  }
+
+  _refineTemplate() {
+    return `
+      <style>
+        .refine-overlay {
+          position: fixed; inset: 0; z-index: 2147483600;
+          background: rgba(0,0,0,0.5);
+          display: flex; align-items: center; justify-content: center; padding: 24px;
+        }
+        .refine-modal {
+          width: min(920px, 96vw); max-height: 88vh; display: flex; flex-direction: column;
+          background: var(--bg-primary, #fff); color: var(--text-primary, #111827);
+          border: 1px solid var(--border-color, #e5e7eb); border-radius: 14px;
+          box-shadow: 0 24px 60px rgba(0,0,0,0.35); overflow: hidden;
+        }
+        .refine-head {
+          display: flex; justify-content: space-between; align-items: center;
+          padding: 14px 18px; border-bottom: 1px solid var(--border-color, #eee); font-weight: 600;
+        }
+        .refine-close { border: none; background: transparent; font-size: 22px; cursor: pointer; color: #6b7280; }
+        .refine-body { padding: 16px 18px; overflow-y: auto; }
+        .refine-status { padding: 28px; text-align: center; color: #6b7280; }
+        .refine-error { color: #b91c1c; }
+        .refine-rationale { margin-bottom: 12px; color: #1d4ed8; font-size: 13px; }
+        .refine-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .refine-col h4 { margin: 0 0 6px; font-size: 12px; color: #6b7280; text-transform: uppercase; }
+        .refine-before, .refine-after {
+          width: 100%; box-sizing: border-box; height: 280px; overflow: auto;
+          padding: 10px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px;
+          font: inherit; font-size: 13px; white-space: pre-wrap; word-break: break-word; background: var(--bg-secondary, #fafafa);
+        }
+        .refine-after { resize: vertical; background: var(--bg-primary, #fff); }
+        .refine-meta { display: flex; gap: 14px; margin-top: 12px; flex-wrap: wrap; }
+        .refine-meta label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #6b7280; flex: 1; min-width: 160px; }
+        .refine-meta input { padding: 6px 8px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; font: inherit; }
+        .refine-foot {
+          display: flex; justify-content: space-between; align-items: center; gap: 12px;
+          padding: 12px 18px; border-top: 1px solid var(--border-color, #eee);
+        }
+        .refine-foot-msg { font-size: 12px; color: #b91c1c; }
+        .refine-foot-actions { display: flex; gap: 8px; }
+        .refine-cancel, .refine-apply { padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; border: 1px solid var(--border-color, #e5e7eb); }
+        .refine-cancel { background: transparent; color: var(--text-secondary, #374151); }
+        .refine-apply { background: #111827; color: #fff; border-color: #111827; }
+        .refine-apply:disabled { opacity: 0.5; cursor: not-allowed; }
+        @media (max-width: 640px) { .refine-cols { grid-template-columns: 1fr; } }
+      </style>
+      <div class="refine-modal">
+        <div class="refine-head">
+          <span>✨ Improve memory with AI</span>
+          <button class="refine-close" title="Close">×</button>
+        </div>
+        <div class="refine-body"></div>
+        <div class="refine-foot">
+          <span class="refine-foot-msg"></span>
+          <span class="refine-foot-actions">
+            <button class="refine-cancel">Cancel</button>
+            <button class="refine-apply">Apply</button>
+          </span>
+        </div>
+      </div>`;
+  }
+
   /**
    * Go back to previous page
    */
@@ -906,6 +1068,7 @@ class MemoryDetailPage extends HTMLElement {
                 <path d="M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </button>
+            <button class="refine-btn" title="Improve with AI — rewrite content, suggest category & tags (you approve before it saves)">✨ Improve</button>
             <button class="edit-btn" title="Edit memory (Ctrl+E)">
               <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M11 4H4C3.46957 4 2.96086 4.21071 2.58579 4.58579C2.21071 4.96086 2 5.46957 2 6V20C2 20.5304 2.21071 21.0391 2.58579 21.4142C2.96086 21.7893 3.46957 22 4 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
