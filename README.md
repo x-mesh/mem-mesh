@@ -62,6 +62,13 @@ That's it. Restart Cursor / Claude Desktop / Kiro and mem-mesh MCP tools are liv
 
 **For agents / CI:** `uvx mem-mesh --json` runs onboarding non-interactively and prints a single JSON result (per-step status + `next_actions`). Non-TTY invocations (pipes, agents) auto-run non-interactively even without `--json`. Onboarding writes the config single-source-of-truth — `~/.mem-mesh/api_url` and `~/.mem-mesh/hook_token` — which every tool's hooks read at runtime (reachable from GUI- and terminal-launched tools alike). The `MEM_MESH_API_URL` / `MEM_MESH_HOOK_TOKEN` env vars *seed* those files (and act as a per-session override; `mem-mesh doctor` flags any that shadow the files). The token must also stay exported for HTTP hooks / authenticated MCP, which read the shell env and have no file fallback. Example: `MEM_MESH_API_URL=https://memory.example.com MEM_MESH_HOOK_TOKEN=… uvx mem-mesh --json`.
 
+Install or repair hooks directly through the same uvx entrypoint:
+
+```bash
+uvx mem-mesh hooks install --target codex
+uvx mem-mesh hooks status
+```
+
 Want the web dashboard too? `uvx --from "mem-mesh[server]" mem-mesh serve` — open http://localhost:8000.
 
 ### Alternative: pip install
