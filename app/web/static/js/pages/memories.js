@@ -922,8 +922,15 @@ class MemoriesPage extends HTMLElement {
         return; // block all other keys while help is open
       }
 
-      // Skip when focus is in an input/select/textarea (except Escape)
-      if (e.target.matches('input, select, textarea, .combobox-input') && e.key !== 'Escape') return;
+      // Skip when focus is in an input/select/textarea (except Escape).
+      // Use composedPath() so editable targets inside shadow DOM (e.g. the
+      // global chat-widget textarea) are detected before document retargets
+      // e.target to the shadow host.
+      const editable = e.composedPath().some((el) =>
+        el?.nodeType === 1 &&
+        (el.matches?.('input, select, textarea, .combobox-input') || el.isContentEditable)
+      );
+      if (editable && e.key !== 'Escape') return;
 
       // Skip when a modal overlay is open (edit modal, palette, export menu)
       if (document.querySelector('.cmd-palette-overlay, .mem-edit-overlay')) return;

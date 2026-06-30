@@ -117,6 +117,14 @@ export class SettingsPage extends HTMLElement {
               <span>Model</span>
               <input id="chat-model" type="text" placeholder="provider default">
             </label>
+            <label class="chat-field">
+              <span>Output Language</span>
+              <select id="chat-language">
+                <option value="auto">Auto</option>
+                <option value="korean">한국어</option>
+                <option value="english">English</option>
+              </select>
+            </label>
             <label class="chat-field chat-field-wide">
               <span>API Key</span>
               <div class="chat-key-row">
@@ -446,6 +454,8 @@ export class SettingsPage extends HTMLElement {
         if (model) model.value = (data.llm_model && data.llm_model.value) || '';
         const baseUrl = this.querySelector('#chat-base-url');
         if (baseUrl) baseUrl.value = (data.llm_base_url && data.llm_base_url.value) || '';
+        const language = this.querySelector('#chat-language');
+        if (language) language.value = (data.output_language && data.output_language.value) || 'auto';
         const key = this.querySelector('#chat-api-key');
         const configured = data.llm_api_key && data.llm_api_key.configured;
         if (key) {
@@ -489,6 +499,7 @@ export class SettingsPage extends HTMLElement {
             llm_provider: this.querySelector('#chat-provider')?.value || 'anthropic',
             llm_model: this.querySelector('#chat-model')?.value.trim() || '',
             llm_base_url: this.querySelector('#chat-base-url')?.value.trim() || '',
+            output_language: this.querySelector('#chat-language')?.value || 'auto',
         };
         const key = this.querySelector('#chat-api-key')?.value.trim();
         if (key) payload.llm_api_key = key;

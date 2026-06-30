@@ -482,6 +482,14 @@ class Settings(BaseSettings):
         default=True,
         description="Master toggle for the dashboard chat assistant widget",
     )
+    chat_output_language: str = Field(
+        default="auto",
+        description=(
+            "Language for 'Save as memory' summaries: 'auto' (match the input "
+            "conversation language), 'korean', or 'english'. JSON keys and the "
+            "category enum always stay in English."
+        ),
+    )
 
     @field_validator("storage_mode")
     @classmethod

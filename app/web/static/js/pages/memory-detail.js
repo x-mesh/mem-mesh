@@ -435,7 +435,8 @@ class MemoryDetailPage extends HTMLElement {
       if (e.target === overlay) overlay.remove();
     });
     const body = overlay.querySelector('.dd-body');
-    body.innerHTML = '<div class="dd-status">🔀 Searching for similar memories…</div>';
+    body.innerHTML =
+      '<div class="dd-status"><span class="dd-spinner"></span>Searching for similar memories…</div>';
     try {
       const res = await fetch('/api/chat/v1/dedup/scan', {
         method: 'POST',
@@ -487,7 +488,7 @@ class MemoryDetailPage extends HTMLElement {
       return;
     }
     const body = overlay.querySelector('.dd-body');
-    body.innerHTML = '<div class="dd-status">✨ Merging with AI…</div>';
+    body.innerHTML = '<div class="dd-status"><span class="dd-spinner"></span>Merging with AI…</div>';
     overlay.querySelector('.dd-foot-actions').innerHTML = '';
     msg.textContent = '';
     try {
@@ -567,6 +568,13 @@ class MemoryDetailPage extends HTMLElement {
         .dd-close { border: none; background: transparent; font-size: 22px; cursor: pointer; color: #6b7280; }
         .dd-body { padding: 16px 18px; overflow-y: auto; }
         .dd-status { padding: 24px; text-align: center; color: #6b7280; }
+        .dd-spinner {
+          width: 14px; height: 14px; border: 2px solid var(--border-color, #d1d5db);
+          border-top-color: var(--text-primary, #111827); border-radius: 50%;
+          display: inline-block; vertical-align: middle; margin-right: 8px;
+          animation: dd-spin 0.7s linear infinite;
+        }
+        @keyframes dd-spin { to { transform: rotate(360deg); } }
         .dd-error { color: #b91c1c; }
         .dd-hint { font-size: 13px; color: #6b7280; margin: 0 0 10px; }
         .dd-cand { display: flex; gap: 10px; align-items: flex-start; padding: 8px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
@@ -687,7 +695,7 @@ class MemoryDetailPage extends HTMLElement {
     const body = overlay.querySelector('.refine-body');
     overlay.querySelector('.refine-apply').style.display = 'none';
     body.innerHTML =
-      '<div class="refine-status">✨ Asking the assistant to improve this memory…</div>';
+      '<div class="refine-status"><span class="refine-spinner"></span>Asking the assistant to improve this memory…</div>';
 
     try {
       const res = await fetch('/api/chat/v1/refine', {
@@ -785,6 +793,13 @@ class MemoryDetailPage extends HTMLElement {
         .refine-close { border: none; background: transparent; font-size: 22px; cursor: pointer; color: #6b7280; }
         .refine-body { padding: 16px 18px; overflow-y: auto; }
         .refine-status { padding: 28px; text-align: center; color: #6b7280; }
+        .refine-spinner {
+          width: 14px; height: 14px; border: 2px solid var(--border-color, #d1d5db);
+          border-top-color: var(--text-primary, #111827); border-radius: 50%;
+          display: inline-block; vertical-align: middle; margin-right: 8px;
+          animation: refine-spin 0.7s linear infinite;
+        }
+        @keyframes refine-spin { to { transform: rotate(360deg); } }
         .refine-error { color: #b91c1c; }
         .refine-rationale { margin-bottom: 12px; color: #1d4ed8; font-size: 13px; }
         .refine-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }

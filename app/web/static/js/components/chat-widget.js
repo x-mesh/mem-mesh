@@ -330,7 +330,7 @@ export class ChatWidget extends HTMLElement {
       this._setBusy(false);
       this._setTool('');
       if (ok && bubble.textContent.trim()) {
-        this._appendSaveAction(text, bubble.textContent);
+        this._appendSaveAction(text, bubble.dataset.md || bubble.textContent);
       }
     }
   }
@@ -368,7 +368,8 @@ export class ChatWidget extends HTMLElement {
     });
     const body = overlay.querySelector('.cm-body');
     overlay.querySelector('.cm-save').style.display = 'none';
-    body.innerHTML = '<div class="cm-status">✨ Distilling this into a memory…</div>';
+    body.innerHTML =
+      '<div class="cm-status"><span class="cm-spinner"></span>Distilling this into a memory…</div>';
     try {
       const res = await fetch('/api/chat/v1/summarize', {
         method: 'POST',
@@ -424,7 +425,7 @@ export class ChatWidget extends HTMLElement {
     }
     const btn = overlay.querySelector('.cm-save');
     btn.disabled = true;
-    msg.textContent = 'Saving…';
+    msg.innerHTML = '<span class="cm-spinner"></span>Saving…';
     try {
       const res = await fetch('/api/chat/v1/save-memory', {
         method: 'POST',
@@ -479,6 +480,12 @@ export class ChatWidget extends HTMLElement {
         .cm-cancel { background: transparent; color: #374151; }
         .cm-save { background: #111827; color: #fff; border-color: #111827; }
         .cm-save:disabled { opacity: 0.5; cursor: not-allowed; }
+        .cm-spinner {
+          width: 14px; height: 14px; border: 2px solid #d1d5db; border-top-color: #111827;
+          border-radius: 50%; display: inline-block; vertical-align: middle; margin-right: 8px;
+          animation: cm-spin 0.7s linear infinite;
+        }
+        @keyframes cm-spin { to { transform: rotate(360deg); } }
       </style>
       <div class="cm-modal">
         <div class="cm-head">
@@ -567,11 +574,19 @@ export class ChatWidget extends HTMLElement {
       case 'message':
         // streamed deltas already built the text; only set on no-stream fallback
         if (!this._gotDelta) {
-          bubble.textContent = payload.text || '';
+          bubble.dataset.md = payload.text || '';
+          bubble.innerHTML = this._renderMarkdown(payload.text || '');
           this._scroll();
         }
         break;
       case 'done':
+        // Streaming kept the raw text (partial markdown is unsafe to render
+        // mid-stream); render the finished message once here.
+        if (this._gotDelta && !bubble.classList.contains('error')) {
+          bubble.dataset.md = bubble.textContent;
+          bubble.innerHTML = this._renderMarkdown(bubble.textContent);
+          this._scroll();
+        }
         if (payload.truncated) this._setTool('(stopped at step limit)');
         else this._setTool('');
         break;
@@ -583,6 +598,92 @@ export class ChatWidget extends HTMLElement {
   }
 
   // ----- rendering ------------------------------------------------------
+
+  // Minimal, dependency-free markdown → HTML. Escapes first, so output is
+  // XSS-safe; supports code fences/inline code, headings, lists, bold/italic,
+  // and http(s) links — enough for assistant replies.
+  _mdEscape(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  _mdInline(text) {
+    const codes = [];
+    let t = String(text).replace(/`([^`]+)`/g, (_m, c) => {
+      codes.push(this._mdEscape(c));
+      return `\x00C${codes.length - 1}\x00`;
+    });
+    t = this._mdEscape(t);
+    t = t.replace(
+      /\[([^\]\x00]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      (_m, txt, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${txt}</a>`
+    );
+    t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    t = t.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+    t = t.replace(/\x00C(\d+)\x00/g, (_m, i) => `<code class="md-code">${codes[+i]}</code>`);
+    return t;
+  }
+
+  _renderMarkdown(src) {
+    const fences = [];
+    const s = String(src).replace(/```[ \t]*[\w-]*\n?([\s\S]*?)```/g, (_m, code) => {
+      fences.push(this._mdEscape(code.replace(/\n$/, '')));
+      return `\x00F${fences.length - 1}\x00`;
+    });
+    const out = [];
+    let list = null;
+    const closeList = () => {
+      if (list) {
+        out.push(`</${list}>`);
+        list = null;
+      }
+    };
+    for (const line of s.split('\n')) {
+      const fence = line.match(/^\x00F(\d+)\x00$/);
+      if (fence) {
+        closeList();
+        out.push(`<pre class="md-pre"><code>${fences[+fence[1]]}</code></pre>`);
+        continue;
+      }
+      const h = line.match(/^(#{1,6})\s+(.*)$/);
+      if (h) {
+        closeList();
+        const lvl = h[1].length;
+        out.push(`<h${lvl} class="md-h">${this._mdInline(h[2])}</h${lvl}>`);
+        continue;
+      }
+      const ul = line.match(/^\s*[-*+]\s+(.*)$/);
+      if (ul) {
+        if (list !== 'ul') {
+          closeList();
+          out.push('<ul class="md-list">');
+          list = 'ul';
+        }
+        out.push(`<li>${this._mdInline(ul[1])}</li>`);
+        continue;
+      }
+      const ol = line.match(/^\s*\d+\.\s+(.*)$/);
+      if (ol) {
+        if (list !== 'ol') {
+          closeList();
+          out.push('<ol class="md-list">');
+          list = 'ol';
+        }
+        out.push(`<li>${this._mdInline(ol[1])}</li>`);
+        continue;
+      }
+      if (line.trim() === '') {
+        closeList();
+        continue;
+      }
+      closeList();
+      out.push(`<p class="md-p">${this._mdInline(line)}</p>`);
+    }
+    closeList();
+    return out.join('');
+  }
 
   _addMessage(role, text) {
     const el = document.createElement('div');
@@ -687,6 +788,19 @@ export class ChatWidget extends HTMLElement {
         .msg.user { align-self: flex-end; background: #111827; color: #fff; border-bottom-right-radius: 4px; }
         .msg.assistant { align-self: flex-start; background: #fff; border: 1px solid #e5e7eb; border-bottom-left-radius: 4px; }
         .msg.error { color: #b91c1c; border-color: #fecaca; }
+        .msg .md-p { margin: 0 0 8px; }
+        .msg .md-p:last-child, .msg .md-list:last-child, .msg .md-pre:last-child { margin-bottom: 0; }
+        .msg .md-p:first-child, .msg .md-h:first-child { margin-top: 0; }
+        .msg .md-h { margin: 10px 0 4px; font-weight: 600; line-height: 1.3; }
+        .msg h1.md-h { font-size: 1.25em; }
+        .msg h2.md-h { font-size: 1.15em; }
+        .msg h3.md-h, .msg h4.md-h, .msg h5.md-h, .msg h6.md-h { font-size: 1.05em; }
+        .msg .md-list { margin: 4px 0 8px; padding-left: 20px; }
+        .msg .md-list li { margin: 2px 0; }
+        .msg .md-code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+        .msg .md-pre { background: #f6f8fa; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; margin: 6px 0; overflow-x: auto; white-space: pre; }
+        .msg .md-pre code { background: none; padding: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; }
+        .msg.assistant a { color: #2563eb; text-decoration: underline; }
         .msg-actions { align-self: flex-start; margin-top: -4px; }
         .save-memory-btn {
           border: 1px solid #e5e7eb; background: #fff; color: #374151;

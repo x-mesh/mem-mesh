@@ -435,9 +435,11 @@ async def chat_summarize(
         raise HTTPException(
             status_code=403, detail="Chat assistant is disabled in settings"
         )
+    # Per-request override wins; when None the service resolves the stored
+    # 'chat.output_language' setting (DB > env > default 'auto').
     try:
         proposed = await service.summarize_for_memory(
-            text=payload.text, settings=settings
+            text=payload.text, settings=settings, language=payload.language
         )
     except ChatError as exc:
         raise HTTPException(status_code=exc.http_status, detail=str(exc))

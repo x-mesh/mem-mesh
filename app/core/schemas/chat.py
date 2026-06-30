@@ -17,6 +17,7 @@ class ChatSettingsResponse(BaseModel):
     llm_api_key: RelaySettingValue
     llm_model: RelaySettingValue
     llm_base_url: RelaySettingValue
+    output_language: RelaySettingValue
     enabled: bool = True
     configured: bool = False
     available: bool = False
@@ -36,6 +37,7 @@ class ChatSettingsUpdateRequest(BaseModel):
     llm_api_key: Optional[str] = Field(default=None, max_length=500)
     llm_model: Optional[str] = Field(default=None, max_length=200)
     llm_base_url: Optional[str] = Field(default=None, max_length=500)
+    output_language: Optional[str] = Field(default=None, max_length=20)
     enabled: Optional[bool] = None
 
     @field_validator("llm_provider")
@@ -48,6 +50,16 @@ class ChatSettingsUpdateRequest(BaseModel):
             return None
         if normalized not in ("anthropic", "openai"):
             raise ValueError("llm_provider must be 'anthropic' or 'openai'")
+        return normalized
+
+    @field_validator("output_language")
+    @classmethod
+    def _validate_output_language(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if normalized not in ("auto", "korean", "english"):
+            return "auto"
         return normalized
 
 
@@ -177,6 +189,7 @@ SAVE_CATEGORIES = ("decision", "bug", "incident", "idea", "code_snippet")
 
 class ChatSummarizeRequest(BaseModel):
     text: str = Field(min_length=1, max_length=100000)
+    language: Optional[str] = Field(default=None, max_length=20)
 
 
 class ChatMemoryProposal(BaseModel):

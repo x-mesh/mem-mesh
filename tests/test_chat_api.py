@@ -296,7 +296,7 @@ class _FakeSaveChatService:
     async def is_enabled(self, s):
         return True
 
-    async def summarize_for_memory(self, *, text, settings):
+    async def summarize_for_memory(self, *, text, settings, language=None):
         return {
             "content": "## WHY\nlasting decision content",
             "category": "decision",

@@ -52,6 +52,34 @@ _SUMMARIZE_SYSTEM_PROMPT = (
     "(string), tags (array of strings), summary (one short line)."
 )
 
+
+def _language_instruction(language: Optional[str]) -> str:
+    """Build the language directive appended to the summarize system prompt.
+
+    ``language`` is one of 'korean' / 'english' / 'auto' (or any other value,
+    which is treated as 'auto'). Only the content and summary VALUES follow the
+    requested language; the JSON keys and the category enum stay in English in
+    every case so downstream ``_extract_json_object`` / ``_valid_category``
+    parsing never breaks.
+    """
+
+    normalized = (language or "auto").strip().lower()
+    if normalized == "korean":
+        directive = "Write the content and summary VALUES in Korean."
+    elif normalized == "english":
+        directive = "Write the content and summary VALUES in English."
+    else:
+        directive = (
+            "Write the content and summary VALUES in the SAME language as the "
+            "input conversation."
+        )
+    return (
+        directive + " ALWAYS keep the JSON keys and the category enum value "
+        "(one of: decision, bug, incident, idea, code_snippet) in English — "
+        "never translate the keys or the category."
+    )
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,12 +95,17 @@ class ChatService:
         "llm_api_key": "chat.llm_api_key",
         "llm_model": "chat.llm_model",
         "llm_base_url": "chat.llm_base_url",
+        "output_language": "chat.output_language",
     }
     SETTING_FIELDS = {
         "llm_provider": ("chat_llm_provider", "MEM_MESH_CHAT_LLM_PROVIDER"),
         "llm_api_key": ("chat_llm_api_key", "MEM_MESH_CHAT_LLM_API_KEY"),
         "llm_model": ("chat_llm_model", "MEM_MESH_CHAT_LLM_MODEL"),
         "llm_base_url": ("chat_llm_base_url", "MEM_MESH_CHAT_LLM_BASE_URL"),
+        "output_language": (
+            "chat_output_language",
+            "MEM_MESH_CHAT_OUTPUT_LANGUAGE",
+        ),
     }
 
     def __init__(self, db: Any):
@@ -158,6 +191,9 @@ class ChatService:
             llm_base_url=await self._db_backed_setting(
                 key="llm_base_url", label="Chat LLM endpoint", settings=settings
             ),
+            output_language=await self._db_backed_setting(
+                key="output_language", label="Chat output language", settings=settings
+            ),
             enabled=await self.is_enabled(settings),
             configured=await self.is_configured(settings),
             available=(
@@ -177,6 +213,14 @@ class ChatService:
                 await self.db.set_app_config(self.CONFIG_KEYS[key], cleaned)
             else:
                 await self.db.delete_app_config(self.CONFIG_KEYS[key])
+        if request.output_language is not None:
+            cleaned = str(request.output_language).strip().lower()
+            if cleaned:
+                await self.db.set_app_config(
+                    self.CONFIG_KEYS["output_language"], cleaned
+                )
+            else:
+                await self.db.delete_app_config(self.CONFIG_KEYS["output_language"])
         if request.enabled is not None:
             await self.db.set_app_config(
                 self.ENABLED_KEY, "true" if request.enabled else "false"
@@ -411,17 +455,34 @@ class ChatService:
         }
 
     async def summarize_for_memory(
-        self, *, text: str, settings: Any, http_client: Any = None
+        self,
+        *,
+        text: str,
+        settings: Any,
+        language: Optional[str] = None,
+        http_client: Any = None,
     ) -> dict:
-        """Distill text (a chat answer/thread) into a proposed durable memory."""
+        """Distill text (a chat answer/thread) into a proposed durable memory.
+
+        ``language`` ('korean' / 'english' / 'auto') controls the language of the
+        content/summary VALUES. When None/empty it falls back to the stored
+        ``chat.output_language`` setting (DB > env > default 'auto'). The JSON keys
+        and category enum always stay in English regardless.
+        """
+
+        if not language:
+            language, _ = await self._effective_setting_value(
+                "output_language", settings
+            )
 
         enricher, _provider = await self._build_enricher(
             settings, http_client=http_client
         )
+        system_prompt = f"{_SUMMARIZE_SYSTEM_PROMPT} {_language_instruction(language)}"
         try:
             result = await enricher.chat(
                 [
-                    {"role": "system", "content": _SUMMARIZE_SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"<input>\n{text}\n</input>"},
                 ]
             )
