@@ -73,6 +73,25 @@ class ChatService:
         value, _ = await self._effective_setting_value("llm_api_key", settings)
         return bool(value)
 
+    ENABLED_KEY = "chat.enabled"
+
+    async def is_enabled(self, settings: Any) -> bool:
+        db_value = await self.db.get_app_config(self.ENABLED_KEY)
+        if db_value is not None:
+            return str(db_value).strip().lower() in ("1", "true", "yes", "on")
+        return bool(getattr(settings, "chat_enabled", True))
+
+    async def get_status(self, settings: Any) -> dict:
+        configured = await self.is_configured(settings)
+        enabled = await self.is_enabled(settings)
+        provider, _ = await self._effective_setting_value("llm_provider", settings)
+        return {
+            "configured": configured,
+            "enabled": enabled,
+            "available": configured and enabled,
+            "provider": provider or None,
+        }
+
     # ----- dashboard admin settings -----------------------------------------
 
     async def _db_backed_setting(
@@ -109,6 +128,11 @@ class ChatService:
             llm_base_url=await self._db_backed_setting(
                 key="llm_base_url", label="Chat LLM endpoint", settings=settings
             ),
+            enabled=await self.is_enabled(settings),
+            configured=await self.is_configured(settings),
+            available=(
+                await self.is_configured(settings) and await self.is_enabled(settings)
+            ),
         )
 
     async def update_admin_settings(
@@ -123,6 +147,10 @@ class ChatService:
                 await self.db.set_app_config(self.CONFIG_KEYS[key], cleaned)
             else:
                 await self.db.delete_app_config(self.CONFIG_KEYS[key])
+        if request.enabled is not None:
+            await self.db.set_app_config(
+                self.ENABLED_KEY, "true" if request.enabled else "false"
+            )
         return await self.get_admin_settings(settings)
 
     async def _build_enricher(

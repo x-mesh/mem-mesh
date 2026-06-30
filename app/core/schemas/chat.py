@@ -17,6 +17,18 @@ class ChatSettingsResponse(BaseModel):
     llm_api_key: RelaySettingValue
     llm_model: RelaySettingValue
     llm_base_url: RelaySettingValue
+    enabled: bool = True
+    configured: bool = False
+    available: bool = False
+
+
+class ChatStatusResponse(BaseModel):
+    """Lightweight availability check for the floating widget."""
+
+    available: bool = False
+    configured: bool = False
+    enabled: bool = True
+    provider: Optional[str] = None
 
 
 class ChatSettingsUpdateRequest(BaseModel):
@@ -24,6 +36,7 @@ class ChatSettingsUpdateRequest(BaseModel):
     llm_api_key: Optional[str] = Field(default=None, max_length=500)
     llm_model: Optional[str] = Field(default=None, max_length=200)
     llm_base_url: Optional[str] = Field(default=None, max_length=500)
+    enabled: Optional[bool] = None
 
     @field_validator("llm_provider")
     @classmethod
@@ -85,18 +98,25 @@ class ChatCompleteResponse(BaseModel):
     tool_calls: List[ChatToolCall] = Field(default_factory=list)
 
 
+class ChatPageContext(BaseModel):
+    """Where the user is in the dashboard when they open the assistant."""
+
+    route: Optional[str] = Field(default=None, max_length=200)
+    label: Optional[str] = Field(default=None, max_length=120)
+    memory_id: Optional[str] = Field(default=None, max_length=100)
+    project_id: Optional[str] = Field(default=None, max_length=100)
+
+
 class ChatAgentRequest(BaseModel):
     messages: List[ChatMessageInput] = Field(min_length=1)
-    project_id: Optional[str] = Field(default=None, max_length=100)
-    page_memory_id: Optional[str] = Field(default=None, max_length=100)
+    page: Optional[ChatPageContext] = None
     max_steps: int = Field(default=5, ge=1, le=8)
 
 
 class ChatStreamRequest(BaseModel):
     messages: List[ChatMessageInput] = Field(min_length=1)
     session_id: Optional[str] = Field(default=None, max_length=64)
-    project_id: Optional[str] = Field(default=None, max_length=100)
-    page_memory_id: Optional[str] = Field(default=None, max_length=100)
+    page: Optional[ChatPageContext] = None
     max_steps: int = Field(default=5, ge=1, le=8)
 
 

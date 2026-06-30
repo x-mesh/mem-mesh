@@ -98,9 +98,13 @@ export class SettingsPage extends HTMLElement {
       <div class="settings-section" id="settings-chat">
         <div class="section-header">
           <span class="section-label">Chat Assistant</span>
+          <label class="chat-enable-toggle" title="Show the floating chat widget (requires a configured provider)">
+            <input type="checkbox" id="chat-enabled">
+            <span>Enabled</span>
+          </label>
         </div>
         <div class="section-body">
-          <p class="section-desc">Configure an OpenAI/Anthropic-compatible API for the dashboard chat assistant. The key is stored on the server and never returned to the browser.</p>
+          <p class="section-desc">Configure an OpenAI/Anthropic-compatible API for the dashboard chat assistant. The key is stored on the server and never returned to the browser. The floating widget appears only when a provider is configured and this is enabled.</p>
           <div class="chat-settings-grid">
             <label class="chat-field">
               <span>Provider</span>
@@ -327,6 +331,7 @@ export class SettingsPage extends HTMLElement {
         this.querySelector('#chat-save-btn')?.addEventListener('click', () => this.saveChatSettings());
         this.querySelector('#chat-test-btn')?.addEventListener('click', () => this.testChatConnection());
         this.querySelector('#chat-key-toggle')?.addEventListener('click', () => this.toggleChatKeyVisibility());
+        this.querySelector('#chat-enabled')?.addEventListener('change', () => this.saveChatEnabled());
         this.querySelector('#refresh-status-btn')?.addEventListener('click', () => this.loadStatus());
         this.querySelector('#change-model-btn')?.addEventListener('click', () => {
             window.history.pushState({}, '', '/onboarding');
@@ -447,10 +452,35 @@ export class SettingsPage extends HTMLElement {
             key.value = '';
             key.placeholder = configured ? 'configured — enter new key to replace' : 'enter key to set';
         }
+        const enabled = this.querySelector('#chat-enabled');
+        if (enabled) enabled.checked = data.enabled !== false;
         const meta = this.querySelector('#chat-settings-meta');
         if (meta) {
             const src = (data.llm_provider && data.llm_provider.source) || 'default';
-            meta.innerHTML = `provider <span class="env-src env-src-${src}">${src}</span> &middot; key ${configured ? 'configured' : 'not set'}`;
+            const avail = data.available
+                ? '<span class="env-src env-src-db">active</span>'
+                : !configured
+                  ? 'inactive (no key)'
+                  : 'inactive (disabled)';
+            meta.innerHTML = `provider <span class="env-src env-src-${src}">${src}</span> &middot; key ${configured ? 'configured' : 'not set'} &middot; widget ${avail}`;
+        }
+    }
+
+    async saveChatEnabled() {
+        const enabled = this.querySelector('#chat-enabled')?.checked ?? true;
+        try {
+            const res = await fetch('/api/chat/v1/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+            this.applyChatSettings(data);
+            window.dispatchEvent(new CustomEvent('memmesh:chat-settings-changed'));
+            showToast(enabled ? 'Chat assistant enabled.' : 'Chat assistant disabled.', 'success');
+        } catch (error) {
+            showToast(`Failed: ${error.message}`, 'error');
         }
     }
 
@@ -473,6 +503,7 @@ export class SettingsPage extends HTMLElement {
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
             this.applyChatSettings(data);
+            window.dispatchEvent(new CustomEvent('memmesh:chat-settings-changed'));
             showToast('Chat settings saved.', 'success');
         } catch (error) {
             showToast(`Save failed: ${error.message}`, 'error');
@@ -1573,6 +1604,20 @@ style.textContent = `
 .chat-key-row .settings-btn {
   flex: 0 0 auto;
   padding: 6px 12px;
+}
+
+.chat-enable-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.chat-enable-toggle input {
+  width: 14px;
+  height: 14px;
 }
 
 @media (max-width: 640px) {

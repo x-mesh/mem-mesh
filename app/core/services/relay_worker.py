@@ -210,6 +210,60 @@ class RelayEnricher:
     def _parse_chat(self, raw: dict) -> ChatResult:
         raise NotImplementedError
 
+    # ----- streaming chat ---------------------------------------------------
+
+    async def chat_stream(
+        self,
+        messages: List[dict],
+        *,
+        tools: Optional[list] = None,
+        max_tokens: Optional[int] = None,
+    ):
+        """Async generator yielding ``{"type":"text_delta","text":...}`` as the
+        model produces tokens, then a final ``{"type":"final","result":
+        ChatResult}``. Subclasses parse their provider's streaming format."""
+
+        raise NotImplementedError
+        yield  # pragma: no cover - makes this an async generator
+
+    async def _post_stream(self, *, headers: dict, json_body: dict):
+        client = self.http_client
+        close_client = False
+        if client is None:
+            import httpx
+
+            client = httpx.AsyncClient()
+            close_client = True
+        try:
+            async with client.stream(
+                "POST",
+                self.base_url,
+                headers=headers,
+                json=json_body,
+                timeout=self.timeout,
+            ) as response:
+                if response.status_code >= 400:
+                    raise RuntimeError(await self._stream_error(response))
+                async for line in response.aiter_lines():
+                    yield line
+        finally:
+            if close_client:
+                await client.aclose()
+
+    @staticmethod
+    async def _stream_error(response: Any) -> str:
+        try:
+            body = await response.aread()
+            data = json.loads(body)
+            if isinstance(data, dict):
+                if isinstance(data.get("error"), dict) and data["error"].get("message"):
+                    return str(data["error"]["message"])
+                if data.get("detail"):
+                    return str(data["detail"])
+        except Exception:
+            pass
+        return f"HTTP {getattr(response, 'status_code', '?')}"
+
 
 class AnthropicRelayEnricher(RelayEnricher):
     """Anthropic Messages API adapter for relay enrichment and digest jobs."""
@@ -328,6 +382,84 @@ class AnthropicRelayEnricher(RelayEnricher):
             finish_reason=(raw or {}).get("stop_reason"),
             raw=raw,
         )
+
+    async def chat_stream(
+        self,
+        messages: List[dict],
+        *,
+        tools: Optional[list] = None,
+        max_tokens: Optional[int] = None,
+    ):
+        body = self._chat_payload(
+            messages,
+            tools=tools,
+            tool_choice=None,
+            max_tokens=max_tokens or self.max_tokens,
+        )
+        body["stream"] = True
+        lines = self._post_stream(headers=self._auth_headers(), json_body=body)
+        async for event in self._parse_anthropic_stream(lines):
+            yield event
+
+    @staticmethod
+    async def _parse_anthropic_stream(lines):
+        text_parts: List[str] = []
+        blocks: dict = {}  # index -> {type, id, name, json}
+        stop_reason = None
+        async for line in lines:
+            line = (line or "").strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if not data:
+                continue
+            try:
+                evt = json.loads(data)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            etype = evt.get("type")
+            if etype == "content_block_start":
+                cb = evt.get("content_block") or {}
+                blocks[evt.get("index")] = {
+                    "type": cb.get("type"),
+                    "id": cb.get("id"),
+                    "name": cb.get("name"),
+                    "json": "",
+                }
+            elif etype == "content_block_delta":
+                delta = evt.get("delta") or {}
+                if delta.get("type") == "text_delta":
+                    chunk = delta.get("text", "")
+                    text_parts.append(chunk)
+                    yield {"type": "text_delta", "text": chunk}
+                elif delta.get("type") == "input_json_delta":
+                    block = blocks.get(evt.get("index"))
+                    if block is not None:
+                        block["json"] += delta.get("partial_json", "")
+            elif etype == "message_delta":
+                stop_reason = (evt.get("delta") or {}).get("stop_reason") or stop_reason
+        tool_calls = []
+        for block in blocks.values():
+            if block.get("type") == "tool_use":
+                try:
+                    args = json.loads(block["json"] or "{}")
+                except (json.JSONDecodeError, ValueError):
+                    args = {}
+                tool_calls.append(
+                    {
+                        "id": block.get("id"),
+                        "name": block.get("name"),
+                        "arguments": args,
+                    }
+                )
+        yield {
+            "type": "final",
+            "result": ChatResult(
+                text="".join(text_parts),
+                tool_calls=tool_calls,
+                finish_reason=stop_reason,
+            ),
+        }
 
 
 class OpenAIRelayEnricher(RelayEnricher):
@@ -481,6 +613,83 @@ class OpenAIRelayEnricher(RelayEnricher):
             finish_reason=choice.get("finish_reason"),
             raw=raw,
         )
+
+    async def chat_stream(
+        self,
+        messages: List[dict],
+        *,
+        tools: Optional[list] = None,
+        max_tokens: Optional[int] = None,
+    ):
+        body = self._chat_payload(
+            messages,
+            tools=tools,
+            tool_choice=None,
+            max_tokens=max_tokens or self.max_tokens,
+        )
+        body["stream"] = True
+        lines = self._post_stream(headers=self._auth_headers(), json_body=body)
+        async for event in self._parse_openai_stream(lines):
+            yield event
+
+    @staticmethod
+    async def _parse_openai_stream(lines):
+        text_parts: List[str] = []
+        tools_by_index: dict = {}  # index -> {id, name, args}
+        finish = None
+        async for line in lines:
+            line = (line or "").strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            if not data:
+                continue
+            try:
+                chunk = json.loads(data)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            choices = chunk.get("choices") or []
+            if not choices or not isinstance(choices[0], dict):
+                continue
+            choice = choices[0]
+            delta = choice.get("delta") or {}
+            if delta.get("content"):
+                text_parts.append(delta["content"])
+                yield {"type": "text_delta", "text": delta["content"]}
+            for tc in delta.get("tool_calls") or []:
+                if not isinstance(tc, dict):
+                    continue
+                idx = tc.get("index", 0)
+                slot = tools_by_index.setdefault(
+                    idx, {"id": None, "name": None, "args": ""}
+                )
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
+                fn = tc.get("function") or {}
+                if fn.get("name"):
+                    slot["name"] = fn["name"]
+                if fn.get("arguments"):
+                    slot["args"] += fn["arguments"]
+            if choice.get("finish_reason"):
+                finish = choice["finish_reason"]
+        tool_calls = []
+        for idx in sorted(tools_by_index):
+            slot = tools_by_index[idx]
+            try:
+                args = json.loads(slot["args"] or "{}")
+            except (json.JSONDecodeError, ValueError):
+                args = {}
+            tool_calls.append(
+                {"id": slot["id"], "name": slot["name"], "arguments": args}
+            )
+        yield {
+            "type": "final",
+            "result": ChatResult(
+                text="".join(text_parts), tool_calls=tool_calls, finish_reason=finish
+            ),
+        }
 
 
 _RELAY_ENRICHERS = {

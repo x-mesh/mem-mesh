@@ -1,14 +1,20 @@
 /**
- * Floating chat assistant widget (M1d).
+ * Floating chat assistant widget.
  *
  * A draggable launcher that expands into a chat panel. Talks to the
  * /api/chat/v1/stream SSE endpoint (POST + fetch ReadableStream), rendering
- * tool-call progress and the assistant's answer. Position persists in
- * localStorage; mounted once globally so it floats across all dashboard pages.
+ * token-by-token streaming, tool-call progress, a spinner + elapsed timer.
+ * The panel is draggable (by its header) and resizable from the top-left grip.
+ * Position and size persist in localStorage; mounted once globally so it
+ * floats across all dashboard pages. On a memory detail page it picks up the
+ * memory id so the assistant can answer about the current memory.
  */
 
 const POS_KEY = 'memmesh.chat.pos';
+const SIZE_KEY = 'memmesh.chat.size';
 const STREAM_URL = '/api/chat/v1/stream';
+const MIN_W = 320;
+const MIN_H = 360;
 
 export class ChatWidget extends HTMLElement {
   constructor() {
@@ -16,9 +22,13 @@ export class ChatWidget extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this.open = false;
     this.busy = false;
+    this.available = false;
     this.sessionId = null;
-    this.messages = []; // {role, text}
+    this.panelW = 380;
+    this.panelH = 540;
     this._drag = null;
+    this._timer = null;
+    this._gotDelta = false;
   }
 
   connectedCallback() {
@@ -26,24 +36,45 @@ export class ChatWidget extends HTMLElement {
     this._els = {
       launcher: this.shadowRoot.querySelector('.launcher'),
       panel: this.shadowRoot.querySelector('.panel'),
+      header: this.shadowRoot.querySelector('.header'),
+      grip: this.shadowRoot.querySelector('.grip'),
       list: this.shadowRoot.querySelector('.messages'),
       input: this.shadowRoot.querySelector('textarea'),
       send: this.shadowRoot.querySelector('.send'),
-      status: this.shadowRoot.querySelector('.status'),
+      spinner: this.shadowRoot.querySelector('.spinner'),
+      elapsed: this.shadowRoot.querySelector('.elapsed'),
+      tool: this.shadowRoot.querySelector('.tool-status'),
+      chip: this.shadowRoot.querySelector('.context-chip'),
     };
+    this._restoreSize();
     this._restorePosition();
     this._bind();
+    // Hidden until the server confirms a provider is configured + enabled.
+    this.style.display = 'none';
+    this._checkAvailability();
+    window.addEventListener('memmesh:chat-settings-changed', () =>
+      this._checkAvailability()
+    );
   }
 
-  // ----- layout / drag --------------------------------------------------
+  async _checkAvailability() {
+    try {
+      const res = await fetch('/api/chat/v1/status', {
+        headers: { Accept: 'application/json' },
+      });
+      const data = await res.json().catch(() => ({}));
+      this.available = !!data.available;
+    } catch (_) {
+      this.available = false;
+    }
+    this.style.display = this.available ? '' : 'none';
+    if (!this.available && this.open) this._toggle(false);
+  }
+
+  // ----- persistence ----------------------------------------------------
 
   _restorePosition() {
-    let pos = null;
-    try {
-      pos = JSON.parse(localStorage.getItem(POS_KEY) || 'null');
-    } catch (_) {
-      pos = null;
-    }
+    const pos = this._readJSON(POS_KEY);
     if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
       this.style.left = `${this._clampX(pos.x)}px`;
       this.style.top = `${this._clampY(pos.y)}px`;
@@ -52,18 +83,52 @@ export class ChatWidget extends HTMLElement {
     }
   }
 
-  _clampX(x) {
-    return Math.max(8, Math.min(x, window.innerWidth - 72));
-  }
-  _clampY(y) {
-    return Math.max(8, Math.min(y, window.innerHeight - 72));
+  _restoreSize() {
+    const size = this._readJSON(SIZE_KEY);
+    if (size && size.w && size.h) {
+      this.panelW = Math.max(MIN_W, size.w);
+      this.panelH = Math.max(MIN_H, size.h);
+    }
+    this._applySize();
   }
 
+  _applySize() {
+    if (!this._els) return;
+    this._els.panel.style.width = `${this.panelW}px`;
+    this._els.panel.style.height = `${this.panelH}px`;
+  }
+
+  _readJSON(key) {
+    try {
+      return JSON.parse(localStorage.getItem(key) || 'null');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _save(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (_) {
+      /* ignore quota errors */
+    }
+  }
+
+  _clampX(x) {
+    return Math.max(8, Math.min(x, window.innerWidth - 64));
+  }
+  _clampY(y) {
+    return Math.max(8, Math.min(y, window.innerHeight - 64));
+  }
+
+  // ----- pointer (drag launcher / drag panel / resize) ------------------
+
   _bind() {
-    const l = this._els.launcher;
-    l.addEventListener('pointerdown', (e) => this._onDown(e));
+    this._els.launcher.addEventListener('pointerdown', (e) => this._onDown(e, 'launcher'));
+    this._els.header.addEventListener('pointerdown', (e) => this._onDown(e, 'panel'));
+    this._els.grip.addEventListener('pointerdown', (e) => this._onDown(e, 'resize'));
     window.addEventListener('pointermove', (e) => this._onMove(e));
-    window.addEventListener('pointerup', (e) => this._onUp(e));
+    window.addEventListener('pointerup', () => this._onUp());
     this.shadowRoot.querySelector('.close').addEventListener('click', () => this._toggle(false));
     this._els.send.addEventListener('click', () => this._submit());
     this._els.input.addEventListener('keydown', (e) => {
@@ -74,42 +139,63 @@ export class ChatWidget extends HTMLElement {
     });
   }
 
-  _onDown(e) {
+  _onDown(e, mode) {
+    // don't start a drag when interacting with the close button
+    if (mode === 'panel' && e.target.closest('.close')) return;
     const rect = this.getBoundingClientRect();
     this._drag = {
+      mode,
       startX: e.clientX,
       startY: e.clientY,
       offX: e.clientX - rect.left,
       offY: e.clientY - rect.top,
+      left: rect.left,
+      top: rect.top,
+      w: this.panelW,
+      h: this.panelH,
       moved: false,
     };
-    this._els.launcher.setPointerCapture?.(e.pointerId);
+    e.target.setPointerCapture?.(e.pointerId);
+    if (mode === 'resize') e.preventDefault();
   }
 
   _onMove(e) {
-    if (!this._drag) return;
-    const dx = e.clientX - this._drag.startX;
-    const dy = e.clientY - this._drag.startY;
-    if (!this._drag.moved && Math.hypot(dx, dy) < 4) return;
-    this._drag.moved = true;
-    const x = this._clampX(e.clientX - this._drag.offX);
-    const y = this._clampY(e.clientY - this._drag.offY);
-    this.style.left = `${x}px`;
-    this.style.top = `${y}px`;
-    this.style.right = 'auto';
-    this.style.bottom = 'auto';
+    const d = this._drag;
+    if (!d) return;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+    if (!d.moved && Math.hypot(dx, dy) < 4) return;
+    d.moved = true;
+
+    if (d.mode === 'resize') {
+      // top-left grip: drag up/left to grow, keeping the bottom-right anchored
+      const maxW = window.innerWidth - 24;
+      const maxH = window.innerHeight - 24;
+      const newW = Math.max(MIN_W, Math.min(d.w - dx, maxW));
+      const newH = Math.max(MIN_H, Math.min(d.h - dy, maxH));
+      this.panelW = newW;
+      this.panelH = newH;
+      this._applySize();
+      this.style.left = `${d.left + (d.w - newW)}px`;
+      this.style.top = `${d.top + (d.h - newH)}px`;
+      this.style.right = 'auto';
+      this.style.bottom = 'auto';
+    } else {
+      this.style.left = `${this._clampX(e.clientX - d.offX)}px`;
+      this.style.top = `${this._clampY(e.clientY - d.offY)}px`;
+      this.style.right = 'auto';
+      this.style.bottom = 'auto';
+    }
   }
 
   _onUp() {
-    if (!this._drag) return;
-    if (this._drag.moved) {
+    const d = this._drag;
+    if (!d) return;
+    if (d.moved) {
       const rect = this.getBoundingClientRect();
-      try {
-        localStorage.setItem(POS_KEY, JSON.stringify({ x: rect.left, y: rect.top }));
-      } catch (_) {
-        /* ignore quota errors */
-      }
-    } else {
+      this._save(POS_KEY, { x: rect.left, y: rect.top });
+      if (d.mode === 'resize') this._save(SIZE_KEY, { w: this.panelW, h: this.panelH });
+    } else if (d.mode === 'launcher') {
       this._toggle(!this.open);
     }
     this._drag = null;
@@ -126,14 +212,46 @@ export class ChatWidget extends HTMLElement {
   }
 
   _capturePageContext() {
-    // page memory id from the route (e.g. /memories/{id} or /memory/{id})
-    const m = window.location.pathname.match(/\/memor(?:y|ies)\/([\w-]+)/);
-    this.pageMemoryId = m ? m[1] : null;
-    // project context, if the dashboard exposes one
-    this.projectId =
+    const path = window.location.pathname;
+    const page = { route: path, label: null, memory_id: null, project_id: null };
+    let chip = '';
+    let m;
+    if ((m = path.match(/\/memor(?:y|ies)\/([\w-]+)/)) || (m = path.match(/\/edit\/([\w-]+)/))) {
+      page.memory_id = m[1];
+      page.label = path.includes('/edit/') ? 'edit memory' : 'memory detail';
+      chip = `📄 ${page.label} ${m[1].slice(0, 8)}`;
+    } else if ((m = path.match(/\/project\/([\w-]+)/))) {
+      page.project_id = decodeURIComponent(m[1]);
+      page.label = 'project detail';
+      chip = `📁 project ${page.project_id}`;
+    } else {
+      const NAMES = {
+        '/': 'dashboard',
+        '/dashboard': 'dashboard',
+        '/settings': 'settings',
+        '/search': 'search',
+        '/analytics': 'analytics',
+        '/work': 'work',
+        '/projects': 'projects',
+        '/memories': 'memories',
+        '/relay': 'relay',
+        '/security': 'security',
+        '/monitoring': 'monitoring',
+        '/connect': 'connect',
+      };
+      page.label = NAMES[path] || path.replace(/^\//, '') || 'dashboard';
+      chip = `⚲ ${page.label}`;
+    }
+    // fall back to an app-provided project id if the route didn't carry one
+    page.project_id =
+      page.project_id ||
       window.app?.appState?.currentProjectId ||
       window.__MEMMESH_PROJECT_ID__ ||
       null;
+
+    this.pageContext = page;
+    this._els.chip.textContent = chip;
+    this._els.chip.style.display = chip ? '' : 'none';
   }
 
   // ----- chat -----------------------------------------------------------
@@ -142,10 +260,12 @@ export class ChatWidget extends HTMLElement {
     const text = this._els.input.value.trim();
     if (!text || this.busy) return;
     this._els.input.value = '';
+    this._capturePageContext(); // refresh in case the user navigated
     this._addMessage('user', text);
     const bubble = this._addMessage('assistant', '');
+    this._gotDelta = false;
     this._setBusy(true);
-    this._setStatus('Thinking…');
+    this._setTool('');
     try {
       await this._stream(text, bubble);
     } catch (err) {
@@ -153,7 +273,7 @@ export class ChatWidget extends HTMLElement {
       bubble.classList.add('error');
     } finally {
       this._setBusy(false);
-      this._setStatus('');
+      this._setTool('');
     }
   }
 
@@ -161,8 +281,7 @@ export class ChatWidget extends HTMLElement {
     const body = {
       messages: [{ role: 'user', content: text }],
       session_id: this.sessionId || undefined,
-      project_id: this.projectId || undefined,
-      page_memory_id: this.pageMemoryId || undefined,
+      page: this.pageContext || undefined,
     };
     const res = await fetch(STREAM_URL, {
       method: 'POST',
@@ -185,7 +304,9 @@ export class ChatWidget extends HTMLElement {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      buf += decoder.decode(value, { stream: true });
+      // sse_starlette emits CRLF; normalize the whole buffer (a \r\n can
+      // straddle a chunk boundary) so \n\n framing works.
+      buf = (buf + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n');
       let idx;
       while ((idx = buf.indexOf('\n\n')) >= 0) {
         const frame = buf.slice(0, idx);
@@ -214,17 +335,26 @@ export class ChatWidget extends HTMLElement {
         this.sessionId = payload.session_id || this.sessionId;
         break;
       case 'tool_call':
-        this._setStatus(`🔧 ${payload.name}…`);
+        this._setTool(`🔧 ${payload.name}…`);
         break;
       case 'tool_result':
-        this._setStatus(`${payload.ok ? '✓' : '✗'} ${payload.name}`);
+        this._setTool(`${payload.ok ? '✓' : '✗'} ${payload.name}`);
         break;
-      case 'message':
-        bubble.textContent = payload.text || '';
+      case 'delta':
+        this._gotDelta = true;
+        bubble.textContent += payload.text || '';
         this._scroll();
         break;
+      case 'message':
+        // streamed deltas already built the text; only set on no-stream fallback
+        if (!this._gotDelta) {
+          bubble.textContent = payload.text || '';
+          this._scroll();
+        }
+        break;
       case 'done':
-        if (payload.truncated) this._setStatus('(stopped at step limit)');
+        if (payload.truncated) this._setTool('(stopped at step limit)');
+        else this._setTool('');
         break;
       case 'error':
         bubble.textContent = `Error: ${payload.detail || 'request failed'}`;
@@ -248,10 +378,27 @@ export class ChatWidget extends HTMLElement {
     this.busy = busy;
     this._els.send.disabled = busy;
     this._els.input.disabled = busy;
+    this._els.spinner.style.display = busy ? '' : 'none';
+    if (busy) this._startTimer();
+    else this._stopTimer();
   }
 
-  _setStatus(text) {
-    this._els.status.textContent = text || '';
+  _startTimer() {
+    const start = performance.now();
+    this._els.elapsed.textContent = '0.0s';
+    clearInterval(this._timer);
+    this._timer = setInterval(() => {
+      this._els.elapsed.textContent = `${((performance.now() - start) / 1000).toFixed(1)}s`;
+    }, 100);
+  }
+
+  _stopTimer() {
+    clearInterval(this._timer);
+    this._timer = null;
+  }
+
+  _setTool(text) {
+    this._els.tool.textContent = text || '';
   }
 
   _scroll() {
@@ -269,105 +416,83 @@ export class ChatWidget extends HTMLElement {
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         .launcher {
-          width: 56px;
-          height: 56px;
-          border-radius: 50%;
-          background: #111827;
-          color: #fff;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: grab;
-          box-shadow: 0 6px 20px rgba(0,0,0,0.25);
-          touch-action: none;
-          user-select: none;
+          width: 56px; height: 56px; border-radius: 50%;
+          background: #111827; color: #fff;
+          display: flex; align-items: center; justify-content: center;
+          cursor: grab; box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+          touch-action: none; user-select: none;
         }
         .launcher:active { cursor: grabbing; }
         .launcher.hidden { display: none; }
         .launcher svg { width: 26px; height: 26px; }
         .panel {
-          display: none;
-          flex-direction: column;
-          width: 380px;
-          max-width: calc(100vw - 32px);
-          height: 540px;
-          max-height: calc(100vh - 48px);
-          background: #fff;
-          color: #111827;
-          border: 1px solid #e5e7eb;
-          border-radius: 14px;
-          box-shadow: 0 18px 50px rgba(0,0,0,0.28);
-          overflow: hidden;
+          display: none; flex-direction: column; position: relative;
+          width: 380px; height: 540px;
+          max-width: calc(100vw - 32px); max-height: calc(100vh - 48px);
+          background: #fff; color: #111827;
+          border: 1px solid #e5e7eb; border-radius: 14px;
+          box-shadow: 0 18px 50px rgba(0,0,0,0.28); overflow: hidden;
         }
         .panel.open { display: flex; }
+        .grip {
+          position: absolute; top: 0; left: 0; width: 18px; height: 18px;
+          cursor: nwse-resize; z-index: 3; touch-action: none;
+          background:
+            linear-gradient(135deg, transparent 0 40%, #cbd5e1 40% 50%, transparent 50% 70%, #cbd5e1 70% 80%, transparent 80%);
+        }
         .header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 12px 14px;
-          border-bottom: 1px solid #f0f0f0;
-          font-weight: 600;
-          font-size: 14px;
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 12px 14px; border-bottom: 1px solid #f0f0f0;
+          font-weight: 600; font-size: 14px; cursor: move; touch-action: none;
+          user-select: none;
         }
         .close {
-          border: none;
-          background: transparent;
-          font-size: 18px;
-          cursor: pointer;
-          color: #6b7280;
-          line-height: 1;
+          border: none; background: transparent; font-size: 18px; cursor: pointer;
+          color: #6b7280; line-height: 1;
+        }
+        .context-chip {
+          margin: 8px 14px 0; padding: 4px 8px; align-self: flex-start;
+          background: #eff6ff; color: #1d4ed8; border-radius: 8px; font-size: 11.5px;
         }
         .messages {
-          flex: 1;
-          overflow-y: auto;
-          padding: 14px;
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-          background: #fafafa;
+          flex: 1; overflow-y: auto; padding: 14px;
+          display: flex; flex-direction: column; gap: 10px; background: #fafafa;
         }
         .msg {
-          padding: 8px 12px;
-          border-radius: 12px;
-          max-width: 85%;
-          white-space: pre-wrap;
-          word-break: break-word;
-          font-size: 13.5px;
-          line-height: 1.45;
+          padding: 8px 12px; border-radius: 12px; max-width: 85%;
+          white-space: pre-wrap; word-break: break-word;
+          font-size: 13.5px; line-height: 1.45;
         }
         .msg.user { align-self: flex-end; background: #111827; color: #fff; border-bottom-right-radius: 4px; }
         .msg.assistant { align-self: flex-start; background: #fff; border: 1px solid #e5e7eb; border-bottom-left-radius: 4px; }
         .msg.error { color: #b91c1c; border-color: #fecaca; }
-        .status { padding: 0 14px; min-height: 18px; font-size: 12px; color: #6b7280; }
+        .status {
+          display: flex; align-items: center; gap: 8px;
+          padding: 4px 14px; min-height: 20px; font-size: 12px; color: #6b7280;
+        }
+        .spinner {
+          width: 12px; height: 12px; border: 2px solid #d1d5db;
+          border-top-color: #111827; border-radius: 50%;
+          animation: spin 0.7s linear infinite; display: none;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .elapsed { font-variant-numeric: tabular-nums; }
+        .tool-status { color: #374151; }
         .composer {
-          display: flex;
-          gap: 8px;
-          padding: 12px 14px;
-          border-top: 1px solid #f0f0f0;
+          display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid #f0f0f0;
         }
         textarea {
-          flex: 1;
-          resize: none;
-          height: 38px;
-          max-height: 120px;
-          padding: 8px 10px;
-          border: 1px solid #e5e7eb;
-          border-radius: 10px;
-          font: inherit;
-          font-size: 13.5px;
+          flex: 1; resize: none; height: 38px; max-height: 120px;
+          padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 10px;
+          font: inherit; font-size: 13.5px;
         }
         .send {
-          border: none;
-          background: #111827;
-          color: #fff;
-          border-radius: 10px;
-          padding: 0 16px;
-          font-weight: 600;
-          cursor: pointer;
+          border: none; background: #111827; color: #fff; border-radius: 10px;
+          padding: 0 16px; font-weight: 600; cursor: pointer;
         }
         .send:disabled { opacity: 0.5; cursor: not-allowed; }
         @media (max-width: 480px) {
-          .panel { width: calc(100vw - 16px); height: calc(100vh - 90px); }
+          .panel { width: calc(100vw - 16px) !important; height: calc(100vh - 90px) !important; }
         }
       </style>
       <div class="launcher" title="Ask the memory assistant">
@@ -376,12 +501,18 @@ export class ChatWidget extends HTMLElement {
         </svg>
       </div>
       <div class="panel">
+        <div class="grip" title="Drag to resize"></div>
         <div class="header">
           <span>Memory Assistant</span>
           <button class="close" title="Close">×</button>
         </div>
+        <div class="context-chip" style="display:none"></div>
         <div class="messages"></div>
-        <div class="status"></div>
+        <div class="status">
+          <span class="spinner"></span>
+          <span class="elapsed"></span>
+          <span class="tool-status"></span>
+        </div>
         <div class="composer">
           <textarea placeholder="Ask about your memories…" rows="1"></textarea>
           <button class="send">Send</button>

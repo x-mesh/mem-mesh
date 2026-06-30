@@ -14,6 +14,7 @@ import json
 from typing import Any, List, Optional
 
 from .chat_tools import READ_ONLY_TOOLS, REGISTRY, ChatTool, execute_tool, render_tools
+from .relay_worker import ChatResult
 
 
 class ChatAgentLoop:
@@ -35,11 +36,10 @@ class ChatAgentLoop:
         self.max_steps = max_steps
 
     async def run_events(self, messages: List[dict]):
-        """Async generator of progress events for SSE.
+        """Async generator of progress events for SSE (token-streaming).
 
-        Yields ``{"type": ...}`` dicts: ``tool_call`` / ``tool_result`` as they
-        happen, then ``message`` (final text) and ``done`` (steps/truncated/
-        full tool trace).
+        Yields ``delta`` (streamed answer tokens), ``tool_call`` / ``tool_result``
+        (as they happen), then ``message`` (final text) and ``done``.
         """
 
         rendered = render_tools(self.tools, self.provider) if self.tools else None
@@ -47,7 +47,15 @@ class ChatAgentLoop:
         trace: List[dict] = []
 
         for step in range(1, self.max_steps + 1):
-            result = await self.enricher.chat(convo, tools=rendered)
+            result = None
+            async for ev in self.enricher.chat_stream(convo, tools=rendered):
+                if ev.get("type") == "text_delta":
+                    yield {"type": "delta", "text": ev.get("text", "")}
+                elif ev.get("type") == "final":
+                    result = ev.get("result")
+            if result is None:
+                result = ChatResult()
+
             if not result.tool_calls:
                 yield {"type": "message", "text": result.text}
                 yield {
@@ -94,32 +102,71 @@ class ChatAgentLoop:
                 )
             convo.append({"role": "tool", "results": results})
 
-        # Step budget exhausted while still calling tools — force a final answer
-        # with no tools so the user always gets text rather than a dangling call.
-        final = await self.enricher.chat(convo, tools=None)
-        yield {"type": "message", "text": final.text}
+        # Step budget exhausted — stream one final answer with no tools.
+        result = None
+        async for ev in self.enricher.chat_stream(convo, tools=None):
+            if ev.get("type") == "text_delta":
+                yield {"type": "delta", "text": ev.get("text", "")}
+            elif ev.get("type") == "final":
+                result = ev.get("result")
+        yield {"type": "message", "text": result.text if result else ""}
         yield {
             "type": "done",
             "steps": self.max_steps,
             "truncated": True,
-            "finish_reason": final.finish_reason,
+            "finish_reason": result.finish_reason if result else None,
             "tool_calls": trace,
         }
 
     async def run(self, messages: List[dict]) -> dict:
-        text = ""
-        done: dict = {}
-        async for ev in self.run_events(messages):
-            if ev["type"] == "message":
-                text = ev["text"]
-            elif ev["type"] == "done":
-                done = ev
+        """Non-streaming variant (used by POST /agent and tests)."""
+
+        rendered = render_tools(self.tools, self.provider) if self.tools else None
+        convo: List[dict] = list(messages)
+        trace: List[dict] = []
+
+        for step in range(1, self.max_steps + 1):
+            result = await self.enricher.chat(convo, tools=rendered)
+            if not result.tool_calls:
+                return {
+                    "text": result.text,
+                    "tool_calls": trace,
+                    "steps": step,
+                    "truncated": False,
+                    "finish_reason": result.finish_reason,
+                }
+            convo.append(
+                {
+                    "role": "assistant",
+                    "content": result.text,
+                    "tool_calls": result.tool_calls,
+                }
+            )
+            results = []
+            for call in result.tool_calls:
+                res = await self._run_one(call)
+                trace.append(
+                    {
+                        "name": call.get("name"),
+                        "arguments": call.get("arguments") or {},
+                        "result": res,
+                    }
+                )
+                results.append(
+                    {
+                        "tool_call_id": call.get("id"),
+                        "content": json.dumps(res, ensure_ascii=False),
+                    }
+                )
+            convo.append({"role": "tool", "results": results})
+
+        final = await self.enricher.chat(convo, tools=None)
         return {
-            "text": text,
-            "tool_calls": done.get("tool_calls", []),
-            "steps": done.get("steps", 0),
-            "truncated": done.get("truncated", False),
-            "finish_reason": done.get("finish_reason"),
+            "text": final.text,
+            "tool_calls": trace,
+            "steps": self.max_steps,
+            "truncated": True,
+            "finish_reason": final.finish_reason,
         }
 
     async def _run_one(self, call: dict) -> dict:

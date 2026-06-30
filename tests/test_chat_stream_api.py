@@ -47,6 +47,9 @@ class _FakeService:
     async def is_configured(self, settings):
         return True
 
+    async def is_enabled(self, settings):
+        return True
+
     async def get_effective_config(self, settings):
         return {
             "values": {
@@ -115,7 +118,7 @@ async def test_chat_stream_emits_events_and_persists(monkeypatch):
                 "/api/chat/v1/stream",
                 json={
                     "messages": [{"role": "user", "content": "what's up"}],
-                    "project_id": "p1",
+                    "page": {"project_id": "p1", "label": "dashboard"},
                 },
             ) as resp:
                 assert resp.status_code == 200

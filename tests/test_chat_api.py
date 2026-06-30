@@ -106,3 +106,71 @@ async def test_chat_settings_clear_key_deletes_db_row():
             r = await client.put("/api/chat/v1/settings", json={"llm_api_key": "   "})
             assert r.status_code == 200
             assert await db.get_app_config("chat.llm_api_key") is None
+
+
+def test_build_agent_system_prompt_describes_page():
+    from app.core.schemas.chat import ChatPageContext
+    from app.web.dashboard.route_modules.chat import _build_agent_system_prompt
+
+    # no page -> base prompt only, no page-specific clauses
+    base = _build_agent_system_prompt(None)
+    assert "mem-mesh assistant" in base
+    assert "Current project_id is" not in base
+    assert "get_memory_context" not in base
+    assert "page." not in base
+
+    # project page -> project_id wired in
+    p = _build_agent_system_prompt(
+        ChatPageContext(
+            route="/project/acme", label="project detail", project_id="acme"
+        )
+    )
+    assert "project detail" in p
+    assert "'acme'" in p
+    assert "list_pins" in p
+
+    # memory page -> instructs get_memory_context
+    m = _build_agent_system_prompt(
+        ChatPageContext(route="/memory/abc", label="memory detail", memory_id="abc")
+    )
+    assert "get_memory_context" in m
+    assert "'abc'" in m
+
+    # plain page -> route label mentioned, no project/memory clauses
+    s = _build_agent_system_prompt(ChatPageContext(route="/settings", label="settings"))
+    assert "settings page" in s
+    assert "project_id is" not in s
+    assert "get_memory_context" not in s
+
+
+@pytest.mark.asyncio
+async def test_chat_status_and_enable_toggle():
+    async with _temp_db() as db:
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            # nothing configured -> unavailable
+            s = (await client.get("/api/chat/v1/status")).json()
+            assert s["configured"] is False
+            assert s["available"] is False
+
+            # configure a key -> available (enabled defaults true)
+            await client.put(
+                "/api/chat/v1/settings",
+                json={"llm_provider": "anthropic", "llm_api_key": "sk"},
+            )
+            s = (await client.get("/api/chat/v1/status")).json()
+            assert s["configured"] is True
+            assert s["enabled"] is True
+            assert s["available"] is True
+            assert s["provider"] == "anthropic"
+
+            # disable via toggle -> unavailable but still configured
+            r = await client.put("/api/chat/v1/settings", json={"enabled": False})
+            assert r.json()["enabled"] is False
+            assert r.json()["available"] is False
+            s = (await client.get("/api/chat/v1/status")).json()
+            assert s["configured"] is True
+            assert s["enabled"] is False
+            assert s["available"] is False
+            assert await db.get_app_config("chat.enabled") == "false"

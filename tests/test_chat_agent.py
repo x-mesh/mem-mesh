@@ -180,3 +180,118 @@ async def test_agent_loop_rejects_unknown_tool_but_continues():
     assert out["text"] == "cannot do that"
     assert out["tool_calls"][0]["result"]["ok"] is False
     assert "unknown tool" in out["tool_calls"][0]["result"]["error"]
+
+
+# ----- streaming (chat_stream parsers + run_events) -----------------------
+
+
+async def _aiter(lines):
+    for ln in lines:
+        yield ln
+
+
+@pytest.mark.asyncio
+async def test_parse_anthropic_stream_text_and_tool_use():
+    from app.core.services.relay_worker import AnthropicRelayEnricher
+
+    lines = [
+        'data: {"type":"message_start"}',
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}',
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}',
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}',
+        'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu1","name":"search_memories"}}',
+        'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"query\\":"}}',
+        'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\\"auth\\"}"}}',
+        'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}',
+        'data: {"type":"message_stop"}',
+    ]
+    deltas = []
+    final = None
+    async for ev in AnthropicRelayEnricher._parse_anthropic_stream(_aiter(lines)):
+        if ev["type"] == "text_delta":
+            deltas.append(ev["text"])
+        elif ev["type"] == "final":
+            final = ev["result"]
+    assert "".join(deltas) == "Hello"
+    assert final.text == "Hello"
+    assert final.finish_reason == "tool_use"
+    assert final.tool_calls == [
+        {"id": "tu1", "name": "search_memories", "arguments": {"query": "auth"}}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_parse_openai_stream_text_and_tool_calls():
+    from app.core.services.relay_worker import OpenAIRelayEnricher
+
+    lines = [
+        'data: {"choices":[{"delta":{"content":"Hi"}}]}',
+        'data: {"choices":[{"delta":{"content":" there"}}]}',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"list_pins","arguments":"{\\"pro"}}]}}]}',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ject_id\\":\\"p1\\"}"}}]},"finish_reason":"tool_calls"}]}',
+        "data: [DONE]",
+    ]
+    deltas = []
+    final = None
+    async for ev in OpenAIRelayEnricher._parse_openai_stream(_aiter(lines)):
+        if ev["type"] == "text_delta":
+            deltas.append(ev["text"])
+        elif ev["type"] == "final":
+            final = ev["result"]
+    assert "".join(deltas) == "Hi there"
+    assert final.text == "Hi there"
+    assert final.finish_reason == "tool_calls"
+    assert final.tool_calls == [
+        {"id": "c1", "name": "list_pins", "arguments": {"project_id": "p1"}}
+    ]
+
+
+class _StreamingEnricher:
+    """Fake enricher exposing chat_stream with scripted turns."""
+
+    def __init__(self, turns):
+        # turns: list of (list_of_text_chunks, ChatResult)
+        self.turns = list(turns)
+        self.calls = []
+
+    async def chat_stream(self, messages, *, tools=None, max_tokens=None):
+        self.calls.append({"tools": tools})
+        chunks, result = self.turns.pop(0)
+        for c in chunks:
+            yield {"type": "text_delta", "text": c}
+        yield {"type": "final", "result": result}
+
+
+@pytest.mark.asyncio
+async def test_run_events_streams_deltas_then_tool_then_answer():
+    enricher = _StreamingEnricher(
+        [
+            (
+                [],
+                ChatResult(
+                    text="",
+                    tool_calls=[{"id": "t1", "name": "memory_stats", "arguments": {}}],
+                ),
+            ),
+            (["You ", "have ", "3."], ChatResult(text="You have 3.", tool_calls=[])),
+        ]
+    )
+
+    class _StatsHandlers:
+        async def stats(self, **kwargs):
+            return {"total_memories": 3}
+
+    loop = ChatAgentLoop(
+        enricher=enricher, provider="anthropic", handlers=_StatsHandlers(), max_steps=5
+    )
+    events = [
+        ev async for ev in loop.run_events([{"role": "user", "content": "count"}])
+    ]
+    types = [e["type"] for e in events]
+    assert "tool_call" in types and "tool_result" in types
+    deltas = "".join(e["text"] for e in events if e["type"] == "delta")
+    assert deltas == "You have 3."
+    msg = next(e for e in events if e["type"] == "message")
+    assert msg["text"] == "You have 3."
+    done = next(e for e in events if e["type"] == "done")
+    assert done["truncated"] is False

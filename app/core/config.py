@@ -478,6 +478,10 @@ class Settings(BaseSettings):
         ge=1,
         description="Max output tokens per chat assistant turn",
     )
+    chat_enabled: bool = Field(
+        default=True,
+        description="Master toggle for the dashboard chat assistant widget",
+    )
 
     @field_validator("storage_mode")
     @classmethod
