@@ -277,6 +277,37 @@ def main(argv: Optional[List[str]] = None) -> None:
         help="Show installed MCP config JSON with line numbers + syntax highlighting",
     )
 
+    # --- mem-mesh auth (dashboard credential management) ---
+    auth_parser = sub.add_parser("auth", help="Dashboard auth management")
+    auth_sub = auth_parser.add_subparsers(dest="auth_command", help="Auth commands")
+    auth_set_pw = auth_sub.add_parser(
+        "set-password",
+        help="Set/reset the dashboard admin password (server-side recovery)",
+    )
+    auth_set_pw.add_argument(
+        "--username",
+        default=None,
+        help="Also set the admin username (default: leave unchanged)",
+    )
+    auth_set_pw.add_argument(
+        "--password",
+        default=None,
+        help="New password (omit to be prompted without echo; avoids shell history)",
+    )
+    auth_set_pw.add_argument(
+        "--password-stdin",
+        action="store_true",
+        help="Read the new password from stdin (one line)",
+    )
+    auth_set_pw.add_argument(
+        "--enable-basic-auth",
+        action="store_true",
+        help="Also enable Basic Auth (web_basic_auth_enabled=true)",
+    )
+    auth_set_pw.add_argument(
+        "--json", action="store_true", help="Emit machine-readable JSON"
+    )
+
     # --- mem-mesh doctor (top-level full diagnostics) ---
     doctor_parser = sub.add_parser(
         "doctor", help="Full diagnostics: API + MCP + token + hooks, with fixes"
@@ -479,6 +510,24 @@ def main(argv: Optional[List[str]] = None) -> None:
         from app.cli.system_status import cmd_system_status
 
         cmd_system_status(verbose=args.verbose)
+
+    elif args.command == "auth":
+        if args.auth_command == "set-password":
+            from app.cli.auth_cmd import cmd_set_password
+
+            password = args.password
+            if args.password_stdin:
+                password = sys.stdin.readline().rstrip("\n")
+            sys.exit(
+                cmd_set_password(
+                    username=args.username,
+                    password=password,
+                    enable_basic_auth=args.enable_basic_auth,
+                    json_mode=args.json,
+                )
+            )
+        else:
+            sub.choices["auth"].print_help()
 
     elif args.command == "doctor":
         from app.cli.system_doctor import cmd_system_doctor
