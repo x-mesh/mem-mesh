@@ -93,3 +93,28 @@ async def test_add_message_updates_session_timestamp():
         await store.add_message(session_id=sid, role="user", content="x")
         after = (await store.get_session(sid))["updated_at"]
         assert after >= before
+
+
+@pytest.mark.asyncio
+async def test_enrichment_store_upsert_and_get():
+    from app.core.services.enrich_store import EnrichmentStore
+
+    async with _temp_db() as db:
+        store = EnrichmentStore(db)
+        assert await store.get("m1") is None
+        saved = await store.upsert(
+            memory_id="m1",
+            title="T",
+            abstract="A",
+            tags=["x", "y"],
+            display_kind="note",
+            model="claude",
+        )
+        assert saved["title"] == "T"
+        assert saved["tags"] == ["x", "y"]
+        # upsert replaces
+        again = await store.upsert(memory_id="m1", title="T2", tags=["z"])
+        assert again["title"] == "T2"
+        assert again["tags"] == ["z"]
+        got = await store.get("m1")
+        assert got["title"] == "T2"

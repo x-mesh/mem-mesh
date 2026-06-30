@@ -116,6 +116,8 @@ class MemoryDetailPage extends HTMLElement {
       this.deleteMemory();
     } else if (target.classList.contains('refine-btn')) {
       this.refineMemory();
+    } else if (target.classList.contains('enrich-btn')) {
+      this.enrichMemory();
     } else if (target.classList.contains('back-btn')) {
       this.goBack();
     } else if (target.classList.contains('share-btn')) {
@@ -260,6 +262,7 @@ class MemoryDetailPage extends HTMLElement {
       this.isLoading = false;
       console.log('Rendering final state with isLoading:', this.isLoading);
       this.render();
+      if (this.memory) this._loadEnrichment();
     }
   }
 
@@ -306,6 +309,7 @@ class MemoryDetailPage extends HTMLElement {
       this.isLoading = false;
       console.log('Direct API - Rendering final state');
       this.render();
+      if (this.memory) this._loadEnrichment();
     }
   }
   
@@ -413,6 +417,70 @@ class MemoryDetailPage extends HTMLElement {
     }
   }
   
+  /**
+   * Enrich this memory with AI metadata (title/abstract/tags). Reuses the relay
+   * enrichment adapter via POST /chat/v1/enrich; new tags are merged into the
+   * memory and the title/abstract are shown in the enrichment panel. The memory
+   * content itself is not changed.
+   */
+  async enrichMemory() {
+    if (!this.memoryId) return;
+    const btn = this.querySelector('.enrich-btn');
+    const original = btn ? btn.textContent : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '🏷 Enriching…';
+    }
+    try {
+      const res = await fetch('/api/chat/v1/enrich', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memory_id: this.memoryId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      // reload to pick up merged tags, then show the enrichment panel
+      await this.loadMemoryData();
+      this._renderEnrichment(data);
+    } catch (err) {
+      this._renderEnrichmentError(err.message);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = original || '🏷 Enrich';
+      }
+    }
+  }
+
+  async _loadEnrichment() {
+    if (!this.memoryId) return;
+    try {
+      const res = await fetch(`/api/chat/v1/enrich/${encodeURIComponent(this.memoryId)}`);
+      if (!res.ok) return; // 404 = none yet
+      this._renderEnrichment(await res.json());
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  _renderEnrichment(data) {
+    const panel = this.querySelector('#enrichment-panel');
+    if (!panel || !data || (!data.title && !data.abstract)) return;
+    panel.style.display = '';
+    panel.innerHTML = `
+      <div class="enrichment-head">🏷 AI enrichment</div>
+      ${data.title ? `<div class="enrichment-title">${this.escapeHtml(data.title)}</div>` : ''}
+      ${data.abstract ? `<div class="enrichment-abstract">${this.escapeHtml(data.abstract)}</div>` : ''}
+      ${(data.tags && data.tags.length) ? `<div class="enrichment-tags">${data.tags.map((t) => `<span class="tag">#${this.escapeHtml(t)}</span>`).join('')}</div>` : ''}`;
+  }
+
+  _renderEnrichmentError(message) {
+    const panel = this.querySelector('#enrichment-panel');
+    if (!panel) return;
+    panel.style.display = '';
+    panel.innerHTML = `<div class="enrichment-head">🏷 AI enrichment</div><div class="enrichment-error">${this.escapeHtml(message)}</div>`;
+  }
+
   /**
    * Improve this memory with AI: propose a rewrite, preview the diff, apply on
    * approval (POST /chat/v1/refine then /refine/apply). The chat LLM provider
@@ -1069,6 +1137,7 @@ class MemoryDetailPage extends HTMLElement {
               </svg>
             </button>
             <button class="refine-btn" title="Improve with AI — rewrite content, suggest category & tags (you approve before it saves)">✨ Improve</button>
+            <button class="enrich-btn" title="Enrich with AI — generate a title, abstract, and tags (merges tags into this memory)">🏷 Enrich</button>
             <button class="edit-btn" title="Edit memory (Ctrl+E)">
               <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M11 4H4C3.46957 4 2.96086 4.21071 2.58579 4.58579C2.21071 4.96086 2 5.46957 2 6V20C2 20.5304 2.21071 21.0391 2.58579 21.4142C2.96086 21.7893 3.46957 22 4 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1127,6 +1196,7 @@ class MemoryDetailPage extends HTMLElement {
           <div class="memory-body">
             <!-- View Mode -->
             <div class="view-mode">
+              <div class="enrichment-panel" id="enrichment-panel" style="display:none"></div>
               <div class="memory-text">
                 ${formattedContent}
               </div>
@@ -1490,6 +1560,26 @@ style.textContent = `
     font-size: 0.75rem;
     font-weight: 500;
   }
+
+  .enrichment-panel {
+    margin-bottom: 1rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border-color);
+    border-left: 3px solid #6366f1;
+    border-radius: var(--border-radius-sm);
+    background: var(--bg-secondary);
+  }
+  .enrichment-head {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    margin-bottom: 0.35rem;
+  }
+  .enrichment-title { font-weight: 600; margin-bottom: 0.25rem; }
+  .enrichment-abstract { font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem; }
+  .enrichment-tags { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .enrichment-error { color: #b91c1c; font-size: 0.85rem; }
   
   /* Edit Mode Styles */
   .edit-form {

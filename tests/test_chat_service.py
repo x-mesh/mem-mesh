@@ -360,3 +360,32 @@ async def test_summarize_for_memory_parses_json():
         assert out["category"] == "decision"
         assert out["tags"] == ["x"]
         assert "WHY" in out["content"]
+
+
+@pytest.mark.asyncio
+async def test_enrich_memory_content_via_relay_enrich():
+    async with _temp_db() as db:
+        service = ChatService(db)
+        http = _FakeHTTPClient(
+            _FakeHTTPResponse(
+                payload={
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                '{"title":"T","abstract":"A","tags":["x","y"],'
+                                '"display_kind":"note","confidence":0.8}'
+                            ),
+                        }
+                    ]
+                }
+            )
+        )
+        out = await service.enrich_memory_content(
+            content="some memory content",
+            settings=_settings(chat_llm_api_key="k"),
+            http_client=http,
+        )
+        assert out["title"] == "T"
+        assert out["abstract"] == "A"
+        assert out["tags"] == ["x", "y"]

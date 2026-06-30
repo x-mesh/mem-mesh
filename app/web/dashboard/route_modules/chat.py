@@ -19,6 +19,8 @@ from app.core.schemas.chat import (
     ChatAgentResponse,
     ChatCompleteRequest,
     ChatCompleteResponse,
+    ChatEnrichRequest,
+    ChatEnrichResponse,
     ChatMemoryProposal,
     ChatRefineApplyRequest,
     ChatRefineApplyResponse,
@@ -38,6 +40,7 @@ from app.core.schemas.chat import (
 )
 from app.core.services.chat import ChatService
 from app.core.services.chat_store import ChatStore
+from app.core.services.enrich_store import EnrichmentStore
 
 from ...common.dependencies import get_database, get_memory_service
 from ...mcp import sse as mcp_sse
@@ -449,4 +452,90 @@ async def chat_save_memory(
         id=result.id,
         category=payload.category,
         status=getattr(result, "status", "saved"),
+    )
+
+
+@router.post("/enrich", response_model=ChatEnrichResponse)
+async def chat_enrich(
+    payload: ChatEnrichRequest,
+    db=Depends(get_database),
+    service: ChatService = Depends(get_chat_service),
+    memory_service=Depends(get_memory_service),
+) -> ChatEnrichResponse:
+    """Generate title/abstract/tags metadata for a memory (reuses the relay
+    enrichment adapter), store it, and merge new tags into the memory."""
+
+    settings = get_settings()
+    if not await service.is_configured(settings):
+        raise HTTPException(
+            status_code=400, detail="Chat assistant LLM API key is not configured"
+        )
+    if not await service.is_enabled(settings):
+        raise HTTPException(
+            status_code=403, detail="Chat assistant is disabled in settings"
+        )
+    memory = await memory_service.get(payload.memory_id)
+    if memory is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+
+    try:
+        data = await service.enrich_memory_content(
+            content=memory.content, settings=settings
+        )
+    except ChatError as exc:
+        raise HTTPException(status_code=exc.http_status, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Chat enrich failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    new_tags = _parse_tags(data.get("tags"))
+    original_tags = _parse_tags(getattr(memory, "tags", None))
+    merged = list(dict.fromkeys([*original_tags, *new_tags]))
+    if set(merged) != set(original_tags):
+        try:
+            await memory_service.update(payload.memory_id, tags=merged)
+        except Exception:
+            logger.exception("Tag merge during enrich failed")
+
+    store = EnrichmentStore(db)
+    saved = await store.upsert(
+        memory_id=payload.memory_id,
+        title=redact_secrets(str(data.get("title", ""))),
+        abstract=redact_secrets(str(data.get("abstract", ""))),
+        tags=new_tags,
+        display_kind=str(data.get("display_kind", "")),
+        model=str(data.get("model", "")),
+    )
+    return ChatEnrichResponse(
+        memory_id=payload.memory_id,
+        title=saved["title"],
+        abstract=saved["abstract"],
+        tags=saved["tags"],
+        display_kind=saved.get("display_kind", ""),
+        model=saved.get("model", ""),
+        merged_tags=merged,
+        created_at=saved.get("created_at"),
+    )
+
+
+@router.get("/enrich/{memory_id}", response_model=ChatEnrichResponse)
+async def get_chat_enrich(
+    memory_id: str,
+    db=Depends(get_database),
+) -> ChatEnrichResponse:
+    """Return stored enrichment for a memory (404 if none yet)."""
+
+    store = EnrichmentStore(db)
+    saved = await store.get(memory_id)
+    if not saved:
+        raise HTTPException(status_code=404, detail="No enrichment for this memory")
+    return ChatEnrichResponse(
+        memory_id=memory_id,
+        title=saved.get("title", ""),
+        abstract=saved.get("abstract", ""),
+        tags=saved.get("tags", []),
+        display_kind=saved.get("display_kind", ""),
+        model=saved.get("model", ""),
+        merged_tags=saved.get("tags", []),
+        created_at=saved.get("created_at"),
     )

@@ -337,6 +337,32 @@ class ChatService:
                 "Could not parse the model's refinement output as JSON"
             ) from exc
 
+    async def enrich_memory_content(
+        self, *, content: str, settings: Any, http_client: Any = None
+    ) -> dict:
+        """Generate title/abstract/tags metadata for a memory.
+
+        Reuses the relay enrichment adapter/prompt (``RelayEnricher.enrich``,
+        inherited by the chat enricher) driven by the chat LLM credentials.
+        """
+
+        enricher, _provider = await self._build_enricher(
+            settings, http_client=http_client
+        )
+        try:
+            data = await enricher.enrich(content)
+        except ChatProviderError:
+            raise
+        except Exception as exc:
+            raise ChatProviderError(str(exc)) from exc
+        return {
+            "title": data.title,
+            "abstract": data.abstract,
+            "tags": list(data.tags or []),
+            "display_kind": data.display_kind,
+            "model": getattr(enricher, "model", ""),
+        }
+
     async def summarize_for_memory(
         self, *, text: str, settings: Any, http_client: Any = None
     ) -> dict:

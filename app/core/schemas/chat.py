@@ -207,3 +207,18 @@ class ChatSaveMemoryResponse(BaseModel):
     id: str
     category: str
     status: str = "saved"
+
+
+class ChatEnrichRequest(BaseModel):
+    memory_id: str = Field(min_length=1, max_length=100)
+
+
+class ChatEnrichResponse(BaseModel):
+    memory_id: str
+    title: str = ""
+    abstract: str = ""
+    tags: List[str] = Field(default_factory=list)
+    display_kind: str = ""
+    model: str = ""
+    merged_tags: List[str] = Field(default_factory=list)
+    created_at: Optional[str] = None

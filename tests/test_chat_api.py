@@ -344,3 +344,57 @@ async def test_chat_summarize_and_save_memory():
             assert memsvc.created["category"] == "idea"
             assert memsvc.created["source"] == "chat-assistant"
             assert memsvc.created["project_id"] == "p1"
+
+
+class _FakeEnrichChatService:
+    async def is_configured(self, s):
+        return True
+
+    async def is_enabled(self, s):
+        return True
+
+    async def enrich_memory_content(self, *, content, settings):
+        return {
+            "title": "Better title",
+            "abstract": "An abstract",
+            "tags": ["new1", "new2"],
+            "display_kind": "note",
+            "model": "m",
+        }
+
+
+@pytest.mark.asyncio
+async def test_chat_enrich_stores_and_merges_tags():
+    from app.web.common.dependencies import get_memory_service
+    from app.web.dashboard.route_modules import chat as chat_route
+
+    async with _temp_db() as db:
+        memsvc = _FakeMemoryService()  # get('m1') -> _FakeMem(tags '["x"]')
+        app = FastAPI()
+        app.include_router(chat_route.router, prefix="/api")
+        app.dependency_overrides[get_database] = lambda: db
+        app.dependency_overrides[chat_route.get_chat_service] = (
+            lambda: _FakeEnrichChatService()
+        )
+        app.dependency_overrides[get_memory_service] = lambda: memsvc
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            r = await client.post("/api/chat/v1/enrich", json={"memory_id": "m1"})
+            assert r.status_code == 200
+            body = r.json()
+            assert body["title"] == "Better title"
+            assert body["tags"] == ["new1", "new2"]
+            assert set(body["merged_tags"]) == {"x", "new1", "new2"}
+            assert set(memsvc.updated["tags"]) == {"x", "new1", "new2"}
+
+            # stored -> GET returns it
+            g = await client.get("/api/chat/v1/enrich/m1")
+            assert g.status_code == 200
+            assert g.json()["title"] == "Better title"
+
+            # unknown -> 404
+            assert (await client.get("/api/chat/v1/enrich/nope")).status_code == 404
+
+            # unknown memory on POST -> 404
+            r404 = await client.post("/api/chat/v1/enrich", json={"memory_id": "nope"})
+            assert r404.status_code == 404
