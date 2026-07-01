@@ -46,6 +46,7 @@ import { MemoriesPage } from './pages/memories.js';
 import { AnalyticsPage } from './pages/analytics.js';
 import { SettingsPage } from './pages/settings-page.js';
 import { WorkPage } from './pages/work.js';
+import { CurationPage } from './pages/curation.js';
 import { MonitoringPage } from './pages/monitoring.js';
 import { ProjectAnalyticsPage } from './pages/project-analytics.js';
 import { OAuthPage } from './pages/oauth.js';
@@ -150,6 +151,7 @@ class App {
     this.pages.set('analytics', AnalyticsPage);
     this.pages.set('settings', SettingsPage);
     this.pages.set('work', WorkPage);
+    this.pages.set('curation', CurationPage);
     this.pages.set('monitoring', MonitoringPage);
     this.pages.set('project-analytics', ProjectAnalyticsPage);
     this.pages.set('oauth', OAuthPage);
@@ -174,6 +176,7 @@ class App {
     this.router.register('/project/:id', (params) => this.renderPage('project-detail', params));
     this.router.register('/memories', () => this.renderPage('memories'));
     this.router.register('/work', () => this.renderPage('work'));
+    this.router.register('/curation', () => this.renderPage('curation'));
     this.router.register('/analytics', () => this.renderPage('analytics'));
     this.router.register('/settings', () => this.renderPage('settings'));
     this.router.register('/monitoring', () => this.renderPage('monitoring'));
@@ -447,6 +450,9 @@ class App {
         case 'work':
           pageElement = document.createElement('work-page');
           break;
+        case 'curation':
+          pageElement = document.createElement('curation-page');
+          break;
         case 'monitoring':
           pageElement = document.createElement('monitoring-page');
           break;
@@ -518,6 +524,7 @@ class App {
         (route === '/connect' && pageName === 'connect') ||
         (route === '/relay' && pageName === 'relay') ||
         (route === '/work' && pageName === 'work') ||
+        (route === '/curation' && pageName === 'curation') ||
         (route === '/monitoring' && pageName === 'monitoring')
       ) {
         link.classList.add('active');

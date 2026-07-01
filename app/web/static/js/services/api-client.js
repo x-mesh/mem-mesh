@@ -311,6 +311,30 @@ export class APIClient {
   }
 
   /**
+   * Reconcile curation (SSOT #3 F4)
+   */
+  async getCurationQueue(projectId = null, limit = 50) {
+    const params = { limit };
+    if (projectId) params.project_id = projectId;
+    return this.get('/curation/queue', params);
+  }
+
+  async approveCurationSupersede(relationId) {
+    return this.post(
+      `/curation/supersede/${encodeURIComponent(relationId)}/approve`,
+      {}
+    );
+  }
+
+  async rejectCurationNew(memoryId) {
+    return this.post(`/curation/reject-new/${encodeURIComponent(memoryId)}`, {});
+  }
+
+  async dismissCuration(relationId) {
+    return this.post(`/curation/dismiss/${encodeURIComponent(relationId)}`, {});
+  }
+
+  /**
    * Health check
    */
   async healthCheck() {
