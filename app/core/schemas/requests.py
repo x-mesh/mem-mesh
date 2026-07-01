@@ -138,6 +138,7 @@ class SearchParams(BaseModel):
     query: str = Field(min_length=0)  # Allow empty query
     project_id: Optional[str] = Field(default=None)
     category: Optional[str] = Field(default=None)
+    categories: Optional[List[str]] = Field(default=None)
     limit: int = Field(default=5, ge=1, le=20)
     recency_weight: float = Field(default=0.0, ge=0.0, le=1.0)
     search_mode: str = Field(
@@ -217,6 +218,26 @@ class SearchParams(BaseModel):
                 raise ValueError(
                     f"Invalid category: {v}. Must be one of {valid_categories}"
                 )
+        return v
+
+    @field_validator("categories")
+    @classmethod
+    def validate_categories(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is not None:
+            valid_categories = {
+                "task",
+                "bug",
+                "idea",
+                "decision",
+                "incident",
+                "code_snippet",
+                "git-history",
+            }
+            for item in v:
+                if item not in valid_categories:
+                    raise ValueError(
+                        f"Invalid category: {item}. Must be one of {valid_categories}"
+                    )
         return v
 
 

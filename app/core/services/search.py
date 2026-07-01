@@ -10,7 +10,7 @@ from datetime import datetime
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, List, Optional
 
-from ..database.base import Database
+from ..database.base import Database, category_filter_clause
 from ..embeddings.service import EmbeddingService
 from ..schemas.responses import SearchResponse, SearchResult
 
@@ -72,6 +72,7 @@ class SearchService:
         query: str,
         project_id: Optional[str] = None,
         category: Optional[str] = None,
+        categories: Optional[List[str]] = None,
         source: Optional[str] = None,
         tag: Optional[str] = None,
         limit: int = 25,
@@ -121,11 +122,15 @@ class SearchService:
             f"Searching for query: '{original_query}' (expanded: {len(query.split()) if query else 0} terms) with mode: {search_mode}, filters - project_id: {project_id}, category: {category}, source: {source}, tag: {tag}, limit: {limit}, offset: {offset}, sort: {sort_by} {sort_direction}"
         )
 
+        # Multi-category filters must not collide in the cache/metric key that a
+        # single category would produce, so fold the list into a stable key.
+        cache_cat = ",".join(sorted(categories)) if categories else category
+
         try:
             # Check cache first (only when offset=0)
             if offset == 0:  # Cache first page only
                 cached_results = await self.cache_manager.get_cached_search(
-                    query=query, project_id=project_id, category=category, limit=limit
+                    query=query, project_id=project_id, category=cache_cat, limit=limit
                 )
                 if cached_results:
                     logger.info(
@@ -137,7 +142,7 @@ class SearchService:
                         result=cached_results,
                         start_time=start_time,
                         project_id=project_id,
-                        category=category,
+                        category=cache_cat,
                         embedding_time_ms=0,
                         search_time_ms=0,
                     )
@@ -146,7 +151,9 @@ class SearchService:
             filters = {}
             if project_id:
                 filters["project_id"] = project_id
-            if category:
+            if categories:
+                filters["category"] = list(categories)
+            elif category:
                 filters["category"] = category
             if source:
                 filters["source"] = source
@@ -216,7 +223,7 @@ class SearchService:
                     result=result,
                     start_time=start_time,
                     project_id=project_id,
-                    category=category,
+                    category=cache_cat,
                 )
                 return result
 
@@ -246,7 +253,7 @@ class SearchService:
                     query=query,
                     results=result,
                     project_id=project_id,
-                    category=category,
+                    category=cache_cat,
                     limit=limit,
                 )
                 logger.info(
@@ -259,7 +266,7 @@ class SearchService:
                 result=result,
                 start_time=start_time,
                 project_id=project_id,
-                category=category,
+                category=cache_cat,
             )
 
             return result
@@ -273,7 +280,7 @@ class SearchService:
                 result=result,
                 start_time=start_time,
                 project_id=project_id,
-                category=category,
+                category=cache_cat,
             )
             return result
 
@@ -470,8 +477,10 @@ class SearchService:
                     base_query += " AND project_id = ?"
                     params.append(filters["project_id"])
                 if filters.get("category"):
-                    base_query += " AND category = ?"
-                    params.append(filters["category"])
+                    _cond, _cp = category_filter_clause(filters["category"])
+                    if _cond:
+                        base_query += " AND " + _cond
+                        params.extend(_cp)
 
             base_query += " ORDER BY created_at DESC LIMIT ?"
             params.append(limit)
@@ -576,8 +585,10 @@ class SearchService:
                     base_query += " AND project_id = ?"
                     params.append(filters["project_id"])
                 if filters.get("category"):
-                    base_query += " AND category = ?"
-                    params.append(filters["category"])
+                    _cond, _cp = category_filter_clause(filters["category"])
+                    if _cond:
+                        base_query += " AND " + _cond
+                        params.extend(_cp)
 
             base_query += " ORDER BY created_at DESC LIMIT ?"
             params.append(limit)
@@ -752,8 +763,10 @@ class SearchService:
                     base_query += " AND project_id = ?"
                     params.append(filters["project_id"])
                 if filters.get("category"):
-                    base_query += " AND category = ?"
-                    params.append(filters["category"])
+                    _cond, _cp = category_filter_clause(filters["category"])
+                    if _cond:
+                        base_query += " AND " + _cond
+                        params.extend(_cp)
 
             # Fetch a modest candidate pool for fuzzy matching. SequenceMatcher
             # scoring is O(rows × words), so limit*3 (not *10) cuts cost ~80% with

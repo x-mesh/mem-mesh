@@ -11,6 +11,7 @@ import pytest
 from app.core.database.base import Database
 from app.core.services.memory import MemoryService
 from app.core.services.search import SearchService
+from app.core.services.unified_search import UnifiedSearchService
 
 
 @pytest.fixture
@@ -157,6 +158,46 @@ class TestSearchService:
         assert isinstance(response.results, list)
 
     @pytest.mark.asyncio
+    async def test_search_with_multi_category_filter(
+        self, search_service, memory_service
+    ):
+        """다중 카테고리 필터 검색 테스트 (category IN)"""
+        # Given - 세 가지 카테고리의 메모리 생성
+        await memory_service.create(
+            content=(
+                "Task memory for multi-category testing — long enough fixture content to pass the quality gate. "
+                "Represents a routine task entry with owner, checklist, and due-by."
+            ),
+            category="task",
+            source="test",
+        )
+        await memory_service.create(
+            content=(
+                "Bug memory for multi-category testing — long enough fixture content to pass the quality gate. "
+                "Represents a bug entry with reproduction steps, observed vs expected, and diagnostic notes."
+            ),
+            category="bug",
+            source="test",
+        )
+        await memory_service.create(
+            content=(
+                "Idea memory for multi-category testing — long enough fixture content to pass the quality gate. "
+                "Represents an idea entry with motivation, rough sketch, and open questions."
+            ),
+            category="idea",
+            source="test",
+        )
+
+        # When - 빈 쿼리 + categories 로 최근 메모리를 category IN 필터로 조회
+        response = await search_service.search(query="", categories=["task", "bug"])
+
+        # Then - 선택한 카테고리(task/bug)만 반환, idea 는 제외
+        returned = {r.category for r in response.results}
+        assert returned <= {"task", "bug"}
+        assert "idea" not in returned
+        assert returned == {"task", "bug"}
+
+    @pytest.mark.asyncio
     async def test_search_with_limit(self, search_service, memory_service):
         """검색 결과 개수 제한 테스트"""
         # Given - 여러 메모리 생성
@@ -224,3 +265,82 @@ class TestSearchService:
         # 같은 시간인 경우
         score_same = search_service._calculate_recency_score(oldest, oldest, oldest)
         assert score_same == 1.0
+
+
+@pytest.fixture
+async def unified_search_service(temp_db, mock_embedding_service):
+    """UnifiedSearchService 픽스처 (빈 쿼리 → get_recent_memories 경로 검증용).
+
+    무거운 품질/한국어/노이즈/정규화 기능은 비활성화 — 빈 쿼리 최근메모리 경로만 검증한다.
+    """
+    return UnifiedSearchService(
+        db=temp_db,
+        embedding_service=mock_embedding_service,
+        enable_quality_features=False,
+        enable_korean_optimization=False,
+        enable_noise_filter=False,
+        enable_score_normalization=False,
+    )
+
+
+class TestUnifiedSearchMultiCategory:
+    """UnifiedSearchService 다중 카테고리 필터 테스트 (route가 호출하는 실제 서비스)"""
+
+    async def _seed(self, memory_service):
+        await memory_service.create(
+            content=(
+                "Task memory for unified multi-category testing — long enough fixture content to pass the quality gate. "
+                "Represents a routine task entry with owner, checklist, and due-by."
+            ),
+            category="task",
+            source="test",
+        )
+        await memory_service.create(
+            content=(
+                "Bug memory for unified multi-category testing — long enough fixture content to pass the quality gate. "
+                "Represents a bug entry with reproduction steps, observed vs expected, and diagnostic notes."
+            ),
+            category="bug",
+            source="test",
+        )
+        await memory_service.create(
+            content=(
+                "Idea memory for unified multi-category testing — long enough fixture content to pass the quality gate. "
+                "Represents an idea entry with motivation, rough sketch, and open questions."
+            ),
+            category="idea",
+            source="test",
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_query_multi_category_filter(
+        self, unified_search_service, memory_service
+    ):
+        """빈 쿼리 + categories=[bug, idea] → bug/idea 만 반환, task 제외 (category IN)"""
+        # Given - task/bug/idea 세 카테고리 시드
+        await self._seed(memory_service)
+
+        # When - 빈 쿼리 → get_recent_memories 경로 (category IN 필터)
+        response = await unified_search_service.search(
+            query="", categories=["bug", "idea"]
+        )
+
+        # Then - bug/idea 만 반환, task 는 제외
+        returned = {r.category for r in response.results}
+        assert returned == {"bug", "idea"}
+        assert "task" not in returned
+
+    @pytest.mark.asyncio
+    async def test_empty_query_single_category_backward_compat(
+        self, unified_search_service, memory_service
+    ):
+        """단일 category='bug' 하위호환 — bug 만 반환"""
+        # Given
+        await self._seed(memory_service)
+
+        # When
+        response = await unified_search_service.search(query="", category="bug")
+
+        # Then
+        returned = {r.category for r in response.results}
+        assert returned == {"bug"}
