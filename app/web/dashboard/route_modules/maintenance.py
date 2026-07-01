@@ -90,18 +90,72 @@ async def run_project_maintenance(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+async def _reconcile_status_counts(db, project_id: Optional[str]) -> dict:
+    """reconcile_queue status counts (optionally project-scoped) for the same
+    progress shape as maintenance ops. Missing table → empty (schema v11 not
+    yet migrated)."""
+    try:
+        if project_id:
+            rows = await db.fetchall(
+                "SELECT status, COUNT(*) AS c FROM reconcile_queue "
+                "WHERE project_id = ? GROUP BY status",
+                (project_id,),
+            )
+        else:
+            rows = await db.fetchall(
+                "SELECT status, COUNT(*) AS c FROM reconcile_queue GROUP BY status"
+            )
+    except Exception:
+        return {}
+    return {str(r["status"]): int(r["c"]) for r in rows}
+
+
+async def _reconcile_status_counts_by_project(db) -> dict:
+    """{project_id: {status: n}} over reconcile_queue; missing table → empty."""
+    try:
+        rows = await db.fetchall(
+            "SELECT project_id, status, COUNT(*) AS c FROM reconcile_queue "
+            "WHERE project_id IS NOT NULL GROUP BY project_id, status"
+        )
+    except Exception:
+        return {}
+    out: dict = {}
+    for r in rows:
+        out.setdefault(str(r["project_id"]), {})[str(r["status"])] = int(r["c"])
+    return out
+
+
 @router.get("/status")
 async def maintenance_status(
     project_id: Optional[str] = None,
+    by_project: bool = False,
     service: MaintenanceService = Depends(get_maintenance_service),
+    db=Depends(get_database),
 ) -> dict:
-    """Queue status counts + pending improve-proposal count (for UI badges)."""
-    return {
-        "queue": await service.status_counts(),
+    """Queue status counts + pending improve-proposal count (for UI badges).
+
+    With ``project_id`` every count is scoped to that project; with
+    ``by_project`` a ``queue_by_project`` map covering all projects in one
+    request is added (the project-card progress poll). Without either the
+    counts stay global as before. ``reconcile`` is included so card progress
+    covers all three operations.
+    """
+    queue = await service.status_counts(project_id=project_id)
+    reconcile = await _reconcile_status_counts(db, project_id)
+    if reconcile:
+        queue["reconcile"] = reconcile
+    result = {
+        "queue": queue,
         "pending_proposals": await service.count_refine_proposals(
             project_id=project_id
         ),
     }
+    if by_project:
+        by_proj = await service.status_counts_by_project()
+        for proj, statuses in (await _reconcile_status_counts_by_project(db)).items():
+            by_proj.setdefault(proj, {})["reconcile"] = statuses
+        result["queue_by_project"] = by_proj
+    return result
 
 
 class CancelRequest(BaseModel):
@@ -125,6 +179,31 @@ async def cancel_pending(
         operation=payload.operation, project_id=payload.project_id
     )
     return {"cancelled": cancelled}
+
+
+class RetryRequest(BaseModel):
+    operation: Optional[str] = None
+    project_id: Optional[str] = None
+    job_id: Optional[str] = None
+
+
+@router.post("/retry")
+async def retry_dead_letters(
+    payload: RetryRequest,
+    service: MaintenanceService = Depends(get_maintenance_service),
+) -> dict:
+    """Requeue dead-lettered enrich/improve jobs (attempts reset, worker picks
+    them up again). Optional operation / project_id / job_id narrow the scope."""
+    if payload.operation and payload.operation not in MAINTENANCE_OPERATIONS:
+        raise HTTPException(
+            status_code=400, detail=f"unknown operation: {payload.operation}"
+        )
+    retried = await service.retry_dead_letters(
+        operation=payload.operation,
+        project_id=payload.project_id,
+        job_id=payload.job_id,
+    )
+    return {"retried": retried}
 
 
 @router.get("/proposals")

@@ -101,7 +101,9 @@ class CurationService:
             "maintenance_queue",
             ("memory_id",),
             False,
-            ("operation",),
+            # attempts lets the UI show errors only on rows still failing
+            # (dead_letter / pending retry), not on eventually-successful ones.
+            ("operation", "attempts"),
             ("operation", ("enrich", "improve")),
         ),
     )

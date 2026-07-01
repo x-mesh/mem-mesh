@@ -41,6 +41,10 @@ class ProjectsPage extends HTMLElement {
       this.loadProjects();
     }, 100);
   }
+
+  disconnectedCallback() {
+    this._stopMaintenancePoll();
+  }
   
   /**
    * Setup event listeners
@@ -96,6 +100,9 @@ class ProjectsPage extends HTMLElement {
         this.sortProjects();
         this.renderProjects();
         this.updateSummary();
+        // Surface batches already running (or failed leftovers) on page load;
+        // the poll self-terminates when nothing is active.
+        this._startMaintenancePoll();
       } else {
         console.warn('No projects found in response:', data);
         this.projects = [];
@@ -253,6 +260,14 @@ class ProjectsPage extends HTMLElement {
    * Handle project card clicks
    */
   handleProjectClick(event) {
+    const maintRetryBtn = event.target.closest('.maint-retry-btn');
+    if (maintRetryBtn) {
+      event.stopPropagation();
+      const projectId = maintRetryBtn.getAttribute('data-project-id');
+      if (projectId) this.retryProjectMaintenance(projectId, maintRetryBtn);
+      return;
+    }
+
     const autoShareBtn = event.target.closest('.relay-autoshare-btn');
     if (autoShareBtn) {
       event.stopPropagation();
@@ -541,6 +556,7 @@ class ProjectsPage extends HTMLElement {
         ? `Queued — ${parts.join(', ')}`
         : 'Nothing to queue (already done — use Force to re-run)';
       showToast(msg, parts.length ? 'success' : 'warning');
+      this._startMaintenancePoll();
     } catch (error) {
       showToast(error?.data?.detail || error?.message || 'Maintenance failed', 'error');
       throw error;
@@ -721,8 +737,116 @@ class ProjectsPage extends HTMLElement {
           </button>
         </div>
         ${this._autoShareStatusHtml(project.id)}
+        ${this._maintenanceProgressHtml(project.id)}
       </div>
     `).join('');
+  }
+
+  // ── Maintenance batch progress on cards ──────────────────────────────────
+
+  /**
+   * Per-operation progress rows for a project's maintenance batches. Shown
+   * while jobs are active (pending/processing) or dead-lettered; a batch that
+   * finished clean disappears. Counting mirrors curation.js's worker card:
+   * done+stale are resolved, cancelled is ignored.
+   */
+  _maintenanceProgressHtml(projectId) {
+    const ops = (this._maintByProject || {})[projectId];
+    if (!ops) return '';
+    const rows = Object.entries(ops).map(([op, c]) => {
+      const done = (c.done || 0) + (c.stale || 0);
+      const failed = c.dead_letter || 0;
+      const active = (c.pending || 0) + (c.processing || 0);
+      const total = done + failed + active;
+      if (!total || (!active && !failed)) return '';
+      const pct = Math.round((done / total) * 100);
+      const retryBtn = failed && op !== 'reconcile'
+        ? `<button class="maint-retry-btn" data-project-id="${this._escapeHtml(projectId)}" title="Requeue this project's failed jobs">Retry</button>`
+        : '';
+      return `
+        <div class="maint-progress-row">
+          <span class="maint-progress-op">${this._escapeHtml(op)}</span>
+          <div class="maint-progress-bar"><div class="maint-progress-fill${failed ? ' has-failed' : ''}" style="width:${pct}%"></div></div>
+          <span class="maint-progress-label">${done} / ${total}${active ? '' : ' done'}${failed ? ` · <span class="maint-progress-failed">${failed} failed</span>` : ''}</span>
+          ${retryBtn}
+        </div>`;
+    }).filter(Boolean).join('');
+    if (!rows) return '';
+    return `<div class="maint-progress" data-project-id="${this._escapeHtml(projectId)}">${rows}</div>`;
+  }
+
+  /**
+   * Update card progress in place — a full renderProjects() every 3s would
+   * swallow in-flight clicks and flicker the grid.
+   */
+  _updateMaintProgressNodes() {
+    this.querySelectorAll('.project-card').forEach((card) => {
+      const pid = card.getAttribute('data-project-id');
+      if (!pid) return;
+      const html = this._maintenanceProgressHtml(pid);
+      const existing = card.querySelector('.maint-progress');
+      if (existing) {
+        if (html) existing.outerHTML = html;
+        else existing.remove();
+      } else if (html) {
+        card.insertAdjacentHTML('beforeend', html);
+      }
+    });
+  }
+
+  /** Start the 3s progress poll if not already running (idempotent). */
+  _startMaintenancePoll() {
+    if (this._maintPollTimer) return;
+    this._pollMaintenanceStatus();
+  }
+
+  _stopMaintenancePoll() {
+    if (this._maintPollTimer) {
+      clearTimeout(this._maintPollTimer);
+      this._maintPollTimer = null;
+    }
+  }
+
+  /**
+   * One poll tick: fetch all projects' queue counts in a single request and
+   * reschedule only while something is still active — the poll terminates
+   * itself when every batch has drained (recursive setTimeout, no overlap).
+   */
+  async _pollMaintenanceStatus() {
+    this._maintPollTimer = null;
+    if (!this.isConnected) return;
+    const api = window.app?.apiClient;
+    if (!api) return;
+    if (!document.hidden) {
+      try {
+        // Status polls must bypass APIClient's permanent GET cache.
+        api.invalidateCache?.('/maintenance/status');
+        const res = await api.get('/maintenance/status?by_project=true');
+        this._maintByProject = res?.queue_by_project || {};
+        this._updateMaintProgressNodes();
+      } catch (_) { /* transient — retry on the next tick */ }
+    }
+    const anyActive = Object.values(this._maintByProject || {}).some((ops) =>
+      Object.values(ops).some((c) => (c.pending || 0) + (c.processing || 0) > 0)
+    );
+    if (anyActive && this.isConnected) {
+      this._maintPollTimer = setTimeout(() => this._pollMaintenanceStatus(), 3000);
+    }
+  }
+
+  /** Requeue a project's dead-lettered enrich/improve jobs from its card. */
+  async retryProjectMaintenance(projectId, btn) {
+    const api = window.app?.apiClient;
+    if (!api) { showToast('API not available', 'error'); return; }
+    if (btn) btn.disabled = true;
+    try {
+      const res = await api.post('/maintenance/retry', { project_id: projectId });
+      showToast(`Requeued ${res?.retried ?? 0} failed job(s)`, 'success');
+      this._startMaintenancePoll();
+    } catch (error) {
+      showToast(error?.data?.detail || error?.message || 'Retry failed', 'error');
+      if (btn) btn.disabled = false;
+    }
   }
   
   /**
@@ -1210,6 +1334,74 @@ style.textContent = `
 
   .relay-autoshare-status.error {
     color: var(--error-color, #ef4444);
+  }
+
+  .maint-progress {
+    margin-top: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .maint-progress-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+
+  .maint-progress-op {
+    min-width: 56px;
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+
+  .maint-progress-bar {
+    flex: 1;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--bg-tertiary);
+    overflow: hidden;
+  }
+
+  .maint-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--success-color, #16a34a);
+    transition: width 0.4s ease;
+  }
+
+  .maint-progress-fill.has-failed {
+    background: linear-gradient(90deg, var(--success-color, #16a34a), var(--error-color, #ef4444));
+  }
+
+  .maint-progress-label {
+    white-space: nowrap;
+  }
+
+  .maint-progress-failed {
+    color: var(--error-color, #ef4444);
+  }
+
+  .maint-retry-btn {
+    padding: 2px 8px;
+    font-size: 0.72rem;
+    border: 1px solid var(--warning-color, #d97706);
+    color: var(--warning-color, #d97706);
+    background: transparent;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+  }
+
+  .maint-retry-btn:hover {
+    background: var(--warning-color, #d97706);
+    color: #fff;
+  }
+
+  .maint-retry-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .view-btn {

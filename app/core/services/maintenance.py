@@ -275,9 +275,11 @@ class MaintenanceService:
         return item
 
     async def _finish(self, item_id: str, status: str) -> None:
+        # Clear last_error: a job that failed once then succeeded on retry must
+        # not keep showing the old error next to its 'done' status in the UI.
         await self.db.execute(
-            "UPDATE maintenance_queue SET status = ?, locked_by = NULL, "
-            "locked_at = NULL, updated_at = ? WHERE id = ?",
+            "UPDATE maintenance_queue SET status = ?, last_error = NULL, "
+            "locked_by = NULL, locked_at = NULL, updated_at = ? WHERE id = ?",
             (status, _utc_now(), item_id),
         )
 
@@ -520,12 +522,77 @@ class MaintenanceService:
         )
         return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
 
-    async def status_counts(self) -> dict:
+    async def retry_dead_letters(
+        self,
+        *,
+        operation: Optional[str] = None,
+        project_id: Optional[str] = None,
+        job_id: Optional[str] = None,
+    ) -> int:
+        """Requeue dead-lettered jobs so the worker picks them up again.
+
+        Resets ``dead_letter`` rows to ``pending`` with attempts/backoff cleared
+        (``last_error`` is kept for traceability — a successful run clears it in
+        ``_finish``). Rows whose (memory, operation) already has a live
+        pending/processing job are skipped: requeueing them would violate the
+        ``idx_maintenance_queue_live`` partial unique index. Optional
+        ``operation`` / ``project_id`` / ``job_id`` narrow the scope. Returns
+        the number requeued.
+        """
+        await self.ensure_schema()
+        clauses = ["status = 'dead_letter'"]
+        where_params: list = []
+        if operation:
+            clauses.append("operation = ?")
+            where_params.append(operation)
+        if project_id:
+            clauses.append("project_id = ?")
+            where_params.append(project_id)
+        if job_id:
+            clauses.append("id = ?")
+            where_params.append(job_id)
+        clauses.append(
+            "NOT EXISTS (SELECT 1 FROM maintenance_queue live "
+            "WHERE live.memory_id = maintenance_queue.memory_id "
+            "AND live.operation = maintenance_queue.operation "
+            "AND live.status IN ('pending', 'processing'))"
+        )
+        cur = await self.db.execute(
+            f"UPDATE maintenance_queue SET status = 'pending', attempts = 0, "
+            f"next_attempt_at = 0, locked_by = NULL, locked_at = NULL, "
+            f"updated_at = ? WHERE {' AND '.join(clauses)}",
+            (_utc_now(), *where_params),
+        )
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+    async def status_counts_by_project(self) -> dict:
+        """{project_id: {operation: {status: n}}} in one query — the project
+        card progress poll needs every project at once, not N requests."""
         await self.ensure_schema()
         rows = await self.db.fetchall(
-            "SELECT operation, status, COUNT(*) AS c FROM maintenance_queue "
-            "GROUP BY operation, status"
+            "SELECT project_id, operation, status, COUNT(*) AS c "
+            "FROM maintenance_queue WHERE project_id IS NOT NULL "
+            "GROUP BY project_id, operation, status"
         )
+        out: dict = {}
+        for r in rows:
+            ops = out.setdefault(str(r["project_id"]), {})
+            ops.setdefault(str(r["operation"]), {})[str(r["status"])] = int(r["c"])
+        return out
+
+    async def status_counts(self, *, project_id: Optional[str] = None) -> dict:
+        await self.ensure_schema()
+        if project_id:
+            rows = await self.db.fetchall(
+                "SELECT operation, status, COUNT(*) AS c FROM maintenance_queue "
+                "WHERE project_id = ? GROUP BY operation, status",
+                (project_id,),
+            )
+        else:
+            rows = await self.db.fetchall(
+                "SELECT operation, status, COUNT(*) AS c FROM maintenance_queue "
+                "GROUP BY operation, status"
+            )
         counts: dict = {}
         for r in rows:
             counts.setdefault(str(r["operation"]), {})[str(r["status"])] = int(r["c"])

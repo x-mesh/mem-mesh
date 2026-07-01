@@ -250,10 +250,22 @@ export class CurationPage extends HTMLElement {
           )
           .join('')
       : '<span class="cur-badge">empty</span>';
+    const isMaintenance = String(w.key).startsWith('maintenance:');
     const recentRows = (w.recent || [])
       .map((r) => {
-        const err = r.last_error
+        // last_error only means "failing" on dead_letter / pending-retry rows;
+        // a done row keeps no error (cleared on success), and stale snapshots
+        // from before that fix must not read as failures.
+        const failing =
+          r.status === 'dead_letter' ||
+          (r.status === 'pending' && (r.attempts || 0) > 0);
+        const err = failing && r.last_error
           ? `<div class="cur-recent-err">${this._esc(r.last_error)}</div>`
+          : '';
+        const retryBtn = isMaintenance && r.status === 'dead_letter'
+          ? `<button class="cur-btn cur-retry-job" data-retry-job="${this._esc(
+              String(r.id)
+            )}" title="Requeue this failed job">retry</button>`
           : '';
         const op = r.operation
           ? `<span class="cur-recent-op">${this._esc(r.operation)}</span>`
@@ -270,6 +282,7 @@ export class CurationPage extends HTMLElement {
             <div class="cur-recent-main">
               ${op}${subjects}
             </div>
+            ${retryBtn}
             <span class="cur-recent-status cur-badge-${this._esc(
               r.status
             )}">${this._esc(r.status)}</span>
@@ -304,17 +317,23 @@ export class CurationPage extends HTMLElement {
       : '';
     // Cancel control: only maintenance (enrich/improve) jobs are cancelable,
     // and only when there's a pending backlog to stop.
-    const isMaintenance = String(w.key).startsWith('maintenance:');
     const cancelBtn = isMaintenance && (counts.pending || 0) > 0
       ? `<button class="cur-btn cur-cancel" data-cancel-op="${this._esc(
           String(w.key).split(':')[1] || ''
         )}">Cancel ${counts.pending} pending</button>`
+      : '';
+    // Retry control: requeue this operation's dead-lettered jobs.
+    const retryAllBtn = isMaintenance && failed > 0
+      ? `<button class="cur-btn cur-retry" data-retry-op="${this._esc(
+          String(w.key).split(':')[1] || ''
+        )}">Retry ${failed} failed</button>`
       : '';
     return `
       <div class="cur-card cur-worker" data-worker="${this._esc(w.key)}">
         <div class="cur-worker-head">
           <h3>${this._esc(w.label || w.key)}</h3>
           ${running ? '<span class="cur-worker-live">● running</span>' : ''}
+          ${retryAllBtn}
           ${cancelBtn}
         </div>
         ${progress}
@@ -434,6 +453,26 @@ export class CurationPage extends HTMLElement {
       } catch (err) {
         this._msg(`Cancel failed: ${err?.data?.detail || err.message}`, true);
         cancelBtn.disabled = false;
+      }
+      return;
+    }
+    const retryBtn = e.target.closest('.cur-retry, .cur-retry-job');
+    if (retryBtn) {
+      const api = window.app?.apiClient;
+      if (!api) return;
+      const payload = retryBtn.dataset.retryJob
+        ? { job_id: retryBtn.dataset.retryJob }
+        : retryBtn.dataset.retryOp
+          ? { operation: retryBtn.dataset.retryOp }
+          : {};
+      retryBtn.disabled = true;
+      try {
+        const res = await api.post('/maintenance/retry', payload);
+        this._msg(`Requeued ${res?.retried ?? 0} failed job(s).`);
+        this.loadActivity({ silent: true });
+      } catch (err) {
+        this._msg(`Retry failed: ${err?.data?.detail || err.message}`, true);
+        retryBtn.disabled = false;
       }
       return;
     }
@@ -595,6 +634,12 @@ export class CurationPage extends HTMLElement {
       .cur-cancel { margin-left: auto; padding: 4px 10px; font-size: 0.78rem; border-color: var(--error-color, #ef4444); color: var(--error-color, #ef4444); background: transparent; }
       .cur-cancel:hover { background: var(--error-color, #ef4444); color: #fff; }
       .cur-cancel:disabled { opacity: 0.5; cursor: default; }
+      .cur-retry { margin-left: auto; padding: 4px 10px; font-size: 0.78rem; border-color: var(--warning-color, #d97706); color: var(--warning-color, #d97706); background: transparent; }
+      .cur-retry + .cur-cancel { margin-left: 0; }
+      .cur-retry:hover { background: var(--warning-color, #d97706); color: #fff; }
+      .cur-retry:disabled, .cur-retry-job:disabled { opacity: 0.5; cursor: default; }
+      .cur-retry-job { padding: 2px 8px; font-size: 0.72rem; border-color: var(--warning-color, #d97706); color: var(--warning-color, #d97706); background: transparent; }
+      .cur-retry-job:hover { background: var(--warning-color, #d97706); color: #fff; }
       .cur-worker-key { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); }
       .cur-badges { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
       .cur-badge { font-size: 0.76rem; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-secondary); }
