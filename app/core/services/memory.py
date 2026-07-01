@@ -207,8 +207,11 @@ class MemoryService:
         # 3.5. F1 sync gate (reconcile): nearest-neighbor candidates only.
         # The NLI/LLM contradiction judgment is moved off the write path to the
         # async reconcile worker (per-add cross-encoder = L1 system-stall risk).
+        # Gated by reconcile_enabled (env enable_conflict_detection OR app_config
+        # reconcile.enabled) — F1 needs no NLI model, only vector candidates.
+        reconcile_on = await self._reconcile_enabled()
         reconcile_candidates: list[dict] | None = None
-        if self.conflict_detector is not None:
+        if reconcile_on:
             reconcile_candidates = await self._find_reconcile_candidates(
                 embedding_vector, project_id
             )
@@ -259,7 +262,7 @@ class MemoryService:
         # catch the earlier one and enqueue the pair. INSERT OR IGNORE keeps it
         # idempotent with the pre-save enqueue; failure is non-blocking (the
         # memory is already canonical with its pre-save queue rows, if any).
-        if self.conflict_detector is not None:
+        if reconcile_on:
             try:
                 post = await self._find_reconcile_candidates(
                     embedding_vector, project_id, exclude_id=memory.id
@@ -658,6 +661,20 @@ class MemoryService:
             logger.error("Failed to save to vector index: %s", e)
             raise DatabaseError(f"Failed to save to vector index: {e}") from e
 
+    async def _reconcile_enabled(self) -> bool:
+        """Whether write-time reconcile (F1 enqueue) is on.
+
+        True if env ``enable_conflict_detection`` is set, OR the dashboard
+        app_config ``reconcile.enabled`` is truthy. Lets the reconcile pipeline
+        be toggled from the dashboard without an env change.
+        """
+        from ..config import get_settings
+
+        if get_settings().enable_conflict_detection:
+            return True
+        val = await self.db.get_app_config("reconcile.enabled")
+        return str(val or "").strip().lower() in ("true", "1", "yes", "on")
+
     async def _find_reconcile_candidates(
         self,
         embedding_vector: List[float],
@@ -673,15 +690,18 @@ class MemoryService:
         can revalidate at apply time and skip rows mutated in between (C2 TOCTOU).
 
         Returns None on no match or on any failure (graceful: never blocks save).
+        Uses vector similarity thresholds from settings directly — no NLI model
+        is loaded on the write path (the async worker loads NLI).
         """
-        if self.conflict_detector is None:
-            return None
+        from ..config import get_settings
+
+        settings = get_settings()
 
         try:
             embedding_bytes = self.embedding_service.to_bytes(embedding_vector)
             embedding_json = self._embedding_to_json(embedding_bytes)
 
-            max_c = self.conflict_detector.max_candidates
+            max_c = settings.conflict_max_candidates
             active_table = await self._resolve_vector_table()
             # Table name is from a fixed slot allowlist (_resolve_vector_table),
             # never user input — safe to interpolate.
@@ -745,7 +765,9 @@ class MemoryService:
             if not rows:
                 return None
 
-            threshold = self.conflict_detector.similarity_threshold
+            threshold = self.embedding_service.scaled_threshold(
+                settings.conflict_similarity_threshold
+            )
             candidates: list[dict] = []
             for row in rows:
                 # Convert cosine distance -> similarity

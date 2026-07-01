@@ -135,8 +135,12 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
     relay_worker.add_argument(
         "--tasks",
-        default="outbox,item,aggregate",
-        help="Comma-separated relay tasks: outbox,item,aggregate",
+        default=None,
+        help=(
+            "Comma-separated relay tasks (outbox,item,aggregate,reconcile). "
+            "Fixed override for debugging; omit to use the relay.worker_tasks "
+            "setting (dashboard-managed, re-read each daemon cycle)."
+        ),
     )
     relay_worker.add_argument(
         "--interval",

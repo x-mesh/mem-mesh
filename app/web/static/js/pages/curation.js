@@ -1,8 +1,9 @@
 /**
- * Curation Page — reconcile 큐(사람 게이트, SSOT #3 F4).
+ * Curation Page — reconcile queue (human gate, SSOT #3 F4).
  *
- * 비동기 reconcile 워커가 만든 PROPOSED 관계(supersede/conflict)를 검토해
- * 승인(old 폐기) / NEW 폐기(C3) / 유지(dismiss) 한다. REST: /api/curation/*.
+ * Reviews PROPOSED relations (supersede/conflict) produced by the async
+ * reconcile worker: approve (deprecate old) / deprecate new (C3) / dismiss.
+ * REST: /api/curation/*.
  */
 
 export class CurationPage extends HTMLElement {
@@ -38,12 +39,12 @@ export class CurationPage extends HTMLElement {
       list.innerHTML = '<div class="cur-empty">API client unavailable.</div>';
       return;
     }
-    list.innerHTML = '<div class="cur-empty">불러오는 중…</div>';
+    list.innerHTML = '<div class="cur-empty">Loading…</div>';
     try {
       const res = await api.getCurationQueue();
       this._render(res?.items || []);
     } catch (e) {
-      list.innerHTML = `<div class="cur-empty cur-msg-error">불러오기 실패: ${this._esc(
+      list.innerHTML = `<div class="cur-empty cur-msg-error">Failed to load: ${this._esc(
         e.message
       )}</div>`;
     }
@@ -55,7 +56,7 @@ export class CurationPage extends HTMLElement {
     if (count) count.textContent = String(items.length);
     if (!items.length) {
       list.innerHTML =
-        '<div class="cur-empty">검토할 reconcile 제안이 없습니다.</div>';
+        '<div class="cur-empty">No reconcile proposals to review.</div>';
       return;
     }
     list.innerHTML = items.map((it) => this._row(it)).join('');
@@ -68,19 +69,19 @@ export class CurationPage extends HTMLElement {
     const approveBtn = isSupersede
       ? `<button class="cur-btn cur-approve" data-relation="${this._esc(
           it.id
-        )}">✓ 승인 · old 폐기</button>`
+        )}">✓ Approve · deprecate old</button>`
       : '';
     const mergeBlock = isMerge
       ? `
         <div class="cur-merge">
-          <h4>🔀 병합 결과 (LLM 제안 · 편집 가능)</h4>
+          <h4>🔀 Merged result (LLM proposal · editable)</h4>
           <textarea class="cur-merged">${this._esc(meta.merged_text || '')}</textarea>
         </div>`
       : '';
     const mergeBtn = isMerge
       ? `<button class="cur-btn cur-approve-merge" data-relation="${this._esc(
           it.id
-        )}">🔀 병합 승인</button>`
+        )}">🔀 Approve merge</button>`
       : '';
     return `
       <div class="cur-card" data-relation="${this._esc(it.id)}">
@@ -107,10 +108,10 @@ export class CurationPage extends HTMLElement {
           ${mergeBtn}
           <button class="cur-btn cur-reject" data-memory="${this._esc(
             it.source_id
-          )}">✗ NEW 폐기</button>
+          )}">✗ Deprecate new</button>
           <button class="cur-btn cur-dismiss" data-relation="${this._esc(
             it.id
-          )}">유지 · dismiss</button>
+          )}">Keep · dismiss</button>
         </div>
       </div>`;
   }
@@ -131,24 +132,24 @@ export class CurationPage extends HTMLElement {
     try {
       if (approve) {
         await api.approveCurationSupersede(approve.dataset.relation);
-        this._msg('승인됨 — old 메모리를 deprecated로 변경했습니다.');
+        this._msg('Approved — the old memory was deprecated.');
       } else if (merge) {
         const card = merge.closest('.cur-card');
         const mergedText = card?.querySelector('.cur-merged')?.value || null;
-        if (!window.confirm('두 메모리를 병합하고 원본 2개를 폐기할까요?')) return;
+        if (!window.confirm('Merge the two memories and deprecate both originals?')) return;
         await api.approveCurationMerge(merge.dataset.relation, mergedText);
-        this._msg('병합됨 — 새 메모리를 생성하고 원본 2개를 폐기했습니다.');
+        this._msg('Merged — created a new memory and deprecated both originals.');
       } else if (reject) {
-        if (!window.confirm('이 NEW 메모리를 폐기(deprecated)할까요?')) return;
+        if (!window.confirm('Deprecate this new memory?')) return;
         await api.rejectCurationNew(reject.dataset.memory);
-        this._msg('NEW 메모리를 폐기했습니다.');
+        this._msg('The new memory was deprecated.');
       } else if (dismiss) {
         await api.dismissCuration(dismiss.dataset.relation);
-        this._msg('제안을 유지(dismiss)했습니다.');
+        this._msg('Proposal dismissed.');
       }
       this.loadData();
     } catch (err) {
-      this._msg(`실패: ${err.message}`, true);
+      this._msg(`Failed: ${err.message}`, true);
     }
   }
 
@@ -156,10 +157,10 @@ export class CurationPage extends HTMLElement {
     return `
       <div class="cur-page">
         <div class="cur-header">
-          <h1>Reconcile 큐레이션 <span class="cur-count-badge">(<span class="cur-count">0</span>)</span></h1>
-          <button class="cur-btn cur-refresh">새로고침</button>
+          <h1>Reconcile Curation <span class="cur-count-badge">(<span class="cur-count">0</span>)</span></h1>
+          <button class="cur-btn cur-refresh">Refresh</button>
         </div>
-        <p class="cur-hint">비동기 reconcile 워커가 감지한 모순/중복 제안입니다. 승인 시에만 메모리가 폐기됩니다.</p>
+        <p class="cur-hint">Conflict/duplicate proposals detected by the async reconcile worker. Memories are deprecated only on approval.</p>
         <div class="cur-msg"></div>
         <div class="cur-list"></div>
       </div>`;

@@ -16,6 +16,7 @@ from .relations import router as relations_router
 from .relay import router as relay_router
 from .search import router as search_router
 from .security import router as security_router
+from .settings_llm import router as settings_llm_router
 from .stats import router as stats_router
 
 router = APIRouter()
@@ -31,6 +32,7 @@ router.include_router(security_router)
 router.include_router(connect_router)
 router.include_router(chat_router)
 router.include_router(curation_router)
+router.include_router(settings_llm_router)
 
 __all__ = [
     "router",
@@ -45,4 +47,5 @@ __all__ = [
     "connect_router",
     "chat_router",
     "curation_router",
+    "settings_llm_router",
 ]

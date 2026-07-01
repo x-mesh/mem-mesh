@@ -24,6 +24,7 @@ export class SettingsPage extends HTMLElement {
         this.loadStatus();
         this.loadRulesIndex();
         this.loadChatSettings();
+        this.loadLlmRouting();
     }
 
     disconnectedCallback() {
@@ -141,6 +142,23 @@ export class SettingsPage extends HTMLElement {
             <button class="settings-btn-primary" id="chat-save-btn">Save</button>
             <button class="settings-btn" id="chat-test-btn">Test</button>
             <span id="chat-settings-meta" class="env-foot"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- LLM Routing -->
+      <div class="settings-section" id="settings-llm-routing">
+        <div class="section-header">
+          <span class="section-label">LLM Routing</span>
+        </div>
+        <div class="section-body">
+          <p class="section-desc">relay and reconcile use the shared Chat LLM above by default. Switch to a per-service dedicated LLM when needed.</p>
+          <p class="env-foot" id="llm-routing-chat-status"></p>
+          ${this.renderLlmServiceBlock('relay', 'Relay')}
+          ${this.renderLlmServiceBlock('reconcile', 'Reconcile')}
+          <div class="chat-actions">
+            <button class="settings-btn-primary" id="llm-routing-save-btn">Save LLM Routing</button>
+            <span id="llm-routing-meta" class="env-foot"></span>
           </div>
         </div>
       </div>
@@ -340,6 +358,9 @@ export class SettingsPage extends HTMLElement {
         this.querySelector('#chat-test-btn')?.addEventListener('click', () => this.testChatConnection());
         this.querySelector('#chat-key-toggle')?.addEventListener('click', () => this.toggleChatKeyVisibility());
         this.querySelector('#chat-enabled')?.addEventListener('change', () => this.saveChatEnabled());
+        this.querySelector('#llm-routing-save-btn')?.addEventListener('click', () => this.saveLlmRouting());
+        this.querySelector('#relay-use-own')?.addEventListener('change', () => this.toggleLlmFields('relay'));
+        this.querySelector('#reconcile-use-own')?.addEventListener('change', () => this.toggleLlmFields('reconcile'));
         this.querySelector('#refresh-status-btn')?.addEventListener('click', () => this.loadStatus());
         this.querySelector('#change-model-btn')?.addEventListener('click', () => {
             window.history.pushState({}, '', '/onboarding');
@@ -560,6 +581,113 @@ export class SettingsPage extends HTMLElement {
         } catch (error) {
             if (meta) meta.textContent = `Test failed: ${error.message}`;
             showToast(`Chat test failed: ${error.message}`, 'error');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    // ── LLM Routing settings ──
+
+    renderLlmServiceBlock(svc, label) {
+        return `
+      <div class="llm-svc" data-svc="${svc}">
+        <div class="llm-svc-head">
+          <span class="llm-svc-title">${label}</span>
+          <label class="chat-enable-toggle" title="Use a dedicated LLM for ${label} (otherwise the shared Chat LLM)">
+            <input type="checkbox" id="${svc}-use-own">
+            <span>Use dedicated LLM</span>
+          </label>
+        </div>
+        <div class="llm-svc-off" id="${svc}-llm-off">Using shared Chat LLM</div>
+        <div class="chat-settings-grid llm-svc-fields" id="${svc}-llm-fields" hidden>
+          <label class="chat-field">
+            <span>Provider</span>
+            <select id="${svc}-llm-provider">
+              <option value="anthropic">anthropic</option>
+              <option value="openai">openai</option>
+            </select>
+          </label>
+          <label class="chat-field">
+            <span>Model</span>
+            <input id="${svc}-llm-model" type="text" placeholder="provider default">
+          </label>
+          <label class="chat-field chat-field-wide">
+            <span>API Key</span>
+            <input id="${svc}-llm-api-key" type="password" autocomplete="new-password" placeholder="enter key to set">
+          </label>
+          <label class="chat-field chat-field-wide">
+            <span>Base URL</span>
+            <input id="${svc}-llm-base-url" type="url" placeholder="empty = provider default">
+          </label>
+        </div>
+      </div>`;
+    }
+
+    async loadLlmRouting() {
+        const meta = this.querySelector('#llm-routing-meta');
+        try {
+            const data = await window.app.apiClient.get('/settings/llm-routing');
+            this.applyLlmRouting(data);
+        } catch (error) {
+            if (meta) meta.textContent = `Failed to load: ${error.message}`;
+        }
+    }
+
+    applyLlmRouting(data) {
+        if (!data) return;
+        const status = this.querySelector('#llm-routing-chat-status');
+        if (status) {
+            status.innerHTML = data.chat_configured
+                ? '<span class="env-src env-src-db">Shared Chat LLM configured</span> Services without a dedicated LLM use the Chat settings above.'
+                : '<span class="env-state off">Shared Chat LLM not configured</span> Set a key in Chat Assistant above, or configure a per-service dedicated LLM.';
+        }
+        ['relay', 'reconcile'].forEach((svc) => {
+            const s = data[svc] || {};
+            const toggle = this.querySelector(`#${svc}-use-own`);
+            if (toggle) toggle.checked = s.use_own === true;
+            const provider = this.querySelector(`#${svc}-llm-provider`);
+            if (provider) provider.value = s.provider || 'anthropic';
+            const model = this.querySelector(`#${svc}-llm-model`);
+            if (model) model.value = s.model || '';
+            const baseUrl = this.querySelector(`#${svc}-llm-base-url`);
+            if (baseUrl) baseUrl.value = s.base_url || '';
+            const key = this.querySelector(`#${svc}-llm-api-key`);
+            if (key) {
+                key.value = '';
+                key.placeholder = s.api_key_configured ? 'configured — enter a new key to replace' : 'enter key to set';
+            }
+            this.toggleLlmFields(svc);
+        });
+    }
+
+    toggleLlmFields(svc) {
+        const on = this.querySelector(`#${svc}-use-own`)?.checked ?? false;
+        const fields = this.querySelector(`#${svc}-llm-fields`);
+        const off = this.querySelector(`#${svc}-llm-off`);
+        if (fields) fields.hidden = !on;
+        if (off) off.hidden = on;
+    }
+
+    async saveLlmRouting() {
+        const payload = {};
+        ['relay', 'reconcile'].forEach((svc) => {
+            const block = { use_own: this.querySelector(`#${svc}-use-own`)?.checked ?? false };
+            const provider = this.querySelector(`#${svc}-llm-provider`)?.value || '';
+            if (provider) block.provider = provider;
+            block.model = this.querySelector(`#${svc}-llm-model`)?.value.trim() || '';
+            block.base_url = this.querySelector(`#${svc}-llm-base-url`)?.value.trim() || '';
+            const key = this.querySelector(`#${svc}-llm-api-key`)?.value.trim();
+            if (key) block.api_key = key;
+            payload[svc] = block;
+        });
+        const btn = this.querySelector('#llm-routing-save-btn');
+        if (btn) btn.disabled = true;
+        try {
+            await window.app.apiClient.put('/settings/llm-routing', payload);
+            showToast('LLM routing saved.', 'success');
+            await this.loadLlmRouting();
+        } catch (error) {
+            showToast(`Save failed: ${error.message}`, 'error');
         } finally {
             if (btn) btn.disabled = false;
         }
@@ -1635,6 +1763,51 @@ style.textContent = `
   .chat-settings-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* LLM routing */
+
+.llm-svc {
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.llm-svc:first-of-type {
+  border-top: none;
+  padding-top: var(--space-2);
+}
+
+.llm-svc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.llm-svc-title {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+}
+
+.llm-svc-off {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 4px 0;
+}
+
+.llm-svc-fields {
+  margin-bottom: 0;
+}
+
+.llm-svc-fields[hidden] {
+  display: none;
+}
+
+.llm-svc-fields select,
+.llm-svc-fields input {
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 /* Migration progress */
