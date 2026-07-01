@@ -280,35 +280,15 @@ export class KeyboardShortcuts {
       }
     }, 'Submit form');
     
-    // List navigation shortcuts
-    this.register('j', () => {
-      this.navigateList('down');
-    }, 'Navigate down in lists');
-    
-    this.register('k', () => {
-      this.navigateList('up');
-    }, 'Navigate up in lists');
-    
-    this.register('enter', () => {
-      this.activateSelectedItem();
-    }, 'Activate selected item');
-    
-    // Quick actions
-    this.register('g h', () => {
-      window.app?.router?.navigate('/');
-    }, 'Go to home');
-    
-    this.register('g s', () => {
-      window.app?.router?.navigate('/search');
-    }, 'Go to search');
-    
-    this.register('g p', () => {
-      window.app?.router?.navigate('/projects');
-    }, 'Go to projects');
-    
-    this.register('g a', () => {
-      window.app?.router?.navigate('/analytics');
-    }, 'Go to analytics');
+    // NOTE: bare single-letter list-nav shortcuts (j/k/Enter) were intentionally
+    // removed. This global manager's input guard only inspects
+    // event.target.tagName (see isTypingInInput), so keys typed into inputs that
+    // retarget to a shadow host — the chat/search web components — slipped past it
+    // and fired while the user was typing. Arrow-key/j-k list navigation is owned
+    // by the page components (memories.js, work.js), which guard with
+    // composedPath()+isContentEditable. The 'g h/g s/g p/g a' sequences were also
+    // removed: generateShortcutKey() never emits multi-key chords, so they were
+    // dead registrations that only cluttered the shortcuts help dialog.
   }
   
   /**

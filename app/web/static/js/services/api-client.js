@@ -17,11 +17,18 @@ export class APIClient {
     const url = new URL(`${this.baseURL}${endpoint}`, window.location.origin);
     
     Object.entries(params).forEach(([key, value]) => {
-      if (value !== null && value !== undefined) {
-        // query 파라미터는 빈 문자열도 허용
-        if (key === 'query' || value !== '') {
-          url.searchParams.append(key, value);
-        }
+      if (value === null || value === undefined) return;
+      // Arrays → repeated params (e.g. categories=bug&categories=incident) so
+      // FastAPI List[str] query params bind correctly.
+      if (Array.isArray(value)) {
+        value.forEach((v) => {
+          if (v !== null && v !== undefined && v !== '') url.searchParams.append(key, v);
+        });
+        return;
+      }
+      // query 파라미터는 빈 문자열도 허용
+      if (key === 'query' || value !== '') {
+        url.searchParams.append(key, value);
       }
     });
     
@@ -34,6 +41,19 @@ export class APIClient {
   getCacheKey(method, url, data = null) {
     const key = `${method}:${url.toString()}`;
     return data ? `${key}:${JSON.stringify(data)}` : key;
+  }
+
+  /**
+   * Drop cached GET responses whose key contains a path fragment.
+   * The generic request() never invalidates the cache, so mutations must call
+   * this explicitly (e.g. after updating a memory) or later reads stay stale.
+   */
+  invalidateCache(pathFragment) {
+    for (const key of this.cache.keys()) {
+      if (key.includes(pathFragment)) {
+        this.cache.delete(key);
+      }
+    }
   }
   
   /**
@@ -211,15 +231,21 @@ export class APIClient {
   }
   
   async createMemory(memoryData) {
-    return this.post('/memories', memoryData);
+    const result = await this.post('/memories', memoryData);
+    this.invalidateCache('/memories');
+    return result;
   }
-  
+
   async updateMemory(memoryId, updates) {
-    return this.put(`/memories/${memoryId}`, updates);
+    const result = await this.put(`/memories/${memoryId}`, updates);
+    this.invalidateCache('/memories');
+    return result;
   }
-  
+
   async deleteMemory(memoryId) {
-    return this.delete(`/memories/${memoryId}`);
+    const result = await this.delete(`/memories/${memoryId}`);
+    this.invalidateCache('/memories');
+    return result;
   }
 
   /**

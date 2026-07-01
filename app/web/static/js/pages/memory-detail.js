@@ -365,9 +365,16 @@ class MemoryDetailPage extends HTMLElement {
     
     try {
       if (window.app && window.app.apiClient) {
-        const updatedMemory = await window.app.apiClient.updateMemory(this.memoryId, updatedData);
-        this.memory = updatedMemory;
-        this.originalContent = updatedMemory.content;
+        // PUT /memories/{id} returns {id, status}, NOT the memory object, so
+        // assigning its result to this.memory blanked the view (undefined
+        // category, 0 chars). Re-fetch the canonical record instead;
+        // updateMemory invalidates the cache so this GET reflects the save.
+        await window.app.apiClient.updateMemory(this.memoryId, updatedData);
+        const refreshed = await window.app.apiClient.getMemory(this.memoryId);
+        if (refreshed) {
+          this.memory = refreshed;
+          this.originalContent = refreshed.content;
+        }
         this.isEditing = false;
         
         if (window.app && window.app.errorHandler) {
@@ -1219,12 +1226,46 @@ class MemoryDetailPage extends HTMLElement {
       // 인라인 코드 처리 전에 나머지 HTML 이스케이프
       formatted = this.escapeHtml(formatted);
 
-      // 간단한 마크다운 변환
-      formatted = formatted
-        .replace(/\n/g, '<br>')
+      // 블록 마크다운: 헤더(#~######) + 리스트(-,*,+ / 1.)를 라인 단위로 처리한다.
+      // (코드블록·테이블은 위에서 플레이스홀더로 치환됨, formatted는 이미 escapeHtml 완료)
+      // 인라인(bold/italic/code)은 라인별로 적용, 링크는 아래 기존 단계에서 처리.
+      const inlineMd = (s) => s
         .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
         .replace(/\*([^*]+)\*/g, '<em>$1</em>')
         .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+      const mdLines = [];
+      let mdList = null;
+      const closeMdList = () => { if (mdList) { mdLines.push(`</${mdList}>`); mdList = null; } };
+      for (const line of formatted.split('\n')) {
+        if (/^__(?:CODE_BLOCK|TABLE_BLOCK)_\d+__$/.test(line.trim())) {
+          closeMdList();
+          mdLines.push(line.trim());
+          continue;
+        }
+        const heading = line.match(/^(#{1,6})\s+(.*)$/);
+        if (heading) {
+          closeMdList();
+          const lvl = heading[1].length;
+          mdLines.push(`<h${lvl}>${inlineMd(heading[2])}</h${lvl}>`);
+          continue;
+        }
+        const bullet = line.match(/^\s*[-*+]\s+(.*)$/);
+        if (bullet) {
+          if (mdList !== 'ul') { closeMdList(); mdLines.push('<ul>'); mdList = 'ul'; }
+          mdLines.push(`<li>${inlineMd(bullet[1])}</li>`);
+          continue;
+        }
+        const numbered = line.match(/^\s*\d+\.\s+(.*)$/);
+        if (numbered) {
+          if (mdList !== 'ol') { closeMdList(); mdLines.push('<ol>'); mdList = 'ol'; }
+          mdLines.push(`<li>${inlineMd(numbered[1])}</li>`);
+          continue;
+        }
+        closeMdList();
+        mdLines.push(line.trim() ? `${inlineMd(line)}<br>` : '<br>');
+      }
+      closeMdList();
+      formatted = mdLines.join('\n');
       
       // URL 링크 변환
       formatted = formatted.replace(
@@ -1752,7 +1793,47 @@ style.textContent = `
   .memory-text .md-table tr:hover {
     background: var(--bg-hover, rgba(0,0,0,0.02));
   }
-  
+
+  /* Rendered-markdown headings: the global h1–h6 sizes (text-3xl/2xl) are
+     document-scale and far too large inside a memory body — scope them down. */
+  .memory-text h1,
+  .memory-text h2,
+  .memory-text h3,
+  .memory-text h4,
+  .memory-text h5,
+  .memory-text h6 {
+    color: var(--text-primary);
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 1.5rem 0 0.5rem;
+    text-transform: none !important;
+  }
+  .memory-text h1:first-child,
+  .memory-text h2:first-child,
+  .memory-text h3:first-child {
+    margin-top: 0;
+  }
+  .memory-text h1 { font-size: 1.4rem; }
+  .memory-text h2 { font-size: 1.25rem; }
+  .memory-text h3 { font-size: 1.1rem; }
+  .memory-text h4,
+  .memory-text h5,
+  .memory-text h6 { font-size: 1rem; }
+
+  /* Lists: the global "* { padding: 0 }" reset strips the indent, so the
+     bullet/number hangs outside the text column. Restore it. */
+  .memory-text ul,
+  .memory-text ol {
+    margin: 0.5rem 0;
+    padding-left: 1.5rem;
+  }
+  .memory-text ul { list-style: disc; }
+  .memory-text ol { list-style: decimal; }
+  .memory-text li {
+    margin: 0.25rem 0;
+    line-height: 1.7;
+  }
+
   .memory-tags {
     display: flex;
     flex-wrap: wrap;

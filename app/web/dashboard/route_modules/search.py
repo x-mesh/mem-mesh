@@ -5,9 +5,9 @@ Provides endpoints for searching memories with various modes and filters.
 """
 
 import logging
-from typing import Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.schemas.requests import normalize_project_id
@@ -27,6 +27,7 @@ class SearchRequest(BaseModel):
     query: str = ""
     project_id: Optional[str] = None
     category: Optional[str] = None
+    categories: Optional[List[str]] = None
     source: Optional[str] = None
     tag: Optional[str] = None
     limit: int = Field(default=25, ge=1, le=500)
@@ -39,6 +40,20 @@ class SearchRequest(BaseModel):
     date_from: Optional[str] = None
     date_to: Optional[str] = None
     temporal_mode: str = "boost"
+
+
+# Canonical memory categories (mirrors SearchParams.validate_category). Used to
+# bound the user-controlled `categories` filter so a crafted/huge list can't blow
+# up the SQL IN clause or the cache key.
+_VALID_CATEGORIES = {
+    "task",
+    "bug",
+    "idea",
+    "decision",
+    "incident",
+    "code_snippet",
+    "git-history",
+}
 
 
 async def _do_search(
@@ -54,6 +69,7 @@ async def _do_search(
     recency_weight: float,
     search_mode: str,
     service: UnifiedSearchService,
+    categories: Optional[List[str]] = None,
     time_range: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
@@ -65,11 +81,21 @@ async def _do_search(
     # "my-project". strict=False: a malformed filter degrades to "unknown"
     # (empty result) rather than a 500.
     project_id = normalize_project_id(project_id, strict=False)
+    # Bound the user-controlled multi-category filter: dedupe (order-preserving),
+    # drop unknown categories, and cap at the number of real categories so a
+    # crafted `categories=...` list can't expand the SQL IN clause / cache key.
+    if categories:
+        deduped: list[str] = []
+        for c in categories:
+            if c in _VALID_CATEGORIES and c not in deduped:
+                deduped.append(c)
+        categories = deduped[: len(_VALID_CATEGORIES)] or None
     try:
         return await service.search(
             query=query,
             project_id=project_id,
             category=category,
+            categories=categories,
             source=source,
             tag=tag,
             limit=limit,
@@ -93,6 +119,7 @@ async def search_memories(
     query: str,
     project_id: str = None,
     category: str = None,
+    categories: Optional[List[str]] = Query(None),
     source: str = None,
     tag: str = None,
     limit: int = 25,
@@ -120,6 +147,7 @@ async def search_memories(
         query=query,
         project_id=project_id,
         category=category,
+        categories=categories,
         source=source,
         tag=tag,
         limit=limit,
@@ -151,6 +179,7 @@ async def search_memories_post(
         query=body.query,
         project_id=body.project_id,
         category=body.category,
+        categories=body.categories,
         source=body.source,
         tag=body.tag,
         limit=body.limit,

@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 if TYPE_CHECKING:
     from .search_quality import SearchIntent
 
-from ..database.base import Database
+from ..database.base import Database, category_filter_clause
 from ..embeddings.service import EmbeddingService
 from ..schemas.responses import SearchResponse, SearchResult
 from .cache_manager import get_cache_manager
@@ -216,6 +216,7 @@ class UnifiedSearchService:
         query: str,
         project_id: Optional[str] = None,
         category: Optional[str] = None,
+        categories: Optional[List[str]] = None,
         source: Optional[str] = None,
         tag: Optional[str] = None,
         limit: int = 25,
@@ -285,12 +286,16 @@ class UnifiedSearchService:
             if expanded_query != query:
                 logger.info(f"Query expanded: '{query}' → '{expanded_query[:100]}...'")
 
+        # Multi-category filters must not collide in the cache/metric key that a
+        # single category would produce, so fold the list into a stable key.
+        cache_cat = ",".join(sorted(categories)) if categories else category
+
         # 3. Check cache (only when offset=0)
         if offset == 0 and query:
             cached_results = await self.cache_manager.get_cached_search(
                 query=expanded_query,
                 project_id=project_id,
-                category=category,
+                category=cache_cat,
                 limit=limit,
             )
             if cached_results:
@@ -309,7 +314,9 @@ class UnifiedSearchService:
         filters = {}
         if project_id:
             filters["project_id"] = project_id
-        if category:
+        if categories:
+            filters["category"] = list(categories)
+        elif category:
             filters["category"] = category
         if source:
             filters["source"] = source
@@ -412,7 +419,7 @@ class UnifiedSearchService:
                 query=expanded_query,
                 results=result,
                 project_id=project_id,
-                category=category,
+                category=cache_cat,
                 limit=limit,
             )
 
@@ -435,7 +442,7 @@ class UnifiedSearchService:
 
         # 11. Collect metrics
         await self._collect_metrics(
-            original_query, result, start_time, project_id, category
+            original_query, result, start_time, project_id, cache_cat
         )
 
         # 12. Generate suggestions on empty/low-quality results
@@ -882,8 +889,12 @@ class UnifiedSearchService:
                 sql += " AND m.project_id = ?"
                 params.append(filters["project_id"])
             if filters.get("category"):
-                sql += " AND m.category = ?"
-                params.append(filters["category"])
+                _cond, _cp = category_filter_clause(
+                    filters["category"], column="m.category"
+                )
+                if _cond:
+                    sql += " AND " + _cond
+                    params.extend(_cp)
 
         sql += " ORDER BY fts.rank LIMIT ?"
         params.append(limit)
@@ -991,8 +1002,10 @@ class UnifiedSearchService:
                 base_query += " AND project_id = ?"
                 params.append(filters["project_id"])
             if filters.get("category"):
-                base_query += " AND category = ?"
-                params.append(filters["category"])
+                _cond, _cp = category_filter_clause(filters["category"])
+                if _cond:
+                    base_query += " AND " + _cond
+                    params.extend(_cp)
 
         # Fuzzy scoring is a Python SequenceMatcher loop, O(rows × words); it only
         # needs a modest candidate pool. limit*3 (not *10) cuts the scoring cost
@@ -1073,8 +1086,10 @@ class UnifiedSearchService:
                 base_query += " AND project_id = ?"
                 params.append(filters["project_id"])
             if filters.get("category"):
-                base_query += " AND category = ?"
-                params.append(filters["category"])
+                _cond, _cp = category_filter_clause(filters["category"])
+                if _cond:
+                    base_query += " AND " + _cond
+                    params.extend(_cp)
 
         base_query += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)

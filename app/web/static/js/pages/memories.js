@@ -158,7 +158,7 @@ class MemoriesPage extends HTMLElement {
   parseURLParameters() {
     const p = new URLSearchParams(window.location.search);
     this.viewParams = {
-      category: p.get('category') || null,
+      category: (p.get('category') || '').split(',').filter(Boolean),
       project_id: p.get('project_id') || null,
       tag: p.get('tag') || null,
       source: p.get('source') || null
@@ -171,7 +171,7 @@ class MemoriesPage extends HTMLElement {
 
   updateURL() {
     const p = new URLSearchParams();
-    if (this.viewParams.category) p.set('category', this.viewParams.category);
+    if (this.viewParams.category.length) p.set('category', this.viewParams.category.join(','));
     if (this.viewParams.project_id) p.set('project_id', this.viewParams.project_id);
     if (this.viewParams.tag) p.set('tag', this.viewParams.tag);
     if (this.viewParams.source) p.set('source', this.viewParams.source);
@@ -268,7 +268,7 @@ class MemoriesPage extends HTMLElement {
           { value: 'code_snippet', text: 'Code Snippet', icon: '💻' },
           { value: 'git-history', text: 'Git History', icon: '📚' }
         ]);
-        if (this.viewParams.category) catCombo.setValue(this.viewParams.category);
+        this._syncCatCombo();
       }
       const projCombo = this.querySelector('.mem-proj-combo');
       if (projCombo && this.viewParams.project_id) {
@@ -413,7 +413,7 @@ class MemoriesPage extends HTMLElement {
     if (!container) return;
 
     const chips = [];
-    if (this.viewParams.category) chips.push({ key: 'category', label: this.viewParams.category });
+    this.viewParams.category.forEach(cat => chips.push({ key: `category:${cat}`, label: cat }));
     if (this.viewParams.project_id) chips.push({ key: 'project_id', label: `project:${this.viewParams.project_id}` });
     if (this.viewParams.tag) chips.push({ key: 'tag', label: `#${this.viewParams.tag}` });
     if (this.viewParams.source) chips.push({ key: 'source', label: `source:${this.viewParams.source}` });
@@ -442,12 +442,12 @@ class MemoriesPage extends HTMLElement {
     } else if (key === 'timeRange') {
       this.timeRange = null;
       this.querySelectorAll('.mem-time-btn').forEach(b => b.classList.toggle('active', b.dataset.range === ''));
+    } else if (key.startsWith('category:')) {
+      const cat = key.slice(9);
+      this.viewParams.category = this.viewParams.category.filter(c => c !== cat);
+      this._syncCatCombo();
     } else {
       this.viewParams[key] = null;
-      if (key === 'category') {
-        const combo = this.querySelector('.mem-cat-combo');
-        if (combo) combo.setValue('', 'All Categories');
-      }
       if (key === 'project_id') {
         const combo = this.querySelector('.mem-proj-combo');
         if (combo) combo.setValue('', 'All Projects');
@@ -458,7 +458,7 @@ class MemoriesPage extends HTMLElement {
 
   clearAllFilters() {
     this.searchQuery = '';
-    this.viewParams = { category: null, project_id: null, tag: null, source: null };
+    this.viewParams = { category: [], project_id: null, tag: null, source: null };
     this.timeRange = null;
     this.sortBy = this._prevSortBy || 'created_at';
     const input = this.querySelector('.mem-search-input');
@@ -473,6 +473,21 @@ class MemoriesPage extends HTMLElement {
     this.resetAndLoad();
   }
 
+  _toggleCategory(cat) {
+    const set = new Set(this.viewParams.category);
+    if (set.has(cat)) set.delete(cat); else set.add(cat);
+    this.viewParams.category = [...set];
+    this._syncCatCombo();
+  }
+
+  _syncCatCombo() {
+    const combo = this.querySelector('.mem-cat-combo');
+    if (!combo) return;
+    const cats = this.viewParams.category;
+    if (cats.length === 1) combo.setValue(cats[0]);
+    else combo.setValue('', cats.length ? `${cats.length} categories` : 'All Categories');
+  }
+
   /* ── Data loading ───────────────────────────────────────── */
 
   resetAndLoad() {
@@ -481,6 +496,7 @@ class MemoriesPage extends HTMLElement {
     this.hasMore = true;
     this.updateURL();
     this.renderChips();
+    this.renderStatsBar();
     this.loadMemories();
   }
 
@@ -506,7 +522,7 @@ class MemoriesPage extends HTMLElement {
         params.time_range = this.timeRange;
         params.temporal_mode = 'filter';
       }
-      if (this.viewParams.category) params.category = this.viewParams.category;
+      if (this.viewParams.category.length) params.categories = this.viewParams.category;
       if (this.viewParams.project_id) params.project_id = this.viewParams.project_id;
       if (this.viewParams.source) params.source = this.viewParams.source;
       if (this.viewParams.tag) params.tag = this.viewParams.tag;
@@ -643,14 +659,14 @@ class MemoriesPage extends HTMLElement {
         const type = filterEl.dataset.filterType;
         const value = filterEl.dataset.filterValue;
         if (type && value) {
-          this.viewParams[type] = value;
           if (type === 'category') {
-            const catCombo = this.querySelector('.mem-cat-combo');
-            if (catCombo) catCombo.setValue(value);
-          }
-          if (type === 'project_id') {
-            const projCombo = this.querySelector('.mem-proj-combo');
-            if (projCombo) projCombo.setValue(value);
+            this._toggleCategory(value);
+          } else {
+            this.viewParams[type] = value;
+            if (type === 'project_id') {
+              const projCombo = this.querySelector('.mem-proj-combo');
+              if (projCombo) projCombo.setValue(value);
+            }
           }
           this.resetAndLoad();
         }
@@ -793,7 +809,7 @@ class MemoriesPage extends HTMLElement {
       }
       // Searchable combobox change events (CustomEvent with detail)
       if (target.matches('.mem-cat-combo')) {
-        this.viewParams.category = e.detail?.value || null;
+        this.viewParams.category = e.detail?.value ? [e.detail.value] : [];
         this.resetAndLoad();
         return;
       }
@@ -1079,7 +1095,7 @@ class MemoriesPage extends HTMLElement {
 
   shouldIncludeMemory(memory) {
     if (this.viewParams.project_id && memory.project_id !== this.viewParams.project_id) return false;
-    if (this.viewParams.category && memory.category !== this.viewParams.category) return false;
+    if (this.viewParams.category.length && !this.viewParams.category.includes(memory.category)) return false;
     if (this.viewParams.source && memory.source !== this.viewParams.source) return false;
     if (this.viewParams.tag && !(memory.tags || []).includes(this.viewParams.tag)) return false;
     if (this.searchQuery) {
@@ -1502,11 +1518,16 @@ class MemoriesPage extends HTMLElement {
       return `<span class="mem-spark-bar" style="height:${h}px" title="${d.date}: ${d.count}"></span>`;
     }).join('');
 
-    // Category pills (top 4)
-    const topCats = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 4);
-    const catPills = topCats.map(([c, n]) =>
-      `<span class="mem-stat-cat mem-clickable-filter" data-filter-type="category" data-filter-value="${esc(c)}">${esc(c)} <strong>${n}</strong></span>`
-    ).join('');
+    // Category pills — show every category that has memories, most-used first.
+    // (Previously capped at the top 4 by count, which silently hid categories
+    //  tied at the cut, e.g. incident/decision alongside code_snippet.)
+    const catEntries = Object.entries(cats)
+      .filter(([, n]) => n > 0)
+      .sort((a, b) => b[1] - a[1]);
+    const catPills = catEntries.map(([c, n]) => {
+      const active = this.viewParams.category.includes(c);
+      return `<span class="mem-stat-cat mem-clickable-filter${active ? ' active' : ''}" data-filter-type="category" data-filter-value="${esc(c)}">${esc(c)} <strong>${n}</strong></span>`;
+    }).join('');
 
     // Week total
     const weekTotal = daily.reduce((sum, d) => sum + d.count, 0);
@@ -2716,6 +2737,12 @@ style.textContent = `
   }
   .mem-stat-cat:hover { background: var(--border-color); }
   .mem-stat-cat strong { font-weight: 600; color: var(--text-primary); margin-left: 2px; }
+  .mem-stat-cat.active {
+    background: var(--primary-color, #2563eb);
+    color: #fff;
+    border-color: var(--primary-color, #2563eb);
+  }
+  .mem-stat-cat.active strong { color: #fff; }
   .mem-stat-pins {
     padding: 1px 6px;
     border-radius: 3px;

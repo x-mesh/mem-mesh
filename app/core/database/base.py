@@ -49,7 +49,24 @@ __all__ = [
     "EMBEDDING_TABLE_PRIMARY",
     "EMBEDDING_TABLE_SECONDARY",
     "EMBEDDING_TABLE_SLOTS",
+    "category_filter_clause",
 ]
+
+
+def category_filter_clause(cat, column: str = "category"):
+    """SQL condition + params for a category filter that may be a single string
+    (``category = ?``) or a list/tuple/set of categories (``category IN (?, ...)``).
+    Returns (condition_without_AND, params_list). Empty ('', []) when no filter.
+    """
+    if not cat:
+        return "", []
+    if isinstance(cat, (list, tuple, set)):
+        cats = [c for c in cat if c]
+        if not cats:
+            return "", []
+        placeholders = ",".join("?" * len(cats))
+        return f"{column} IN ({placeholders})", list(cats)
+    return f"{column} = ?", [cat]
 
 
 class Database:
@@ -274,8 +291,12 @@ class Database:
                             filter_conditions.append("m.project_id = ?")
                             params.append(filters["project_id"])
                         if filters.get("category"):
-                            filter_conditions.append("m.category = ?")
-                            params.append(filters["category"])
+                            _cond, _cp = category_filter_clause(
+                                filters["category"], column="m.category"
+                            )
+                            if _cond:
+                                filter_conditions.append(_cond)
+                                params.extend(_cp)
 
                     base_query += f" WHERE {' AND '.join(filter_conditions)}"
 
@@ -311,8 +332,10 @@ class Database:
                 base_query += " AND project_id = ?"
                 params.append(filters["project_id"])
             if filters.get("category"):
-                base_query += " AND category = ?"
-                params.append(filters["category"])
+                _cond, _cp = category_filter_clause(filters["category"])
+                if _cond:
+                    base_query += " AND " + _cond
+                    params.extend(_cp)
 
         base_query += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
@@ -342,8 +365,10 @@ class Database:
                     base_query += " AND project_id = ?"
                     params.append(filters["project_id"])
                 if filters.get("category"):
-                    base_query += " AND category = ?"
-                    params.append(filters["category"])
+                    _cond, _cp = category_filter_clause(filters["category"])
+                    if _cond:
+                        base_query += " AND " + _cond
+                        params.extend(_cp)
                 if filters.get("source"):
                     base_query += " AND source = ?"
                     params.append(filters["source"])
@@ -397,8 +422,10 @@ class Database:
                     base_query += " AND project_id = ?"
                     params.append(filters["project_id"])
                 if filters.get("category"):
-                    base_query += " AND category = ?"
-                    params.append(filters["category"])
+                    _cond, _cp = category_filter_clause(filters["category"])
+                    if _cond:
+                        base_query += " AND " + _cond
+                        params.extend(_cp)
                 if filters.get("source"):
                     base_query += " AND source = ?"
                     params.append(filters["source"])
