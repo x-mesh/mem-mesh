@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.23.0] - 2026-07-01
+
+**프로젝트 Overview(LLM 서사 요약)**를 도입한 minor 릴리스. WHY: 프로젝트에 쌓인 메모리가 늘어날수록 "이 프로젝트가 지금 어떤 상태이고 무엇이 미결인가"를 한눈에 보기 어려웠다. 개별 메모리 enrich(title/abstract)는 있지만 프로젝트 전체를 관통하는 서사 요약이 없었다. 그래서 최근 20개 메모리를 한 번의 LLM 호출로 요약(summary/themes/recent_activity/open_issues/key_decisions)해 두 곳(Projects 카드 모달 · 메모리 상세 사이드바)에서 동일 렌더러로 노출하고, 입력 메모리의 source_hash로 stale을 감지해 on-demand 재생성한다.
+
+### Added
+- **프로젝트 Overview (LLM 요약)** — 프로젝트의 최근 20개 메모리를 한 번의 chat LLM 호출로 요약해 summary·themes·recent_activity·open_issues·key_decisions(소스 메모리 링크 포함)를 생성. Projects 페이지 카드의 `📋 Overview` 버튼(모달)과 메모리 상세 사이드바(Related Memories 위 패널)에서 공유 렌더러(`window.ProjectOverviewRender`)로 동일하게 표시. 결과는 `project_overview` 테이블에 캐시하고 입력 메모리의 source_hash로 stale 감지 후 on-demand 재생성. `app/core/services/overview.py`, `app/core/services/chat.py`, `app/web/dashboard/route_modules/overview.py`, `app/web/static/js/components/overview-render.js`, `app/web/static/js/pages/projects.js`, `app/web/static/js/pages/memory-detail.js`
+
+### Fixed
+- **Overview stale 오탐** — source_hash가 `id:content_hash`만 포함해 category-only 편집·enrichment(title/abstract) 갱신 시 cached overview가 fresh로 남던 문제를, 해시에 category+enrichment 필드를 포함해 해결. `app/core/services/overview.py`
+- **Overview 생성 500 (no such table)** — `_gather_items`가 lazy 생성되는 `memory_enrichment`를 LEFT JOIN하는데 enrich를 한 번도 안 쓴 DB에선 테이블이 없어 500나던 것을, `ensure_schema`가 EnrichmentStore 스키마를 선행 보장하도록 수정(curation.py의 동일 JOIN 가드 패턴과 정합). `app/core/services/overview.py`
+- **메모리 상세 단축키 리스너 누수** — `.bind(this)`로 매번 새 함수를 만들어 removeEventListener가 실패, 숫자키가 Settings 등 다른 페이지에서 페이지 이동을 유발하던 것을 stored bound handler + 입력 필드 포커스 가드로 해결. `app/web/static/js/pages/memory-detail.js`
+
+### Changed
+- **relay enricher temperature 노출** — 구조적 추출(enrich/digest/reconcile)의 출력 안정성을 위해 temperature를 0.2로 낮추고 파라미터화. `app/core/services/relay_worker.py`, `app/core/services/chat.py`
+
 ## [1.22.0] - 2026-07-01
 
 **프로젝트 단위 일괄 지식 정리(maintenance)**를 도입하고, **relay 팀공유를 실사용 가능한 수준으로 완성**(identity 관리·토큰 검증·config hot-reload·enrichment 전파·sharing policy)한 minor 릴리스. WHY: (1) 지금까지 enrich/improve/reconcile은 메모리 하나씩만 가능해 프로젝트 전체를 한 번에 정리할 수 없었고, reconcile은 write-time(`create`)에만 걸려 있어 "reconcile 켜기 전부터 있던 메모리"는 영원히 비교되지 않았다. 그래서 프로젝트 단위로 큐에 적재해 백그라운드 워커가 페이싱 처리하는 maintenance 서브시스템을 얹는다(동기 LLM 루프 금지 — CLAUDE.md L1/L5). (2) relay가 hub에 붙긴 했지만 토큰이 맞는지 확인할 방법(도달성만 체크됨)·발급된 identity를 rotate/delete할 방법·대시보드에서 LLM 키를 바꿔도 워커 재시작 없이 반영할 방법이 없었고, 로컬 Enrich 결과(title/abstract)가 공유 시 전달되지 않았다. (3) 공유 가능 카테고리가 코드에 하드코딩돼 새 카테고리가 조용히 공유 불가로 굳었다. 이들을 실사용 관점에서 메운다.
