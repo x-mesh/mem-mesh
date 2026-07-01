@@ -10,6 +10,7 @@ from typing import Optional
 from app.core.config import Settings
 from app.core.database.base import Database
 from app.core.embeddings.service import EmbeddingService
+from app.core.services.llm_resolver import resolve_service_llm
 from app.core.services.relay import RelayService
 from app.core.services.relay_worker import (
     RelayWorker,
@@ -205,19 +206,22 @@ async def _run_relay_worker_instance(
         effective = await service.get_effective_config(settings)
         relay_config = effective["values"]
         relay_sources = effective["sources"]
-        needs_llm = bool(enabled & {"item", "aggregate", "reconcile"})
+        # Unified LLM: item/aggregate use the relay-resolved LLM (shared chat LLM
+        # by default; relay_llm_* when relay opts into its own key).
         text_enricher = None
-        if needs_llm:
-            if not relay_config["llm_api_key"]:
+        if enabled & {"item", "aggregate"}:
+            relay_llm = await resolve_service_llm(db, settings, "relay")
+            if not relay_llm["api_key"]:
                 raise ValueError(
-                    "Relay LLM API key is required for item/aggregate/reconcile "
-                    "relay tasks"
+                    "No LLM configured for relay item/aggregate tasks — set the "
+                    "shared chat LLM (chat_llm_*) or relay_llm_* with "
+                    "relay_use_own_llm=true"
                 )
             text_enricher = build_relay_enricher(
-                provider=relay_config["llm_provider"],
-                api_key=relay_config["llm_api_key"],
-                model=relay_config["llm_model"],
-                base_url=relay_config["llm_base_url"],
+                provider=relay_llm["provider"],
+                api_key=relay_llm["api_key"],
+                model=relay_llm["model"],
+                base_url=relay_llm["base_url"],
                 timeout=settings.relay_llm_timeout,
             )
 
@@ -245,6 +249,7 @@ async def _run_relay_worker_instance(
         # detection is on (the NLI model is loaded here, not on the write path).
         reconcile_service = None
         conflict_detector = None
+        reconcile_enricher = None
         if "reconcile" in enabled:
             if not settings.enable_conflict_detection:
                 raise ValueError(
@@ -273,6 +278,21 @@ async def _run_relay_worker_instance(
                 backoff_max_seconds=backoff_max,
                 lease_seconds=lease_seconds,
             )
+            # reconcile resolves its own LLM independently (shared chat LLM by
+            # default; reconcile_llm_* when it opts into its own key).
+            reconcile_llm = await resolve_service_llm(db, settings, "reconcile")
+            if not reconcile_llm["api_key"]:
+                raise ValueError(
+                    "No LLM configured for reconcile — set the shared chat LLM "
+                    "(chat_llm_*) or reconcile_llm_* with reconcile_use_own_llm=true"
+                )
+            reconcile_enricher = build_relay_enricher(
+                provider=reconcile_llm["provider"],
+                api_key=reconcile_llm["api_key"],
+                model=reconcile_llm["model"],
+                base_url=reconcile_llm["base_url"],
+                timeout=settings.relay_llm_timeout,
+            )
 
         worker = RelayWorker(
             service=service,
@@ -285,7 +305,7 @@ async def _run_relay_worker_instance(
             prompt_version=relay_config["prompt_version"],
             lease_seconds=lease_seconds,
             reconcile_service=reconcile_service,
-            reconcile_enricher=text_enricher if "reconcile" in enabled else None,
+            reconcile_enricher=reconcile_enricher,
             conflict_detector=conflict_detector,
         )
 

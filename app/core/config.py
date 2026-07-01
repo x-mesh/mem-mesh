@@ -491,6 +491,29 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Unified LLM: chat_llm_* is the shared default. relay/reconcile reuse it
+    # unless they opt into their own key. Predictable rule (see resolve_service_llm):
+    # explicit use_own toggle wins; otherwise a service uses its own key only when
+    # that key is configured, else falls back to the shared chat LLM.
+    relay_use_own_llm: bool = Field(
+        default=False,
+        description="Force relay to use relay_llm_* instead of the shared chat LLM",
+    )
+    reconcile_use_own_llm: bool = Field(
+        default=False,
+        description="Force reconcile to use reconcile_llm_* instead of the shared chat LLM",
+    )
+    reconcile_llm_provider: str = Field(
+        default="anthropic",
+        description="LLM provider for reconcile judgment: 'anthropic' or 'openai'",
+    )
+    reconcile_llm_api_key: str = Field(default="")
+    reconcile_llm_model: str = Field(
+        default="",
+        description="Model used by the reconcile worker's LLM judgment",
+    )
+    reconcile_llm_base_url: str = Field(default="")
+
     @field_validator("storage_mode")
     @classmethod
     def validate_storage_mode(cls, v: str) -> str:
@@ -515,6 +538,15 @@ class Settings(BaseSettings):
         normalized = (v or "anthropic").strip().lower()
         if normalized not in ("anthropic", "openai"):
             raise ValueError("chat_llm_provider must be 'anthropic' or 'openai'")
+        return normalized
+
+    @field_validator("reconcile_llm_provider")
+    @classmethod
+    def validate_reconcile_llm_provider(cls, v: str) -> str:
+        """Validate reconcile LLM provider is one of the supported adapters."""
+        normalized = (v or "anthropic").strip().lower()
+        if normalized not in ("anthropic", "openai"):
+            raise ValueError("reconcile_llm_provider must be 'anthropic' or 'openai'")
         return normalized
 
     @field_validator("log_level")
