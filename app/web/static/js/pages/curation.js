@@ -39,6 +39,17 @@ export class CurationPage extends HTMLElement {
     }, 2600);
   }
 
+  _improveMsg(text, isError = false) {
+    const el = this.querySelector('.cur-improve-msg');
+    if (!el) return;
+    el.textContent = text;
+    el.className = `cur-msg${isError ? ' cur-msg-error' : ' cur-msg-ok'}`;
+    if (text) setTimeout(() => {
+      el.textContent = '';
+      el.className = 'cur-improve-msg';
+    }, 2600);
+  }
+
   // ---- Pending tab (reconcile queue) --------------------------------------
 
   async loadData() {
@@ -225,6 +236,57 @@ export class CurationPage extends HTMLElement {
     if (tab === 'activity' && !this._activityLoaded) {
       this.loadActivity();
     }
+    if (tab === 'improve') {
+      this.loadImproveProposals();
+    }
+  }
+
+  async loadImproveProposals() {
+    const api = window.app?.apiClient;
+    const list = this.querySelector('.cur-improve-list');
+    if (!api || !list) return;
+    list.innerHTML = '<div class="cur-empty">Loading…</div>';
+    try {
+      const data = await api.get('/maintenance/proposals');
+      const proposals = data?.proposals || [];
+      const countEl = this.querySelector('.cur-improve-count');
+      if (countEl) countEl.textContent = String(proposals.length);
+      this.renderImproveProposals(proposals);
+    } catch (err) {
+      list.innerHTML = `<div class="cur-empty">Failed to load: ${this._esc(err.message)}</div>`;
+    }
+  }
+
+  renderImproveProposals(proposals) {
+    const list = this.querySelector('.cur-improve-list');
+    if (!list) return;
+    if (!proposals.length) {
+      list.innerHTML = '<div class="cur-empty">No pending improve proposals. Run Improve from a project’s Maintenance action.</div>';
+      return;
+    }
+    list.innerHTML = proposals.map((p) => `
+      <div class="cur-card cur-improve-card" data-proposal="${this._esc(p.id)}">
+        <div class="cur-head">
+          <span class="cur-type">improve</span>
+          <span class="cur-muted">${this._esc(p.project_id || '')} · ${this._esc(p.memory_id)}</span>
+          ${p.stale ? '<span class="cur-type cur-type-supersedes">stale — memory changed</span>' : ''}
+        </div>
+        ${p.rationale ? `<p class="cur-hint">${this._esc(p.rationale)}</p>` : ''}
+        <div class="cur-diff">
+          <div class="cur-diff-col">
+            <div class="cur-diff-label">Current</div>
+            <pre class="cur-diff-text cur-diff-old">${this._esc(p.original_content || '')}</pre>
+          </div>
+          <div class="cur-diff-col">
+            <div class="cur-diff-label">Proposed</div>
+            <pre class="cur-diff-text cur-diff-new">${this._esc(p.proposed_content || '')}</pre>
+          </div>
+        </div>
+        <div class="cur-actions">
+          <button class="cur-btn cur-improve-approve" data-proposal="${this._esc(p.id)}" ${p.stale ? 'disabled title="Memory changed since this proposal"' : ''}>Approve &amp; apply</button>
+          <button class="cur-btn cur-improve-reject" data-proposal="${this._esc(p.id)}">Reject</button>
+        </div>
+      </div>`).join('');
   }
 
   async _onClick(e) {
@@ -249,9 +311,33 @@ export class CurationPage extends HTMLElement {
       this.loadActivity();
       return;
     }
+    if (e.target.closest('.cur-improve-refresh')) {
+      this.loadImproveProposals();
+      return;
+    }
 
     const api = window.app?.apiClient;
     if (!api) return;
+
+    const improveApprove = e.target.closest('.cur-improve-approve');
+    const improveReject = e.target.closest('.cur-improve-reject');
+    if (improveApprove || improveReject) {
+      const pid = (improveApprove || improveReject).dataset.proposal;
+      try {
+        if (improveApprove) {
+          if (!window.confirm('Apply this rewrite to the memory’s content?')) return;
+          await api.post(`/maintenance/proposals/${encodeURIComponent(pid)}/approve`);
+          this._improveMsg('Applied — the memory content was updated.');
+        } else {
+          await api.post(`/maintenance/proposals/${encodeURIComponent(pid)}/reject`);
+          this._improveMsg('Proposal rejected.');
+        }
+        this.loadImproveProposals();
+      } catch (err) {
+        this._improveMsg(`Failed: ${err?.data?.detail || err.message}`, true);
+      }
+      return;
+    }
     if (e.target.closest('.cur-refresh')) {
       this.loadData();
       return;
@@ -290,7 +376,8 @@ export class CurationPage extends HTMLElement {
     return `
       <div class="cur-page">
         <div class="cur-tabs">
-          <button class="cur-tab-btn cur-tab-active" data-tab="pending">Pending</button>
+          <button class="cur-tab-btn cur-tab-active" data-tab="pending">Reconcile</button>
+          <button class="cur-tab-btn" data-tab="improve">Improve</button>
           <button class="cur-tab-btn" data-tab="activity">Activity</button>
         </div>
 
@@ -302,6 +389,16 @@ export class CurationPage extends HTMLElement {
           <p class="cur-hint">Conflict/duplicate proposals detected by the async reconcile worker. Memories are deprecated only on approval.</p>
           <div class="cur-msg"></div>
           <div class="cur-list"></div>
+        </div>
+
+        <div class="cur-tab-panel cur-tab-panel-improve" data-tab-panel="improve" hidden>
+          <div class="cur-header">
+            <h1>Improve Proposals <span class="cur-count-badge">(<span class="cur-improve-count">0</span>)</span></h1>
+            <button class="cur-btn cur-improve-refresh">Refresh</button>
+          </div>
+          <p class="cur-hint">Rewritten content proposed by batch Improve. Nothing is applied until you approve — the memory's content only changes on approval.</p>
+          <div class="cur-improve-msg"></div>
+          <div class="cur-improve-list"></div>
         </div>
 
         <div class="cur-tab-panel cur-tab-panel-activity" data-tab-panel="activity" hidden>
@@ -343,6 +440,13 @@ export class CurationPage extends HTMLElement {
       .cur-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
       .cur-type { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border-color); color: var(--text-secondary); }
       .cur-type-supersedes { color: #b45309; border-color: #f59e0b; }
+      .cur-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0; }
+      .cur-diff-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); margin-bottom: 4px; }
+      .cur-diff-text { white-space: pre-wrap; word-break: break-word; font-size: 0.82rem; line-height: 1.5; max-height: 260px; overflow: auto; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-color); margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .cur-diff-old { background: var(--bg-tertiary); color: var(--text-secondary); }
+      .cur-diff-new { background: color-mix(in oklch, var(--success-color, #16a34a) 8%, var(--bg-secondary)); color: var(--text-primary); }
+      .cur-improve-msg { min-height: 20px; font-size: 0.9rem; margin-bottom: 10px; }
+      @media (max-width: 640px) { .cur-diff { grid-template-columns: 1fr; } }
       .cur-type-conflicts { color: var(--error-color, #ef4444); border-color: var(--error-color, #ef4444); }
       .cur-verdict { font-size: 0.8rem; color: var(--text-secondary); }
       .cur-rationale { font-size: 0.88rem; color: var(--info, #3b82f6); margin-bottom: 10px; }

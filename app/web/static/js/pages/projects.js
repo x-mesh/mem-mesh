@@ -261,6 +261,14 @@ class ProjectsPage extends HTMLElement {
       return;
     }
 
+    const maintenanceBtn = event.target.closest('.maintenance-btn');
+    if (maintenanceBtn) {
+      event.stopPropagation();
+      const projectId = maintenanceBtn.getAttribute('data-project-id');
+      if (projectId) this.openMaintenanceModal(projectId);
+      return;
+    }
+
     const shareBtn = event.target.closest('.relay-share-btn');
     if (shareBtn) {
       event.stopPropagation();
@@ -371,6 +379,95 @@ class ProjectsPage extends HTMLElement {
     } catch (error) {
       // FastAPI returns {detail}; APIError surfaces it on .data.detail / .message.
       showToast(error?.data?.detail || error?.message || 'Failed to share project', 'error');
+    }
+  }
+
+  /**
+   * Open the batch maintenance modal for a project (enrich / improve / reconcile).
+   */
+  openMaintenanceModal(projectId) {
+    const existing = document.querySelector('.maintenance-modal-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'maintenance-modal-overlay';
+    overlay.innerHTML = `
+      <div class="maintenance-modal" role="dialog" aria-modal="true">
+        <div class="maintenance-modal-header">
+          <h3>Project maintenance</h3>
+          <button class="maintenance-modal-close" aria-label="Close">&times;</button>
+        </div>
+        <p class="maintenance-modal-sub">Run batch jobs over every canonical memory in
+          <strong>${this._escapeHtml(projectId)}</strong>. Work runs in the background
+          (relay worker) — this only queues it.</p>
+        <label class="maintenance-op">
+          <input type="checkbox" value="enrich" checked>
+          <span><strong>Enrich</strong> — generate title/abstract/tags (safe, never changes content)</span>
+        </label>
+        <label class="maintenance-op">
+          <input type="checkbox" value="reconcile" checked>
+          <span><strong>Reconcile</strong> — find duplicates/conflicts → review in Curation (safe, proposals only)</span>
+        </label>
+        <label class="maintenance-op">
+          <input type="checkbox" value="improve">
+          <span><strong>Improve</strong> — rewrite content. Never auto-applied — proposes a diff you approve per memory.</span>
+        </label>
+        <label class="maintenance-force">
+          <input type="checkbox" class="maintenance-force-cb">
+          <span>Force re-run (re-enrich / re-propose even if already done)</span>
+        </label>
+        <div class="maintenance-modal-actions">
+          <button class="maintenance-cancel secondary-button">Cancel</button>
+          <button class="maintenance-run primary-button">Queue jobs</button>
+        </div>
+        <div class="maintenance-modal-note">Needs the relay worker running with the
+          <code>maintenance</code>/<code>reconcile</code> tasks + a chat LLM. Results:
+          Enrich → memory's AI box · Improve → <a href="/curation" data-route="/curation">Curation</a> · Reconcile → <a href="/curation" data-route="/curation">Curation</a>.</div>
+      </div>`;
+
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('.maintenance-modal-close').addEventListener('click', close);
+    overlay.querySelector('.maintenance-cancel').addEventListener('click', close);
+    overlay.querySelector('.maintenance-run').addEventListener('click', async () => {
+      const ops = Array.from(overlay.querySelectorAll('.maintenance-op input:checked')).map(c => c.value);
+      if (!ops.length) { showToast('Select at least one operation', 'warning'); return; }
+      const force = overlay.querySelector('.maintenance-force-cb').checked;
+      const runBtn = overlay.querySelector('.maintenance-run');
+      runBtn.disabled = true;
+      runBtn.textContent = 'Queueing…';
+      try {
+        await this.runProjectMaintenance(projectId, ops, force);
+        close();
+      } catch (_) {
+        runBtn.disabled = false;
+        runBtn.textContent = 'Queue jobs';
+      }
+    });
+
+    document.body.appendChild(overlay);
+  }
+
+  async runProjectMaintenance(projectId, operations, force) {
+    const api = window.app?.apiClient;
+    if (!api) { showToast('API not available', 'error'); throw new Error('no api'); }
+    try {
+      const result = await api.post(
+        `/maintenance/projects/${encodeURIComponent(projectId)}`,
+        { operations, force },
+      );
+      const parts = [];
+      for (const [op, n] of Object.entries(result?.enqueued || {})) {
+        if (n > 0) parts.push(`${op}: ${n}`);
+      }
+      if (result?.reconcile) parts.push(`reconcile: ${result.reconcile.enqueued ?? 0}`);
+      const msg = parts.length
+        ? `Queued — ${parts.join(', ')}`
+        : 'Nothing to queue (already done — use Force to re-run)';
+      showToast(msg, parts.length ? 'success' : 'warning');
+    } catch (error) {
+      showToast(error?.data?.detail || error?.message || 'Maintenance failed', 'error');
+      throw error;
     }
   }
 
@@ -540,6 +637,7 @@ class ProjectsPage extends HTMLElement {
         
         <div class="project-actions">
           <button class="view-btn" data-project-id="${project.id}">View Memories</button>
+          <button class="maintenance-btn" data-project-id="${project.id}" title="Enrich / Improve / Reconcile all memories in this project">🔧 Maintenance</button>
           <button class="relay-share-btn" data-project-id="${project.id}">Share to relay</button>
           <button class="relay-autoshare-btn ${this._isAutoShareOn(project.id) ? 'on' : ''}" data-project-id="${project.id}">
             ${this._isAutoShareOn(project.id) ? '● Auto-share on' : '○ Auto-share off'}
@@ -881,7 +979,91 @@ style.textContent = `
     padding-top: 1rem;
     display: flex;
     justify-content: center;
+    flex-wrap: wrap;
     gap: 0.5rem;
+  }
+
+  .maintenance-btn {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: var(--transition);
+  }
+
+  .maintenance-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+  }
+
+  .maintenance-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+  }
+
+  .maintenance-modal {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    max-width: 520px;
+    width: 100%;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  }
+
+  .maintenance-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+  }
+
+  .maintenance-modal-header h3 { margin: 0; font-size: 1.05rem; }
+
+  .maintenance-modal-close {
+    background: none; border: none; font-size: 1.4rem;
+    line-height: 1; cursor: pointer; color: var(--text-muted);
+  }
+
+  .maintenance-modal-sub {
+    font-size: 0.85rem; color: var(--text-secondary); margin: 0 0 1rem;
+  }
+
+  .maintenance-op, .maintenance-force {
+    display: flex; gap: 0.6rem; align-items: flex-start;
+    padding: 0.5rem 0; font-size: 0.875rem; cursor: pointer;
+  }
+
+  .maintenance-op span strong { color: var(--text-primary); }
+  .maintenance-op span { color: var(--text-secondary); }
+
+  .maintenance-force {
+    border-top: 1px solid var(--border-color);
+    margin-top: 0.5rem; padding-top: 0.75rem;
+    color: var(--text-muted);
+  }
+
+  .maintenance-modal-actions {
+    display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem;
+  }
+
+  .maintenance-modal-note {
+    margin-top: 0.75rem; font-size: 0.75rem; color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  .maintenance-modal-note code {
+    background: var(--bg-tertiary); padding: 0 3px; border-radius: 3px;
   }
 
   .relay-share-btn {
