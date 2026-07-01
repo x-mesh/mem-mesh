@@ -297,11 +297,20 @@ export class CurationPage extends HTMLElement {
            </div>
          </div>`
       : '';
+    // Cancel control: only maintenance (enrich/improve) jobs are cancelable,
+    // and only when there's a pending backlog to stop.
+    const isMaintenance = String(w.key).startsWith('maintenance:');
+    const cancelBtn = isMaintenance && (counts.pending || 0) > 0
+      ? `<button class="cur-btn cur-cancel" data-cancel-op="${this._esc(
+          String(w.key).split(':')[1] || ''
+        )}">Cancel ${counts.pending} pending</button>`
+      : '';
     return `
       <div class="cur-card cur-worker" data-worker="${this._esc(w.key)}">
         <div class="cur-worker-head">
           <h3>${this._esc(w.label || w.key)}</h3>
           ${running ? '<span class="cur-worker-live">● running</span>' : ''}
+          ${cancelBtn}
         </div>
         ${progress}
         <div class="cur-badges">${badges}</div>
@@ -403,6 +412,23 @@ export class CurationPage extends HTMLElement {
     }
     if (e.target.closest('.cur-improve-refresh')) {
       this.loadImproveProposals();
+      return;
+    }
+    const cancelBtn = e.target.closest('.cur-cancel');
+    if (cancelBtn) {
+      const op = cancelBtn.dataset.cancelOp || '';
+      const api = window.app?.apiClient;
+      if (!api) return;
+      if (!window.confirm(`Cancel all pending ${op || 'maintenance'} jobs? A job already running finishes; the rest are dropped.`)) return;
+      cancelBtn.disabled = true;
+      try {
+        const res = await api.post('/maintenance/cancel', op ? { operation: op } : {});
+        this._msg(`Cancelled ${res?.cancelled ?? 0} pending ${op} job(s).`);
+        this.loadActivity({ silent: true });
+      } catch (err) {
+        this._msg(`Cancel failed: ${err?.data?.detail || err.message}`, true);
+        cancelBtn.disabled = false;
+      }
       return;
     }
 
@@ -558,8 +584,11 @@ export class CurationPage extends HTMLElement {
       .cur-filter-btn { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-secondary); cursor: pointer; font-size: 0.82rem; }
       .cur-filter-btn:hover { background: var(--bg-tertiary, var(--bg-secondary)); color: var(--text-primary); }
       .cur-filter-active { border-color: var(--info, #3b82f6); color: var(--info, #3b82f6); }
-      .cur-worker-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+      .cur-worker-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
       .cur-worker-head h3 { margin: 0; font-size: 1.05rem; color: var(--text-primary); }
+      .cur-cancel { margin-left: auto; padding: 4px 10px; font-size: 0.78rem; border-color: var(--error-color, #ef4444); color: var(--error-color, #ef4444); background: transparent; }
+      .cur-cancel:hover { background: var(--error-color, #ef4444); color: #fff; }
+      .cur-cancel:disabled { opacity: 0.5; cursor: default; }
       .cur-worker-key { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); }
       .cur-badges { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
       .cur-badge { font-size: 0.76rem; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-secondary); }
