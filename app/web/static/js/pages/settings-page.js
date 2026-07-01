@@ -181,6 +181,7 @@ export class SettingsPage extends HTMLElement {
               <label class="worker-task"><input type="checkbox" id="worker-task-item"><span class="worker-task-name">item</span><span class="worker-task-desc">AI-enrich each memory (title, abstract, tags) — needs an LLM</span></label>
               <label class="worker-task"><input type="checkbox" id="worker-task-aggregate"><span class="worker-task-name">aggregate</span><span class="worker-task-desc">Generate per-project digests — needs an LLM</span></label>
               <label class="worker-task"><input type="checkbox" id="worker-task-reconcile"><span class="worker-task-name">reconcile</span><span class="worker-task-desc">Detect conflicting/duplicate memories for curation (also turns on write-time detection) — needs an LLM</span></label>
+              <label class="worker-task"><input type="checkbox" id="worker-task-maintenance"><span class="worker-task-name">maintenance</span><span class="worker-task-desc">Run project-level batch Enrich / Improve jobs (Projects → Maintenance) — needs the Chat LLM</span></label>
             </div>
           </div>
           <p class="env-foot" id="worker-hub-note"></p>
@@ -732,7 +733,7 @@ export class SettingsPage extends HTMLElement {
     // ── Worker settings ──
 
     get workerTasks() {
-        return ['outbox', 'item', 'aggregate', 'reconcile'];
+        return ['outbox', 'item', 'aggregate', 'reconcile', 'maintenance'];
     }
 
     async loadWorkerConfig() {

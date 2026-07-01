@@ -173,6 +173,33 @@ export class CurationPage extends HTMLElement {
     list.innerHTML = filtered.map((w) => this._workerCard(w)).join('');
   }
 
+  _subjectLink(s) {
+    const shortId = String(s.memory_id).replace(/^relay:/, '').slice(0, 8);
+    const title = s.title
+      ? `<span class="cur-subject-title">${this._esc(s.title)}</span>`
+      : '<span class="cur-subject-title cur-muted">(untitled)</span>';
+    if (!s.exists) {
+      return `<span class="cur-subject cur-subject-gone" title="memory no longer exists">
+        <code>${this._esc(shortId)}</code> ${title} <span class="cur-muted">· deleted</span>
+      </span>`;
+    }
+    const href = `/memory/${encodeURIComponent(s.memory_id)}`;
+    return `<a class="cur-subject" href="${href}" data-route="${href}" title="${this._esc(
+      s.memory_id
+    )}"><code>${this._esc(shortId)}</code> ${title}</a>`;
+  }
+
+  _shortTime(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      return d.toLocaleString();
+    } catch (_) {
+      return iso;
+    }
+  }
+
   _workerCard(w) {
     const counts = w.counts || {};
     const order = ['pending', 'processing', 'done', 'dead_letter', 'stale'];
@@ -196,13 +223,27 @@ export class CurationPage extends HTMLElement {
         const err = r.last_error
           ? `<div class="cur-recent-err">${this._esc(r.last_error)}</div>`
           : '';
+        const op = r.operation
+          ? `<span class="cur-recent-op">${this._esc(r.operation)}</span>`
+          : '';
+        const subjects = (r.subjects || []).length
+          ? `<div class="cur-recent-subjects">${(r.subjects || [])
+              .map((s) => this._subjectLink(s))
+              .join('')}</div>`
+          : `<code class="cur-recent-id" title="queue job id">${this._esc(
+              String(r.id).slice(0, 8)
+            )}</code>`;
         return `
           <div class="cur-recent-row">
-            <code class="cur-recent-id">${this._esc(String(r.id).slice(0, 8))}</code>
+            <div class="cur-recent-main">
+              ${op}${subjects}
+            </div>
             <span class="cur-recent-status cur-badge-${this._esc(
               r.status
             )}">${this._esc(r.status)}</span>
-            <span class="cur-recent-time">${this._esc(r.updated_at || '')}</span>
+            <span class="cur-recent-time">${this._esc(
+              this._shortTime(r.updated_at)
+            )}</span>
             ${err}
           </div>`;
       })
@@ -412,6 +453,7 @@ export class CurationPage extends HTMLElement {
             <button class="cur-filter-btn" data-filter="item">Enrichment</button>
             <button class="cur-filter-btn" data-filter="aggregate">Digest</button>
             <button class="cur-filter-btn" data-filter="reconcile">Reconcile</button>
+            <button class="cur-filter-btn" data-filter="maintenance">Maintenance</button>
           </div>
           <div class="cur-activity-list"></div>
         </div>
@@ -481,7 +523,16 @@ export class CurationPage extends HTMLElement {
       .cur-recent { display: flex; flex-direction: column; gap: 6px; }
       .cur-recent-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.82rem; padding: 6px 8px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; }
       .cur-recent-id { color: var(--text-secondary); }
-      .cur-recent-time { color: var(--text-secondary); margin-left: auto; }
+      .cur-recent-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; flex: 1; }
+      .cur-recent-op { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border-color); color: var(--text-secondary); }
+      .cur-recent-subjects { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+      .cur-subject { display: inline-flex; align-items: baseline; gap: 6px; text-decoration: none; color: var(--text-primary); max-width: 100%; }
+      .cur-subject:hover .cur-subject-title { text-decoration: underline; }
+      .cur-subject code { color: var(--text-secondary); font-size: 0.74rem; flex-shrink: 0; }
+      .cur-subject-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
+      .cur-subject-gone { color: var(--text-muted); }
+      .cur-muted { color: var(--text-muted); }
+      .cur-recent-time { color: var(--text-secondary); margin-left: auto; white-space: nowrap; }
       .cur-recent-err { flex-basis: 100%; color: var(--error-color, #ef4444); font-size: 0.78rem; word-break: break-word; }
       .cur-recent-empty { color: var(--text-secondary); font-size: 0.85rem; padding: 8px 0; }
       @media (max-width: 640px) { .cur-cols { grid-template-columns: 1fr; } }

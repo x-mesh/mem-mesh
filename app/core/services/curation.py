@@ -69,21 +69,45 @@ class CurationService:
     # LLM worker queue tables (outbox excluded). Order is contract-defined:
     # item → aggregate → reconcile. Table names are a fixed literal allowlist,
     # never user input — safe to interpolate.
+    # (key, label, table, subject_columns, relay_prefixed, extra_columns)
+    # subject_columns → the memory id(s) each job acted on; relay_prefixed marks
+    # relay-materialized memories (browsable id is ``relay:<value>``). This lets
+    # the Activity log show *which memory* (id + title + link), not just an
+    # opaque queue-row id.
     _ACTIVITY_WORKERS = (
-        ("item", "Enrichment", "relay_queue_item"),
-        ("aggregate", "Digest", "relay_queue_aggregate"),
-        ("reconcile", "Reconcile", "reconcile_queue"),
+        ("item", "Enrichment", "relay_queue_item", ("ref_id",), True, ()),
+        ("aggregate", "Digest", "relay_queue_aggregate", ("ref_id",), True, ()),
+        (
+            "reconcile",
+            "Reconcile",
+            "reconcile_queue",
+            ("new_memory_id", "old_memory_id"),
+            False,
+            (),
+        ),
+        (
+            "maintenance",
+            "Maintenance",
+            "maintenance_queue",
+            ("memory_id",),
+            False,
+            ("operation",),
+        ),
     )
 
     async def list_activity(self) -> dict:
-        """Per-worker queue activity: status counts + 10 most-recent rows.
+        """Per-worker queue activity: status counts + 10 most-recent jobs, each
+        annotated with the memory it acted on (id + title + link).
 
         Each worker maps to one queue table. A missing table (schema not yet
         created) degrades to empty counts/recent for that worker instead of
         failing the whole response.
         """
         workers = []
-        for key, label, table in self._ACTIVITY_WORKERS:
+        subject_ids: set[str] = set()
+        for key, label, table, subj_cols, relay_prefixed, extra in (
+            self._ACTIVITY_WORKERS
+        ):
             counts: dict = {}
             recent: list[dict] = []
             try:
@@ -91,26 +115,92 @@ class CurationService:
                     f"SELECT status, COUNT(*) AS n FROM {table} GROUP BY status"
                 )
                 counts = {row["status"]: row["n"] for row in count_rows}
+                cols = ["id", "status", "updated_at", "last_error"]
+                cols.extend(subj_cols)
+                cols.extend(extra)
                 recent_rows = await self.db.fetchall(
-                    f"SELECT id, status, updated_at, last_error FROM {table} "
+                    f"SELECT {', '.join(cols)} FROM {table} "
                     "ORDER BY updated_at DESC LIMIT 10"
                 )
-                recent = [
-                    {
+                for row in recent_rows:
+                    subjects = []
+                    for col in subj_cols:
+                        raw = row[col] if col in row.keys() else None
+                        if not raw:
+                            continue
+                        mem_id = f"relay:{raw}" if relay_prefixed else str(raw)
+                        subjects.append(mem_id)
+                        subject_ids.add(mem_id)
+                    entry = {
                         "id": row["id"],
                         "status": row["status"],
                         "updated_at": row["updated_at"],
                         "last_error": row["last_error"],
+                        "subjects": subjects,
                     }
-                    for row in recent_rows
-                ]
+                    for col in extra:
+                        entry[col] = row[col] if col in row.keys() else None
+                    recent.append(entry)
             except Exception as e:
                 logger.debug("Activity worker %s unavailable: %s", key, e)
                 counts, recent = {}, []
             workers.append(
                 {"key": key, "label": label, "counts": counts, "recent": recent}
             )
+
+        titles = await self._subject_titles(subject_ids)
+        for worker in workers:
+            for entry in worker["recent"]:
+                entry["subjects"] = [
+                    {
+                        "memory_id": mid,
+                        "title": titles.get(mid, {}).get("title", ""),
+                        "exists": mid in titles,
+                    }
+                    for mid in entry["subjects"]
+                ]
         return {"workers": workers}
+
+    async def _subject_titles(self, memory_ids: set[str]) -> dict:
+        """Map memory_id → {title} for the activity log. Title = the memory's
+        enrichment title if present, else the first non-empty content line
+        (truncated). One batched query; missing ids are simply absent."""
+        if not memory_ids:
+            return {}
+        ids = list(memory_ids)
+        placeholders = ",".join("?" for _ in ids)
+        try:
+            rows = await self.db.fetchall(
+                f"""
+                SELECT m.id AS id, m.content AS content, e.title AS enrich_title
+                FROM memories m
+                LEFT JOIN memory_enrichment e ON e.memory_id = m.id
+                WHERE m.id IN ({placeholders})
+                """,
+                tuple(ids),
+            )
+        except Exception:
+            # memory_enrichment may not exist yet — fall back to content only.
+            try:
+                rows = await self.db.fetchall(
+                    f"SELECT id, content, '' AS enrich_title FROM memories "
+                    f"WHERE id IN ({placeholders})",
+                    tuple(ids),
+                )
+            except Exception:
+                return {}
+        out: dict = {}
+        for row in rows:
+            title = (row["enrich_title"] or "").strip()
+            if not title:
+                content = str(row["content"] or "")
+                first = next(
+                    (ln.strip(" #").strip() for ln in content.splitlines() if ln.strip()),
+                    "",
+                )
+                title = first[:80] + ("…" if len(first) > 80 else "")
+            out[str(row["id"])] = {"title": title}
+        return out
 
     async def _relation(self, relation_id: str) -> dict:
         row = await self.db.fetchone(

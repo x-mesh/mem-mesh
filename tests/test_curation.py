@@ -71,6 +71,66 @@ class _FakeMemSvc:
         return r
 
 
+class TestCurationActivity:
+    @pytest.mark.asyncio
+    async def test_activity_annotates_reconcile_pair_with_titles(self, temp_db):
+        await _add(temp_db, "new1")
+        await _add(temp_db, "old1")
+        await temp_db.execute(
+            "INSERT INTO reconcile_queue (id, new_memory_id, old_memory_id, "
+            "project_id, status, created_at, updated_at) "
+            "VALUES ('rq1', 'new1', 'old1', 'p1', 'done', ?, ?)",
+            (NOW, NOW),
+        )
+        svc = CurationService(temp_db)
+        activity = await svc.list_activity()
+        reconcile = next(w for w in activity["workers"] if w["key"] == "reconcile")
+        assert reconcile["counts"] == {"done": 1}
+        row = reconcile["recent"][0]
+        subject_ids = {s["memory_id"] for s in row["subjects"]}
+        assert subject_ids == {"new1", "old1"}
+        # First content line becomes the title.
+        by_id = {s["memory_id"]: s for s in row["subjects"]}
+        assert by_id["new1"]["title"] == "new1 original content"
+        assert by_id["new1"]["exists"] is True
+
+    @pytest.mark.asyncio
+    async def test_activity_maintenance_shows_operation_and_memory(self, temp_db):
+        from app.core.services.maintenance import MaintenanceService
+
+        await _add(temp_db, "mm1")
+        mnt = MaintenanceService(temp_db)
+        await mnt.enqueue_project(
+            project_id="p1", operations=["improve"], force=False
+        )
+        svc = CurationService(temp_db)
+        activity = await svc.list_activity()
+        maint = next(w for w in activity["workers"] if w["key"] == "maintenance")
+        assert maint["counts"].get("pending") == 1
+        row = maint["recent"][0]
+        assert row["operation"] == "improve"
+        assert row["subjects"][0]["memory_id"] == "mm1"
+
+    @pytest.mark.asyncio
+    async def test_activity_flags_deleted_subject(self, temp_db):
+        from app.core.services.maintenance import MaintenanceService
+
+        await _add(temp_db, "gone1")
+        mnt = MaintenanceService(temp_db)
+        await mnt.enqueue_project(
+            project_id="p1", operations=["enrich"], force=False
+        )
+        # Memory deleted after the job was queued (maintenance_queue has no FK).
+        await temp_db.execute("DELETE FROM memories WHERE id = 'gone1'")
+
+        svc = CurationService(temp_db)
+        activity = await svc.list_activity()
+        maint = next(w for w in activity["workers"] if w["key"] == "maintenance")
+        row = maint["recent"][0]
+        assert row["subjects"][0]["memory_id"] == "gone1"
+        assert row["subjects"][0]["exists"] is False
+
+
 class TestCurationService:
     @pytest.mark.asyncio
     async def test_list_queue_only_proposed(self, temp_db):
