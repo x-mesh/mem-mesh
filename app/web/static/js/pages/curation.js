@@ -21,6 +21,10 @@ export class CurationPage extends HTMLElement {
     this.loadData();
   }
 
+  disconnectedCallback() {
+    this._stopActivityPoll();
+  }
+
   _esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -138,23 +142,45 @@ export class CurationPage extends HTMLElement {
 
   // ---- Activity tab (worker queues) ---------------------------------------
 
-  async loadActivity() {
+  async loadActivity(opts = {}) {
     const api = window.app?.apiClient;
     const list = this.querySelector('.cur-activity-list');
     if (!api) {
-      list.innerHTML = '<div class="cur-empty">API client unavailable.</div>';
+      if (list) list.innerHTML = '<div class="cur-empty">API client unavailable.</div>';
       return;
     }
-    list.innerHTML = '<div class="cur-empty">Loading…</div>';
+    // Silent (poll) refreshes must not flash a "Loading…" wipe.
+    if (!opts.silent && list) {
+      list.innerHTML = '<div class="cur-empty">Loading…</div>';
+    }
     try {
       const res = await api.get('/curation/activity');
       this._activityData = res?.workers || [];
       this._activityLoaded = true;
       this.renderActivity();
     } catch (e) {
-      list.innerHTML = `<div class="cur-empty cur-msg-error">Failed to load: ${this._esc(
-        e.message
-      )}</div>`;
+      if (!opts.silent && list) {
+        list.innerHTML = `<div class="cur-empty cur-msg-error">Failed to load: ${this._esc(
+          e.message
+        )}</div>`;
+      }
+    }
+  }
+
+  _startActivityPoll() {
+    this._stopActivityPoll();
+    // Mirror the relay Operations tab: live 3s refresh while viewing.
+    this._activityPollTimer = setInterval(() => {
+      if (this._activeTab === 'activity' && !document.hidden) {
+        this.loadActivity({ silent: true });
+      }
+    }, 3000);
+  }
+
+  _stopActivityPoll() {
+    if (this._activityPollTimer) {
+      clearInterval(this._activityPollTimer);
+      this._activityPollTimer = null;
     }
   }
 
@@ -162,10 +188,11 @@ export class CurationPage extends HTMLElement {
     const list = this.querySelector('.cur-activity-list');
     if (!list) return;
     const workers = this._activityData || [];
+    const f = this._activityFilter;
     const filtered =
-      this._activityFilter === 'all'
+      f === 'all'
         ? workers
-        : workers.filter((w) => w.key === this._activityFilter);
+        : workers.filter((w) => w.key === f || String(w.key).startsWith(f + ':'));
     if (!filtered.length) {
       list.innerHTML = '<div class="cur-empty">No worker activity.</div>';
       return;
@@ -252,12 +279,31 @@ export class CurationPage extends HTMLElement {
       w.recent && w.recent.length
         ? `<div class="cur-recent">${recentRows}</div>`
         : '<div class="cur-recent-empty">No recent activity.</div>';
+    // Progress: how many of the total jobs have finished (done + stale count as
+    // resolved). "N of M" answers "how far along is this batch".
+    const done = (counts.done || 0) + (counts.stale || 0);
+    const failed = counts.dead_letter || 0;
+    const active = (counts.pending || 0) + (counts.processing || 0);
+    const total = done + failed + active;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const running = (counts.processing || 0) > 0;
+    const progress = total > 0
+      ? `<div class="cur-progress">
+           <div class="cur-progress-bar"><div class="cur-progress-fill${failed ? ' has-failed' : ''}" style="width:${pct}%"></div></div>
+           <div class="cur-progress-label">
+             <span class="cur-progress-count">${done} / ${total} done</span>
+             ${active ? `<span class="cur-muted">· ${active} left${running ? ' · running' : ''}</span>` : ''}
+             ${failed ? `<span class="cur-progress-failed">· ${failed} failed</span>` : ''}
+           </div>
+         </div>`
+      : '';
     return `
       <div class="cur-card cur-worker" data-worker="${this._esc(w.key)}">
         <div class="cur-worker-head">
           <h3>${this._esc(w.label || w.key)}</h3>
-          <span class="cur-worker-key">${this._esc(w.key)}</span>
+          ${running ? '<span class="cur-worker-live">● running</span>' : ''}
         </div>
+        ${progress}
         <div class="cur-badges">${badges}</div>
         ${recentBlock}
       </div>`;
@@ -274,8 +320,11 @@ export class CurationPage extends HTMLElement {
     this.querySelectorAll('.cur-tab-panel').forEach((p) => {
       p.hidden = p.dataset.tabPanel !== tab;
     });
-    if (tab === 'activity' && !this._activityLoaded) {
-      this.loadActivity();
+    if (tab === 'activity') {
+      if (!this._activityLoaded) this.loadActivity();
+      this._startActivityPoll();
+    } else {
+      this._stopActivityPoll();
     }
     if (tab === 'improve') {
       this.loadImproveProposals();
@@ -522,6 +571,14 @@ export class CurationPage extends HTMLElement {
       .cur-badge-stale { border-color: #f59e0b; color: #b45309; }
       .cur-recent { display: flex; flex-direction: column; gap: 6px; }
       .cur-recent-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.82rem; padding: 6px 8px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; }
+      .cur-worker-live { font-size: 0.72rem; color: var(--success-color, #16a34a); font-weight: 600; }
+      .cur-progress { margin: 8px 0 10px; }
+      .cur-progress-bar { height: 6px; border-radius: 999px; background: var(--bg-tertiary); overflow: hidden; }
+      .cur-progress-fill { height: 100%; background: var(--success-color, #16a34a); border-radius: 999px; transition: width 0.4s ease; }
+      .cur-progress-fill.has-failed { background: linear-gradient(90deg, var(--success-color, #16a34a), var(--error-color, #ef4444)); }
+      .cur-progress-label { margin-top: 4px; font-size: 0.78rem; color: var(--text-secondary); display: flex; gap: 6px; flex-wrap: wrap; }
+      .cur-progress-count { font-weight: 600; color: var(--text-primary); }
+      .cur-progress-failed { color: var(--error-color, #ef4444); }
       .cur-recent-id { color: var(--text-secondary); }
       .cur-recent-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; flex: 1; }
       .cur-recent-op { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border-color); color: var(--text-secondary); }

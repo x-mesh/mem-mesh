@@ -105,11 +105,28 @@ class TestCurationActivity:
         )
         svc = CurationService(temp_db)
         activity = await svc.list_activity()
-        maint = next(w for w in activity["workers"] if w["key"] == "maintenance")
+        # Maintenance is split into per-operation cards.
+        maint = next(
+            w for w in activity["workers"] if w["key"] == "maintenance:improve"
+        )
         assert maint["counts"].get("pending") == 1
         row = maint["recent"][0]
         assert row["operation"] == "improve"
         assert row["subjects"][0]["memory_id"] == "mm1"
+
+    @pytest.mark.asyncio
+    async def test_activity_splits_maintenance_into_enrich_and_improve(self, temp_db):
+        from app.core.services.maintenance import MaintenanceService
+
+        await _add(temp_db, "mm1")
+        await MaintenanceService(temp_db).enqueue_project(
+            project_id="p1", operations=["enrich", "improve"], force=False
+        )
+        svc = CurationService(temp_db)
+        keys = {w["key"] for w in (await svc.list_activity())["workers"]}
+        assert "maintenance:enrich" in keys
+        assert "maintenance:improve" in keys
+        assert "maintenance" not in keys  # never a merged card
 
     @pytest.mark.asyncio
     async def test_activity_flags_deleted_subject(self, temp_db):
@@ -125,7 +142,9 @@ class TestCurationActivity:
 
         svc = CurationService(temp_db)
         activity = await svc.list_activity()
-        maint = next(w for w in activity["workers"] if w["key"] == "maintenance")
+        maint = next(
+            w for w in activity["workers"] if w["key"] == "maintenance:enrich"
+        )
         row = maint["recent"][0]
         assert row["subjects"][0]["memory_id"] == "gone1"
         assert row["subjects"][0]["exists"] is False

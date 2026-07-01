@@ -69,14 +69,15 @@ class CurationService:
     # LLM worker queue tables (outbox excluded). Order is contract-defined:
     # item → aggregate → reconcile. Table names are a fixed literal allowlist,
     # never user input — safe to interpolate.
-    # (key, label, table, subject_columns, relay_prefixed, extra_columns)
+    # key, label, table, subject_columns, relay_prefixed, extra_columns, split.
     # subject_columns → the memory id(s) each job acted on; relay_prefixed marks
-    # relay-materialized memories (browsable id is ``relay:<value>``). This lets
-    # the Activity log show *which memory* (id + title + link), not just an
-    # opaque queue-row id.
+    # relay-materialized memories (browsable id is ``relay:<value>``); split
+    # (column, values) fans one queue table into one card per value (e.g. the
+    # maintenance queue → Enrich / Improve). This lets the Activity log show
+    # *which memory* + a per-card progress read, not an opaque queue-row id.
     _ACTIVITY_WORKERS = (
-        ("item", "Enrichment", "relay_queue_item", ("ref_id",), True, ()),
-        ("aggregate", "Digest", "relay_queue_aggregate", ("ref_id",), True, ()),
+        ("item", "Enrichment (relay)", "relay_queue_item", ("ref_id",), True, (), None),
+        ("aggregate", "Digest (relay)", "relay_queue_aggregate", ("ref_id",), True, (), None),
         (
             "reconcile",
             "Reconcile",
@@ -84,6 +85,7 @@ class CurationService:
             ("new_memory_id", "old_memory_id"),
             False,
             (),
+            None,
         ),
         (
             "maintenance",
@@ -92,6 +94,7 @@ class CurationService:
             ("memory_id",),
             False,
             ("operation",),
+            ("operation", ("enrich", "improve")),
         ),
     )
 
@@ -99,28 +102,56 @@ class CurationService:
         """Per-worker queue activity: status counts + 10 most-recent jobs, each
         annotated with the memory it acted on (id + title + link).
 
-        Each worker maps to one queue table. A missing table (schema not yet
-        created) degrades to empty counts/recent for that worker instead of
-        failing the whole response.
+        Each worker maps to one queue table (optionally split by a column into
+        multiple cards). A missing table (schema not yet created) degrades to
+        empty counts/recent for that worker instead of failing the response.
         """
-        workers = []
-        subject_ids: set[str] = set()
-        for key, label, table, subj_cols, relay_prefixed, extra in (
+        # Expand split workers into per-value specs (key, label, table, ...,
+        # where=(column, value)|None).
+        specs = []
+        for key, label, table, subj_cols, relay_prefixed, extra, split in (
             self._ACTIVITY_WORKERS
         ):
+            if split:
+                col, values = split
+                for val in values:
+                    specs.append(
+                        (
+                            f"{key}:{val}",
+                            f"{label} · {val}",
+                            table,
+                            subj_cols,
+                            relay_prefixed,
+                            extra,
+                            (col, val),
+                        )
+                    )
+            else:
+                specs.append(
+                    (key, label, table, subj_cols, relay_prefixed, extra, None)
+                )
+
+        workers = []
+        subject_ids: set[str] = set()
+        for key, label, table, subj_cols, relay_prefixed, extra, where in specs:
             counts: dict = {}
             recent: list[dict] = []
+            where_sql = f" WHERE {where[0]} = ?" if where else ""
+            where_params = (where[1],) if where else ()
             try:
                 count_rows = await self.db.fetchall(
-                    f"SELECT status, COUNT(*) AS n FROM {table} GROUP BY status"
+                    f"SELECT status, COUNT(*) AS n FROM {table}{where_sql} "
+                    "GROUP BY status",
+                    where_params,
                 )
                 counts = {row["status"]: row["n"] for row in count_rows}
                 cols = ["id", "status", "updated_at", "last_error"]
                 cols.extend(subj_cols)
                 cols.extend(extra)
                 recent_rows = await self.db.fetchall(
-                    f"SELECT {', '.join(cols)} FROM {table} "
-                    "ORDER BY updated_at DESC LIMIT 10"
+                    f"SELECT {', '.join(cols)} FROM {table}{where_sql} "
+                    "ORDER BY updated_at DESC LIMIT 10",
+                    where_params,
                 )
                 for row in recent_rows:
                     subjects = []
