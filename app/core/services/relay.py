@@ -35,6 +35,7 @@ from ..schemas.relay import (
     RelayAdminOverviewResponse,
     RelayAggregateJob,
     RelayAutoShareSubscription,
+    RelayCategoryPolicy,
     RelayDeadLetterSummary,
     RelayDigestData,
     RelayDigestSummary,
@@ -179,6 +180,7 @@ class RelayService:
         "llm_model": "relay.llm_model",
         "llm_base_url": "relay.llm_base_url",
         "prompt_version": "relay.prompt_version",
+        "blocked_categories": "relay.blocked_categories",
     }
     SETTING_FIELDS = {
         "hub_url": ("relay_hub_url", "MEM_MESH_RELAY_HUB_URL"),
@@ -193,14 +195,13 @@ class RelayService:
         ),
         "prompt_version": ("relay_prompt_version", "MEM_MESH_RELAY_PROMPT_VERSION"),
     }
-    DEFAULT_SHAREABLE_KINDS = {
-        "bug",
-        "idea",
-        "decision",
-        "incident",
-        "code_snippet",
-        "git-history",
-    }
+    # Structurally excluded from sharing, no matter what — not a user policy
+    # choice. 'task' is the default bucket for pin promotions / ad-hoc local
+    # work-tracking (see CLAUDE.md M3), never team knowledge. Everything else
+    # is shareable by default (fail-open) so newly introduced categories don't
+    # silently become unshareable until code catches up; blocked_categories
+    # (below) lets users opt individual categories back out.
+    DENYLISTED_KINDS = {"task"}
 
     # Databases whose relay schema has already been created this process. The
     # DDL is CREATE ... IF NOT EXISTS (idempotent), so once a connection has run
@@ -1030,6 +1031,30 @@ class RelayService:
             aggregate=counts["aggregate"],
         )
 
+    async def _get_blocked_categories(self) -> set[str]:
+        raw = await self.db.get_app_config(self.CONFIG_KEYS["blocked_categories"]) or ""
+        return {c.strip() for c in raw.split(",") if c.strip()}
+
+    async def list_category_policies(self) -> list[RelayCategoryPolicy]:
+        """Sharing policy per category actually present in this node's memories.
+
+        The list is derived from live data, not a hardcoded enum, so a newly
+        introduced category shows up here automatically (default: shared)
+        instead of needing a code change to become toggleable.
+        """
+        rows = await self.db.fetchall(
+            "SELECT DISTINCT category FROM memories "
+            "WHERE category IS NOT NULL AND category != ''"
+        )
+        blocked = await self._get_blocked_categories()
+        categories = sorted(
+            {str(row["category"]) for row in rows} - self.DENYLISTED_KINDS
+        )
+        return [
+            RelayCategoryPolicy(category=c, shared=c not in blocked)
+            for c in categories
+        ]
+
     async def get_admin_settings(self, settings: Any) -> RelaySettingsResponse:
         """Return relay settings and identity registry state for the dashboard."""
 
@@ -1081,6 +1106,7 @@ class RelayService:
                 settings=settings,
             ),
             identities=await self.list_identities(),
+            category_policies=await self.list_category_policies(),
         )
 
     async def update_admin_settings(
@@ -1112,6 +1138,18 @@ class RelayService:
                 self.CONFIG_KEYS["default_source_version"],
                 str(request.default_source_version),
             )
+
+        if request.blocked_categories is not None:
+            cleaned_categories = sorted(
+                {c.strip() for c in request.blocked_categories if c.strip()}
+                - self.DENYLISTED_KINDS  # denylist isn't a policy toggle; ignore
+            )
+            if cleaned_categories:
+                await self.db.set_app_config(
+                    self.CONFIG_KEYS["blocked_categories"], ",".join(cleaned_categories)
+                )
+            else:
+                await self.db.delete_app_config(self.CONFIG_KEYS["blocked_categories"])
 
         from ..config import get_settings
 
@@ -1466,19 +1504,41 @@ class RelayService:
         memory: Any,
         *,
         source_node_id: str,
-        source_version: int,
+        source_version: Optional[int] = None,
         target_hub: str,
         event_type: str = "update",
         status: str = "active",
         allowed_kinds: Optional[Sequence[str]] = None,
         force: bool = False,
     ) -> str:
-        """Build and enqueue a relay outbox event from an existing memory."""
+        """Build and enqueue a relay outbox event from an existing memory.
+
+        ``source_version`` defaults to the memory's own updated_at-derived
+        version (same as auto-share) when not given explicitly, so a manual
+        re-share after a content edit gets a fresh idempotency_key instead of
+        reusing a stale one and colliding on the hub (RelayIdempotencyConflict:
+        "different payload hash"). Pass an explicit value only to pin a
+        specific version.
+        """
+        if source_version is None:
+            source_version = self._auto_share_version(memory)
 
         kind = str(getattr(memory, "category", "") or "")
-        allowed = set(allowed_kinds or self.DEFAULT_SHAREABLE_KINDS)
-        if kind not in allowed:
-            raise RelayTypeGateBlocked(f"memory kind is not team-shareable: {kind}")
+        if kind in self.DENYLISTED_KINDS:
+            raise RelayTypeGateBlocked(
+                f"'{kind}' memories are never team-shareable (local work-tracking "
+                "only). If this was miscategorized, edit its category first."
+            )
+        if allowed_kinds is not None:
+            if kind not in set(allowed_kinds):
+                raise RelayTypeGateBlocked(f"memory kind is not team-shareable: {kind}")
+        else:
+            blocked = await self._get_blocked_categories()
+            if kind in blocked:
+                raise RelayTypeGateBlocked(
+                    f"'{kind}' sharing is disabled — enable it in "
+                    "Personal Node > Sharing Policy."
+                )
 
         content = str(getattr(memory, "content", "") or "")
         if redact_secrets(content) != content:
@@ -1527,7 +1587,7 @@ class RelayService:
         memory_id: str,
         *,
         source_node_id: str,
-        source_version: int,
+        source_version: Optional[int] = None,
         target_hub: str,
         event_type: str = "update",
         status: str = "active",
@@ -1746,12 +1806,20 @@ class RelayService:
         project_id: str,
         *,
         source_node_id: str,
-        source_version: int,
+        source_version: Optional[int] = None,
         target_hub: str,
         event_type: str = "update",
         status: str = "active",
         force: bool = False,
     ) -> RelayShareProjectResponse:
+        """Queue every shareable memory in a project.
+
+        ``source_version`` left unset (the default) means each memory gets its
+        own updated_at-derived version, matching auto-share — a project-wide
+        re-share after some memories were edited won't collide on the ones
+        that didn't change, or falsely reuse one memory's version for another.
+        Pass an explicit value only to pin every memory to the same version.
+        """
         rows = await self.db.fetchall(
             """
             SELECT *

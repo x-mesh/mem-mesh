@@ -3,6 +3,7 @@
 import os
 import tempfile
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -916,6 +917,9 @@ async def test_relay_share_memory_endpoint_enqueues_existing_memory():
     async with _temp_db() as db:
         await db.set_app_config("relay.hub_url", "https://hub.local")
         await db.set_app_config("relay.source_node_id", "node-1")
+        # Deliberately set but must be IGNORED: source_version omitted in the
+        # request now means "derive from updated_at" (matches auto-share),
+        # not "fall back to this static config".
         await db.set_app_config("relay.default_source_version", "3")
         await db.execute(
             """
@@ -957,7 +961,13 @@ async def test_relay_share_memory_endpoint_enqueues_existing_memory():
         outbox = await db.fetchone(
             "SELECT * FROM relay_outbox WHERE id = ?", (data["outbox_id"],)
         )
-        assert outbox["idempotency_key"] == "node-1:memory-1:v3:update"
+        expected_version = RelayService._auto_share_version(
+            SimpleNamespace(updated_at="2026-06-25T00:01:00Z")
+        )
+        assert (
+            outbox["idempotency_key"]
+            == f"node-1:memory-1:v{expected_version}:update"
+        )
 
         await db.execute(
             """

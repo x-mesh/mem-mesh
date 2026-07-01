@@ -125,3 +125,68 @@ async def test_relay_worker_verbose_reports_empty_outbox_queue(tmp_path, monkeyp
     outbox = result["debug"]["before"]["queues"]["outbox"]
     assert outbox["total"] == 0
     assert "relay_outbox has no rows" in outbox["no_work_reason"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_worker_config_hot_reloads_without_rebuilding_heavy_resources(
+    tmp_path,
+):
+    """A dashboard edit (LLM key, hub token, prompt version) must take effect
+    on an already-running worker without a process restart, and without
+    reloading the embedding model — only _refresh_worker_config's cheap
+    fields should change."""
+    import app.cli.relay as relay_cli
+
+    settings = SimpleNamespace(
+        embedding_model="dummy-model",
+        relay_llm_timeout=5.0,
+        relay_http_timeout=5.0,
+    )
+
+    db = Database(str(tmp_path / "relay.db"), embedding_dim=3)
+    await db.connect()
+    try:
+        service = RelayService(db)
+        await service.ensure_schema()
+        await db.set_app_config("relay.hub_token", "old-token")
+        await db.set_app_config("relay.llm_provider", "anthropic")
+        await db.set_app_config("relay.llm_api_key", "old-key")
+        await db.set_app_config("relay.llm_model", "old-model")
+        await db.set_app_config("relay.prompt_version", "v1")
+
+        eff = await service.get_effective_config(settings)
+        active = {"item", "aggregate", "outbox"}
+        worker = await relay_cli._build_relay_worker(
+            db=db,
+            settings=settings,
+            service=service,
+            relay_config=eff["values"],
+            active=active,
+            worker_id="w-1",
+            max_attempts=3,
+            backoff_max=30.0,
+            lease_seconds=60,
+        )
+        embedding_service = worker.embedding_service
+        assert worker.text_enricher.api_key == "old-key"
+        assert worker.outbox_bearer_token == "old-token"
+        assert worker.prompt_version == "v1"
+
+        # Simulate a dashboard edit: rotate the LLM key and hub token, bump
+        # prompt_version — no restart, no rebuild.
+        await db.set_app_config("relay.llm_api_key", "new-key")
+        await db.set_app_config("relay.hub_token", "new-token")
+        await db.set_app_config("relay.prompt_version", "v2")
+
+        await relay_cli._refresh_worker_config(
+            db=db, settings=settings, service=service, worker=worker, active=active
+        )
+
+        assert worker.text_enricher.api_key == "new-key"
+        assert worker.digest_generator is worker.text_enricher
+        assert worker.outbox_bearer_token == "new-token"
+        assert worker.prompt_version == "v2"
+        # The heavy resource is untouched — same object, no reload.
+        assert worker.embedding_service is embedding_service
+    finally:
+        await db.close()

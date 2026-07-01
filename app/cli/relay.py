@@ -371,6 +371,61 @@ async def _build_relay_worker(
     )
 
 
+async def _refresh_worker_config(
+    *, db, settings, service, worker: "RelayWorker", active: set[str]
+) -> Optional[tuple]:
+    """Refresh cheap, DB-backed config on an already-built worker in place.
+
+    LLM provider/model/key/base_url, hub token, and prompt_version are plain
+    attributes RelayWorker reads fresh on every run_once() call — reassigning
+    them here takes effect on the very next cycle. Unlike _build_relay_worker,
+    this never touches the heavy resources (EmbeddingService, the NLI
+    ConflictDetectorService) so a rotated API key or hub token doesn't force a
+    model reload. Called every daemon cycle regardless of whether the active
+    task set changed, so dashboard edits apply without a process restart.
+
+    Returns a signature tuple for change-only logging, or None if worker is
+    None.
+    """
+    eff = await service.get_effective_config(settings)
+    relay_config = eff["values"]
+    sig: list = []
+
+    if active & {"item", "aggregate"}:
+        relay_llm = await resolve_service_llm(db, settings, "relay")
+        enricher = build_relay_enricher(
+            provider=relay_llm["provider"],
+            api_key=relay_llm["api_key"],
+            model=relay_llm["model"],
+            base_url=relay_llm["base_url"],
+            timeout=settings.relay_llm_timeout,
+        )
+        worker.text_enricher = enricher if "item" in active else None
+        worker.digest_generator = enricher if "aggregate" in active else None
+        sig.append(("relay_llm", relay_llm["provider"], relay_llm["model"], relay_llm["api_key"]))
+
+    if "outbox" in active:
+        worker.outbox_bearer_token = relay_config["hub_token"]
+        sig.append(("hub_token", relay_config["hub_token"]))
+
+    if "reconcile" in active:
+        reconcile_llm = await resolve_service_llm(db, settings, "reconcile")
+        worker.reconcile_enricher = build_relay_enricher(
+            provider=reconcile_llm["provider"],
+            api_key=reconcile_llm["api_key"],
+            model=reconcile_llm["model"],
+            base_url=reconcile_llm["base_url"],
+            timeout=settings.relay_llm_timeout,
+        )
+        sig.append(
+            ("reconcile_llm", reconcile_llm["provider"], reconcile_llm["model"], reconcile_llm["api_key"])
+        )
+
+    worker.prompt_version = relay_config["prompt_version"]
+    sig.append(("prompt_version", relay_config["prompt_version"]))
+    return tuple(sig)
+
+
 def _print_worker_state(
     *,
     worker_id: str,
@@ -496,12 +551,17 @@ async def _run_relay_worker_instance(
                 }
             return result
 
-        # Daemon: each cycle re-resolve the requested tasks AND probe which have
-        # config ready. Rebuild only when the active set changes (avoids reloading
-        # the NLI model). If nothing is ready yet, stay up and idle — the worker
-        # picks tasks up as soon as they're configured (e.g. from the dashboard).
+        # Daemon: each cycle re-resolve the requested tasks and probe which have
+        # config ready. The worker itself is rebuilt only when the active task
+        # set changes (avoids reloading the NLI model / embedding model), but
+        # cheap config — LLM keys/model, hub token, prompt_version — is
+        # refreshed in place on the existing worker every cycle, so editing
+        # those in the dashboard takes effect without restarting the process.
+        # If nothing is ready yet, stay up and idle — the worker picks tasks up
+        # as soon as they're configured (e.g. from the dashboard).
         current: Optional[set[str]] = None
         last_signature: Optional[tuple] = None
+        last_config_signature: Optional[tuple] = None
         worker = None
         while True:
             enabled = await _resolve_enabled(db, enabled_override)
@@ -531,6 +591,12 @@ async def _run_relay_worker_instance(
             if worker is None:
                 await asyncio.sleep(interval)
                 continue
+            config_signature = await _refresh_worker_config(
+                db=db, settings=settings, service=service, worker=worker, active=active
+            )
+            if config_signature != last_config_signature:
+                logger.info("relay worker config refreshed (key/token/model change detected)")
+                last_config_signature = config_signature
             stats = await worker.run_once()
             if not any(stats.values()):
                 await asyncio.sleep(interval)

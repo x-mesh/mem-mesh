@@ -480,6 +480,92 @@ async def test_enqueue_memory_share_builds_outbox_payload_from_memory():
 
 
 @pytest.mark.asyncio
+async def test_enqueue_memory_share_auto_derives_version_when_omitted():
+    """Manual share (source_version omitted) must derive a version from the
+    memory's updated_at, same as auto-share — matching _auto_share_version
+    exactly, not the old sticky relay.default_source_version config."""
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        memory = Memory(
+            id="memory-1",
+            content="A relay decision memory.",
+            content_hash="hash-v1",
+            project_id="relay",
+            category="decision",
+            source="test",
+            embedding=b"123",
+            updated_at="2026-06-25T00:01:00Z",
+        )
+
+        outbox_id = await service.enqueue_memory_share(
+            memory,
+            source_node_id="node-1",
+            target_hub="https://hub.local",
+        )
+
+        outbox = await db.fetchone(
+            "SELECT * FROM relay_outbox WHERE id = ?", (outbox_id,)
+        )
+        expected_version = RelayService._auto_share_version(memory)
+        assert (
+            outbox["idempotency_key"] == f"node-1:memory-1:v{expected_version}:update"
+        )
+
+
+@pytest.mark.asyncio
+async def test_reshare_after_content_edit_does_not_collide():
+    """The exact bug scenario: share a memory, edit its content locally
+    (e.g. via 'improve with AI'), share again. With auto-derived
+    (updated_at-based) versions, the second share gets a fresh
+    idempotency_key instead of reusing the first one with a different
+    payload hash — which used to raise RelayIdempotencyConflict on ingest,
+    since the old default source_version was a sticky static config value
+    that never changed between shares."""
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+
+        first = Memory(
+            id="memory-1",
+            content="Original content before enrichment.",
+            content_hash="hash-v1",
+            project_id="relay",
+            category="decision",
+            source="test",
+            embedding=b"123",
+            updated_at="2026-06-25T00:01:00Z",
+        )
+        first_outbox_id = await service.enqueue_memory_share(
+            first, source_node_id="node-1", target_hub="https://hub.local"
+        )
+
+        edited = Memory(
+            id="memory-1",
+            content="Edited content after enrichment ran.",
+            content_hash="hash-v2",
+            project_id="relay",
+            category="decision",
+            source="test",
+            embedding=b"123",
+            updated_at="2026-06-25T00:05:00Z",  # content changed later
+        )
+        second_outbox_id = await service.enqueue_memory_share(
+            edited, source_node_id="node-1", target_hub="https://hub.local"
+        )
+
+        first_row = await db.fetchone(
+            "SELECT idempotency_key FROM relay_outbox WHERE id = ?",
+            (first_outbox_id,),
+        )
+        second_row = await db.fetchone(
+            "SELECT idempotency_key FROM relay_outbox WHERE id = ?",
+            (second_outbox_id,),
+        )
+        assert first_row["idempotency_key"] != second_row["idempotency_key"]
+
+
+@pytest.mark.asyncio
 async def test_enqueue_memory_share_blocks_type_gate_and_secret_before_outbox():
     async with _temp_db() as db:
         service = RelayService(db)
@@ -520,6 +606,133 @@ async def test_enqueue_memory_share_blocks_type_gate_and_secret_before_outbox():
 
         outbox_count = await db.fetchone("SELECT COUNT(*) AS count FROM relay_outbox")
         assert outbox_count["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_enqueue_memory_share_fail_open_for_unknown_category():
+    """A category outside the old hardcoded allowlist (e.g. one introduced
+    later) must share by default — only 'task' is structurally denylisted."""
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        memory = Memory(
+            id="memory-future-cat",
+            content="Something in a category nobody hardcoded a checkbox for.",
+            content_hash="future-hash",
+            project_id="relay",
+            category="spec",
+            source="test",
+            embedding=b"123",
+        )
+
+        outbox_id = await service.enqueue_memory_share(
+            memory,
+            source_node_id="node-1",
+            source_version=1,
+            target_hub="https://hub.local",
+        )
+        assert outbox_id
+
+
+@pytest.mark.asyncio
+async def test_enqueue_memory_share_git_history_still_shareable_by_default():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        memory = Memory(
+            id="memory-git-history",
+            content="git commit abc123 touched relay.py",
+            content_hash="git-hash",
+            project_id="relay",
+            category="git-history",
+            source="test",
+            embedding=b"123",
+        )
+
+        outbox_id = await service.enqueue_memory_share(
+            memory,
+            source_node_id="node-1",
+            source_version=1,
+            target_hub="https://hub.local",
+        )
+        assert outbox_id
+
+
+@pytest.mark.asyncio
+async def test_enqueue_memory_share_blocked_category_soft_block():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        await service.update_admin_settings(
+            RelaySettingsUpdateRequest(blocked_categories=["idea"])
+        )
+        memory = Memory(
+            id="memory-idea",
+            content="An idea the user chose not to share from this node.",
+            content_hash="idea-hash",
+            project_id="relay",
+            category="idea",
+            source="test",
+            embedding=b"123",
+        )
+
+        with pytest.raises(RelayTypeGateBlocked, match="Sharing Policy"):
+            await service.enqueue_memory_share(
+                memory,
+                source_node_id="node-1",
+                source_version=1,
+                target_hub="https://hub.local",
+            )
+
+        # Attempting to soft-block 'task' via the policy request is a no-op —
+        # it's already hard-denylisted and not a user-facing toggle.
+        await service.update_admin_settings(
+            RelaySettingsUpdateRequest(blocked_categories=["task", "bug"])
+        )
+        blocked = await service._get_blocked_categories()
+        assert blocked == {"bug"}
+
+
+@pytest.mark.asyncio
+async def test_list_category_policies_reflects_live_categories_and_blocks():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        for category in ("decision", "task", "spec"):
+            await db.execute(
+                """
+                INSERT INTO memories (
+                    id, content, content_hash, project_id, category, source,
+                    client, embedding, tags, created_at, updated_at, content_bytes
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"mem-{category}",
+                    f"content for {category}",
+                    f"hash-{category}",
+                    "relay",
+                    category,
+                    "test",
+                    None,
+                    b"123",
+                    "[]",
+                    "2026-01-01T00:00:00Z",
+                    "2026-01-01T00:00:00Z",
+                    0,
+                ),
+            )
+        await service.update_admin_settings(
+            RelaySettingsUpdateRequest(blocked_categories=["spec"])
+        )
+
+        policies = await service.list_category_policies()
+        by_category = {p.category: p.shared for p in policies}
+
+        # 'task' never appears — it's denylisted, not a policy choice.
+        assert "task" not in by_category
+        assert by_category["decision"] is True
+        assert by_category["spec"] is False
 
 
 @pytest.mark.asyncio
@@ -1172,7 +1385,7 @@ async def test_auto_share_skips_non_shareable_kind_without_raising():
         service = await _service_with_identity(db)
         await _enable_auto_share(service, "proj-1")
 
-        # "task" is not in DEFAULT_SHAREABLE_KINDS → type gate skip, no raise.
+        # "task" is structurally denylisted → type gate skip, no raise.
         result = await service.auto_share_on_write(
             _shareable_memory(id="mem-4", category="task"), event_type="create"
         )

@@ -5,15 +5,13 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 RelayEventType = Literal["create", "update", "retract"]
-RelayKind = Literal[
-    "task",
-    "bug",
-    "idea",
-    "decision",
-    "incident",
-    "code_snippet",
-    "git-history",
-]
+# Was a Literal of 7 known categories — that made this a 4th hardcoded
+# category enum (alongside the old sharing gate, the dashboard's edit
+# dropdown, and CLAUDE.md's documented list), so a newly introduced category
+# would fail wire validation even after the sharing gate allowed it. The
+# actual policy (denylist + user opt-out) lives in RelayService; this is just
+# a bounded free-form label matching Memory.category's own type.
+RelayKind = str
 
 
 class RelayIngestRequest(BaseModel):
@@ -25,7 +23,7 @@ class RelayIngestRequest(BaseModel):
     source_memory_id: str = Field(min_length=1, max_length=200)
     source_version: int = Field(ge=0)
     source_project_key: str = Field(min_length=1, max_length=200)
-    kind: RelayKind
+    kind: RelayKind = Field(min_length=1, max_length=100)
     status: str = Field(default="active", min_length=1, max_length=50)
     content: Optional[str] = Field(default=None, max_length=50000)
     tags: List[str] = Field(default_factory=list)
@@ -374,6 +372,14 @@ class RelayHealthResponse(BaseModel):
     role: str = "hub"
 
 
+class RelayCategoryPolicy(BaseModel):
+    category: str
+    # False = this category is opted out of Share/Auto-share (soft block, user
+    # controlled). Structurally denylisted categories (e.g. 'task') never
+    # appear here at all — they're not a policy choice.
+    shared: bool = True
+
+
 class RelaySettingsResponse(BaseModel):
     generated_at: str
     hub_url: RelaySettingValue
@@ -386,6 +392,7 @@ class RelaySettingsResponse(BaseModel):
     llm_base_url: RelaySettingValue
     prompt_version: RelaySettingValue
     identities: List[RelayIdentitySummary] = Field(default_factory=list)
+    category_policies: List[RelayCategoryPolicy] = Field(default_factory=list)
 
 
 class RelaySettingsUpdateRequest(BaseModel):
@@ -398,6 +405,10 @@ class RelaySettingsUpdateRequest(BaseModel):
     llm_model: Optional[str] = Field(default=None, max_length=200)
     llm_base_url: Optional[str] = Field(default=None, max_length=500)
     prompt_version: Optional[str] = Field(default=None, max_length=100)
+    # Explicit set of categories to opt OUT of sharing (replaces the stored
+    # set wholesale). None = leave unchanged; [] = clear (share everything
+    # not denylisted).
+    blocked_categories: Optional[List[str]] = None
 
     @field_validator("llm_provider")
     @classmethod

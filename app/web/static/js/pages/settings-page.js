@@ -128,7 +128,10 @@ export class SettingsPage extends HTMLElement {
               </select>
             </label>
             <label class="chat-field chat-field-wide">
-              <span>API Key</span>
+              <span class="chat-field-label-row">
+                <span>API Key</span>
+                <span id="chat-api-key-badge"></span>
+              </span>
               <div class="chat-key-row">
                 <input id="chat-api-key" type="password" autocomplete="new-password" placeholder="enter key to set">
                 <button type="button" class="settings-btn" id="chat-key-toggle">Show</button>
@@ -509,6 +512,8 @@ export class SettingsPage extends HTMLElement {
             key.value = '';
             key.placeholder = configured ? 'configured — enter new key to replace' : 'enter key to set';
         }
+        const keyBadge = this.querySelector('#chat-api-key-badge');
+        if (keyBadge) keyBadge.innerHTML = this.secretBadge(configured, 'Key saved', 'No key saved');
         const enabled = this.querySelector('#chat-enabled');
         if (enabled) enabled.checked = data.enabled !== false;
         const meta = this.querySelector('#chat-settings-meta');
@@ -638,7 +643,10 @@ export class SettingsPage extends HTMLElement {
             <input id="${svc}-llm-model" type="text" placeholder="provider default">
           </label>
           <label class="chat-field chat-field-wide">
-            <span>API Key</span>
+            <span class="chat-field-label-row">
+              <span>API Key</span>
+              <span id="${svc}-llm-api-key-badge"></span>
+            </span>
             <input id="${svc}-llm-api-key" type="password" autocomplete="new-password" placeholder="enter key to set">
           </label>
           <label class="chat-field chat-field-wide">
@@ -682,6 +690,8 @@ export class SettingsPage extends HTMLElement {
                 key.value = '';
                 key.placeholder = s.api_key_configured ? 'configured — enter a new key to replace' : 'enter key to set';
             }
+            const keyBadge = this.querySelector(`#${svc}-llm-api-key-badge`);
+            if (keyBadge) keyBadge.innerHTML = this.secretBadge(s.api_key_configured, 'Key saved', 'No key saved');
             this.toggleLlmFields(svc);
         });
     }
@@ -892,6 +902,16 @@ export class SettingsPage extends HTMLElement {
         return (text == null ? '' : String(text))
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // A secret field's own input is always blank on load (never sent back),
+    // so without this badge "configured" and "empty, never set" look
+    // identical at a glance. Distinct from srcBadge (which only shows env/db/
+    // default) — this shows whether a VALUE is actually saved.
+    secretBadge(configured, savedLabel = 'Saved', missingLabel = 'Not set') {
+        return configured
+            ? `<span class="settings-secret-badge on">${this.escapeHtml(savedLabel)}</span>`
+            : `<span class="settings-secret-badge off">${this.escapeHtml(missingLabel)}</span>`;
     }
 
     // ── Status ──
@@ -1778,6 +1798,35 @@ style.textContent = `
 .chat-field > span {
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.chat-field-label-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Whether a secret VALUE is saved — distinct from the source badge, which
+   only shows where a value came from (env/db/default). */
+.settings-secret-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: var(--font-semibold);
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border-color);
+}
+
+.settings-secret-badge.on {
+  background: var(--success-bg);
+  border-color: color-mix(in oklch, var(--success-color), var(--border-color) 60%);
+  color: var(--success-color);
+}
+
+.settings-secret-badge.off {
+  background: var(--warning-bg);
+  border-color: color-mix(in oklch, var(--warning-color), var(--border-color) 60%);
+  color: var(--warning-text);
 }
 
 .chat-field select,

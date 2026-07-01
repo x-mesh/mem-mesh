@@ -113,7 +113,8 @@ export class RelayPage extends HTMLElement {
             </div>
             <label class="relay-field">
               <span>Version</span>
-              <input id="share-source-version" name="source_version" type="number" min="0" value="1" required>
+              <input id="share-source-version" name="source_version" type="number" min="0" placeholder="auto (from last edit)">
+              <small class="relay-field-hint">Leave blank to auto-version from the memory's last edit — required for a re-share after a content change to not collide.</small>
             </label>
             <label class="relay-field">
               <span>Event</span>
@@ -364,6 +365,10 @@ export class RelayPage extends HTMLElement {
     this.querySelector('#relay-hub-check')?.addEventListener('click', () => {
       this.checkHubConnection();
     });
+    this.querySelector('#relay-sharing-form')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.saveSharingPolicy();
+    });
     this.querySelector('#relay-worker-form')?.addEventListener('submit', (event) => {
       event.preventDefault();
       this.saveWorkerSettings();
@@ -519,12 +524,11 @@ export class RelayPage extends HTMLElement {
     const hubUrlInput = this.querySelector('#relay-setting-hub-url');
     const sourceNodeInput = this.querySelector('#relay-setting-source-node');
     const hubTokenInput = this.querySelector('#relay-setting-hub-token');
+    // default_source_version is an internal relay detail (share fallback), not a
+    // user knob — omitted here so the stored value is preserved.
     const payload = {
       hub_url: hubUrlInput?.value.trim() || '',
       source_node_id: sourceNodeInput?.value.trim() || '',
-      default_source_version: Number(
-        this.querySelector('#relay-setting-source-version')?.value || 1
-      ),
     };
     if (hubTokenInput?.value.trim()) {
       payload.hub_token = hubTokenInput.value.trim();
@@ -537,6 +541,25 @@ export class RelayPage extends HTMLElement {
       showToast('Personal relay settings saved.', 'success');
     } catch (error) {
       showToast(`Relay settings failed: ${this.errorMessage(error)}`, 'error');
+    } finally {
+      submit.disabled = false;
+    }
+  }
+
+  async saveSharingPolicy() {
+    if (!this.api) return;
+    const submit = this.querySelector('#relay-sharing-submit');
+    // Every rendered checkbox is a category known to exist locally; unchecked
+    // ones become the blocked set (checked = shared, the default).
+    const boxes = Array.from(this.querySelectorAll('input[name="share_category"]'));
+    const blockedCategories = boxes.filter((b) => !b.checked).map((b) => b.value);
+    submit.disabled = true;
+    try {
+      this.settings = await this.api.updateRelaySettings({ blocked_categories: blockedCategories });
+      this.renderSettings();
+      showToast('Sharing policy saved.', 'success');
+    } catch (error) {
+      showToast(`Sharing policy failed: ${this.errorMessage(error)}`, 'error');
     } finally {
       submit.disabled = false;
     }
@@ -580,8 +603,14 @@ export class RelayPage extends HTMLElement {
       return;
     }
     // Send the token typed in the field; empty → the server falls back to the
-    // stored hub token, so the check still verifies the configured credential.
+    // stored hub token, so a saved token can be re-checked anytime after reload
+    // (the password field is always blank on load).
     const hubToken = this.querySelector('#relay-setting-hub-token')?.value.trim() || '';
+    const tokenConfigured = Boolean(this.settings?.hub_token?.configured);
+    if (!hubToken && !tokenConfigured) {
+      showToast('No hub token saved yet — paste one and Save, then Check Hub.', 'warning');
+      return;
+    }
     button.disabled = true;
     status.dataset.state = '';
     status.textContent = 'Checking...';
@@ -591,12 +620,17 @@ export class RelayPage extends HTMLElement {
       if (result.token_ok === true) {
         const scopes = (result.scopes && result.scopes.length) ? `, scopes: ${result.scopes.join('/')}` : '';
         lines.push(`Token: valid${result.node_id ? ` — ${result.node_id}` : ''}${scopes}`);
+        // A valid Check Hub IS the commit: persist the just-verified token and
+        // the hub-derived source node id, so a reload keeps them. (Check Hub OK
+        // was being mistaken for Save, and the typed token was lost on reload.)
+        await this._persistVerifiedHub(hubToken, result.node_id, lines);
       } else if (result.token_ok === false) {
         lines.push(`Token: INVALID — ${result.token_message}`);
       } else if (result.token_checked) {
         // Reachable but not verified (e.g. hub too old to expose /auth/check).
         lines.push(`Token: not verified — ${result.token_message}`);
       }
+
       status.textContent = lines.join('\n');
 
       const tokenBad = result.token_ok === false;
@@ -616,6 +650,40 @@ export class RelayPage extends HTMLElement {
       showToast(`Hub check failed: ${this.errorMessage(error)}`, 'error');
     } finally {
       button.disabled = false;
+    }
+  }
+
+  _hubTokenBadgeHtml(configured) {
+    return this._secretBadgeHtml(configured, 'Token saved', 'No token saved');
+  }
+
+  _secretBadgeHtml(configured, savedLabel, missingLabel) {
+    return configured
+      ? `<span class="relay-status-chip status-completed">${this.escapeHtml(savedLabel)}</span>`
+      : `<span class="relay-status-chip status-pending">${this.escapeHtml(missingLabel)}</span>`;
+  }
+
+  // Persist what a successful Check Hub verified, so it survives a reload.
+  // Saves a freshly-typed token (only after it validated) and the hub-derived
+  // source node id. Re-checking an already-saved token with an unchanged node
+  // writes nothing.
+  async _persistVerifiedHub(hubToken, nodeId, lines) {
+    const nodeInput = this.querySelector('#relay-setting-source-node');
+    const currentNode = (this.settings?.source_node_id?.value || '').trim();
+    if (nodeInput && nodeId) nodeInput.value = nodeId;
+    const payload = {};
+    if (hubToken) payload.hub_token = hubToken;
+    if (nodeId && nodeId !== currentNode) payload.source_node_id = nodeId;
+    if (!Object.keys(payload).length) return;
+    try {
+      this.settings = await this.api.updateRelaySettings(payload);
+      lines.push(hubToken ? 'Saved — token verified and stored.' : `Source Node ID synced: ${nodeId}`);
+      // Targeted update, not a full renderSettings() — a full re-render would
+      // wipe the Checking.../result text and any in-progress form input.
+      const badge = this.querySelector('#relay-hub-token-badge');
+      if (badge) badge.innerHTML = this._hubTokenBadgeHtml(this.settings?.hub_token?.configured);
+    } catch (error) {
+      lines.push(`Verified, but auto-save failed: ${this.errorMessage(error)}`);
     }
   }
 
@@ -724,7 +792,9 @@ export class RelayPage extends HTMLElement {
     const submit = this.querySelector('#relay-share-submit');
     const status = this.querySelector('#relay-share-result');
     const memoryId = this.querySelector('#share-memory-id')?.value.trim();
-    const sourceVersion = Number(this.querySelector('#share-source-version')?.value || 0);
+    // Blank → omit source_version so the server auto-derives it from the
+    // memory's updated_at (same as auto-share); an explicit value pins it.
+    const sourceVersionRaw = this.querySelector('#share-source-version')?.value.trim();
     const eventType = this.querySelector('#share-event-type')?.value || 'update';
     const force = Boolean(this.querySelector('#share-force')?.checked);
 
@@ -736,11 +806,9 @@ export class RelayPage extends HTMLElement {
     submit.disabled = true;
     status.textContent = 'Queueing...';
     try {
-      const result = await this.api.shareRelayMemory(memoryId, {
-        source_version: sourceVersion,
-        event_type: eventType,
-        force,
-      });
+      const payload = { event_type: eventType, force };
+      if (sourceVersionRaw) payload.source_version = Number(sourceVersionRaw);
+      const result = await this.api.shareRelayMemory(memoryId, payload);
       status.textContent = `Queued ${result.outbox_id} to ${result.target_hub}`;
       showToast('Memory queued for relay.', 'success');
       await this.loadOverview();
@@ -758,7 +826,8 @@ export class RelayPage extends HTMLElement {
     const submit = this.querySelector('#relay-project-share-submit');
     const status = this.querySelector('#relay-share-result');
     const projectId = this.querySelector('#share-project-id')?.value.trim();
-    const sourceVersion = Number(this.querySelector('#share-source-version')?.value || 0);
+    // Blank → each memory gets its own auto-derived version (see shareMemory).
+    const sourceVersionRaw = this.querySelector('#share-source-version')?.value.trim();
     const eventType = this.querySelector('#share-event-type')?.value || 'update';
     const force = Boolean(this.querySelector('#share-force')?.checked);
 
@@ -770,11 +839,9 @@ export class RelayPage extends HTMLElement {
     submit.disabled = true;
     status.textContent = 'Queueing project...';
     try {
-      const result = await this.api.shareRelayProject(projectId, {
-        source_version: sourceVersion,
-        event_type: eventType,
-        force,
-      });
+      const payload = { event_type: eventType, force };
+      if (sourceVersionRaw) payload.source_version = Number(sourceVersionRaw);
+      const result = await this.api.shareRelayProject(projectId, payload);
       status.textContent = `Queued ${result.queued_count} memories to ${result.target_hub}`;
       showToast('Project queued for relay.', 'success');
       await this.loadOverview();
@@ -1089,22 +1156,19 @@ export class RelayPage extends HTMLElement {
               <input
                 id="relay-setting-source-node"
                 type="text"
+                class="relay-input-readonly"
                 value="${this.escapeHtml(data.source_node_id.value || '')}"
-                placeholder="jinwoo-laptop"
+                placeholder="run Check Hub to set from your token"
+                readonly
+                tabindex="-1"
               >
-              ${this.renderSettingHint(data.source_node_id)}
-            </label>
-            <label class="relay-field">
-              <span>Default Version</span>
-              <input
-                id="relay-setting-source-version"
-                type="number"
-                min="0"
-                value="${Number(data.default_source_version || 1)}"
-              >
+              <small class="relay-field-hint">Read-only — the hub derives this from your token. Click Check Hub to sync it.</small>
             </label>
             <label class="relay-field relay-field-wide">
-              <span>Hub Token</span>
+              <span class="relay-field-label-row">
+                <span>Hub Token</span>
+                <span id="relay-hub-token-badge">${this._hubTokenBadgeHtml(data.hub_token.configured)}</span>
+              </span>
               <input
                 id="relay-setting-hub-token"
                 type="password"
@@ -1132,6 +1196,31 @@ export class RelayPage extends HTMLElement {
             ${this.renderSettingRow(data.hub_token)}
           </div>
         </section>
+
+        <form class="relay-panel relay-field-wide" id="relay-sharing-form">
+          <div class="relay-panel-header">
+            <h2>Sharing Policy</h2>
+            <span class="relay-panel-meta">this node → team hub</span>
+          </div>
+          <p class="relay-field-hint">
+            Unchecked categories are skipped by Share and Auto-share. New categories
+            show up here automatically and are shared by default — uncheck any you'd
+            rather keep local. 'task' memories are always local-only.
+          </p>
+          <div class="relay-category-grid">
+            ${data.category_policies.length
+              ? data.category_policies.map((p) => `
+                  <label class="relay-inline-check">
+                    <input type="checkbox" name="share_category" value="${this.escapeHtml(p.category)}" ${p.shared ? 'checked' : ''}>
+                    ${this.escapeHtml(p.category)}
+                  </label>
+                `).join('')
+              : '<span class="relay-muted">No memories yet — categories will appear here once you have some.</span>'}
+          </div>
+          <div class="relay-actions">
+            <button class="primary-button" id="relay-sharing-submit" type="submit">Save Sharing Policy</button>
+          </div>
+        </form>
       </section>
     `;
 
@@ -1157,7 +1246,10 @@ export class RelayPage extends HTMLElement {
               ${this.renderSettingHint(data.llm_base_url)}
             </label>
             <label class="relay-field relay-field-wide">
-              <span>LLM API Key</span>
+              <span class="relay-field-label-row">
+                <span>LLM API Key</span>
+                ${this._secretBadgeHtml(data.llm_api_key.configured, 'Key saved', 'No key saved')}
+              </span>
               <input
                 id="relay-setting-llm-api-key"
                 type="password"
@@ -1313,10 +1405,9 @@ export class RelayPage extends HTMLElement {
 
   applyShareDefaults() {
     if (!this.settings) return;
-    const versionInput = this.querySelector('#share-source-version');
-    if (versionInput && (!versionInput.value || versionInput.value === '1')) {
-      versionInput.value = this.settings.default_source_version || 1;
-    }
+    // Left blank on purpose — the server auto-derives a per-memory version
+    // from updated_at when omitted, which is now the sane default (see
+    // shareMemory/shareProject). No static prefill.
     this.renderShareConnection();
   }
 

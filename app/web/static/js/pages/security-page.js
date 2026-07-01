@@ -134,6 +134,15 @@ export class SecurityPage extends HTMLElement {
     return `<span class="src-badge ${cls}" title="active source">${s}${lock}</span>`;
   }
 
+  // Whether a secret VALUE is actually set — distinct from srcBadge (which
+  // only shows where the value came from). The password input is always
+  // blank on load, so without this, "set" and "never set" look identical.
+  configuredBadge(isSet, setLabel = 'Set', missingLabel = 'Not set') {
+    return isSet
+      ? `<span class="src-badge configured-on">${this.escapeHtml(setLabel)}</span>`
+      : `<span class="src-badge configured-off">${this.escapeHtml(missingLabel)}</span>`;
+  }
+
   // ----- Hook token tab -------------------------------------------------
 
   renderHookPanel() {
@@ -318,7 +327,7 @@ export class SecurityPage extends HTMLElement {
             <input type="text" id="ba-username" class="form-input" value="${this.escapeHtml(uname.value || 'admin')}" ${dis}>
           </div>
           <div class="form-group">
-            <label>Admin password ${this.srcBadge(pw)}</label>
+            <label>Admin password ${this.configuredBadge(pw.value, 'Set', 'Not set')} ${this.srcBadge(pw)}</label>
             <input type="password" id="ba-password" class="form-input" placeholder="${pw.value ? '•••••••• (set — type to change)' : 'set a password'}" ${dis}>
           </div>
           <div class="actions">
@@ -511,6 +520,8 @@ export class SecurityPage extends HTMLElement {
         .src-env { background: #dbeafe; color: #1e40af; }
         .src-db { background: #dcfce7; color: #166534; }
         .src-default { background: var(--secondary-bg, #e9ecef); color: var(--text-secondary, #555); }
+        .configured-on { background: #dcfce7; color: #166534; }
+        .configured-off { background: #fef3c7; color: #92400e; }
         .form-row { margin: 1rem 0; }
         .switch-row { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; }
         .switch-row input { width: 18px; height: 18px; }

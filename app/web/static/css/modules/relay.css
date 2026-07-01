@@ -272,6 +272,24 @@
   color: var(--text-secondary);
 }
 
+/* Label row that pairs a field name with a saved/unsaved status chip (e.g.
+   Hub Token), so users can tell at a glance whether a secret is persisted
+   without having to type into the (always-blank-on-load) password field. */
+.relay-field-label-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Sharing Policy checkbox list: category count is dynamic (derived from live
+   data, not a hardcoded enum), so it wraps rather than assuming a fixed row. */
+.relay-category-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-2) 0 var(--space-3);
+}
+
 .relay-field input,
 .relay-field select {
   width: 100%;
@@ -447,6 +465,20 @@
 
 /* Hub check result: its own line below the buttons, full width, wrapping so
    long URLs and the token verdict stay visible instead of truncating. */
+/* Read-only setting input (e.g. Source Node ID, which the hub owns): looks
+   static, not like an editable box, so users don't try to change it. */
+.relay-input-readonly {
+  background: var(--surface-muted, rgba(0, 0, 0, 0.04));
+  color: var(--text-secondary);
+  cursor: default;
+  border-style: dashed;
+}
+
+.relay-input-readonly:focus {
+  outline: none;
+  box-shadow: none;
+}
+
 .relay-hub-check-status {
   margin-top: var(--space-3);
   color: var(--text-secondary);

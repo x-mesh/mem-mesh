@@ -143,21 +143,22 @@ async def _resolve_share_defaults(
     source_node_id: Optional[str],
     source_version: Optional[int],
     target_hub: Optional[str],
-) -> tuple[str, int, str]:
+) -> tuple[str, Optional[int], str]:
+    """Resolve hub_url/source_node_id (required, config-backed) and pass
+    source_version through unresolved. Unlike the other two, source_version has
+    no static default here — leaving it None lets the service layer derive it
+    per-memory from updated_at (same as auto-share), instead of every share
+    reusing one sticky version number and colliding on re-share after an edit.
+    """
     effective = await service.get_effective_config(get_settings())
     values = effective["values"]
     resolved_source_node_id = source_node_id or values["source_node_id"]
     resolved_target_hub = target_hub or values["hub_url"]
-    resolved_source_version = (
-        source_version
-        if source_version is not None
-        else values["default_source_version"]
-    )
     if not resolved_source_node_id:
         raise HTTPException(status_code=400, detail="Relay source node is not set")
     if not resolved_target_hub:
         raise HTTPException(status_code=400, detail="Relay team hub URL is not set")
-    return resolved_source_node_id, resolved_source_version, resolved_target_hub
+    return resolved_source_node_id, source_version, resolved_target_hub
 
 
 @router.get("/admin/overview", response_model=RelayAdminOverviewResponse)
