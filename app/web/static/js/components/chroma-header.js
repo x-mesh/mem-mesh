@@ -91,29 +91,41 @@ class ChromaHeader extends HTMLElement {
                 </svg>
                 <span>Work</span>
               </a>
-              <a href="/curation" class="nav-link" data-route="/curation" data-nav="curation">
-                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
-                  <path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <span>Curation</span>
-              </a>
-              <a href="/analytics" class="nav-link" data-route="/analytics" data-nav="analytics">
-                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
-                  <path d="M18 20V10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                  <path d="M12 20V4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                  <path d="M6 20V14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <span>Analytics</span>
-              </a>
-              <a href="/relay" class="nav-link" data-route="/relay" data-nav="relay">
-                <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
-                  <circle cx="6" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
-                  <circle cx="18" cy="6" r="3" stroke="currentColor" stroke-width="2"/>
-                  <circle cx="18" cy="18" r="3" stroke="currentColor" stroke-width="2"/>
-                  <path d="M8.7 10.7L15.3 7.3M8.7 13.3L15.3 16.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <span>Relay</span>
-              </a>
+              <div class="nav-dropdown" id="nav-more">
+                <button type="button" class="nav-link nav-dropdown-toggle" aria-haspopup="true" aria-expanded="false">
+                  <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                    <circle cx="5" cy="12" r="1.6" fill="currentColor"/>
+                    <circle cx="12" cy="12" r="1.6" fill="currentColor"/>
+                    <circle cx="19" cy="12" r="1.6" fill="currentColor"/>
+                  </svg>
+                  <span>More</span>
+                </button>
+                <div class="nav-dropdown-menu" role="menu">
+                  <a href="/curation" class="nav-link nav-dropdown-item" data-route="/curation" data-nav="curation">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                      <path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <span>Curation</span>
+                  </a>
+                  <a href="/analytics" class="nav-link nav-dropdown-item" data-route="/analytics" data-nav="analytics">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                      <path d="M18 20V10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      <path d="M12 20V4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      <path d="M6 20V14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>Analytics</span>
+                  </a>
+                  <a href="/relay" class="nav-link nav-dropdown-item" data-route="/relay" data-nav="relay">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
+                      <circle cx="6" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                      <circle cx="18" cy="6" r="3" stroke="currentColor" stroke-width="2"/>
+                      <circle cx="18" cy="18" r="3" stroke="currentColor" stroke-width="2"/>
+                      <path d="M8.7 10.7L15.3 7.3M8.7 13.3L15.3 16.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>Relay</span>
+                  </a>
+                </div>
+              </div>
               <a href="/settings" class="nav-link" data-route="/settings" data-nav="settings">
                 <svg class="nav-icon" viewBox="0 0 24 24" fill="none">
                   <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
@@ -317,6 +329,24 @@ class ChromaHeader extends HTMLElement {
     document.addEventListener('click', (e) => {
       if (!this.querySelector('#user-menu')?.contains(e.target)) {
         userDropdown?.classList.remove('open');
+      }
+    });
+
+    // "More" nav dropdown (Curation / Analytics / Relay)
+    const moreDropdown = this.querySelector('#nav-more');
+    const moreToggle = moreDropdown?.querySelector('.nav-dropdown-toggle');
+    moreToggle?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = moreDropdown.classList.toggle('open');
+      moreToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    moreDropdown?.querySelectorAll('.nav-dropdown-item').forEach((item) => {
+      item.addEventListener('click', () => moreDropdown.classList.remove('open'));
+    });
+    document.addEventListener('click', (e) => {
+      if (moreDropdown && !moreDropdown.contains(e.target)) {
+        moreDropdown.classList.remove('open');
+        moreToggle?.setAttribute('aria-expanded', 'false');
       }
     });
 
@@ -546,10 +576,18 @@ class ChromaHeader extends HTMLElement {
     this.querySelectorAll('.nav-link, .mobile-nav-link').forEach(link => {
       const route = link.getAttribute('data-route');
       if (!route) return;
-      const isActive = currentPath === route || 
+      const isActive = currentPath === route ||
         (route !== '/' && currentPath.startsWith(route + '/'));
       link.classList.toggle('active', isActive);
     });
+    // Highlight the "More" toggle when a page inside it is active.
+    const moreToggle = this.querySelector('#nav-more .nav-dropdown-toggle');
+    if (moreToggle) {
+      const childActive = this.querySelector(
+        '#nav-more .nav-dropdown-item.active'
+      );
+      moreToggle.classList.toggle('active', !!childActive);
+    }
   }
 }
 
