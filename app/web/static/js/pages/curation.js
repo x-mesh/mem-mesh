@@ -47,7 +47,9 @@ export class CurationPage extends HTMLElement {
     const el = this.querySelector('.cur-improve-msg');
     if (!el) return;
     el.textContent = text;
-    el.className = `cur-msg${isError ? ' cur-msg-error' : ' cur-msg-ok'}`;
+    // Keep the base class so a subsequent querySelector('.cur-improve-msg')
+    // (e.g. a rapid second message) still finds this element.
+    el.className = `cur-improve-msg${isError ? ' cur-msg-error' : ' cur-msg-ok'}`;
     if (text) setTimeout(() => {
       el.textContent = '';
       el.className = 'cur-improve-msg';
@@ -154,6 +156,9 @@ export class CurationPage extends HTMLElement {
       list.innerHTML = '<div class="cur-empty">Loading…</div>';
     }
     try {
+      // Status endpoints must never serve APIClient's permanent GET cache, or
+      // the 3s poll just re-returns the first (stale) snapshot forever.
+      api.invalidateCache?.('/curation/activity');
       const res = await api.get('/curation/activity');
       this._activityData = res?.workers || [];
       this._activityLoaded = true;
@@ -346,6 +351,7 @@ export class CurationPage extends HTMLElement {
     if (!api || !list) return;
     list.innerHTML = '<div class="cur-empty">Loading…</div>';
     try {
+      api.invalidateCache?.('/maintenance/proposals');
       const data = await api.get('/maintenance/proposals');
       const proposals = data?.proposals || [];
       const countEl = this.querySelector('.cur-improve-count');

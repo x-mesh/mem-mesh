@@ -292,9 +292,14 @@ class MemoryService:
         proposal → human curation). No LLM/NLI runs here; only cheap vector
         candidate lookup, so it's safe to run inline for the request.
 
-        Returns ``{scanned, enqueued, skipped}``. ``enqueued`` counts pairs; the
-        queue's ``UNIQUE(new_memory_id, old_memory_id)`` + INSERT OR IGNORE make
-        re-runs idempotent, so previously-queued pairs count as skipped.
+        Returns ``{scanned, enqueued}``. ``enqueued`` is the number of pairs
+        actually inserted (from INSERT OR IGNORE rowcounts — no table COUNT, so
+        it doesn't race under concurrent writers). The queue's
+        ``UNIQUE(new_memory_id, old_memory_id)`` keeps re-runs idempotent.
+
+        Each undirected pair {A, B} is enqueued once: once A→B is queued, B's
+        scan skips A rather than queuing the mirror B→A (which is a distinct
+        row and would double the worker's LLM cost for the same comparison).
         """
         rows = await self.db.fetchall(
             """
@@ -306,6 +311,7 @@ class MemoryService:
         )
         scanned = 0
         enqueued = 0
+        seen_pairs: set[frozenset] = set()
         for row in rows:
             memory_id = str(row["id"])
             embedding_bytes = row["embedding"]
@@ -322,24 +328,21 @@ class MemoryService:
                     "Project reconcile candidate scan failed for %s: %s", memory_id, e
                 )
                 continue
-            if not candidates:
+            # Drop candidates whose undirected pair was already handled from the
+            # other side (avoids queuing both A→B and B→A).
+            fresh = []
+            for c in candidates or []:
+                pair = frozenset((memory_id, c["id"]))
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+                fresh.append(c)
+            if not fresh:
                 continue
-            before = await self._reconcile_queue_count()
-            await self._enqueue_reconcile(
-                memory_id, str(row["content_hash"]), candidates, project_id
+            enqueued += await self._enqueue_reconcile(
+                memory_id, str(row["content_hash"]), fresh, project_id
             )
-            after = await self._reconcile_queue_count()
-            enqueued += max(0, after - before)
         return {"scanned": scanned, "enqueued": enqueued}
-
-    async def _reconcile_queue_count(self) -> int:
-        try:
-            row = await self.db.fetchone(
-                "SELECT COUNT(*) AS c FROM reconcile_queue"
-            )
-            return int(row["c"]) if row else 0
-        except Exception:
-            return 0
 
     async def create_with_embedding(
         self,
@@ -855,16 +858,19 @@ class MemoryService:
         new_content_hash: str,
         candidates: list[dict],
         project_id: Optional[str],
-    ) -> None:
+    ) -> int:
         """Enqueue (new, old) conflict pairs for the async reconcile worker.
 
         One row per (new, old) pair: ``UNIQUE(new_memory_id, old_memory_id)``
         holds the 1:N conflict set (C1). ``INSERT OR IGNORE`` keeps a re-add
-        idempotent. Called inside the save transaction (C2 atomicity).
+        idempotent. Called inside the save transaction (C2 atomicity). Returns
+        the number of rows actually inserted (from each statement's rowcount) so
+        callers don't need a separate COUNT.
         """
         now = datetime.utcnow().isoformat() + "Z"
+        inserted = 0
         for c in candidates:
-            await self.db.execute(
+            cur = await self.db.execute(
                 """
                 INSERT OR IGNORE INTO reconcile_queue
                 (id, new_memory_id, old_memory_id, project_id, similarity,
@@ -883,6 +889,9 @@ class MemoryService:
                     now,
                 ),
             )
+            if cur.rowcount and cur.rowcount > 0:
+                inserted += cur.rowcount
+        return inserted
 
     async def _update_vector_index(
         self, memory_id: str, embedding_bytes: bytes

@@ -415,7 +415,7 @@ class MaintenanceService:
                     if isinstance(proposed_tags, list)
                     else None
                 ),
-                str(data.get("rationale", ""))[:1000] or None,
+                redact_secrets(str(data.get("rationale", "")))[:1000] or None,
                 str(data.get("model", "")) or None,
                 now,
                 now,

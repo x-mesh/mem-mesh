@@ -346,3 +346,43 @@ class TestMemoryService:
             )
 
         assert mock_embedding_service.aembed.call_count == 3  # max_retries
+
+
+class TestProjectReconcile:
+    """enqueue_project_reconcile: undirected-pair dedup + rowcount-based count."""
+
+    @pytest.mark.asyncio
+    async def test_enqueue_project_reconcile_dedups_mirror_pairs(self, temp_db):
+        from unittest.mock import Mock
+
+        emb = Mock(spec=EmbeddingService)
+        emb.from_bytes.return_value = [0.1, 0.2, 0.3]
+        svc = MemoryService(temp_db, emb)
+
+        async def fake_find(vec, pid, exclude_id=None):
+            # A and B are mutual near-duplicates.
+            return {
+                "A": [{"id": "B", "content_hash": "hb", "similarity": 0.9}],
+                "B": [{"id": "A", "content_hash": "ha", "similarity": 0.9}],
+            }.get(exclude_id)
+
+        svc._find_reconcile_candidates = fake_find
+        for mid, h in [("A", "ha"), ("B", "hb")]:
+            await temp_db.execute(
+                "INSERT INTO memories (id, content, content_hash, project_id, "
+                "category, source, embedding, tags, created_at, updated_at, "
+                "content_bytes) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (mid, f"content {mid} long enough", h, "proj", "decision", "t",
+                 b"x", "[]", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", 0),
+            )
+
+        result = await svc.enqueue_project_reconcile("proj")
+        # The undirected pair {A,B} is queued once, not both A->B and B->A.
+        assert result == {"scanned": 2, "enqueued": 1}
+        rows = await temp_db.fetchall(
+            "SELECT new_memory_id, old_memory_id FROM reconcile_queue"
+        )
+        assert len(rows) == 1
+
+        # Re-run is idempotent (UNIQUE + INSERT OR IGNORE → 0 new).
+        assert (await svc.enqueue_project_reconcile("proj"))["enqueued"] == 0
