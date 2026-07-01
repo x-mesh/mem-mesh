@@ -253,6 +253,26 @@ class MemoryService:
             logger.error("Failed to save memory: %s", e)
             raise DatabaseError(f"Failed to save memory: {e}") from e
 
+        # 5.5 C2 post-commit re-scan: a concurrent add that committed between the
+        # pre-save scan and this commit was invisible mid-transaction, so neither
+        # add saw the other. Re-scanning after commit lets the later committer
+        # catch the earlier one and enqueue the pair. INSERT OR IGNORE keeps it
+        # idempotent with the pre-save enqueue; failure is non-blocking (the
+        # memory is already canonical with its pre-save queue rows, if any).
+        if self.conflict_detector is not None:
+            try:
+                post = await self._find_reconcile_candidates(
+                    embedding_vector, project_id, exclude_id=memory.id
+                )
+                if post:
+                    await self._enqueue_reconcile(
+                        memory.id, memory.content_hash, post, project_id
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Post-commit reconcile re-scan failed (non-blocking): %s", e
+                )
+
         # Continuous relay sharing (best-effort, outside the save transaction).
         await self._relay_auto_share(memory, event_type="create")
         return response
@@ -642,6 +662,7 @@ class MemoryService:
         self,
         embedding_vector: List[float],
         project_id: Optional[str] = None,
+        exclude_id: Optional[str] = None,
     ) -> list[dict] | None:
         """F1 sync gate: nearest-neighbor candidates for the async reconcile worker.
 
@@ -660,27 +681,65 @@ class MemoryService:
             embedding_bytes = self.embedding_service.to_bytes(embedding_vector)
             embedding_json = self._embedding_to_json(embedding_bytes)
 
-            # Brute-force scan scoped to project_id + canonical only. A true
-            # sqlite-vec MATCH kNN is a follow-up (C5).
+            max_c = self.conflict_detector.max_candidates
             active_table = await self._resolve_vector_table()
-            cursor = await self.db.execute(
-                f"""
-                SELECT m.id, m.content_hash,
-                       vec_distance_cosine(e.embedding, ?) AS distance
-                FROM {active_table} e
-                JOIN memories m ON m.id = e.memory_id
-                WHERE (m.project_id = ? OR ? IS NULL)
-                  AND COALESCE(m.status, 'canonical') = 'canonical'
-                ORDER BY distance ASC
-                LIMIT ?
-                """,
-                (
-                    embedding_json,
-                    project_id,
-                    project_id,
-                    self.conflict_detector.max_candidates,
-                ),
-            )
+            # Table name is from a fixed slot allowlist (_resolve_vector_table),
+            # never user input — safe to interpolate.
+            if active_table == "memories_vec_fallback":
+                # vec0 unavailable → cosine brute scan (no MATCH kNN operator).
+                cursor = await self.db.execute(
+                    f"""
+                    SELECT m.id, m.content_hash,
+                           vec_distance_cosine(e.embedding, ?) AS distance
+                    FROM {active_table} e
+                    JOIN memories m ON m.id = e.memory_id
+                    WHERE (m.project_id = ? OR ? IS NULL)
+                      AND COALESCE(m.status, 'canonical') = 'canonical'
+                      AND (? IS NULL OR m.id != ?)
+                    ORDER BY distance ASC
+                    LIMIT ?
+                    """,
+                    (
+                        embedding_json,
+                        project_id,
+                        project_id,
+                        exclude_id,
+                        exclude_id,
+                        max_c,
+                    ),
+                )
+            else:
+                # sqlite-vec vec0 MATCH kNN (indexed nearest-neighbor, no full
+                # scan). Over-fetch the inner kNN so the project/status filter on
+                # the outer join still yields up to max_c canonical candidates.
+                inner_limit = max_c * 5 if project_id else max_c
+                cursor = await self.db.execute(
+                    f"""
+                    SELECT m.id, m.content_hash, ve.distance
+                    FROM memories m
+                    JOIN (
+                        SELECT memory_id, distance
+                        FROM {active_table}
+                        WHERE embedding MATCH ?
+                        ORDER BY distance
+                        LIMIT ?
+                    ) ve ON m.id = ve.memory_id
+                    WHERE (m.project_id = ? OR ? IS NULL)
+                      AND COALESCE(m.status, 'canonical') = 'canonical'
+                      AND (? IS NULL OR m.id != ?)
+                    ORDER BY ve.distance ASC
+                    LIMIT ?
+                    """,
+                    (
+                        embedding_json,
+                        inner_limit,
+                        project_id,
+                        project_id,
+                        exclude_id,
+                        exclude_id,
+                        max_c,
+                    ),
+                )
 
             rows = cursor.fetchall()
             if not rows:
