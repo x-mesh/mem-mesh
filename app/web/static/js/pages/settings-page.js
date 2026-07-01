@@ -168,28 +168,19 @@ export class SettingsPage extends HTMLElement {
       <div class="settings-section" id="settings-worker">
         <div class="section-header">
           <span class="section-label">Worker</span>
-          <label class="chat-enable-toggle" title="Write-time conflict detection and the reconcile worker gate">
-            <input type="checkbox" id="worker-reconcile-enabled">
-            <span>Enable reconcile</span>
-          </label>
         </div>
         <div class="section-body">
-          <p class="section-desc">Relay/reconcile background worker. Tasks with missing config wait until configured.</p>
+          <p class="section-desc">Which background tasks the relay worker runs. A task with missing config just waits until it's configured — the worker stays up.</p>
           <div class="chat-field worker-tasks-field">
             <span>Worker tasks</span>
-            <div class="migration-row">
-              <label class="check-label"><input type="checkbox" id="worker-task-outbox"><span>outbox</span></label>
-              <label class="check-label"><input type="checkbox" id="worker-task-item"><span>item</span></label>
-              <label class="check-label"><input type="checkbox" id="worker-task-aggregate"><span>aggregate</span></label>
-              <label class="check-label"><input type="checkbox" id="worker-task-reconcile"><span>reconcile</span></label>
+            <div class="worker-task-list">
+              <label class="worker-task"><input type="checkbox" id="worker-task-outbox"><span class="worker-task-name">outbox</span><span class="worker-task-desc">Sync memories to the team hub (needs a hub token — set on the Relay page)</span></label>
+              <label class="worker-task"><input type="checkbox" id="worker-task-item"><span class="worker-task-name">item</span><span class="worker-task-desc">AI-enrich each memory (title, abstract, tags) — needs an LLM</span></label>
+              <label class="worker-task"><input type="checkbox" id="worker-task-aggregate"><span class="worker-task-name">aggregate</span><span class="worker-task-desc">Generate per-project digests — needs an LLM</span></label>
+              <label class="worker-task"><input type="checkbox" id="worker-task-reconcile"><span class="worker-task-name">reconcile</span><span class="worker-task-desc">Detect conflicting/duplicate memories for curation (also turns on write-time detection) — needs an LLM</span></label>
             </div>
           </div>
-          <div class="chat-settings-grid">
-            <label class="chat-field chat-field-wide">
-              <span>Relay hub token</span>
-              <input id="worker-hub-token" type="password" autocomplete="new-password" placeholder="enter token" style="background: var(--bg-primary); color: var(--text-primary);">
-            </label>
-          </div>
+          <p class="env-foot" id="worker-hub-note"></p>
           <div class="chat-actions">
             <button class="settings-btn-primary" id="worker-save-btn">Save Worker Settings</button>
             <span id="worker-meta" class="env-foot"></span>
@@ -746,29 +737,26 @@ export class SettingsPage extends HTMLElement {
 
     applyWorkerConfig(data) {
         if (!data) return;
-        const reconcile = this.querySelector('#worker-reconcile-enabled');
-        if (reconcile) reconcile.checked = data.reconcile_enabled === true;
         const tasks = Array.isArray(data.worker_tasks) ? data.worker_tasks : [];
         this.workerTasks.forEach((task) => {
             const cb = this.querySelector(`#worker-task-${task}`);
             if (cb) cb.checked = tasks.includes(task);
         });
-        const token = this.querySelector('#worker-hub-token');
-        if (token) {
-            token.value = '';
-            token.placeholder = data.hub_token_configured ? 'configured — enter to replace' : 'enter token';
+        // hub token lives on the Relay page — just surface its status here.
+        const note = this.querySelector('#worker-hub-note');
+        if (note) {
+            note.innerHTML = data.hub_token_configured
+                ? '<span class="env-src env-src-db">Hub token configured</span> outbox is ready. Manage it on the <a href="/relay" data-route="/relay">Relay page</a>.'
+                : '<span class="env-state off">No hub token</span> outbox waits until you set one on the <a href="/relay" data-route="/relay">Relay page</a>.';
         }
     }
 
     async saveWorkerConfig() {
         const payload = {
-            reconcile_enabled: this.querySelector('#worker-reconcile-enabled')?.checked ?? false,
             worker_tasks: this.workerTasks.filter(
                 (task) => this.querySelector(`#worker-task-${task}`)?.checked,
             ),
         };
-        const token = this.querySelector('#worker-hub-token')?.value.trim();
-        if (token) payload.hub_token = token;
         const btn = this.querySelector('#worker-save-btn');
         if (btn) btn.disabled = true;
         try {

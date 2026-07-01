@@ -168,15 +168,9 @@ async def get_worker_settings(db=Depends(get_database)):
 async def put_worker_settings(body: dict = Body(...), db=Depends(get_database)):
     """Partial-update relay worker config, then return the effective config."""
     try:
-        if "reconcile_enabled" in body:
-            value = body["reconcile_enabled"]
-            if value is None:
-                await db.delete_app_config("reconcile.enabled")
-            else:
-                await db.set_app_config(
-                    "reconcile.enabled", "true" if value else "false"
-                )
-
+        # worker_tasks is the single control for reconcile: the "reconcile" task
+        # both enqueues (F1, via reconcile.enabled) and processes (F2). The hub
+        # token lives on the Relay page, not here.
         if "worker_tasks" in body:
             tasks = body["worker_tasks"]
             if not isinstance(tasks, list):
@@ -194,13 +188,10 @@ async def put_worker_settings(body: dict = Body(...), db=Depends(get_database)):
                 await db.set_app_config("relay.worker_tasks", ",".join(cleaned))
             else:
                 await db.delete_app_config("relay.worker_tasks")
-
-        if "hub_token" in body:
-            token = body["hub_token"]
-            if token is None or str(token) == "":
-                await db.delete_app_config("relay.hub_token")
-            else:
-                await db.set_app_config("relay.hub_token", str(token))
+            # The reconcile task drives write-time detection too (F1 gate).
+            await db.set_app_config(
+                "reconcile.enabled", "true" if "reconcile" in cleaned else "false"
+            )
 
         return await _build_worker_response(db, get_settings())
     except HTTPException:
