@@ -31,6 +31,10 @@ _STR_FIELDS = {
     "base_url": "base_url",
 }
 
+# Relay worker task settings (mirror app.cli.relay._KNOWN_TASKS / _DEFAULT_TASKS).
+_KNOWN_TASKS = ("outbox", "item", "aggregate", "reconcile")
+_DEFAULT_TASKS = ("outbox", "item", "aggregate")
+
 
 async def _resolve_value(db, settings, namespace: str, field: str) -> str:
     """DB app_config ``<ns>.llm_<field>`` if set, else Settings ``<ns>_llm_<field>``."""
@@ -112,4 +116,95 @@ async def put_llm_routing(body: dict = Body(...), db=Depends(get_database)):
         return await _build_response(db, get_settings())
     except Exception as e:
         logger.exception("Put llm-routing failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _resolve_reconcile_enabled(db, settings) -> bool:
+    """app_config ``reconcile.enabled`` if set, else Settings ``enable_conflict_detection``."""
+    val = await db.get_app_config("reconcile.enabled")
+    if val is not None:
+        return str(val).strip().lower() in _TRUE
+    return bool(settings.enable_conflict_detection)
+
+
+async def _resolve_worker_tasks(db) -> list:
+    """app_config ``relay.worker_tasks`` (csv) if set, else the default task list."""
+    raw = await db.get_app_config("relay.worker_tasks")
+    if raw is None:
+        return list(_DEFAULT_TASKS)
+    tasks = [t.strip() for t in str(raw).split(",") if t.strip()]
+    return tasks or list(_DEFAULT_TASKS)
+
+
+async def _resolve_hub_token_configured(db, settings) -> bool:
+    """Whether ``relay.hub_token`` app_config or Settings ``relay_hub_token`` is present."""
+    val = await db.get_app_config("relay.hub_token")
+    if val is not None:
+        return bool(str(val).strip())
+    return bool((settings.relay_hub_token or "").strip())
+
+
+async def _build_worker_response(db, settings) -> dict:
+    """Assemble the relay worker response (shared by GET and PUT; token as bool only)."""
+    return {
+        "reconcile_enabled": await _resolve_reconcile_enabled(db, settings),
+        "worker_tasks": await _resolve_worker_tasks(db),
+        "hub_token_configured": await _resolve_hub_token_configured(db, settings),
+        "known_tasks": list(_KNOWN_TASKS),
+    }
+
+
+@router.get("/worker")
+async def get_worker_settings(db=Depends(get_database)):
+    """Return the effective relay worker config (hub token as a boolean only)."""
+    try:
+        return await _build_worker_response(db, get_settings())
+    except Exception as e:
+        logger.exception("Get worker settings failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/worker")
+async def put_worker_settings(body: dict = Body(...), db=Depends(get_database)):
+    """Partial-update relay worker config, then return the effective config."""
+    try:
+        if "reconcile_enabled" in body:
+            value = body["reconcile_enabled"]
+            if value is None:
+                await db.delete_app_config("reconcile.enabled")
+            else:
+                await db.set_app_config(
+                    "reconcile.enabled", "true" if value else "false"
+                )
+
+        if "worker_tasks" in body:
+            tasks = body["worker_tasks"]
+            if not isinstance(tasks, list):
+                raise HTTPException(
+                    status_code=400, detail="worker_tasks must be a list"
+                )
+            cleaned = [str(t).strip() for t in tasks if str(t).strip()]
+            unknown = [t for t in cleaned if t not in _KNOWN_TASKS]
+            if unknown:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"unknown relay worker task(s): {', '.join(unknown)}",
+                )
+            if cleaned:
+                await db.set_app_config("relay.worker_tasks", ",".join(cleaned))
+            else:
+                await db.delete_app_config("relay.worker_tasks")
+
+        if "hub_token" in body:
+            token = body["hub_token"]
+            if token is None or str(token) == "":
+                await db.delete_app_config("relay.hub_token")
+            else:
+                await db.set_app_config("relay.hub_token", str(token))
+
+        return await _build_worker_response(db, get_settings())
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Put worker settings failed")
         raise HTTPException(status_code=500, detail=str(e))

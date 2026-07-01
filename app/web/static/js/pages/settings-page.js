@@ -25,6 +25,7 @@ export class SettingsPage extends HTMLElement {
         this.loadRulesIndex();
         this.loadChatSettings();
         this.loadLlmRouting();
+        this.loadWorkerConfig();
     }
 
     disconnectedCallback() {
@@ -159,6 +160,39 @@ export class SettingsPage extends HTMLElement {
           <div class="chat-actions">
             <button class="settings-btn-primary" id="llm-routing-save-btn">Save LLM Routing</button>
             <span id="llm-routing-meta" class="env-foot"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Worker -->
+      <div class="settings-section" id="settings-worker">
+        <div class="section-header">
+          <span class="section-label">Worker</span>
+          <label class="chat-enable-toggle" title="Write-time conflict detection and the reconcile worker gate">
+            <input type="checkbox" id="worker-reconcile-enabled">
+            <span>Enable reconcile</span>
+          </label>
+        </div>
+        <div class="section-body">
+          <p class="section-desc">Relay/reconcile background worker. Tasks with missing config wait until configured.</p>
+          <div class="chat-field worker-tasks-field">
+            <span>Worker tasks</span>
+            <div class="migration-row">
+              <label class="check-label"><input type="checkbox" id="worker-task-outbox"><span>outbox</span></label>
+              <label class="check-label"><input type="checkbox" id="worker-task-item"><span>item</span></label>
+              <label class="check-label"><input type="checkbox" id="worker-task-aggregate"><span>aggregate</span></label>
+              <label class="check-label"><input type="checkbox" id="worker-task-reconcile"><span>reconcile</span></label>
+            </div>
+          </div>
+          <div class="chat-settings-grid">
+            <label class="chat-field chat-field-wide">
+              <span>Relay hub token</span>
+              <input id="worker-hub-token" type="password" autocomplete="new-password" placeholder="enter token" style="background: var(--bg-primary); color: var(--text-primary);">
+            </label>
+          </div>
+          <div class="chat-actions">
+            <button class="settings-btn-primary" id="worker-save-btn">Save Worker Settings</button>
+            <span id="worker-meta" class="env-foot"></span>
           </div>
         </div>
       </div>
@@ -361,6 +395,7 @@ export class SettingsPage extends HTMLElement {
         this.querySelector('#llm-routing-save-btn')?.addEventListener('click', () => this.saveLlmRouting());
         this.querySelector('#relay-use-own')?.addEventListener('change', () => this.toggleLlmFields('relay'));
         this.querySelector('#reconcile-use-own')?.addEventListener('change', () => this.toggleLlmFields('reconcile'));
+        this.querySelector('#worker-save-btn')?.addEventListener('click', () => this.saveWorkerConfig());
         this.querySelector('#refresh-status-btn')?.addEventListener('click', () => this.loadStatus());
         this.querySelector('#change-model-btn')?.addEventListener('click', () => {
             window.history.pushState({}, '', '/onboarding');
@@ -686,6 +721,60 @@ export class SettingsPage extends HTMLElement {
             await window.app.apiClient.put('/settings/llm-routing', payload);
             showToast('LLM routing saved.', 'success');
             await this.loadLlmRouting();
+        } catch (error) {
+            showToast(`Save failed: ${error.message}`, 'error');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    // ── Worker settings ──
+
+    get workerTasks() {
+        return ['outbox', 'item', 'aggregate', 'reconcile'];
+    }
+
+    async loadWorkerConfig() {
+        const meta = this.querySelector('#worker-meta');
+        try {
+            const data = await window.app.apiClient.get('/settings/worker');
+            this.applyWorkerConfig(data);
+        } catch (error) {
+            if (meta) meta.textContent = `Failed to load: ${error.message}`;
+        }
+    }
+
+    applyWorkerConfig(data) {
+        if (!data) return;
+        const reconcile = this.querySelector('#worker-reconcile-enabled');
+        if (reconcile) reconcile.checked = data.reconcile_enabled === true;
+        const tasks = Array.isArray(data.worker_tasks) ? data.worker_tasks : [];
+        this.workerTasks.forEach((task) => {
+            const cb = this.querySelector(`#worker-task-${task}`);
+            if (cb) cb.checked = tasks.includes(task);
+        });
+        const token = this.querySelector('#worker-hub-token');
+        if (token) {
+            token.value = '';
+            token.placeholder = data.hub_token_configured ? 'configured — enter to replace' : 'enter token';
+        }
+    }
+
+    async saveWorkerConfig() {
+        const payload = {
+            reconcile_enabled: this.querySelector('#worker-reconcile-enabled')?.checked ?? false,
+            worker_tasks: this.workerTasks.filter(
+                (task) => this.querySelector(`#worker-task-${task}`)?.checked,
+            ),
+        };
+        const token = this.querySelector('#worker-hub-token')?.value.trim();
+        if (token) payload.hub_token = token;
+        const btn = this.querySelector('#worker-save-btn');
+        if (btn) btn.disabled = true;
+        try {
+            await window.app.apiClient.put('/settings/worker', payload);
+            showToast('Worker settings saved.', 'success');
+            await this.loadWorkerConfig();
         } catch (error) {
             showToast(`Save failed: ${error.message}`, 'error');
         } finally {
@@ -1808,6 +1897,16 @@ style.textContent = `
 .llm-svc-fields input {
   background: var(--bg-primary);
   color: var(--text-primary);
+}
+
+/* Worker */
+
+.worker-tasks-field {
+  margin-bottom: var(--space-3);
+}
+
+.worker-tasks-field .migration-row {
+  gap: var(--space-3);
 }
 
 /* Migration progress */
