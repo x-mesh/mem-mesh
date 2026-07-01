@@ -20,6 +20,8 @@ from app.core.schemas.relay import (
     RelayHubCheckResponse,
     RelayIdentityCreateRequest,
     RelayIdentityCreateResponse,
+    RelayIdentityDeleteResponse,
+    RelayIdentityRotateRequest,
     RelayIdentityUpdateRequest,
     RelayIngestRequest,
     RelayIngestResponse,
@@ -417,6 +419,63 @@ async def update_relay_identity(
     except Exception as exc:
         logger.exception("Relay identity update failed")
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.delete(
+    "/admin/identities/{token_hash_prefix}",
+    response_model=RelayIdentityDeleteResponse,
+)
+async def delete_relay_identity(
+    token_hash_prefix: str,
+    service: RelayService = Depends(get_relay_service),
+) -> RelayIdentityDeleteResponse:
+    """Permanently remove a hub identity (hard delete; PUT with revoked=true is
+    the reversible soft alternative)."""
+
+    try:
+        removed = await service.delete_identity(token_hash_prefix)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Relay identity delete failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+    if not removed:
+        raise HTTPException(status_code=404, detail="Relay identity not found")
+    return RelayIdentityDeleteResponse(ok=True, token_hash_prefix=token_hash_prefix)
+
+
+@router.post(
+    "/admin/identities/{token_hash_prefix}/rotate",
+    response_model=RelayIdentityCreateResponse,
+)
+async def rotate_relay_identity(
+    token_hash_prefix: str,
+    payload: RelayIdentityRotateRequest,
+    service: RelayService = Depends(get_relay_service),
+) -> RelayIdentityCreateResponse:
+    """Rotate an identity's token (metadata kept, old token invalidated at once).
+
+    The new token is returned once when generated — copy it immediately.
+    """
+
+    try:
+        rotated = await service.rotate_identity(
+            token_hash_prefix, new_token=payload.token
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Relay identity rotation failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+    if rotated is None:
+        raise HTTPException(status_code=404, detail="Relay identity not found")
+    identity, token, generated = rotated
+    return RelayIdentityCreateResponse(
+        identity=identity,
+        token=token if generated else None,
+        token_generated=generated,
+        token_hash_prefix=identity.token_hash_prefix,
+    )
 
 
 @router.post("/ingest", response_model=RelayIngestResponse)

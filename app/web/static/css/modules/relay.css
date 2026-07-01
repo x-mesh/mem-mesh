@@ -780,6 +780,34 @@
   font-size: var(--text-xs);
 }
 
+.relay-table-actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  white-space: nowrap;
+}
+
+.relay-table-action.danger {
+  border: 1px solid var(--danger, #dc2626);
+  background: transparent;
+  color: var(--danger, #dc2626);
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+}
+
+.relay-table-action.danger:hover {
+  background: var(--danger, #dc2626);
+  color: #fff;
+}
+
+/* Merged Hub Identities panel: the create form sits above the table, divided
+   by a hairline so it reads as "add new" over "existing". */
+.relay-identity-create {
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08));
+}
+
 .relay-ellipsis {
   max-width: 220px;
   overflow: hidden;

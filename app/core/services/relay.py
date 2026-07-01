@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 import time
 import uuid
 import weakref
@@ -1342,6 +1343,57 @@ class RelayService:
             ),
         )
         return await self.get_identity(row["token_hash"])
+
+    async def rotate_identity(
+        self, token_hash_prefix: str, *, new_token: Optional[str] = None
+    ) -> Optional[tuple[RelayIdentitySummary, str, bool]]:
+        """Replace an identity's token in place, keeping its metadata.
+
+        Generates a new token (or uses ``new_token``), then atomically drops the
+        old ``token_hash`` and re-registers the same user/node/display/scopes
+        under the new token. The old token stops authenticating immediately.
+        Returns (summary, token, generated) or None if the prefix is unknown.
+        Raises ValueError if the prefix is ambiguous.
+        """
+        row = await self._identity_row_by_prefix(token_hash_prefix)
+        if not row:
+            return None
+        generated = new_token is None
+        token = new_token or secrets.token_urlsafe(32)
+        scopes = _json_loads(row["scopes_json"], [])
+        async with self.db.transaction():
+            await self.db.execute(
+                "DELETE FROM relay_identity WHERE token_hash = ?",
+                (row["token_hash"],),
+            )
+            new_hash = await self.register_identity(
+                token=token,
+                user_id=str(row["user_id"]),
+                source_node_id=str(row["source_node_id"]),
+                display_name=str(row["display_name"]),
+                home_domain=row["home_domain"],
+                scopes=scopes,
+            )
+        summary = await self.get_identity(new_hash)
+        if summary is None:
+            return None
+        return summary, token, generated
+
+    async def delete_identity(self, token_hash_prefix: str) -> bool:
+        """Permanently remove a hub identity by its visible token hash prefix.
+
+        Returns True if a row was removed. Unlike ``revoked`` (a reversible soft
+        disable via update_identity), this drops the credential from the
+        registry entirely. Raises ValueError if the prefix is ambiguous.
+        """
+        row = await self._identity_row_by_prefix(token_hash_prefix)
+        if not row:
+            return False
+        await self.db.execute(
+            "DELETE FROM relay_identity WHERE token_hash = ?",
+            (row["token_hash"],),
+        )
+        return True
 
     async def register_identity(
         self,

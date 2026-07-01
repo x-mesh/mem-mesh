@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from app.core.database.base import Database
 from app.core.schemas.relay import RelayHubCheckResponse, RelayIngestRequest
 from app.core.services.memory import MemoryService
-from app.core.services.relay import RelayService
+from app.core.services.relay import RelayService, RelayUnauthorized
 from app.web.common.dependencies import (
     get_database,
     get_embedding_service,
@@ -844,6 +844,71 @@ async def test_hub_check_forwards_token_with_stored_fallback(monkeypatch):
                 json={"hub_url": "http://hub.local"},
             )
             assert seen["token"] == "stored-tok"
+
+
+@pytest.mark.asyncio
+async def test_relay_identity_delete_endpoint_removes_row():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        prefix = (
+            await service.register_identity(
+                token="relay-token-to-delete",
+                user_id="user-1",
+                source_node_id="node-1",
+                display_name="Jinwoo",
+            )
+        )[:12]
+
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            deleted = await client.delete(f"/api/relay/v1/admin/identities/{prefix}")
+            again = await client.delete(f"/api/relay/v1/admin/identities/{prefix}")
+
+        assert deleted.status_code == 200
+        assert deleted.json()["ok"] is True
+        # Second delete → gone.
+        assert again.status_code == 404
+        assert await service.list_identities() == []
+
+
+@pytest.mark.asyncio
+async def test_relay_identity_rotate_endpoint_swaps_token():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        old_prefix = (
+            await service.register_identity(
+                token="old-relay-token-123456",
+                user_id="user-1",
+                source_node_id="node-1",
+                display_name="Jinwoo",
+            )
+        )[:12]
+
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            rotated = await client.post(
+                f"/api/relay/v1/admin/identities/{old_prefix}/rotate",
+                json={},
+            )
+
+        assert rotated.status_code == 200
+        body = rotated.json()
+        assert body["token_generated"] is True
+        new_token = body["token"]
+        assert new_token and new_token != "old-relay-token-123456"
+
+        # Old token no longer authenticates; the new one does — metadata kept.
+        with pytest.raises(RelayUnauthorized):
+            await service.authorize("old-relay-token-123456", require_scope="read")
+        identity = await service.authorize(new_token, require_scope="write")
+        assert identity["source_node_id"] == "node-1"
+        assert identity["display_name"] == "Jinwoo"
+        # Exactly one identity remains (old row replaced, not duplicated).
+        assert len(await service.list_identities()) == 1
 
 
 @pytest.mark.asyncio

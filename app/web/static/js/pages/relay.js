@@ -375,6 +375,31 @@ export class RelayPage extends HTMLElement {
     this.querySelectorAll('[data-identity-save]').forEach((button) => {
       button.addEventListener('click', () => this.saveIdentity(button.dataset.identitySave));
     });
+    this.querySelectorAll('[data-identity-rotate]').forEach((button) => {
+      button.addEventListener('click', () => this.rotateIdentity(button.dataset.identityRotate));
+    });
+    this.querySelectorAll('[data-identity-delete]').forEach((button) => {
+      button.addEventListener('click', () => this.deleteIdentity(button.dataset.identityDelete));
+    });
+    this.bindIdentityAutofill();
+  }
+
+  bindIdentityAutofill() {
+    // Typing a User ID prefills Display Name (and Source Node ID when empty)
+    // until the user edits those fields themselves — reduces a 3-field form to
+    // effectively one input for the common case.
+    const userId = this.querySelector('#identity-user-id');
+    const display = this.querySelector('#identity-display-name');
+    const node = this.querySelector('#identity-source-node');
+    if (!userId) return;
+    [display, node].forEach((el) => {
+      el?.addEventListener('input', () => { el.dataset.touched = '1'; });
+    });
+    userId.addEventListener('input', () => {
+      const value = userId.value.trim();
+      if (display && !display.dataset.touched) display.value = value;
+      if (node && !node.dataset.touched && !node.value.trim()) node.value = value;
+    });
   }
 
   switchTab(tab) {
@@ -520,11 +545,12 @@ export class RelayPage extends HTMLElement {
   async saveWorkerSettings() {
     if (!this.api) return;
     const submit = this.querySelector('#relay-worker-submit');
+    // prompt_version is intentionally omitted — it's a code-prompt cache tag, not
+    // a user setting. Leaving it out of the payload preserves the stored value.
     const payload = {
       llm_provider: this.querySelector('#relay-setting-llm-provider')?.value.trim() || '',
       llm_model: this.querySelector('#relay-setting-llm-model')?.value.trim() || '',
       llm_base_url: this.querySelector('#relay-setting-llm-base-url')?.value.trim() || '',
-      prompt_version: this.querySelector('#relay-setting-prompt-version')?.value.trim() || '',
     };
     const llmKey = this.querySelector('#relay-setting-llm-api-key')?.value.trim();
     if (llmKey) {
@@ -596,18 +622,18 @@ export class RelayPage extends HTMLElement {
   async createIdentity() {
     if (!this.api) return;
     const submit = this.querySelector('#relay-identity-submit');
-    const tokenMode = this.querySelector('#identity-token-mode')?.value || 'generate';
     const payload = {
       user_id: this.querySelector('#identity-user-id')?.value.trim(),
       source_node_id: this.querySelector('#identity-source-node')?.value.trim(),
       display_name: this.querySelector('#identity-display-name')?.value.trim(),
-      home_domain: this.querySelector('#identity-home-domain')?.value.trim() || null,
       scopes: Array.from(this.querySelectorAll('[name="identity_scope"]:checked')).map(
         (item) => item.value
       ),
     };
+    // Blank custom token → the server auto-generates one (shown once); a filled
+    // one is used verbatim.
     const manualToken = this.querySelector('#identity-token')?.value.trim();
-    if (tokenMode === 'manual' && manualToken) {
+    if (manualToken) {
       payload.token = manualToken;
     }
     if (!payload.user_id || !payload.source_node_id || !payload.display_name) {
@@ -639,7 +665,6 @@ export class RelayPage extends HTMLElement {
       user_id: row.querySelector('[data-field="user_id"]')?.value.trim(),
       source_node_id: row.querySelector('[data-field="source_node_id"]')?.value.trim(),
       display_name: row.querySelector('[data-field="display_name"]')?.value.trim(),
-      home_domain: row.querySelector('[data-field="home_domain"]')?.value.trim() || null,
       scopes: Array.from(row.querySelectorAll('[data-field="scope"]:checked')).map(
         (item) => item.value
       ),
@@ -651,6 +676,46 @@ export class RelayPage extends HTMLElement {
       showToast('Relay identity updated.', 'success');
     } catch (error) {
       showToast(`Identity update failed: ${this.errorMessage(error)}`, 'error');
+    }
+  }
+
+  async deleteIdentity(tokenHashPrefix) {
+    if (!this.api || !tokenHashPrefix) return;
+    const row = Array.from(this.querySelectorAll('[data-identity-row]')).find(
+      (item) => item.dataset.identityRow === tokenHashPrefix
+    );
+    const label = row?.querySelector('[data-field="display_name"]')?.value.trim() || tokenHashPrefix;
+    if (!window.confirm(`Delete identity "${label}"? Its token stops working immediately. To disable it reversibly, use the revoked checkbox instead.`)) {
+      return;
+    }
+    try {
+      await this.api.deleteRelayIdentity(tokenHashPrefix);
+      await this.loadSettings();
+      showToast('Relay identity deleted.', 'success');
+    } catch (error) {
+      showToast(`Identity delete failed: ${this.errorMessage(error)}`, 'error');
+    }
+  }
+
+  async rotateIdentity(tokenHashPrefix) {
+    if (!this.api || !tokenHashPrefix) return;
+    const row = Array.from(this.querySelectorAll('[data-identity-row]')).find(
+      (item) => item.dataset.identityRow === tokenHashPrefix
+    );
+    const label = row?.querySelector('[data-field="display_name"]')?.value.trim() || tokenHashPrefix;
+    if (!window.confirm(`Rotate the token for "${label}"? A new token is issued and the old one stops working immediately — update this node's Hub Token with the new value.`)) {
+      return;
+    }
+    try {
+      // Blank body → server generates a new token, returned once.
+      const result = await this.api.rotateRelayIdentity(tokenHashPrefix);
+      await this.loadSettings();
+      if (result.token) {
+        this.showIssuedToken(result.token);
+      }
+      showToast('Token rotated — copy the new token now.', 'success');
+    } catch (error) {
+      showToast(`Token rotation failed: ${this.errorMessage(error)}`, 'error');
     }
   }
 
@@ -1087,6 +1152,11 @@ export class RelayPage extends HTMLElement {
               ${this.renderSettingHint(data.llm_provider)}
             </label>
             <label class="relay-field relay-field-wide">
+              <span>LLM Endpoint</span>
+              <input id="relay-setting-llm-base-url" type="url" placeholder="leave empty for provider default" value="${this.escapeHtml(data.llm_base_url.value || '')}">
+              ${this.renderSettingHint(data.llm_base_url)}
+            </label>
+            <label class="relay-field relay-field-wide">
               <span>LLM API Key</span>
               <input
                 id="relay-setting-llm-api-key"
@@ -1100,16 +1170,6 @@ export class RelayPage extends HTMLElement {
               <span>LLM Model</span>
               <input id="relay-setting-llm-model" type="text" value="${this.escapeHtml(data.llm_model.value || '')}">
               ${this.renderSettingHint(data.llm_model)}
-            </label>
-            <label class="relay-field">
-              <span>Prompt Version</span>
-              <input id="relay-setting-prompt-version" type="text" value="${this.escapeHtml(data.prompt_version.value || '')}">
-              ${this.renderSettingHint(data.prompt_version)}
-            </label>
-            <label class="relay-field relay-field-wide">
-              <span>LLM Endpoint</span>
-              <input id="relay-setting-llm-base-url" type="url" placeholder="leave empty for provider default" value="${this.escapeHtml(data.llm_base_url.value || '')}">
-              ${this.renderSettingHint(data.llm_base_url)}
             </label>
           </div>
           <div class="relay-actions">
@@ -1125,47 +1185,36 @@ export class RelayPage extends HTMLElement {
           </div>
           <div class="relay-setting-list">
             ${this.renderSettingRow(data.llm_provider)}
+            ${this.renderSettingRow(data.llm_base_url)}
             ${this.renderSettingRow(data.llm_api_key)}
             ${this.renderSettingRow(data.llm_model)}
-            ${this.renderSettingRow(data.llm_base_url)}
-            ${this.renderSettingRow(data.prompt_version)}
           </div>
         </section>
       </section>
 
-      <section class="relay-settings-grid">
-        <form class="relay-panel" id="relay-identity-form">
-          <div class="relay-panel-header">
-            <h2>Hub Identity</h2>
-            <span class="relay-panel-meta">team hub</span>
-          </div>
+      <section class="relay-panel relay-identities">
+        <div class="relay-panel-header">
+          <h2>Hub Identities</h2>
+          <span class="relay-panel-meta">${data.identities.length} registered</span>
+        </div>
+
+        <form id="relay-identity-form" class="relay-identity-create">
           <div class="relay-form-grid">
             <label class="relay-field">
               <span>User ID</span>
               <input id="identity-user-id" type="text" autocomplete="off" required>
             </label>
             <label class="relay-field">
-              <span>Source Node ID</span>
-              <input id="identity-source-node" type="text" autocomplete="off" value="${this.escapeHtml(data.source_node_id.value || '')}" required>
-            </label>
-            <label class="relay-field">
               <span>Display Name</span>
               <input id="identity-display-name" type="text" autocomplete="off" required>
             </label>
             <label class="relay-field">
-              <span>Home Domain</span>
-              <input id="identity-home-domain" type="text" autocomplete="off" placeholder="local">
+              <span>Source Node ID</span>
+              <input id="identity-source-node" type="text" autocomplete="off" value="${this.escapeHtml(data.source_node_id.value || '')}" required>
             </label>
-            <label class="relay-field">
-              <span>Token</span>
-              <select id="identity-token-mode">
-                <option value="generate" selected>generate</option>
-                <option value="manual">manual</option>
-              </select>
-            </label>
-            <label class="relay-field">
-              <span>Manual Token</span>
-              <input id="identity-token" type="password" autocomplete="new-password" placeholder="optional">
+            <label class="relay-field relay-field-wide">
+              <span>Custom token <small class="relay-field-hint">optional — leave blank to auto-generate</small></span>
+              <input id="identity-token" type="password" autocomplete="new-password" placeholder="blank = generate a secure token">
             </label>
             <div class="relay-scope-row relay-field-wide">
               <label><input type="checkbox" name="identity_scope" value="read" checked> read</label>
@@ -1174,20 +1223,14 @@ export class RelayPage extends HTMLElement {
           </div>
           <div class="relay-actions">
             <button class="primary-button" id="relay-identity-submit" type="submit">Register Identity</button>
-            <span class="relay-inline-status">Generated token is shown once.</span>
+            <span class="relay-inline-status">A generated token is shown once — copy it immediately.</span>
           </div>
           <div id="relay-issued-token" class="relay-issued-token hidden"></div>
         </form>
 
-        <section class="relay-panel">
-          <div class="relay-panel-header">
-            <h2>Registered Nodes</h2>
-            <span class="relay-panel-meta">${data.identities.length} identities</span>
-          </div>
-          <div class="relay-table-wrap">
-            ${this.renderIdentityTable(data.identities)}
-          </div>
-        </section>
+        <div class="relay-table-wrap">
+          ${this.renderIdentityTable(data.identities)}
+        </div>
       </section>
     `;
 
@@ -1232,7 +1275,6 @@ export class RelayPage extends HTMLElement {
           <tr>
             <th>User</th>
             <th>Node</th>
-            <th>Home</th>
             <th>Scopes</th>
             <th>State</th>
             <th></th>
@@ -1250,9 +1292,6 @@ export class RelayPage extends HTMLElement {
                 <code>${this.escapeHtml(row.token_hash_prefix)}</code>
               </td>
               <td>
-                <input class="relay-table-input" data-field="home_domain" value="${this.escapeHtml(row.home_domain || '')}">
-              </td>
-              <td>
                 <label class="relay-inline-check"><input data-field="scope" type="checkbox" value="read" ${row.scopes.includes('read') ? 'checked' : ''}> read</label>
                 <label class="relay-inline-check"><input data-field="scope" type="checkbox" value="write" ${row.scopes.includes('write') ? 'checked' : ''}> write</label>
               </td>
@@ -1260,8 +1299,10 @@ export class RelayPage extends HTMLElement {
                 <label class="relay-inline-check"><input data-field="revoked" type="checkbox" ${row.revoked ? 'checked' : ''}> revoked</label>
                 <span class="relay-muted">${this.formatDate(row.updated_at)}</span>
               </td>
-              <td>
+              <td class="relay-table-actions">
                 <button class="secondary-button relay-table-action" type="button" data-identity-save="${this.escapeHtml(row.token_hash_prefix)}">Save</button>
+                <button class="secondary-button relay-table-action" type="button" data-identity-rotate="${this.escapeHtml(row.token_hash_prefix)}">Rotate</button>
+                <button class="relay-table-action danger" type="button" data-identity-delete="${this.escapeHtml(row.token_hash_prefix)}">Delete</button>
               </td>
             </tr>
           `).join('')}

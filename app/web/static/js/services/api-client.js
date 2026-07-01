@@ -266,6 +266,14 @@ export class APIClient {
     return this.put(`/relay/v1/admin/identities/${encodeURIComponent(tokenHashPrefix)}`, payload);
   }
 
+  async deleteRelayIdentity(tokenHashPrefix) {
+    return this.delete(`/relay/v1/admin/identities/${encodeURIComponent(tokenHashPrefix)}`);
+  }
+
+  async rotateRelayIdentity(tokenHashPrefix, payload = {}) {
+    return this.post(`/relay/v1/admin/identities/${encodeURIComponent(tokenHashPrefix)}/rotate`, payload);
+  }
+
   async shareRelayMemory(memoryId, payload) {
     return this.post(`/relay/v1/outbox/share/${encodeURIComponent(memoryId)}`, payload);
   }

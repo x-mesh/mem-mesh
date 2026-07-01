@@ -439,6 +439,17 @@ class RelayIdentityCreateResponse(BaseModel):
     token_hash_prefix: str
 
 
+class RelayIdentityDeleteResponse(BaseModel):
+    ok: bool = True
+    token_hash_prefix: str
+
+
+class RelayIdentityRotateRequest(BaseModel):
+    # Optional replacement token; blank → the server generates a secure one
+    # (returned once in the response, same as create).
+    token: Optional[str] = Field(default=None, min_length=16, max_length=500)
+
+
 class RelayIdentityUpdateRequest(BaseModel):
     user_id: Optional[str] = Field(default=None, min_length=1, max_length=200)
     source_node_id: Optional[str] = Field(default=None, min_length=1, max_length=200)
