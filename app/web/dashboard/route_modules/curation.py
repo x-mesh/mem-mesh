@@ -39,6 +39,18 @@ async def list_queue(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/activity")
+async def list_activity(
+    service: CurationService = Depends(get_curation_service),
+):
+    """List LLM worker queue activity (status counts + recent rows per worker)."""
+    try:
+        return await service.list_activity()
+    except Exception as e:
+        logger.exception("Curation activity failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/supersede/{relation_id}/approve")
 async def approve_supersede(
     relation_id: str,

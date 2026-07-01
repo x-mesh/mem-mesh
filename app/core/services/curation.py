@@ -66,6 +66,52 @@ class CurationService:
             items.append(d)
         return items
 
+    # LLM worker queue tables (outbox excluded). Order is contract-defined:
+    # item → aggregate → reconcile. Table names are a fixed literal allowlist,
+    # never user input — safe to interpolate.
+    _ACTIVITY_WORKERS = (
+        ("item", "Enrichment", "relay_queue_item"),
+        ("aggregate", "Digest", "relay_queue_aggregate"),
+        ("reconcile", "Reconcile", "reconcile_queue"),
+    )
+
+    async def list_activity(self) -> dict:
+        """Per-worker queue activity: status counts + 10 most-recent rows.
+
+        Each worker maps to one queue table. A missing table (schema not yet
+        created) degrades to empty counts/recent for that worker instead of
+        failing the whole response.
+        """
+        workers = []
+        for key, label, table in self._ACTIVITY_WORKERS:
+            counts: dict = {}
+            recent: list[dict] = []
+            try:
+                count_rows = await self.db.fetchall(
+                    f"SELECT status, COUNT(*) AS n FROM {table} GROUP BY status"
+                )
+                counts = {row["status"]: row["n"] for row in count_rows}
+                recent_rows = await self.db.fetchall(
+                    f"SELECT id, status, updated_at, last_error FROM {table} "
+                    "ORDER BY updated_at DESC LIMIT 10"
+                )
+                recent = [
+                    {
+                        "id": row["id"],
+                        "status": row["status"],
+                        "updated_at": row["updated_at"],
+                        "last_error": row["last_error"],
+                    }
+                    for row in recent_rows
+                ]
+            except Exception as e:
+                logger.debug("Activity worker %s unavailable: %s", key, e)
+                counts, recent = {}, []
+            workers.append(
+                {"key": key, "label": label, "counts": counts, "recent": recent}
+            )
+        return {"workers": workers}
+
     async def _relation(self, relation_id: str) -> dict:
         row = await self.db.fetchone(
             "SELECT * FROM memory_relations WHERE id = ?", (relation_id,)
