@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.0] - 2026-07-01
+
+**프로젝트 단위 일괄 지식 정리(maintenance)**를 도입하고, **relay 팀공유를 실사용 가능한 수준으로 완성**(identity 관리·토큰 검증·config hot-reload·enrichment 전파·sharing policy)한 minor 릴리스. WHY: (1) 지금까지 enrich/improve/reconcile은 메모리 하나씩만 가능해 프로젝트 전체를 한 번에 정리할 수 없었고, reconcile은 write-time(`create`)에만 걸려 있어 "reconcile 켜기 전부터 있던 메모리"는 영원히 비교되지 않았다. 그래서 프로젝트 단위로 큐에 적재해 백그라운드 워커가 페이싱 처리하는 maintenance 서브시스템을 얹는다(동기 LLM 루프 금지 — CLAUDE.md L1/L5). (2) relay가 hub에 붙긴 했지만 토큰이 맞는지 확인할 방법(도달성만 체크됨)·발급된 identity를 rotate/delete할 방법·대시보드에서 LLM 키를 바꿔도 워커 재시작 없이 반영할 방법이 없었고, 로컬 Enrich 결과(title/abstract)가 공유 시 전달되지 않았다. (3) 공유 가능 카테고리가 코드에 하드코딩돼 새 카테고리가 조용히 공유 불가로 굳었다. 이들을 실사용 관점에서 메운다.
+
+### Added
+- **프로젝트 단위 일괄 maintenance (enrich/improve/reconcile)** — Projects 페이지 각 프로젝트에서 Enrich(title/abstract 생성, content 불변)·Improve(content 재작성 제안, 승인 후에만 적용)·Reconcile(중복/모순 탐지, 사람 승인) 배치를 큐에 적재. enrich/improve는 relay 워커의 신규 `maintenance` task가 chat LLM으로 처리하고, reconcile은 기존 `reconcile_queue`를 재사용해 write-time에만 걸리던 탐지를 기존 메모리에 소급 실행한다. `app/core/services/maintenance.py`, `app/web/dashboard/route_modules/maintenance.py`, `app/web/static/js/pages/projects.js`, `app/cli/relay.py`
+- **Improve 제안 리뷰 (Curation)** — 재작성 제안을 원본/제안 diff로 검토해 개별 승인(적용)/거부. content는 승인 시에만 변경(reconcile→curation과 동일한 human-gate). `app/web/static/js/pages/curation.js`, `app/web/dashboard/route_modules/maintenance.py`
+- **Curation Activity 진행 대시보드** — 워커별(Enrichment/Digest/Reconcile/Maintenance enrich·improve) 진행률 바 + "N/M done" + 상태 카운트 + 처리된 메모리 id·제목·링크 + 3초 라이브 폴링 + 배치 취소(Cancel pending). `app/core/services/curation.py`, `app/web/static/js/pages/curation.js`
+- **relay identity 관리** — hub identity 발급 토큰의 rotate(재발급)·delete(영구 제거, revoke와 별개). Hub Identities 패널 통합 + User ID 자동완성. `app/core/services/relay.py`, `app/web/dashboard/route_modules/relay.py`, `app/web/static/js/pages/relay.js`
+- **relay 토큰 검증 (Check Hub)** — `/auth/check` 엔드포인트로 도달성뿐 아니라 토큰 유효성까지 검증하고, 성공 시 hub가 알려준 source_node_id 자동 동기화·저장. 검증된 토큰은 즉시 저장돼 리로드 후에도 재검증 가능. `app/core/services/relay.py`, `app/web/dashboard/route_modules/relay.py`, `app/web/static/js/pages/relay.js`
+- **relay Sharing Policy** — 공유 가능 카테고리를 하드코딩 allowlist에서 denylist(`task`만 구조적 차단)로 전환하고, 실제 존재하는 카테고리를 동적 조회해 opt-out 토글 제공. 새 카테고리는 기본 공유 가능(fail-open). `app/core/services/relay.py`, `app/web/static/js/pages/relay.js`
+- **로컬 enrichment relay 전파** — 대시보드 Enrich 결과(title/abstract/display_kind)를 relay share payload에 실어 hub가 자체 LLM 없이 표시하도록 전달. `app/core/services/relay.py`, `app/core/schemas/relay.py`
+- **relay worker 디버그 로깅** — `-v`/`-d` 플래그(INFO/DEBUG) + 시작 시 설정 요약(active/waiting tasks) + task skip 사유. `app/cli/relay.py`, `app/cli/main.py`
+- **메모리 멀티카테고리 검색 필터**. `app/web/static/js`
+
+### Changed
+- **relay worker config hot-reload** — 데몬이 매 사이클 LLM 키/hub 토큰/prompt_version을 워커 인스턴스에 in-place 갱신해, 대시보드 설정 변경이 프로세스 재시작 없이 다음 사이클에 반영된다(무거운 embedding/NLI 모델은 유지). `app/cli/relay.py`, `app/core/services/relay_worker.py`
+- **manual share source_version 자동 파생** — 수동 Share가 auto-share와 동일하게 `memory.updated_at`(+enrichment 시각)에서 버전을 파생해, enrich/편집 후 재공유 시 `RelayIdempotencyConflict`(same key, different hash)를 방지. `app/core/services/relay.py`, `app/web/dashboard/route_modules/relay.py`
+- **RelayKind 완화** — ingest `kind`를 Literal enum에서 길이 검증된 str로 넓혀 새 카테고리가 wire validation에서 막히지 않게 함. `app/core/schemas/relay.py`
+- **Settings/Relay UX** — secret 필드(토큰/키) 저장 상태 배지, worker tasks에 `maintenance` 추가, prompt_version 필드 숨김, Source Node ID 읽기전용, Worker LLM 필드 순서 정리. `app/web/static/js/pages/settings-page.js`, `app/web/static/js/pages/relay.js`, `app/web/static/js/pages/security-page.js`
+
+### Fixed
+- **대시보드 메모리 목록 stale** — APIClient의 TTL 없는 GET 캐시가 외부 경로(MCP/hook/relay/다른 탭) 생성 메모리를 반영 못하던 것을 전역 WebSocket memory 이벤트에서 `/memories` 캐시 무효화로 해결. Activity/Improve 폴링도 GET 전 캐시 무효화. `app/web/static/js/main.js`, `app/web/static/js/pages/curation.js`
+- **relay LLM JSON 파싱 복원력** — prose로 감싸인 LLM 응답에서 outermost balanced JSON을 salvage하고, refine의 `max_tokens`를 입력 크기에 맞춰 잘림을 방지. `app/core/services/relay_worker.py`, `app/core/services/chat.py`
+- **memory-detail/settings 레이아웃·단축키 가드** 정리. `app/web/static/js/pages`
+
+### Performance
+- **프로젝트 reconcile 배치 최적화** — 메모리마다 `reconcile_queue` 전체 COUNT를 2번 하던 것을 `INSERT OR IGNORE` rowcount 기반으로 대체(2N COUNT + race 제거)하고, 양방향 중복 쌍(A→B/B→A)을 undirected로 dedup해 reconcile LLM 비용을 절반으로 줄임. `app/core/services/memory.py`
+
 ## [1.21.1] - 2026-06-30
 
 v1.21.0의 **반쪽 발행을 복구**하는 patch. WHY: 1.21.0은 PyPI에는 정상 발행됐지만, Docker publish 워크플로의 Test gate(`pytest tests/`)가 테스트 회귀 3건으로 실패해 **이미지가 발행되지 못했다**(Build/Merge가 skip). 회귀는 chat output-language 기능 추가 과정에서 (1) chat-stream 테스트의 fake service가 실제 `ChatService`에 새로 생긴 `resolve_output_language`를 따라가지 못했고, (2) 에러 중앙화 테스트가 `ChatError` 계층 같은 2단계 상속(`ChatNotConfiguredError(ChatError)`)을 직접-base만 검사해 거부한 데서 비롯됐다. 아울러 ruff/isort/black lint 부채로 CI도 red였다. 기능 변경 없이 테스트·lint만 정리한다.
