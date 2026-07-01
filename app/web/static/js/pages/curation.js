@@ -64,10 +64,23 @@ export class CurationPage extends HTMLElement {
   _row(it) {
     const meta = it.metadata || {};
     const isSupersede = it.relation_type === 'supersedes';
+    const isMerge = meta.verdict === 'merge';
     const approveBtn = isSupersede
       ? `<button class="cur-btn cur-approve" data-relation="${this._esc(
           it.id
         )}">✓ 승인 · old 폐기</button>`
+      : '';
+    const mergeBlock = isMerge
+      ? `
+        <div class="cur-merge">
+          <h4>🔀 병합 결과 (LLM 제안 · 편집 가능)</h4>
+          <textarea class="cur-merged">${this._esc(meta.merged_text || '')}</textarea>
+        </div>`
+      : '';
+    const mergeBtn = isMerge
+      ? `<button class="cur-btn cur-approve-merge" data-relation="${this._esc(
+          it.id
+        )}">🔀 병합 승인</button>`
       : '';
     return `
       <div class="cur-card" data-relation="${this._esc(it.id)}">
@@ -88,8 +101,10 @@ export class CurationPage extends HTMLElement {
             <pre>${this._esc(it.target_preview || '')}</pre>
           </div>
         </div>
+        ${mergeBlock}
         <div class="cur-actions">
           ${approveBtn}
+          ${mergeBtn}
           <button class="cur-btn cur-reject" data-memory="${this._esc(
             it.source_id
           )}">✗ NEW 폐기</button>
@@ -108,14 +123,21 @@ export class CurationPage extends HTMLElement {
       return;
     }
     const approve = e.target.closest('.cur-approve');
+    const merge = e.target.closest('.cur-approve-merge');
     const reject = e.target.closest('.cur-reject');
     const dismiss = e.target.closest('.cur-dismiss');
-    if (!approve && !reject && !dismiss) return;
+    if (!approve && !merge && !reject && !dismiss) return;
 
     try {
       if (approve) {
         await api.approveCurationSupersede(approve.dataset.relation);
         this._msg('승인됨 — old 메모리를 deprecated로 변경했습니다.');
+      } else if (merge) {
+        const card = merge.closest('.cur-card');
+        const mergedText = card?.querySelector('.cur-merged')?.value || null;
+        if (!window.confirm('두 메모리를 병합하고 원본 2개를 폐기할까요?')) return;
+        await api.approveCurationMerge(merge.dataset.relation, mergedText);
+        this._msg('병합됨 — 새 메모리를 생성하고 원본 2개를 폐기했습니다.');
       } else if (reject) {
         if (!window.confirm('이 NEW 메모리를 폐기(deprecated)할까요?')) return;
         await api.rejectCurationNew(reject.dataset.memory);
@@ -168,6 +190,10 @@ export class CurationPage extends HTMLElement {
       .cur-col h4 { margin: 0 0 6px; font-size: 0.72rem; text-transform: uppercase; color: var(--text-secondary); }
       .cur-col h4 code { color: var(--text-secondary); }
       .cur-col pre { background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; margin: 0; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.82rem; }
+      .cur-merge { margin-bottom: 12px; }
+      .cur-merge h4 { margin: 0 0 6px; font-size: 0.72rem; text-transform: uppercase; color: var(--info, #3b82f6); }
+      .cur-merged { width: 100%; box-sizing: border-box; min-height: 90px; resize: vertical; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 0.85rem; white-space: pre-wrap; }
+      .cur-approve-merge { border-color: var(--info, #3b82f6); color: var(--info, #3b82f6); }
       .cur-actions { display: flex; gap: 8px; flex-wrap: wrap; }
       .cur-btn { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary); cursor: pointer; font-size: 0.85rem; }
       .cur-btn:hover { background: var(--bg-tertiary, var(--bg-secondary)); }

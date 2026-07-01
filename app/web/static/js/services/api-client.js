@@ -330,6 +330,13 @@ export class APIClient {
     return this.post(`/curation/reject-new/${encodeURIComponent(memoryId)}`, {});
   }
 
+  async approveCurationMerge(relationId, mergedText = null) {
+    return this.post(
+      `/curation/merge/${encodeURIComponent(relationId)}/approve`,
+      { merged_text: mergedText }
+    );
+  }
+
   async dismissCuration(relationId) {
     return this.post(`/curation/dismiss/${encodeURIComponent(relationId)}`, {});
   }

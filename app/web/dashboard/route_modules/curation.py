@@ -8,18 +8,21 @@ queue and approve/reject/dismiss. Approving a supersede demotes the loser to
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.core.services.curation import CurationService
-from app.web.common.dependencies import get_database
+from app.web.common.dependencies import get_database, get_memory_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/curation", tags=["Curation"])
 
 
-def get_curation_service(db=Depends(get_database)) -> CurationService:
-    return CurationService(db)
+def get_curation_service(
+    db=Depends(get_database),
+    memory_service=Depends(get_memory_service),
+) -> CurationService:
+    return CurationService(db, memory_service=memory_service)
 
 
 @router.get("/queue")
@@ -63,6 +66,25 @@ async def reject_new(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Reject-new failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/merge/{relation_id}/approve")
+async def approve_merge(
+    relation_id: str,
+    merged_text: Optional[str] = Body(default=None, embed=True),
+    service: CurationService = Depends(get_curation_service),
+):
+    """Approve a merge: create a new canonical from merged_text, deprecate both.
+
+    ``merged_text`` (optional) overrides the LLM proposal when the human edited it.
+    """
+    try:
+        return await service.approve_merge(relation_id, merged_text=merged_text)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Approve merge failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
