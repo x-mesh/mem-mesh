@@ -411,12 +411,19 @@ class ChatService:
             f"Current tags: {', '.join(tags or []) or '(none)'}\n\n"
             f"<memory>\n{content}\n</memory>"
         )
+        # A refine rewrites the WHOLE memory into a JSON 'content' value, so the
+        # output is roughly input-sized. The default max_tokens (2048) truncates
+        # longer memories → invalid/incomplete JSON. Size the budget to the input
+        # (~1 token per 2 chars for CJK-heavy text) with headroom, capped.
+        est_tokens = len(content) // 2 + 800
+        max_tokens = max(2048, min(8000, est_tokens))
         try:
             result = await enricher.chat(
                 [
                     {"role": "system", "content": refine_system},
                     {"role": "user", "content": user},
-                ]
+                ],
+                max_tokens=max_tokens,
             )
         except ChatProviderError:
             raise

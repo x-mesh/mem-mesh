@@ -203,11 +203,49 @@ class RelayEnricher:
             text = fenced.group(1).strip()
         try:
             data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ValueError("relay LLM response was not valid JSON") from exc
+        except json.JSONDecodeError:
+            # Salvage the outermost balanced {...} even when the model wrapped
+            # it in prose / leading chatter (common on rewrite-style prompts).
+            # A truncated response (never closes) still fails → caller retries.
+            snippet = RelayEnricher._first_json_object(text)
+            if snippet is None:
+                raise ValueError("relay LLM response was not valid JSON")
+            try:
+                data = json.loads(snippet)
+            except json.JSONDecodeError as exc:
+                raise ValueError("relay LLM response was not valid JSON") from exc
         if not isinstance(data, dict):
             raise ValueError("relay LLM response JSON must be an object")
         return data
+
+    @staticmethod
+    def _first_json_object(text: str) -> Optional[str]:
+        """Return the first complete top-level ``{...}`` substring, respecting
+        string literals, or None if there's no balanced object (e.g. truncated)."""
+        start = text.find("{")
+        if start == -1:
+            return None
+        depth = 0
+        in_str = False
+        escape = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : i + 1]
+        return None
 
     # ----- Chat (multi-turn) ------------------------------------------------
     # The same provider transport powers the dashboard chat assistant. ``chat``
