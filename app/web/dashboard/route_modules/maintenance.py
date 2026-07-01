@@ -104,6 +104,29 @@ async def maintenance_status(
     }
 
 
+class CancelRequest(BaseModel):
+    operation: Optional[str] = None
+    project_id: Optional[str] = None
+
+
+@router.post("/cancel")
+async def cancel_pending(
+    payload: CancelRequest,
+    service: MaintenanceService = Depends(get_maintenance_service),
+) -> dict:
+    """Cancel queued enrich/improve jobs (worker stops picking them up). A job
+    already processing finishes its current LLM call. Optional operation /
+    project_id narrow the scope."""
+    if payload.operation and payload.operation not in MAINTENANCE_OPERATIONS:
+        raise HTTPException(
+            status_code=400, detail=f"unknown operation: {payload.operation}"
+        )
+    cancelled = await service.cancel_pending(
+        operation=payload.operation, project_id=payload.project_id
+    )
+    return {"cancelled": cancelled}
+
+
 @router.get("/proposals")
 async def list_proposals(
     project_id: Optional[str] = None,

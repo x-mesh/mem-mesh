@@ -503,6 +503,34 @@ class MaintenanceService:
             (_utc_now(), proposal_id),
         )
 
+    async def cancel_pending(
+        self, *, operation: Optional[str] = None, project_id: Optional[str] = None
+    ) -> int:
+        """Cancel queued jobs so the worker stops picking them up.
+
+        Marks ``pending`` rows as ``cancelled`` (kept for the activity log rather
+        than deleted). A job already ``processing`` finishes its current LLM
+        call — it can't be interrupted mid-flight — but no new ones start.
+        Optional ``operation`` (enrich/improve) and ``project_id`` narrow the
+        scope. Returns the number cancelled.
+        """
+        await self.ensure_schema()
+        clauses = ["status = 'pending'"]
+        where_params: list = []
+        if operation:
+            clauses.append("operation = ?")
+            where_params.append(operation)
+        if project_id:
+            clauses.append("project_id = ?")
+            where_params.append(project_id)
+        cur = await self.db.execute(
+            f"UPDATE maintenance_queue SET status = 'cancelled', "
+            f"locked_by = NULL, locked_at = NULL, updated_at = ? "
+            f"WHERE {' AND '.join(clauses)}",
+            (_utc_now(), *where_params),  # SET's updated_at first, then WHERE
+        )
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
     async def status_counts(self) -> dict:
         await self.ensure_schema()
         rows = await self.db.fetchall(

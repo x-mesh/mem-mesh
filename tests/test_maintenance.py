@@ -158,6 +158,32 @@ async def test_process_stale_job_when_memory_changed():
 
 
 @pytest.mark.asyncio
+async def test_cancel_pending_scoped_by_operation():
+    async with _temp_db() as db:
+        svc = MaintenanceService(db)
+        await svc.ensure_schema()
+        for i in range(3):
+            await _add_memory(db, f"m{i}", content_hash=f"h{i}")
+        await svc.enqueue_project(
+            project_id="proj", operations=["enrich", "improve"], force=False
+        )
+
+        cancelled = await svc.cancel_pending(operation="improve")
+        assert cancelled == 3
+
+        counts = await svc.status_counts()
+        # improve cancelled, enrich untouched.
+        assert counts["improve"] == {"cancelled": 3}
+        assert counts["enrich"] == {"pending": 3}
+
+        # A cancelled job is never claimed by the worker.
+        result = await svc.process_next(
+            worker_id="w", chat_service=_StubChat(), settings=None
+        )
+        assert result["operation"] == "enrich"  # picks the pending enrich, not improve
+
+
+@pytest.mark.asyncio
 async def test_reject_refine_proposal():
     async with _temp_db() as db:
         svc = MaintenanceService(db)
