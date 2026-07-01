@@ -1790,6 +1790,42 @@ style.textContent = `
   font: inherit;
 }
 
+.worker-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.worker-task {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: start;
+  cursor: pointer;
+}
+
+.worker-task input[type='checkbox'] {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  align-self: start;
+  margin-top: 3px;
+}
+
+.worker-task-name {
+  grid-column: 2;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.worker-task-desc {
+  grid-column: 2;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
 .chat-actions {
   display: flex;
   align-items: center;
