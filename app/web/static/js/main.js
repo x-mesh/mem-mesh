@@ -110,6 +110,18 @@ class App {
         console.warn('Initial WebSocket connection failed:', err);
       });
 
+      // apiClient's GET cache has no TTL and only self-invalidates on THIS
+      // tab's own post/put/delete/patch calls. Memories created elsewhere
+      // (MCP tools, hooks, relay ingest, another tab) never trigger that, so
+      // a widget with stable query params (e.g. the dashboard's recent-memory
+      // list) can keep serving a stale cached result indefinitely after
+      // navigating away and back. Invalidate globally on the same real-time
+      // events every page already listens to, regardless of which page (or
+      // none) is currently mounted.
+      ['memory_created', 'memory_updated', 'memory_deleted'].forEach((event) => {
+        wsClient.on(event, () => this.apiClient.invalidateCache('/memories'));
+      });
+
       // Check embedding model status — redirect to onboarding if not ready
       this.checkEmbeddingStatus();
 

@@ -137,7 +137,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         "--tasks",
         default=None,
         help=(
-            "Comma-separated relay tasks (outbox,item,aggregate,reconcile). "
+            "Comma-separated relay tasks "
+            "(outbox,item,aggregate,reconcile,maintenance). "
             "Fixed override for debugging; omit to use the relay.worker_tasks "
             "setting (dashboard-managed, re-read each daemon cycle)."
         ),

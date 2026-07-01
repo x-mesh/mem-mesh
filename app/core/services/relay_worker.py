@@ -827,6 +827,9 @@ class RelayWorker:
         reconcile_service: Optional[Any] = None,
         reconcile_enricher: Optional[Any] = None,
         conflict_detector: Optional[Any] = None,
+        maintenance_service: Optional[Any] = None,
+        chat_service: Optional[Any] = None,
+        chat_settings: Optional[Any] = None,
     ):
         if lease_seconds < 1:
             raise ValueError("lease_seconds must be at least 1")
@@ -844,6 +847,11 @@ class RelayWorker:
         self.reconcile_service = reconcile_service
         self.reconcile_enricher = reconcile_enricher
         self.conflict_detector = conflict_detector
+        # Project-level batch maintenance (enrich/improve): drains
+        # maintenance_queue via the chat LLM. On only when all three are wired.
+        self.maintenance_service = maintenance_service
+        self.chat_service = chat_service
+        self.chat_settings = chat_settings
 
     async def run_once(self) -> Dict[str, int]:
         stats = {
@@ -855,6 +863,8 @@ class RelayWorker:
             "aggregate_failed": 0,
             "reconcile_processed": 0,
             "reconcile_failed": 0,
+            "maintenance_processed": 0,
+            "maintenance_failed": 0,
         }
 
         if self.outbox_sender is not None and self.outbox_bearer_token:
@@ -912,6 +922,22 @@ class RelayWorker:
                     stats["reconcile_processed"] += 1
                 else:
                     stats["reconcile_failed"] += 1
+
+        if (
+            self.maintenance_service is not None
+            and self.chat_service is not None
+            and self.chat_settings is not None
+        ):
+            result = await self.maintenance_service.process_next(
+                worker_id=self.worker_id,
+                chat_service=self.chat_service,
+                settings=self.chat_settings,
+            )
+            if result.get("job_id"):
+                if result.get("processed"):
+                    stats["maintenance_processed"] += 1
+                else:
+                    stats["maintenance_failed"] += 1
 
         return stats
 

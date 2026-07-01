@@ -10,6 +10,7 @@ from .chat import router as chat_router
 from .connect import router as connect_router
 from .curation import router as curation_router
 from .hooks import router as hooks_router
+from .maintenance import router as maintenance_router
 from .memories import router as memories_router
 from .oauth import router as oauth_router
 from .relations import router as relations_router
@@ -32,6 +33,7 @@ router.include_router(security_router)
 router.include_router(connect_router)
 router.include_router(chat_router)
 router.include_router(curation_router)
+router.include_router(maintenance_router)
 router.include_router(settings_llm_router)
 
 __all__ = [

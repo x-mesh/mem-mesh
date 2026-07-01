@@ -105,7 +105,7 @@ async def _run_relay_materialize(*, limit: int = 1000) -> dict:
         await db.close()
 
 
-_KNOWN_TASKS = {"outbox", "item", "aggregate", "reconcile"}
+_KNOWN_TASKS = {"outbox", "item", "aggregate", "reconcile", "maintenance"}
 _DEFAULT_TASKS = "outbox,item,aggregate"
 
 
@@ -262,6 +262,16 @@ async def _probe_active(
         else:
             active.add("reconcile")
 
+    if "maintenance" in enabled:
+        from app.core.services.chat import ChatService
+
+        if await ChatService(db).is_configured(settings):
+            active.add("maintenance")
+        else:
+            waiting["maintenance"] = (
+                "no chat LLM (set the Chat Assistant LLM in Settings)"
+            )
+
     for task in sorted(waiting):
         logger.debug("relay task '%s' waiting: %s", task, waiting[task])
     return active, waiting
@@ -355,6 +365,24 @@ async def _build_relay_worker(
             timeout=settings.relay_llm_timeout,
         )
 
+    # Project-level batch maintenance (enrich/improve) via the chat LLM.
+    maintenance_service = None
+    chat_service = None
+    chat_settings = None
+    if "maintenance" in active:
+        from app.core.services.chat import ChatService
+        from app.core.services.maintenance import MaintenanceService
+
+        maintenance_service = MaintenanceService(
+            db,
+            max_attempts=max_attempts,
+            backoff_max_seconds=backoff_max,
+            lease_seconds=lease_seconds,
+        )
+        chat_service = ChatService(db)
+        chat_settings = settings
+        logger.info("maintenance worker: enrich/improve via chat LLM")
+
     return RelayWorker(
         service=service,
         worker_id=worker_id,
@@ -368,6 +396,9 @@ async def _build_relay_worker(
         reconcile_service=reconcile_service,
         reconcile_enricher=reconcile_enricher,
         conflict_detector=conflict_detector,
+        maintenance_service=maintenance_service,
+        chat_service=chat_service,
+        chat_settings=chat_settings,
     )
 
 
@@ -612,6 +643,10 @@ def _empty_worker_result() -> dict:
         "item_failed": 0,
         "aggregate_processed": 0,
         "aggregate_failed": 0,
+        "reconcile_processed": 0,
+        "reconcile_failed": 0,
+        "maintenance_processed": 0,
+        "maintenance_failed": 0,
     }
 
 

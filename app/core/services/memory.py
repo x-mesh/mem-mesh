@@ -280,6 +280,67 @@ class MemoryService:
         await self._relay_auto_share(memory, event_type="create")
         return response
 
+    async def enqueue_project_reconcile(self, project_id: str) -> dict:
+        """Retroactively enqueue reconcile candidate pairs for a whole project.
+
+        Write-time reconcile (F1) only ever fires on ``create()``, so memories
+        that already existed before reconcile was enabled — or that were added
+        via the batch/embedding path (which skips conflict detection) — are
+        never compared. This scans every canonical memory in the project for
+        near-duplicate/conflict candidates and enqueues the pairs into the same
+        ``reconcile_queue`` the async worker already drains (NLI pre-gate → LLM →
+        proposal → human curation). No LLM/NLI runs here; only cheap vector
+        candidate lookup, so it's safe to run inline for the request.
+
+        Returns ``{scanned, enqueued, skipped}``. ``enqueued`` counts pairs; the
+        queue's ``UNIQUE(new_memory_id, old_memory_id)`` + INSERT OR IGNORE make
+        re-runs idempotent, so previously-queued pairs count as skipped.
+        """
+        rows = await self.db.fetchall(
+            """
+            SELECT id, content_hash, embedding FROM memories
+            WHERE project_id = ?
+              AND COALESCE(status, 'canonical') = 'canonical'
+            """,
+            (project_id,),
+        )
+        scanned = 0
+        enqueued = 0
+        for row in rows:
+            memory_id = str(row["id"])
+            embedding_bytes = row["embedding"]
+            if not embedding_bytes:
+                continue
+            scanned += 1
+            try:
+                vector = self.embedding_service.from_bytes(embedding_bytes)
+                candidates = await self._find_reconcile_candidates(
+                    vector, project_id, exclude_id=memory_id
+                )
+            except Exception as e:
+                logger.warning(
+                    "Project reconcile candidate scan failed for %s: %s", memory_id, e
+                )
+                continue
+            if not candidates:
+                continue
+            before = await self._reconcile_queue_count()
+            await self._enqueue_reconcile(
+                memory_id, str(row["content_hash"]), candidates, project_id
+            )
+            after = await self._reconcile_queue_count()
+            enqueued += max(0, after - before)
+        return {"scanned": scanned, "enqueued": enqueued}
+
+    async def _reconcile_queue_count(self) -> int:
+        try:
+            row = await self.db.fetchone(
+                "SELECT COUNT(*) AS c FROM reconcile_queue"
+            )
+            return int(row["c"]) if row else 0
+        except Exception:
+            return 0
+
     async def create_with_embedding(
         self,
         content: str,
