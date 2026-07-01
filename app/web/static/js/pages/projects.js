@@ -261,6 +261,14 @@ class ProjectsPage extends HTMLElement {
       return;
     }
 
+    const overviewBtn = event.target.closest('.overview-btn');
+    if (overviewBtn) {
+      event.stopPropagation();
+      const projectId = overviewBtn.getAttribute('data-project-id');
+      if (projectId) this.openOverviewModal(projectId);
+      return;
+    }
+
     const maintenanceBtn = event.target.closest('.maintenance-btn');
     if (maintenanceBtn) {
       event.stopPropagation();
@@ -379,6 +387,74 @@ class ProjectsPage extends HTMLElement {
     } catch (error) {
       // FastAPI returns {detail}; APIError surfaces it on .data.detail / .message.
       showToast(error?.data?.detail || error?.message || 'Failed to share project', 'error');
+    }
+  }
+
+  /**
+   * Open the project overview modal (LLM summary of recent memories).
+   */
+  async openOverviewModal(projectId) {
+    const existing = document.querySelector('.overview-modal-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'maintenance-modal-overlay overview-modal-overlay';
+    overlay.innerHTML = `
+      <div class="maintenance-modal overview-modal" role="dialog" aria-modal="true">
+        <div class="maintenance-modal-header">
+          <h3>📋 ${this._escapeHtml(projectId)} · Overview</h3>
+          <button class="overview-modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="overview-body"><div class="overview-loading">Loading…</div></div>
+        <div class="maintenance-modal-actions">
+          <button class="secondary-button overview-cancel">Close</button>
+          <button class="primary-button overview-generate" hidden>Generate</button>
+        </div>
+      </div>`;
+
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('.overview-modal-close').addEventListener('click', close);
+    overlay.querySelector('.overview-cancel').addEventListener('click', close);
+
+    const body = overlay.querySelector('.overview-body');
+    const genBtn = overlay.querySelector('.overview-generate');
+    const api = window.app?.apiClient;
+
+    const runGenerate = async () => {
+      genBtn.disabled = true;
+      body.innerHTML = '<div class="overview-loading">Summarizing recent memories…</div>';
+      try {
+        api?.invalidateCache?.(`/projects/${encodeURIComponent(projectId)}/overview`);
+        const res = await api.post(`/projects/${encodeURIComponent(projectId)}/overview`, {});
+        body.innerHTML = window.ProjectOverviewRender.html(res, { showGeneratedAt: true });
+        genBtn.textContent = 'Regenerate';
+        genBtn.disabled = false;
+      } catch (error) {
+        body.innerHTML = `<div class="overview-empty">${this._escapeHtml(error?.data?.detail || error?.message || 'Failed')}</div>`;
+        genBtn.disabled = false;
+      }
+    };
+    genBtn.addEventListener('click', runGenerate);
+
+    document.body.appendChild(overlay);
+    // Load cached first.
+    try {
+      api?.invalidateCache?.(`/projects/${encodeURIComponent(projectId)}/overview`);
+      const cached = await api.get(`/projects/${encodeURIComponent(projectId)}/overview`);
+      if (cached?.overview) {
+        body.innerHTML = window.ProjectOverviewRender.html(cached, { showGeneratedAt: true });
+        genBtn.textContent = cached.stale ? 'Refresh (memories changed)' : 'Regenerate';
+        genBtn.hidden = false;
+      } else {
+        body.innerHTML = '<div class="overview-empty">No overview yet. Generate one from this project’s recent memories.</div>';
+        genBtn.textContent = 'Generate';
+        genBtn.hidden = false;
+      }
+    } catch (error) {
+      body.innerHTML = `<div class="overview-empty">${this._escapeHtml(error?.message || 'Failed to load')}</div>`;
+      genBtn.textContent = 'Generate';
+      genBtn.hidden = false;
     }
   }
 
@@ -637,6 +713,7 @@ class ProjectsPage extends HTMLElement {
         
         <div class="project-actions">
           <button class="view-btn" data-project-id="${project.id}">View Memories</button>
+          <button class="overview-btn" data-project-id="${project.id}" title="LLM summary of this project's recent memories">📋 Overview</button>
           <button class="maintenance-btn" data-project-id="${project.id}" title="Enrich / Improve / Reconcile all memories in this project">🔧 Maintenance</button>
           <button class="relay-share-btn" data-project-id="${project.id}">Share to relay</button>
           <button class="relay-autoshare-btn ${this._isAutoShareOn(project.id) ? 'on' : ''}" data-project-id="${project.id}">
@@ -983,7 +1060,7 @@ style.textContent = `
     gap: 0.5rem;
   }
 
-  .maintenance-btn {
+  .maintenance-btn, .overview-btn {
     background: transparent;
     color: var(--text-secondary);
     border: 1px solid var(--border-color);
@@ -995,10 +1072,28 @@ style.textContent = `
     transition: var(--transition);
   }
 
-  .maintenance-btn:hover {
+  .maintenance-btn:hover, .overview-btn:hover {
     border-color: var(--primary-color);
     color: var(--primary-color);
   }
+
+  .overview-modal { max-width: 640px; }
+  .overview-body { max-height: 60vh; overflow: auto; }
+  .overview-loading, .overview-empty { color: var(--text-secondary); font-size: 0.875rem; padding: 1rem 0; }
+
+  /* Shared overview render (.ov-*) — modal + memory-detail sidebar */
+  .ov-stale { font-size: 0.78rem; color: var(--warning-text, #92400e); background: var(--warning-bg, #fef3c7); border-radius: 6px; padding: 6px 10px; margin-bottom: 10px; }
+  .ov-summary { font-size: 0.9rem; line-height: 1.6; color: var(--text-primary); margin: 0 0 12px; }
+  .ov-themes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .ov-theme { font-size: 0.72rem; padding: 2px 9px; border-radius: 999px; background: var(--bg-tertiary); color: var(--text-secondary); }
+  .ov-section { margin-bottom: 12px; }
+  .ov-h { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); margin-bottom: 5px; font-weight: 600; }
+  .ov-list { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 4px; }
+  .ov-list li { font-size: 0.83rem; line-height: 1.5; color: var(--text-primary); }
+  .ov-issues .ov-h { color: var(--error-color, #ef4444); }
+  .ov-src { text-decoration: none; color: var(--primary-color); font-weight: 600; margin-right: 2px; }
+  .ov-src:hover { text-decoration: underline; }
+  .ov-foot { font-size: 0.72rem; color: var(--text-muted); margin-top: 10px; border-top: 1px solid var(--border-color); padding-top: 8px; }
 
   .maintenance-modal-overlay {
     position: fixed;

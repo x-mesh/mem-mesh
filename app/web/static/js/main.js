@@ -14,6 +14,7 @@ import { KeyboardShortcuts } from './utils/keyboard-shortcuts.js';
 import { ToastNotifications } from './utils/toast-notifications.js';
 
 // Import components
+import './components/overview-render.js'; // sets window.ProjectOverviewRender
 import { MemoryCard } from './components/memory-card.js';
 import { SearchBar } from './components/search-bar.js';
 import { FilterPanel } from './components/filter-panel.js';

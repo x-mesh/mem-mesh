@@ -280,7 +280,7 @@ class MemoryDetailPage extends HTMLElement {
       this.isLoading = false;
       console.log('Rendering final state with isLoading:', this.isLoading);
       this.render();
-      if (this.memory) this._loadEnrichment();
+      if (this.memory) { this._loadEnrichment(); this._loadOverview(); }
     }
   }
 
@@ -327,7 +327,7 @@ class MemoryDetailPage extends HTMLElement {
       this.isLoading = false;
       console.log('Direct API - Rendering final state');
       this.render();
-      if (this.memory) this._loadEnrichment();
+      if (this.memory) { this._loadEnrichment(); this._loadOverview(); }
     }
   }
   
@@ -677,6 +677,63 @@ class MemoryDetailPage extends HTMLElement {
       this._renderEnrichment(await res.json());
     } catch (_) {
       /* ignore */
+    }
+  }
+
+  /**
+   * Sidebar markup for this memory's project Overview (LLM summary), shown
+   * above Related Memories. Content is filled in async by _loadOverview().
+   */
+  renderOverviewPanel() {
+    if (!this.memory || !this.memory.project_id) return '';
+    const pid = this.escapeHtml(this.memory.project_id);
+    return `
+      <div class="context-section overview-panel" id="overview-panel" data-project-id="${pid}">
+        <div class="context-header">
+          <div class="context-title"><h3>📋 Project Overview</h3></div>
+          <button class="ov-refresh-btn" title="Regenerate from recent memories">↻</button>
+        </div>
+        <div class="ov-content"><div class="overview-loading">Loading…</div></div>
+      </div>`;
+  }
+
+  async _loadOverview() {
+    const panel = this.querySelector('#overview-panel');
+    if (!panel) return;
+    const projectId = panel.getAttribute('data-project-id');
+    if (!projectId) return;
+    const content = panel.querySelector('.ov-content');
+    const refreshBtn = panel.querySelector('.ov-refresh-btn');
+    const api = window.app?.apiClient;
+    const path = `/projects/${encodeURIComponent(projectId)}/overview`;
+
+    const generate = async () => {
+      content.innerHTML = '<div class="overview-loading">Summarizing recent memories…</div>';
+      if (refreshBtn) refreshBtn.disabled = true;
+      try {
+        api?.invalidateCache?.(path);
+        const res = await api.post(path, {});
+        content.innerHTML = window.ProjectOverviewRender.html(res, { showGeneratedAt: true });
+      } catch (err) {
+        content.innerHTML = `<div class="overview-empty">${this.escapeHtml(err?.data?.detail || err?.message || 'Failed')}</div>`;
+      } finally {
+        if (refreshBtn) refreshBtn.disabled = false;
+      }
+    };
+    if (refreshBtn) refreshBtn.addEventListener('click', generate);
+
+    try {
+      api?.invalidateCache?.(path);
+      const res = await api.get(path);
+      if (res?.overview) {
+        content.innerHTML = window.ProjectOverviewRender.html(res, { showGeneratedAt: true });
+      } else {
+        content.innerHTML =
+          '<div class="overview-empty">No overview yet. <button class="ov-gen-link">Generate</button></div>';
+        content.querySelector('.ov-gen-link')?.addEventListener('click', generate);
+      }
+    } catch (_) {
+      content.innerHTML = '<div class="overview-empty">Overview unavailable.</div>';
     }
   }
 
@@ -1535,6 +1592,7 @@ class MemoryDetailPage extends HTMLElement {
         </div>
         
         <div class="memory-sidebar">
+          ${this.renderOverviewPanel()}
           <div class="context-section">
             <div class="context-header">
               <div class="context-title">
@@ -2027,10 +2085,32 @@ style.textContent = `
 
   /* 데스크톱: 사이드바 높이 가득 채우기 */
   @media (min-width: 1025px) {
-    .context-section {
+    .context-section:last-child {
       height: 100%;
     }
   }
+
+  /* Project Overview panel (above Related Memories) */
+  .overview-panel { flex: 0 0 auto; }
+  .overview-panel .ov-content { padding: 1rem 1.5rem; max-height: 40vh; overflow: auto; }
+  .overview-loading, .overview-empty { color: var(--text-secondary); font-size: 0.83rem; }
+  .ov-refresh-btn { background: transparent; border: 1px solid var(--border-color); border-radius: 6px; width: 28px; height: 28px; cursor: pointer; color: var(--text-secondary); }
+  .ov-refresh-btn:hover:not(:disabled) { border-color: var(--primary-color); color: var(--primary-color); }
+  .ov-refresh-btn:disabled { opacity: 0.5; cursor: default; }
+  .ov-gen-link { background: none; border: none; color: var(--primary-color); cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
+  /* Shared .ov-* render tokens (mirror projects.js) */
+  .ov-stale { font-size: 0.76rem; color: var(--warning-text, #92400e); background: var(--warning-bg, #fef3c7); border-radius: 6px; padding: 6px 10px; margin-bottom: 10px; }
+  .ov-summary { font-size: 0.86rem; line-height: 1.6; color: var(--text-primary); margin: 0 0 10px; }
+  .ov-themes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .ov-theme { font-size: 0.7rem; padding: 2px 9px; border-radius: 999px; background: var(--bg-tertiary); color: var(--text-secondary); }
+  .ov-section { margin-bottom: 10px; }
+  .ov-h { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); margin-bottom: 4px; font-weight: 600; }
+  .ov-list { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 3px; }
+  .ov-list li { font-size: 0.8rem; line-height: 1.5; color: var(--text-primary); }
+  .ov-issues .ov-h { color: var(--error-color, #ef4444); }
+  .ov-src { text-decoration: none; color: var(--primary-color); font-weight: 600; margin-right: 2px; }
+  .ov-src:hover { text-decoration: underline; }
+  .ov-foot { font-size: 0.7rem; color: var(--text-muted); margin-top: 8px; border-top: 1px solid var(--border-color); padding-top: 6px; }
   
   .context-header {
     padding: 1rem 1.5rem;

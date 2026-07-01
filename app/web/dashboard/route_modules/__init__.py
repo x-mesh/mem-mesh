@@ -13,6 +13,7 @@ from .hooks import router as hooks_router
 from .maintenance import router as maintenance_router
 from .memories import router as memories_router
 from .oauth import router as oauth_router
+from .overview import router as overview_router
 from .relations import router as relations_router
 from .relay import router as relay_router
 from .search import router as search_router
@@ -34,6 +35,7 @@ router.include_router(connect_router)
 router.include_router(chat_router)
 router.include_router(curation_router)
 router.include_router(maintenance_router)
+router.include_router(overview_router)
 router.include_router(settings_llm_router)
 
 __all__ = [
