@@ -74,8 +74,7 @@ class MaintenanceService:
         if self.db in MaintenanceService._schema_ready:
             return
         async with self.db.transaction():
-            await self.db.execute(
-                """
+            await self.db.execute("""
                 CREATE TABLE IF NOT EXISTS maintenance_queue (
                     id TEXT PRIMARY KEY,
                     memory_id TEXT NOT NULL,
@@ -91,25 +90,19 @@ class MaintenanceService:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
-                """
-            )
+                """)
             # One live (pending/processing) job per (memory, operation) — a
             # re-run while a job is still queued is a no-op, not a duplicate.
-            await self.db.execute(
-                """
+            await self.db.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_maintenance_queue_live
                 ON maintenance_queue(memory_id, operation)
                 WHERE status IN ('pending', 'processing')
-                """
-            )
-            await self.db.execute(
-                """
+                """)
+            await self.db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_maintenance_queue_claim
                 ON maintenance_queue(status, next_attempt_at, created_at)
-                """
-            )
-            await self.db.execute(
-                """
+                """)
+            await self.db.execute("""
                 CREATE TABLE IF NOT EXISTS refine_proposal (
                     id TEXT PRIMARY KEY,
                     memory_id TEXT NOT NULL,
@@ -124,16 +117,13 @@ class MaintenanceService:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
-                """
-            )
+                """)
             # One pending proposal per memory (approving/rejecting frees the slot).
-            await self.db.execute(
-                """
+            await self.db.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_refine_proposal_pending
                 ON refine_proposal(memory_id)
                 WHERE status = 'pending'
-                """
-            )
+                """)
         MaintenanceService._schema_ready.add(self.db)
 
     # ── enqueue ─────────────────────────────────────────────────────────────
@@ -459,10 +449,9 @@ class MaintenanceService:
             except (json.JSONDecodeError, TypeError):
                 d["proposed_tags"] = None
             # Flag proposals whose base memory changed since the proposal.
-            d["stale"] = (
-                d.get("current_hash") is None
-                or d.get("current_hash") != d.get("original_hash")
-            )
+            d["stale"] = d.get("current_hash") is None or d.get(
+                "current_hash"
+            ) != d.get("original_hash")
             out.append(d)
         return out
 

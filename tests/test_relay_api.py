@@ -965,8 +965,7 @@ async def test_relay_share_memory_endpoint_enqueues_existing_memory():
             SimpleNamespace(updated_at="2026-06-25T00:01:00Z")
         )
         assert (
-            outbox["idempotency_key"]
-            == f"node-1:memory-1:v{expected_version}:update"
+            outbox["idempotency_key"] == f"node-1:memory-1:v{expected_version}:update"
         )
 
         await db.execute(

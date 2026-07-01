@@ -124,8 +124,10 @@ async def check_relay_auth(
 
     raw_scopes = identity.get("scopes_json")
     try:
-        scopes = json.loads(raw_scopes) if isinstance(raw_scopes, str) else (
-            raw_scopes or []
+        scopes = (
+            json.loads(raw_scopes)
+            if isinstance(raw_scopes, str)
+            else (raw_scopes or [])
         )
     except Exception:
         scopes = []

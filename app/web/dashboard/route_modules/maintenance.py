@@ -134,9 +134,7 @@ async def list_proposals(
     service: MaintenanceService = Depends(get_maintenance_service),
 ) -> dict:
     """Pending improve (refine) proposals awaiting human review."""
-    proposals = await service.list_refine_proposals(
-        project_id=project_id, limit=limit
-    )
+    proposals = await service.list_refine_proposals(project_id=project_id, limit=limit)
     return {"proposals": proposals, "count": len(proposals)}
 
 
@@ -185,7 +183,11 @@ async def approve_proposal(
         raise HTTPException(status_code=500, detail=str(exc))
 
     await service.mark_proposal_approved(proposal_id)
-    return {"proposal_id": proposal_id, "memory_id": proposal["memory_id"], "applied": True}
+    return {
+        "proposal_id": proposal_id,
+        "memory_id": proposal["memory_id"],
+        "applied": True,
+    }
 
 
 @router.post("/proposals/{proposal_id}/reject")

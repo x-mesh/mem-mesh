@@ -22,9 +22,15 @@ from app.core.services.relay_worker import (
     "text,expected",
     [
         ('{"content":"hi","category":"decision"}', {"content", "category"}),
-        ("```json\n{\"content\":\"hi\"}\n```", {"content"}),
-        ("Sure! Here it is:\n{\"content\":\"hi\",\"tags\":[\"a\"]}\nDone.", {"content", "tags"}),
-        ('{"content":"code: if (x) { y() }","rationale":"ok"}', {"content", "rationale"}),
+        ('```json\n{"content":"hi"}\n```', {"content"}),
+        (
+            'Sure! Here it is:\n{"content":"hi","tags":["a"]}\nDone.',
+            {"content", "tags"},
+        ),
+        (
+            '{"content":"code: if (x) { y() }","rationale":"ok"}',
+            {"content", "rationale"},
+        ),
     ],
 )
 def test_extract_json_object_salvages_wrapped_json(text, expected):

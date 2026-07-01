@@ -20,7 +20,6 @@ from typing import Any, Dict, Optional, Sequence, Union
 
 from ..database.base import Database
 from ..database.models import Memory
-from .enrich_store import EnrichmentStore
 from ..errors import (
     RelayDeliveryConflict,
 )
@@ -64,6 +63,7 @@ from ..schemas.relay import (
     RelayShareProjectResponse,
     RelayStatusCount,
 )
+from .enrich_store import EnrichmentStore
 
 logger = logging.getLogger(__name__)
 
@@ -1052,8 +1052,7 @@ class RelayService:
             {str(row["category"]) for row in rows} - self.DENYLISTED_KINDS
         )
         return [
-            RelayCategoryPolicy(category=c, shared=c not in blocked)
-            for c in categories
+            RelayCategoryPolicy(category=c, shared=c not in blocked) for c in categories
         ]
 
     async def get_admin_settings(self, settings: Any) -> RelaySettingsResponse:
@@ -1213,9 +1212,7 @@ class RelayService:
             message = (
                 "hub reachable" if ok else RelayHTTPClient._response_detail(response)
             )
-            auth = await self._probe_hub_token(
-                client, cleaned, tok, timeout=timeout
-            )
+            auth = await self._probe_hub_token(client, cleaned, tok, timeout=timeout)
             return RelayHubCheckResponse(
                 ok=ok,
                 hub_url=cleaned,
@@ -1672,9 +1669,7 @@ class RelayService:
         """Monotonic source_version for an auto-shared event. Derived from the
         memory's updated_at epoch so each create/update produces a distinct
         idempotency_key (``…:v{version}:{event}``) instead of deduping."""
-        return RelayService._version_from_timestamp(
-            getattr(memory, "updated_at", "")
-        )
+        return RelayService._version_from_timestamp(getattr(memory, "updated_at", ""))
 
     async def _auto_share_row(self, project_id: str) -> Optional[dict]:
         """Fetch the auto-share subscription row, tolerant of a relay schema

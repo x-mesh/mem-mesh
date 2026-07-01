@@ -100,9 +100,7 @@ class TestCurationActivity:
 
         await _add(temp_db, "mm1")
         mnt = MaintenanceService(temp_db)
-        await mnt.enqueue_project(
-            project_id="p1", operations=["improve"], force=False
-        )
+        await mnt.enqueue_project(project_id="p1", operations=["improve"], force=False)
         svc = CurationService(temp_db)
         activity = await svc.list_activity()
         # Maintenance is split into per-operation cards.
@@ -134,17 +132,13 @@ class TestCurationActivity:
 
         await _add(temp_db, "gone1")
         mnt = MaintenanceService(temp_db)
-        await mnt.enqueue_project(
-            project_id="p1", operations=["enrich"], force=False
-        )
+        await mnt.enqueue_project(project_id="p1", operations=["enrich"], force=False)
         # Memory deleted after the job was queued (maintenance_queue has no FK).
         await temp_db.execute("DELETE FROM memories WHERE id = 'gone1'")
 
         svc = CurationService(temp_db)
         activity = await svc.list_activity()
-        maint = next(
-            w for w in activity["workers"] if w["key"] == "maintenance:enrich"
-        )
+        maint = next(w for w in activity["workers"] if w["key"] == "maintenance:enrich")
         row = maint["recent"][0]
         assert row["subjects"][0]["memory_id"] == "gone1"
         assert row["subjects"][0]["exists"] is False
@@ -199,7 +193,9 @@ class TestCurationService:
         await _rel(temp_db, "r", "a", "b", "conflicts", "proposed", "conflict")
         svc = CurationService(temp_db)
         await svc.dismiss("r")
-        row = await temp_db.fetchone("SELECT metadata FROM memory_relations WHERE id='r'")
+        row = await temp_db.fetchone(
+            "SELECT metadata FROM memory_relations WHERE id='r'"
+        )
         assert json.loads(row["metadata"])["state"] == "dismissed"
 
     @pytest.mark.asyncio
@@ -207,7 +203,13 @@ class TestCurationService:
         await _add(temp_db, "new")
         await _add(temp_db, "old")
         await _rel(
-            temp_db, "rm", "new", "old", "conflicts", "proposed", "merge",
+            temp_db,
+            "rm",
+            "new",
+            "old",
+            "conflicts",
+            "proposed",
+            "merge",
             "merged combined content",
         )
         svc = CurationService(temp_db, memory_service=_FakeMemSvc(temp_db))
@@ -234,7 +236,13 @@ class TestCurationService:
         await _add(temp_db, "new")
         await _add(temp_db, "old")
         await _rel(
-            temp_db, "rm", "new", "old", "conflicts", "proposed", "merge",
+            temp_db,
+            "rm",
+            "new",
+            "old",
+            "conflicts",
+            "proposed",
+            "merge",
             "merged text long enough",
         )
         svc = CurationService(temp_db)  # no memory_service

@@ -77,7 +77,15 @@ class CurationService:
     # *which memory* + a per-card progress read, not an opaque queue-row id.
     _ACTIVITY_WORKERS = (
         ("item", "Enrichment (relay)", "relay_queue_item", ("ref_id",), True, (), None),
-        ("aggregate", "Digest (relay)", "relay_queue_aggregate", ("ref_id",), True, (), None),
+        (
+            "aggregate",
+            "Digest (relay)",
+            "relay_queue_aggregate",
+            ("ref_id",),
+            True,
+            (),
+            None,
+        ),
         (
             "reconcile",
             "Reconcile",
@@ -109,9 +117,15 @@ class CurationService:
         # Expand split workers into per-value specs (key, label, table, ...,
         # where=(column, value)|None).
         specs = []
-        for key, label, table, subj_cols, relay_prefixed, extra, split in (
-            self._ACTIVITY_WORKERS
-        ):
+        for (
+            key,
+            label,
+            table,
+            subj_cols,
+            relay_prefixed,
+            extra,
+            split,
+        ) in self._ACTIVITY_WORKERS:
             if split:
                 col, values = split
                 for val in values:
@@ -226,7 +240,11 @@ class CurationService:
             if not title:
                 content = str(row["content"] or "")
                 first = next(
-                    (ln.strip(" #").strip() for ln in content.splitlines() if ln.strip()),
+                    (
+                        ln.strip(" #").strip()
+                        for ln in content.splitlines()
+                        if ln.strip()
+                    ),
                     "",
                 )
                 title = first[:80] + ("…" if len(first) > 80 else "")

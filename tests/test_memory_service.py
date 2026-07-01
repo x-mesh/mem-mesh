@@ -372,8 +372,19 @@ class TestProjectReconcile:
                 "INSERT INTO memories (id, content, content_hash, project_id, "
                 "category, source, embedding, tags, created_at, updated_at, "
                 "content_bytes) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (mid, f"content {mid} long enough", h, "proj", "decision", "t",
-                 b"x", "[]", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", 0),
+                (
+                    mid,
+                    f"content {mid} long enough",
+                    h,
+                    "proj",
+                    "decision",
+                    "t",
+                    b"x",
+                    "[]",
+                    "2026-01-01T00:00:00Z",
+                    "2026-01-01T00:00:00Z",
+                    0,
+                ),
             )
 
         result = await svc.enqueue_project_reconcile("proj")

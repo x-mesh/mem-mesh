@@ -24,9 +24,16 @@ async def _temp_db():
         os.remove(path)
 
 
-async def _add_memory(db, memory_id, *, content="content long enough here",
-                      content_hash="h", project_id="proj", category="decision",
-                      status="canonical"):
+async def _add_memory(
+    db,
+    memory_id,
+    *,
+    content="content long enough here",
+    content_hash="h",
+    project_id="proj",
+    category="decision",
+    status="canonical",
+):
     await db.execute(
         """
         INSERT INTO memories (
@@ -36,20 +43,38 @@ async def _add_memory(db, memory_id, *, content="content long enough here",
         VALUES (?, ?, ?, ?, ?, 'test', ?, '[]', ?, ?, ?, ?)
         """,
         (
-            memory_id, content, content_hash, project_id, category,
-            b"123", status, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", 0,
+            memory_id,
+            content,
+            content_hash,
+            project_id,
+            category,
+            b"123",
+            status,
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:00:00Z",
+            0,
         ),
     )
 
 
 class _StubChat:
     async def enrich_memory_content(self, *, content, settings):
-        return {"title": "T", "abstract": "A", "tags": ["x"],
-                "display_kind": "decision", "model": "stub"}
+        return {
+            "title": "T",
+            "abstract": "A",
+            "tags": ["x"],
+            "display_kind": "decision",
+            "model": "stub",
+        }
 
     async def refine_memory_content(self, *, content, category, tags, settings):
-        return {"content": content + " (improved)", "category": "decision",
-                "tags": ["y"], "rationale": "clearer", "model": "stub"}
+        return {
+            "content": content + " (improved)",
+            "category": "decision",
+            "tags": ["y"],
+            "rationale": "clearer",
+            "model": "stub",
+        }
 
 
 @pytest.mark.asyncio
@@ -100,9 +125,7 @@ async def test_process_enrich_writes_enrichment_store():
         svc = MaintenanceService(db)
         await svc.ensure_schema()
         await _add_memory(db, "m1")
-        await svc.enqueue_project(
-            project_id="proj", operations=["enrich"], force=False
-        )
+        await svc.enqueue_project(project_id="proj", operations=["enrich"], force=False)
 
         result = await svc.process_next(
             worker_id="w", chat_service=_StubChat(), settings=None
@@ -144,9 +167,7 @@ async def test_process_stale_job_when_memory_changed():
         svc = MaintenanceService(db)
         await svc.ensure_schema()
         await _add_memory(db, "m1", content_hash="h1")
-        await svc.enqueue_project(
-            project_id="proj", operations=["enrich"], force=False
-        )
+        await svc.enqueue_project(project_id="proj", operations=["enrich"], force=False)
         # Memory edited after enqueue → content_hash drift → job goes stale.
         await db.execute("UPDATE memories SET content_hash = 'h2' WHERE id = 'm1'")
 

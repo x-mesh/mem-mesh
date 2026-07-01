@@ -256,9 +256,7 @@ async def _probe_active(
         if not await _reconcile_on(db, settings):
             waiting["reconcile"] = "reconcile disabled (enable in Worker settings)"
         elif not (await resolve_service_llm(db, settings, "reconcile"))["api_key"]:
-            waiting["reconcile"] = (
-                "no LLM (set the shared Chat LLM or reconcile_llm_*)"
-            )
+            waiting["reconcile"] = "no LLM (set the shared Chat LLM or reconcile_llm_*)"
         else:
             active.add("reconcile")
 
@@ -433,7 +431,14 @@ async def _refresh_worker_config(
         )
         worker.text_enricher = enricher if "item" in active else None
         worker.digest_generator = enricher if "aggregate" in active else None
-        sig.append(("relay_llm", relay_llm["provider"], relay_llm["model"], relay_llm["api_key"]))
+        sig.append(
+            (
+                "relay_llm",
+                relay_llm["provider"],
+                relay_llm["model"],
+                relay_llm["api_key"],
+            )
+        )
 
     if "outbox" in active:
         worker.outbox_bearer_token = relay_config["hub_token"]
@@ -449,7 +454,12 @@ async def _refresh_worker_config(
             timeout=settings.relay_llm_timeout,
         )
         sig.append(
-            ("reconcile_llm", reconcile_llm["provider"], reconcile_llm["model"], reconcile_llm["api_key"])
+            (
+                "reconcile_llm",
+                reconcile_llm["provider"],
+                reconcile_llm["model"],
+                reconcile_llm["api_key"],
+            )
         )
 
     worker.prompt_version = relay_config["prompt_version"]
@@ -626,7 +636,9 @@ async def _run_relay_worker_instance(
                 db=db, settings=settings, service=service, worker=worker, active=active
             )
             if config_signature != last_config_signature:
-                logger.info("relay worker config refreshed (key/token/model change detected)")
+                logger.info(
+                    "relay worker config refreshed (key/token/model change detected)"
+                )
                 last_config_signature = config_signature
             stats = await worker.run_once()
             if not any(stats.values()):
