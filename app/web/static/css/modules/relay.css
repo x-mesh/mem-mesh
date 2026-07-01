@@ -445,6 +445,29 @@
   white-space: nowrap;
 }
 
+/* Hub check result: its own line below the buttons, full width, wrapping so
+   long URLs and the token verdict stay visible instead of truncating. */
+.relay-hub-check-status {
+  margin-top: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  white-space: pre-line;
+  word-break: break-word;
+}
+
+.relay-hub-check-status:empty {
+  display: none;
+}
+
+.relay-hub-check-status[data-state="ok"] {
+  color: var(--success, #16a34a);
+}
+
+.relay-hub-check-status[data-state="error"] {
+  color: var(--danger, #dc2626);
+}
+
 .relay-status-stack {
   display: flex;
   flex-direction: column;

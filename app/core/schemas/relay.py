@@ -339,6 +339,10 @@ class RelayIdentitySummary(BaseModel):
 
 class RelayHubCheckRequest(BaseModel):
     hub_url: str = Field(min_length=1, max_length=500)
+    # Optional token to verify against the hub. Empty → the server falls back to
+    # the stored personal-node hub token, so "Check Hub" validates the token
+    # that's actually configured even when the input field is masked.
+    token: Optional[str] = Field(default=None, max_length=500)
 
 
 class RelayHubCheckResponse(BaseModel):
@@ -348,6 +352,20 @@ class RelayHubCheckResponse(BaseModel):
     status_code: Optional[int] = None
     relay: Optional[str] = None
     message: str = ""
+    # Token verification: True valid, False rejected (invalid/revoked/no scope),
+    # None not checked (no token given, or hub too old to expose /auth/check).
+    token_checked: bool = False
+    token_ok: Optional[bool] = None
+    token_message: str = ""
+    node_id: Optional[str] = None
+    scopes: List[str] = Field(default_factory=list)
+
+
+class RelayAuthCheckResponse(BaseModel):
+    ok: bool = True
+    node_id: str = ""
+    user_id: str = ""
+    scopes: List[str] = Field(default_factory=list)
 
 
 class RelayHealthResponse(BaseModel):

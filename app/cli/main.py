@@ -180,7 +180,13 @@ def main(argv: Optional[List[str]] = None) -> None:
         "-v",
         "--verbose",
         action="store_true",
-        help="Include relay queue diagnostics in the worker result",
+        help="INFO logging (active tasks, per-cycle activity) + queue diagnostics",
+    )
+    relay_worker.add_argument(
+        "-d",
+        "--debug",
+        action="store_true",
+        help="DEBUG logging (task skip reasons, probe details)",
     )
     relay_materialize = relay_sub.add_parser(
         "materialize",
@@ -504,6 +510,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     lease_seconds=args.lease_seconds,
                     concurrency=args.concurrency,
                     verbose=args.verbose,
+                    debug=args.debug,
                 )
             )
         elif args.relay_command == "materialize":

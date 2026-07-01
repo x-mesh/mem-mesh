@@ -553,15 +553,39 @@ export class RelayPage extends HTMLElement {
       showToast('Team hub URL is missing.', 'warning');
       return;
     }
+    // Send the token typed in the field; empty → the server falls back to the
+    // stored hub token, so the check still verifies the configured credential.
+    const hubToken = this.querySelector('#relay-setting-hub-token')?.value.trim() || '';
     button.disabled = true;
+    status.dataset.state = '';
     status.textContent = 'Checking...';
     try {
-      const result = await this.api.checkRelayHub({ hub_url: hubUrl });
-      status.textContent = result.ok
-        ? `Reachable: ${result.health_url}`
-        : `Failed: ${result.message}`;
-      showToast(result.ok ? 'Hub is reachable.' : 'Hub check failed.', result.ok ? 'success' : 'error');
+      const result = await this.api.checkRelayHub({ hub_url: hubUrl, token: hubToken });
+      const lines = [result.ok ? `Reachable: ${result.health_url}` : `Failed: ${result.message}`];
+      if (result.token_ok === true) {
+        const scopes = (result.scopes && result.scopes.length) ? `, scopes: ${result.scopes.join('/')}` : '';
+        lines.push(`Token: valid${result.node_id ? ` — ${result.node_id}` : ''}${scopes}`);
+      } else if (result.token_ok === false) {
+        lines.push(`Token: INVALID — ${result.token_message}`);
+      } else if (result.token_checked) {
+        // Reachable but not verified (e.g. hub too old to expose /auth/check).
+        lines.push(`Token: not verified — ${result.token_message}`);
+      }
+      status.textContent = lines.join('\n');
+
+      const tokenBad = result.token_ok === false;
+      const overallOk = result.ok && !tokenBad;
+      status.dataset.state = (!result.ok || tokenBad) ? 'error' : (result.token_ok === true ? 'ok' : '');
+      const toastMsg = !result.ok
+        ? 'Hub check failed.'
+        : tokenBad
+          ? 'Hub reachable, but token is invalid.'
+          : result.token_ok === true
+            ? 'Hub reachable, token valid.'
+            : 'Hub reachable, token not verified.';
+      showToast(toastMsg, overallOk ? 'success' : 'error');
     } catch (error) {
+      status.dataset.state = 'error';
       status.textContent = this.errorMessage(error);
       showToast(`Hub check failed: ${this.errorMessage(error)}`, 'error');
     } finally {
@@ -1028,8 +1052,8 @@ export class RelayPage extends HTMLElement {
           <div class="relay-actions">
             <button class="primary-button" id="relay-personal-submit" type="submit">Save Personal Node</button>
             <button class="secondary-button" id="relay-hub-check" type="button">Check Hub</button>
-            <span id="relay-hub-check-result" class="relay-inline-status" aria-live="polite"></span>
           </div>
+          <div id="relay-hub-check-result" class="relay-hub-check-status" aria-live="polite"></div>
         </form>
 
         <section class="relay-panel">

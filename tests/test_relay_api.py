@@ -771,6 +771,82 @@ async def test_relay_health_and_hub_check_endpoint(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_relay_auth_check_endpoint_validates_token():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        await service.register_identity(
+            token="relay-token",
+            user_id="user-1",
+            source_node_id="node-1",
+            display_name="Jinwoo",
+        )
+
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            good = await client.get(
+                "/api/relay/v1/auth/check",
+                headers={"Authorization": "Bearer relay-token"},
+            )
+            bad = await client.get(
+                "/api/relay/v1/auth/check",
+                headers={"Authorization": "Bearer wrong-token"},
+            )
+            missing = await client.get("/api/relay/v1/auth/check")
+
+        assert good.status_code == 200
+        body = good.json()
+        assert body["ok"] is True
+        assert body["node_id"] == "node-1"
+        assert "write" in body["scopes"]
+
+        assert bad.status_code == 401
+        bad_body = bad.json()
+        assert "invalid or revoked" in (
+            bad_body.get("message") or bad_body.get("detail") or ""
+        )
+        assert missing.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_hub_check_forwards_token_with_stored_fallback(monkeypatch):
+    seen = {}
+
+    async def fake_check_hub(self, hub_url, *, token=None, **kwargs):
+        seen["token"] = token
+        return RelayHubCheckResponse(
+            ok=True,
+            hub_url=hub_url,
+            health_url=f"{hub_url}/api/relay/v1/health",
+            status_code=200,
+            relay="mem-mesh-relay",
+            message="hub reachable",
+        )
+
+    monkeypatch.setattr(RelayService, "check_hub", fake_check_hub)
+
+    async with _temp_db() as db:
+        await db.set_app_config("relay.hub_token", "stored-tok")
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # Explicit token wins.
+            await client.post(
+                "/api/relay/v1/admin/hub/check",
+                json={"hub_url": "http://hub.local", "token": "explicit-tok"},
+            )
+            assert seen["token"] == "explicit-tok"
+
+            # Omitted token falls back to the stored hub token.
+            await client.post(
+                "/api/relay/v1/admin/hub/check",
+                json={"hub_url": "http://hub.local"},
+            )
+            assert seen["token"] == "stored-tok"
+
+
+@pytest.mark.asyncio
 async def test_relay_share_memory_endpoint_enqueues_existing_memory():
     async with _temp_db() as db:
         await db.set_app_config("relay.hub_url", "https://hub.local")

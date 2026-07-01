@@ -34,8 +34,17 @@ def cmd_relay_worker(
     lease_seconds: int = 300,
     concurrency: int = 1,
     verbose: bool = False,
+    debug: bool = False,
 ) -> int:
     """Run the relay worker from CLI."""
+
+    # -d → DEBUG (skip reasons, probe), -v → INFO (active tasks, activity),
+    # otherwise WARNING. The startup summary is printed regardless of level.
+    if not json_mode:
+        level = logging.DEBUG if debug else logging.INFO if verbose else logging.WARNING
+        logging.basicConfig(
+            level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+        )
 
     try:
         result = asyncio.run(
@@ -49,6 +58,7 @@ def cmd_relay_worker(
                 lease_seconds=lease_seconds,
                 concurrency=concurrency,
                 verbose=verbose,
+                debug=debug,
             )
         )
         if json_mode:
@@ -132,6 +142,7 @@ async def _run_relay_worker(
     lease_seconds: int = 300,
     concurrency: int = 1,
     verbose: bool = False,
+    debug: bool = False,
 ) -> dict:
     # Explicit --tasks fixes the set (debug); None → dynamic from settings.
     override = _parse_tasks(tasks) if tasks else None
@@ -155,6 +166,7 @@ async def _run_relay_worker(
             lease_seconds=lease_seconds,
             concurrency=concurrency,
             verbose=verbose,
+            debug=debug,
         )
 
     enabled = override or _parse_tasks(_DEFAULT_TASKS)
@@ -184,6 +196,7 @@ async def _run_relay_worker(
                 lease_seconds=lease_seconds,
                 concurrency=concurrency,
                 verbose=False,
+                debug=debug,
             )
             for index in range(concurrency)
         ]
@@ -214,22 +227,44 @@ async def _reconcile_on(db, settings) -> bool:
 
 async def _probe_active(
     *, db, settings, service, relay_config: dict, enabled: set[str]
-) -> set[str]:
-    """Which enabled tasks have their config ready. Cheap (no model load).
+) -> tuple[set[str], dict]:
+    """Which enabled tasks have config ready. Cheap (no model load).
 
-    Tasks missing config aren't errors — the daemon just waits for them to be
-    configured (e.g. via the dashboard) and picks them up on a later cycle.
+    Returns (active, waiting) where ``waiting`` maps each not-yet-runnable task
+    to a human reason. Missing config is not an error — the daemon waits and
+    picks tasks up on a later cycle once they're configured (e.g. via the
+    dashboard). Reasons are logged at DEBUG for -d.
     """
     active: set[str] = set()
+    waiting: dict = {}
+
     if enabled & {"item", "aggregate"}:
-        if (await resolve_service_llm(db, settings, "relay"))["api_key"]:
-            active |= enabled & {"item", "aggregate"}
-    if "outbox" in enabled and relay_config.get("hub_token"):
-        active.add("outbox")
-    if "reconcile" in enabled and await _reconcile_on(db, settings):
-        if (await resolve_service_llm(db, settings, "reconcile"))["api_key"]:
+        has_llm = bool((await resolve_service_llm(db, settings, "relay"))["api_key"])
+        for task in sorted(enabled & {"item", "aggregate"}):
+            if has_llm:
+                active.add(task)
+            else:
+                waiting[task] = "no LLM (set the shared Chat LLM or relay_llm_*)"
+
+    if "outbox" in enabled:
+        if relay_config.get("hub_token"):
+            active.add("outbox")
+        else:
+            waiting["outbox"] = "no hub token (set it on the Relay page)"
+
+    if "reconcile" in enabled:
+        if not await _reconcile_on(db, settings):
+            waiting["reconcile"] = "reconcile disabled (enable in Worker settings)"
+        elif not (await resolve_service_llm(db, settings, "reconcile"))["api_key"]:
+            waiting["reconcile"] = (
+                "no LLM (set the shared Chat LLM or reconcile_llm_*)"
+            )
+        else:
             active.add("reconcile")
-    return active
+
+    for task in sorted(waiting):
+        logger.debug("relay task '%s' waiting: %s", task, waiting[task])
+    return active, waiting
 
 
 async def _build_relay_worker(
@@ -249,6 +284,12 @@ async def _build_relay_worker(
     text_enricher = None
     if active & {"item", "aggregate"}:
         relay_llm = await resolve_service_llm(db, settings, "relay")
+        logger.info(
+            "relay item/aggregate LLM: %s/%s (%s)",
+            relay_llm["provider"],
+            relay_llm["model"],
+            relay_llm["source"],
+        )
         text_enricher = build_relay_enricher(
             provider=relay_llm["provider"],
             api_key=relay_llm["api_key"],
@@ -300,6 +341,12 @@ async def _build_relay_worker(
             lease_seconds=lease_seconds,
         )
         reconcile_llm = await resolve_service_llm(db, settings, "reconcile")
+        logger.info(
+            "reconcile LLM: %s/%s (%s)",
+            reconcile_llm["provider"],
+            reconcile_llm["model"],
+            reconcile_llm["source"],
+        )
         reconcile_enricher = build_relay_enricher(
             provider=reconcile_llm["provider"],
             api_key=reconcile_llm["api_key"],
@@ -324,6 +371,33 @@ async def _build_relay_worker(
     )
 
 
+def _print_worker_state(
+    *,
+    worker_id: str,
+    enabled: set[str],
+    active: set[str],
+    waiting: dict,
+    interval: float,
+    once: bool,
+) -> None:
+    """Startup / active-change summary to stderr, printed regardless of -v/-d.
+
+    A relay worker with no config runs silently idle; this makes it always
+    announce which tasks it's running and, for each idle task, why it's waiting.
+    """
+    lines = [f"relay worker {worker_id}" + (" (once)" if once else "")]
+    lines.append(f"  requested: {','.join(sorted(enabled)) or '(none)'}")
+    lines.append(
+        "  active:    "
+        + (",".join(sorted(active)) if active else "(none — waiting for config)")
+    )
+    for task in sorted(waiting):
+        lines.append(f"  waiting:   {task} — {waiting[task]}")
+    if not once:
+        lines.append(f"  interval:  {interval}s")
+    print("\n".join(lines), file=sys.stderr)
+
+
 async def _run_relay_worker_instance(
     *,
     once: bool,
@@ -335,6 +409,7 @@ async def _run_relay_worker_instance(
     lease_seconds: int,
     concurrency: int,
     verbose: bool = False,
+    debug: bool = False,
 ) -> dict:
     settings = Settings()
 
@@ -351,7 +426,7 @@ async def _run_relay_worker_instance(
         relay_config = effective["values"]
         relay_sources = effective["sources"]
 
-        async def _probe(enabled: set[str]) -> set[str]:
+        async def _probe(enabled: set[str]) -> tuple[set[str], dict]:
             eff = await service.get_effective_config(settings)
             return await _probe_active(
                 db=db,
@@ -377,7 +452,15 @@ async def _run_relay_worker_instance(
 
         if once:
             enabled = await _resolve_enabled(db, enabled_override)
-            active = await _probe(enabled)
+            active, waiting = await _probe(enabled)
+            _print_worker_state(
+                worker_id=worker_id,
+                enabled=enabled,
+                active=active,
+                waiting=waiting,
+                interval=interval,
+                once=True,
+            )
             worker = await _build(active)
             worker_options = _worker_options(
                 worker_id=worker_id,
@@ -418,17 +501,33 @@ async def _run_relay_worker_instance(
         # the NLI model). If nothing is ready yet, stay up and idle — the worker
         # picks tasks up as soon as they're configured (e.g. from the dashboard).
         current: Optional[set[str]] = None
+        last_signature: Optional[tuple] = None
         worker = None
         while True:
             enabled = await _resolve_enabled(db, enabled_override)
-            active = await _probe(enabled)
+            active, waiting = await _probe(enabled)
+            # Rebuild only when the active set changes (avoids reloading the NLI
+            # model), but reprint the summary whenever active OR waiting shifts —
+            # so a config change that lands but can't activate yet (e.g. adding
+            # outbox with no hub token) is still visible instead of silent.
             if active != current:
                 worker = await _build(active) if active else None
                 current = active
+            signature = (frozenset(active), tuple(sorted(waiting.items())))
+            if signature != last_signature:
+                _print_worker_state(
+                    worker_id=worker_id,
+                    enabled=enabled,
+                    active=active,
+                    waiting=waiting,
+                    interval=interval,
+                    once=False,
+                )
                 logger.info(
                     "relay worker active tasks: %s",
                     ",".join(sorted(active)) or "(none — waiting for config)",
                 )
+                last_signature = signature
             if worker is None:
                 await asyncio.sleep(interval)
                 continue

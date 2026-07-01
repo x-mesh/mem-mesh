@@ -123,6 +123,17 @@ class RelayHTTPClient:
         return f"{base}/api/relay/v1/health"
 
     @staticmethod
+    def auth_check_url(target_hub: str) -> str:
+        base = target_hub.rstrip("/")
+        if base.endswith("/api/relay/v1/auth/check"):
+            return base
+        for suffix in ("/api/relay/v1/health", "/api/relay/v1/ingest", "/api/relay/v1"):
+            if base.endswith(suffix):
+                base = base[: -len(suffix)]
+                break
+        return f"{base}/api/relay/v1/auth/check"
+
+    @staticmethod
     def _response_detail(response: Any) -> str:
         try:
             data = response.json()
@@ -1134,11 +1145,13 @@ class RelayService:
         self,
         hub_url: str,
         *,
+        token: Optional[str] = None,
         timeout: float = 5.0,
         http_client: Any = None,
     ) -> RelayHubCheckResponse:
         cleaned = str(hub_url or "").strip()
         health_url = RelayHTTPClient.health_url(cleaned)
+        tok = str(token or "").strip()
         client = http_client
         close_client = False
         if client is None:
@@ -1160,6 +1173,9 @@ class RelayService:
             message = (
                 "hub reachable" if ok else RelayHTTPClient._response_detail(response)
             )
+            auth = await self._probe_hub_token(
+                client, cleaned, tok, timeout=timeout
+            )
             return RelayHubCheckResponse(
                 ok=ok,
                 hub_url=cleaned,
@@ -1167,6 +1183,7 @@ class RelayService:
                 status_code=status_code,
                 relay=relay,
                 message=message,
+                **auth,
             )
         except Exception as exc:
             return RelayHubCheckResponse(
@@ -1180,6 +1197,79 @@ class RelayService:
         finally:
             if close_client:
                 await client.aclose()
+
+    @staticmethod
+    async def _probe_hub_token(
+        client: Any, hub_url: str, token: str, *, timeout: float
+    ) -> Dict[str, Any]:
+        """Verify a relay token against the hub's /auth/check endpoint.
+
+        Returns the token-related fields for RelayHubCheckResponse. Degrades
+        gracefully: an older hub without /auth/check (404/405) reports
+        token_ok=None rather than a false failure.
+        """
+        result: Dict[str, Any] = {
+            "token_checked": False,
+            "token_ok": None,
+            "token_message": "",
+            "node_id": None,
+            "scopes": [],
+        }
+        if not token:
+            result["token_message"] = "no token provided"
+            return result
+
+        result["token_checked"] = True
+        auth_url = RelayHTTPClient.auth_check_url(hub_url)
+        try:
+            resp = await client.get(
+                auth_url,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=timeout,
+            )
+        except Exception as exc:
+            result["token_ok"] = None
+            result["token_message"] = f"token check error: {exc}"
+            return result
+
+        code = int(getattr(resp, "status_code", 0) or 0)
+        if code == 200:
+            body = {}
+            try:
+                body = resp.json()
+            except Exception:
+                body = {}
+            result["token_ok"] = True
+            result["token_message"] = "token valid"
+            result["node_id"] = body.get("node_id")
+            result["scopes"] = list(body.get("scopes") or [])
+        elif code == 401:
+            result["token_ok"] = False
+            result["token_message"] = RelayService._auth_error_detail(resp)
+        elif code in (404, 405):
+            result["token_ok"] = None
+            result["token_message"] = (
+                "hub does not expose token check (update the hub to verify tokens)"
+            )
+        else:
+            result["token_ok"] = False
+            result["token_message"] = RelayService._auth_error_detail(resp)
+        return result
+
+    @staticmethod
+    def _auth_error_detail(response: Any) -> str:
+        """Human message from a relay error body ({error,message,details}) or
+        FastAPI's {detail}, falling back to raw text / status code."""
+        try:
+            data = response.json()
+            if isinstance(data, dict):
+                for key in ("message", "detail"):
+                    if data.get(key):
+                        return str(data[key])
+        except Exception:
+            pass
+        text = str(getattr(response, "text", "") or "")
+        return text or f"HTTP {getattr(response, 'status_code', '')}".strip()
 
     async def list_identities(self) -> list[RelayIdentitySummary]:
         rows = await self.db.fetchall("""

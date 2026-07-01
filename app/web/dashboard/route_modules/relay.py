@@ -1,5 +1,6 @@
 """Relay REST API routes."""
 
+import json
 import logging
 import secrets
 from typing import Optional
@@ -10,6 +11,7 @@ from app.core import runtime_config as rc
 from app.core.config import get_settings
 from app.core.schemas.relay import (
     RelayAdminOverviewResponse,
+    RelayAuthCheckResponse,
     RelayAutoShareListResponse,
     RelayAutoShareSubscription,
     RelayAutoShareUpdateRequest,
@@ -98,6 +100,39 @@ async def get_relay_health() -> RelayHealthResponse:
     """Lightweight public health endpoint for personal-node hub checks."""
 
     return RelayHealthResponse()
+
+
+@router.get("/auth/check", response_model=RelayAuthCheckResponse)
+async def check_relay_auth(
+    authorization: Optional[str] = Header(default=None),
+    service: RelayService = Depends(get_relay_service),
+) -> RelayAuthCheckResponse:
+    """Authenticate a relay token without side effects.
+
+    Used by a personal node's 'Check Hub' to verify its hub token, not just
+    reachability. Requires the ``write`` scope, since delivering to the hub
+    (ingest) needs write — so a valid-but-read-only token still fails here.
+    """
+
+    token = _extract_bearer_token(authorization)
+    try:
+        identity = await service.authorize(token, require_scope="write")
+    except RelayUnauthorized as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    raw_scopes = identity.get("scopes_json")
+    try:
+        scopes = json.loads(raw_scopes) if isinstance(raw_scopes, str) else (
+            raw_scopes or []
+        )
+    except Exception:
+        scopes = []
+    return RelayAuthCheckResponse(
+        ok=True,
+        node_id=str(identity.get("source_node_id") or ""),
+        user_id=str(identity.get("user_id") or ""),
+        scopes=list(scopes),
+    )
 
 
 async def _resolve_share_defaults(
@@ -303,12 +338,20 @@ async def check_relay_hub(
     payload: RelayHubCheckRequest,
     service: RelayService = Depends(get_relay_service),
 ) -> RelayHubCheckResponse:
-    """Check whether a configured team hub URL exposes relay health."""
+    """Check hub reachability and, if a token is available, verify it too."""
 
     try:
+        settings = get_settings()
+        token = (payload.token or "").strip()
+        if not token:
+            # Fall back to the stored hub token so the check validates the
+            # actually-configured credential even when the input is masked.
+            effective = await service.get_effective_config(settings)
+            token = str(effective["values"].get("hub_token") or "").strip()
         return await service.check_hub(
             payload.hub_url,
-            timeout=get_settings().relay_http_timeout,
+            token=token or None,
+            timeout=settings.relay_http_timeout,
         )
     except Exception as exc:
         logger.exception("Relay hub check failed")
