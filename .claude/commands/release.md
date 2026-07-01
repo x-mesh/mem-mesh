@@ -32,6 +32,21 @@ git-kit ship --preflight   # 설정된 lint/test를 working tree에서 실행, �
 ```
 실패하면 여기서 멈추고 고친다. 통과 전엔 다음 단계 금지.
 
+### 1a. Lint 게이트 (필수 — ship preflight가 커버 안 함)
+
+> ⚠️ **`git-kit ship --preflight`는 commit-lint/branch-check/no-conflict만 돌리고 `ruff`/`black`/`isort`는 게이트하지 않는다.** 이 셋은 GitHub Actions **CI 워크플로**(`.github/workflows/ci.yml`, 대상 `app/ tests/`)에서 별도로 검사되므로, 여기서 통과시키지 않으면 **릴리스 아티팩트(PyPI/Docker)는 green이어도 브랜치 CI가 red로 남는다** (v1.16.0·v1.22.0에서 반복 발생 — black/isort 부채로 CI red → 사후 정리 커밋 필요). CI와 **동일 명령·동일 범위**로 로컬에서 먼저 통과시킨다:
+
+```bash
+ruff check app/ tests/          # F401 등
+black --check app/ tests/       # 포맷 — CI에서 가장 자주 걸림
+isort --check-only app/ tests/  # import 정렬
+```
+위반이 있으면 자동 수정 후 커밋에 포함:
+```bash
+ruff check --fix app/ tests/ && black app/ tests/ && isort app/ tests/
+```
+**주의**: CI는 `app/`·`tests/`만 검사한다(`scripts/`는 제외이므로 scripts/ 위반은 무시해도 됨). 셋 다 "All checks passed / left unchanged"가 나와야 다음 단계로 간다.
+
 > ⚠️ 테스트가 임베딩/리랭커 모델을 로드한다면 CPU(맥)에서 무거울 수 있다(CLAUDE.md L1). 무거운 측정성 테스트는 피하고, 최소 `python -c "from app.web.app import app"` import check은 항상 통과시킨다.
 
 ## 2. Version bump
