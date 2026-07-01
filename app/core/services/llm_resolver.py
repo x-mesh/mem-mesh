@@ -15,7 +15,7 @@ Precedence for each value: DB app_config (``<ns>.llm_<field>``) > env-backed
 Settings field (``<ns>_llm_<field>``) > default.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 # Services that can reuse the shared chat LLM or bring their own.
 _OWNABLE = ("relay", "reconcile")
