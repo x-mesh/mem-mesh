@@ -58,6 +58,31 @@ if printf '%s' "$RESPONSE" | grep -qF -e '<task-notification>' -e '</task-notifi
   exit 0
 fi
 
+# Noise guard: skip only the raw Kiro hook envelope. The raw-input fallback above
+# dumps it verbatim when no response field could be extracted; it carries no
+# assistant content, only transport metadata (hook_event_name/cwd/...). Genuine
+# assistant output that happens to be JSON — panel verdicts, code-review findings —
+# holds real, FTS-searchable text and MUST be saved ("Kiro's LLM handles filtering").
+if printf '%s' "$RESPONSE" | jq -e 'type == "object" and has("hook_event_name")' >/dev/null 2>&1; then
+  mem_mesh_log "response" "skip" "hook-envelope"
+  exit 0
+fi
+
+# Content-quality guard: some clients (notably agy/Antigravity) fire Stop on every
+# turn, so trivial output that clears the 100-char length gate still reaches here.
+# Two precise, low-false-positive skips — they must NOT catch genuine responses
+# (prose, code, panel verdicts, review findings), only obvious non-work output:
+#   1. Repetitive padding — a run of 30+ identical chars (e.g. a probe padded "xxxx…").
+#   2. Model-identity banner — a short session greeting like "You are currently using <model>…".
+if printf '%s' "$RESPONSE" | jq -Rrse 'test("(.)\\1{29,}")' >/dev/null 2>&1; then
+  mem_mesh_log "response" "skip" "low-value-padding"
+  exit 0
+fi
+if [ ${#RESPONSE} -lt 300 ] && printf '%s' "$RESPONSE" | head -c 160 | grep -qiE "^[[:space:]]*[*_ ]*you('re| are) (currently )?using[[:space:]*_]+(gemini|gpt|chatgpt|claude|opus|sonnet|haiku)"; then
+  mem_mesh_log "response" "skip" "model-banner"
+  exit 0
+fi
+
 PROJECT_DIR="$(mem_mesh_project_id_from_input "$RAW_INPUT")"
 [ -n "$PROJECT_DIR" ] || PROJECT_DIR="unknown"
 

@@ -604,6 +604,70 @@ def test_kiro_stop_extracts_cli_assistant_response(
     assert expected in state["last_payload"]["content"]
 
 
+def test_kiro_stop_skips_repetitive_padding(tmp_path: Path, hook_api_server) -> None:
+    """A response padded with a long run of one char (a probe) must not be saved."""
+    state, url = hook_api_server
+    script = _render_and_write(
+        tmp_path,
+        KIRO_STOP_HOOK_TEMPLATE,
+        source_tag="agy-hook",
+        client_tag="agy",
+        ide_tag="agy",
+        project_id="test-project",
+    )
+    padded = "Stop hook flat-shape verification. " + ("x" * 170)
+
+    result = _run_hook(script, {}, env={"KIRO_RESULT": padded}, api_url=url)
+
+    assert result.returncode == 0
+    assert "last_payload" not in state
+
+
+def test_kiro_stop_skips_model_banner(tmp_path: Path, hook_api_server) -> None:
+    """A short model-identity greeting (agy fires Stop on it) must not be saved."""
+    state, url = hook_api_server
+    script = _render_and_write(
+        tmp_path,
+        KIRO_STOP_HOOK_TEMPLATE,
+        source_tag="agy-hook",
+        client_tag="agy",
+        ide_tag="agy",
+        project_id="test-project",
+    )
+    banner = (
+        "You are currently using **Gemini 3.1 Pro**. Let me know if you have "
+        "any questions or tasks you'd like to work on!"
+    )
+
+    result = _run_hook(script, {}, env={"KIRO_RESULT": banner}, api_url=url)
+
+    assert result.returncode == 0
+    assert "last_payload" not in state
+
+
+def test_kiro_stop_saves_json_findings(tmp_path: Path, hook_api_server) -> None:
+    """A genuine JSON response (review findings) is not the hook envelope: save it."""
+    state, url = hook_api_server
+    script = _render_and_write(
+        tmp_path,
+        KIRO_STOP_HOOK_TEMPLATE,
+        source_tag="kiro-hook",
+        client_tag="kiro",
+        ide_tag="kiro",
+        project_id="test-project",
+    )
+    findings = (
+        '{"findings":[{"severity":"medium","file":"internal/resolve/resolver.go",'
+        '"line":421,"claim":"AI failure silently skips the file",'
+        '"evidence":"the fallthrough leaves resolutions empty"}]}'
+    )
+
+    result = _run_hook(script, {}, env={"KIRO_RESULT": findings}, api_url=url)
+
+    assert result.returncode == 0
+    assert findings in state["last_payload"]["content"]
+
+
 # ---------------------------------------------------------------------------
 # user-prompt-submit tests
 # ---------------------------------------------------------------------------
