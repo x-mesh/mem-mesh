@@ -424,6 +424,7 @@ class ChatService:
                     {"role": "user", "content": user},
                 ],
                 max_tokens=max_tokens,
+                temperature=0.2,  # structural rewrite → low temp for consistency
             )
         except ChatProviderError:
             raise

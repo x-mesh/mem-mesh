@@ -78,6 +78,7 @@ class RelayEnricher:
         http_client: Any = None,
         timeout: float = 30.0,
         max_tokens: int = 1200,
+        temperature: float = 0.2,
     ):
         if not api_key:
             raise ValueError(f"api_key is required for {type(self).__name__}")
@@ -88,6 +89,10 @@ class RelayEnricher:
         self.http_client = http_client
         self.timeout = timeout
         self.max_tokens = max_tokens
+        # Low temperature by default: enrich/digest/reconcile are structural
+        # JSON extraction, not creative writing — determinism keeps the same
+        # memory from producing wildly different title/abstract each run.
+        self.temperature = temperature
 
     def _normalize_base_url(self, base_url: str) -> str:
         """Hook for provider-specific endpoint normalization."""
@@ -100,9 +105,27 @@ class RelayEnricher:
         payload = await self._complete(
             user_content=(
                 _enrich_language_directive(language)
-                + "Extract a relay per-item enrichment JSON object from this "
-                "single memory. Return only JSON with keys: title, abstract, "
-                "tags, display_kind, problem, resolution, lesson, confidence.\n\n"
+                + "Extract a per-item enrichment JSON object from the single "
+                "memory below. Ground every field in the memory's actual "
+                "content — do not invent facts. Return ONLY a JSON object with "
+                "exactly these keys:\n"
+                '- "title": one concise line, ≤ 80 chars, no trailing period. '
+                "The single most specific thing this memory is about.\n"
+                '- "abstract": 2–3 plain sentences (≤ 400 chars) summarizing '
+                "what it says and why it matters. No preamble like "
+                '"This memory...".\n'
+                '- "tags": 3–7 lowercase kebab-case topic tags (e.g. '
+                '"vector-search"), most specific first, no duplicates, no "#".\n'
+                '- "display_kind": exactly one of "decision", "bug", '
+                '"incident", "idea", "code_snippet", "reference", "task", '
+                '"note" — the best fit for the memory\'s nature.\n'
+                '- "problem": the problem/question it addresses, or null.\n'
+                '- "resolution": the outcome/answer/decision, or null.\n'
+                '- "lesson": the reusable takeaway, or null.\n'
+                '- "confidence": 0.0–1.0, how clearly the memory supports the '
+                "above (low when the content is vague/partial).\n"
+                "Use null (not empty strings) for fields the memory doesn't "
+                "support. Keys, tags, and display_kind are always English.\n\n"
                 f"<memory>\n{content}\n</memory>"
             )
         )
@@ -258,13 +281,16 @@ class RelayEnricher:
         tools: Optional[list] = None,
         tool_choice: Optional[Any] = None,
         max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
     ) -> ChatResult:
         """Run one chat turn.
 
         ``messages`` is a normalized list of ``{"role", "content"}`` where role
         is one of ``system|user|assistant``. ``tools`` (when given) must already
         be in this provider's tool shape — render them via the chat tool
-        registry. Returns a normalized :class:`ChatResult`.
+        registry. ``temperature`` overrides the provider default (leave None for
+        conversational chat; pass a low value for structural JSON tasks like
+        refine). Returns a normalized :class:`ChatResult`.
         """
 
         if not messages:
@@ -276,6 +302,7 @@ class RelayEnricher:
                 tools=tools,
                 tool_choice=tool_choice,
                 max_tokens=max_tokens or self.max_tokens,
+                temperature=temperature,
             ),
         )
         return self._parse_chat(raw)
@@ -290,6 +317,7 @@ class RelayEnricher:
         tools: Optional[list],
         tool_choice: Optional[Any],
         max_tokens: int,
+        temperature: Optional[float] = None,
     ) -> dict:
         raise NotImplementedError
 
@@ -370,6 +398,7 @@ class AnthropicRelayEnricher(RelayEnricher):
             json_body={
                 "model": self.model,
                 "max_tokens": self.max_tokens,
+                "temperature": self.temperature,
                 "system": RELAY_ENRICHER_SYSTEM_PROMPT,
                 "messages": [{"role": "user", "content": user_content}],
             },
@@ -392,6 +421,7 @@ class AnthropicRelayEnricher(RelayEnricher):
         tools: Optional[list],
         tool_choice: Optional[Any],
         max_tokens: int,
+        temperature: Optional[float] = None,
     ) -> dict:
         # Anthropic carries the system prompt at the top level, not as a role,
         # and tool results are a `user` turn whose content is tool_result blocks
@@ -437,6 +467,8 @@ class AnthropicRelayEnricher(RelayEnricher):
             "max_tokens": max_tokens,
             "messages": convo,
         }
+        if temperature is not None:
+            body["temperature"] = temperature
         if system_parts:
             body["system"] = "\n\n".join(p for p in system_parts if p)
         if tools:
@@ -579,6 +611,7 @@ class OpenAIRelayEnricher(RelayEnricher):
             json_body={
                 "model": self.model,
                 "max_tokens": self.max_tokens,
+                "temperature": self.temperature,
                 "messages": [
                     {"role": "system", "content": RELAY_ENRICHER_SYSTEM_PROMPT},
                     {"role": "user", "content": user_content},
@@ -613,6 +646,7 @@ class OpenAIRelayEnricher(RelayEnricher):
         tools: Optional[list],
         tool_choice: Optional[Any],
         max_tokens: int,
+        temperature: Optional[float] = None,
     ) -> dict:
         # OpenAI keeps the system prompt as a message role. Tool calls live on
         # the assistant message; each tool result is its own `tool` message.
@@ -655,6 +689,8 @@ class OpenAIRelayEnricher(RelayEnricher):
             "max_tokens": max_tokens,
             "messages": out,
         }
+        if temperature is not None:
+            body["temperature"] = temperature
         if tools:
             body["tools"] = tools
             if tool_choice is not None:
