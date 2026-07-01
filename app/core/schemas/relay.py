@@ -30,6 +30,12 @@ class RelayIngestRequest(BaseModel):
     links: List[str] = Field(default_factory=list)
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    # Optional pre-baked enrichment (from the sender's local "Enrich" button,
+    # app.core.services.enrich_store.EnrichmentStore) carried along so the hub
+    # doesn't need its own relay item-worker/LLM to show a title/abstract.
+    title: Optional[str] = Field(default=None, max_length=500)
+    abstract: Optional[str] = Field(default=None, max_length=4000)
+    display_kind: Optional[str] = Field(default=None, max_length=100)
 
     @field_validator("tags", "links")
     @classmethod

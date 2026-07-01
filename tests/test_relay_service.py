@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from app.core.database.base import Database
 from app.core.database.models import Memory
 from app.core.schemas.relay import RelayIngestRequest, RelaySettingsUpdateRequest
+from app.core.services.enrich_store import EnrichmentStore
 from app.core.services.relay import (
     RelayDeliveryConflict,
     RelayHTTPClient,
@@ -552,6 +553,102 @@ async def test_reshare_after_content_edit_does_not_collide():
         )
         second_outbox_id = await service.enqueue_memory_share(
             edited, source_node_id="node-1", target_hub="https://hub.local"
+        )
+
+        first_row = await db.fetchone(
+            "SELECT idempotency_key FROM relay_outbox WHERE id = ?",
+            (first_outbox_id,),
+        )
+        second_row = await db.fetchone(
+            "SELECT idempotency_key FROM relay_outbox WHERE id = ?",
+            (second_outbox_id,),
+        )
+        assert first_row["idempotency_key"] != second_row["idempotency_key"]
+
+
+@pytest.mark.asyncio
+async def test_enqueue_memory_share_carries_local_enrichment_to_hub():
+    """The dashboard 'Enrich' button's title/abstract (EnrichmentStore,
+    separate from Memory.content) must ride along through share -> ingest and
+    land in the hub's OWN EnrichmentStore, keyed by the MATERIALIZED memory id
+    (relay:<current_id>) — that's what the memory-detail page's 'AI
+    enrichment' box actually reads, not relay_item_enrichment."""
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        await service.register_identity(
+            token="relay-token",
+            user_id="user-1",
+            source_node_id="sender-node",
+            display_name="Sender",
+        )
+
+        memory = Memory(
+            id="memory-1",
+            content="Original content.",
+            content_hash="hash-v1",
+            project_id="relay",
+            category="decision",
+            source="test",
+            embedding=b"123",
+            updated_at="2026-06-25T00:01:00Z",
+        )
+        await EnrichmentStore(db).upsert(
+            memory_id="memory-1",
+            title="A generated title",
+            abstract="A generated abstract.",
+            tags=["decision"],
+            display_kind="decision",
+            model="test-model",
+        )
+
+        await service.enqueue_memory_share(
+            memory, source_node_id="sender-node", target_hub="https://hub.local"
+        )
+        job = await service.claim_outbox("w1", lease_seconds=30)
+        assert job.payload.title == "A generated title"
+        assert job.payload.abstract == "A generated abstract."
+
+        result = await service.ingest("relay-token", job.payload)
+        assert result.applied_to_current is True
+
+        materialized_id = f"relay:{result.current_memory_id}"
+        enrichment = await EnrichmentStore(db).get(materialized_id)
+        assert enrichment is not None
+        assert enrichment["title"] == "A generated title"
+        assert enrichment["abstract"] == "A generated abstract."
+
+
+@pytest.mark.asyncio
+async def test_reshare_after_enrich_only_does_not_collide():
+    """Enriching without touching content doesn't bump memory.updated_at, so
+    the version must still advance from EnrichmentStore's own timestamp —
+    otherwise re-sharing after Enrich reuses the same idempotency_key with a
+    now-different payload hash (title/abstract included) and collides,
+    exactly like the content-edit case."""
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+
+        memory = Memory(
+            id="memory-1",
+            content="Same content the whole time.",
+            content_hash="hash-v1",
+            project_id="relay",
+            category="decision",
+            source="test",
+            embedding=b"123",
+            updated_at="2026-06-25T00:01:00Z",
+        )
+        first_outbox_id = await service.enqueue_memory_share(
+            memory, source_node_id="node-1", target_hub="https://hub.local"
+        )
+
+        await EnrichmentStore(db).upsert(
+            memory_id="memory-1", title="New title", abstract="New abstract."
+        )
+        second_outbox_id = await service.enqueue_memory_share(
+            memory, source_node_id="node-1", target_hub="https://hub.local"
         )
 
         first_row = await db.fetchone(

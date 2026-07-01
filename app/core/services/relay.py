@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional, Sequence, Union
 
 from ..database.base import Database
 from ..database.models import Memory
+from .enrich_store import EnrichmentStore
 from ..errors import (
     RelayDeliveryConflict,
 )
@@ -1519,9 +1520,27 @@ class RelayService:
         reusing a stale one and colliding on the hub (RelayIdempotencyConflict:
         "different payload hash"). Pass an explicit value only to pin a
         specific version.
+
+        If the memory has local enrichment (the dashboard "Enrich" button,
+        stored separately in EnrichmentStore/memory_enrichment — never part of
+        Memory.content), its title/abstract/display_kind ride along in the
+        payload so the hub shows them without running its own LLM enrichment.
+        Enriching without touching content doesn't bump Memory.updated_at, so
+        the auto-derived version also considers the enrichment's own
+        timestamp — otherwise a content-unchanged re-share after enriching
+        would reuse the same idempotency_key with a now-different payload hash
+        and hit the exact conflict this auto-versioning was built to avoid.
         """
+        source_memory_id = str(getattr(memory, "id"))
+        enrichment = await EnrichmentStore(self.db).get(source_memory_id)
+
         if source_version is None:
             source_version = self._auto_share_version(memory)
+            if enrichment and enrichment.get("created_at"):
+                source_version = max(
+                    source_version,
+                    self._version_from_timestamp(enrichment["created_at"]),
+                )
 
         kind = str(getattr(memory, "category", "") or "")
         if kind in self.DENYLISTED_KINDS:
@@ -1544,7 +1563,14 @@ class RelayService:
         if redact_secrets(content) != content:
             raise RelaySecretBlocked("relay payload contains a high-confidence secret")
 
-        source_memory_id = str(getattr(memory, "id"))
+        title = str(enrichment.get("title") or "") if enrichment else ""
+        abstract = str(enrichment.get("abstract") or "") if enrichment else ""
+        display_kind = str(enrichment.get("display_kind") or "") if enrichment else ""
+        if title and redact_secrets(title) != title:
+            raise RelaySecretBlocked("relay payload contains a high-confidence secret")
+        if abstract and redact_secrets(abstract) != abstract:
+            raise RelaySecretBlocked("relay payload contains a high-confidence secret")
+
         project_key = str(getattr(memory, "project_id", "") or "default")
         tags = self._memory_tags(memory)
         payload_hash = self._hash_payload(
@@ -1557,6 +1583,9 @@ class RelayService:
                 "status": status,
                 "content": content,
                 "tags": tags,
+                "title": title,
+                "abstract": abstract,
+                "display_kind": display_kind,
             }
         )
         request = RelayIngestRequest(
@@ -1573,6 +1602,9 @@ class RelayService:
             content=None if event_type == "retract" else content,
             tags=tags,
             links=[],
+            title=None if event_type == "retract" else (title or None),
+            abstract=None if event_type == "retract" else (abstract or None),
+            display_kind=None if event_type == "retract" else (display_kind or None),
             created_at=getattr(memory, "created_at", None),
             updated_at=getattr(memory, "updated_at", None),
         )
@@ -1626,16 +1658,23 @@ class RelayService:
         )
 
     @staticmethod
+    def _version_from_timestamp(stamp: str) -> int:
+        """ISO timestamp -> epoch seconds, for deriving a monotonic
+        source_version from whichever thing changed (content or enrichment)."""
+        try:
+            normalized = str(stamp or "").replace("Z", "+00:00")
+            return int(datetime.fromisoformat(normalized).timestamp())
+        except ValueError:
+            return int(_epoch_now())
+
+    @staticmethod
     def _auto_share_version(memory: Any) -> int:
         """Monotonic source_version for an auto-shared event. Derived from the
         memory's updated_at epoch so each create/update produces a distinct
         idempotency_key (``…:v{version}:{event}``) instead of deduping."""
-        stamp = str(getattr(memory, "updated_at", "") or "")
-        try:
-            normalized = stamp.replace("Z", "+00:00")
-            return int(datetime.fromisoformat(normalized).timestamp())
-        except ValueError:
-            return int(_epoch_now())
+        return RelayService._version_from_timestamp(
+            getattr(memory, "updated_at", "")
+        )
 
     async def _auto_share_row(self, project_id: str) -> Optional[dict]:
         """Fetch the auto-share subscription row, tolerant of a relay schema
@@ -2878,6 +2917,20 @@ class RelayService:
             visible=bool(visible),
             now=now,
         )
+        # A personal node's local "Enrich" (EnrichmentStore, separate from
+        # Memory.content) rides along in the payload when present — store it
+        # against the MATERIALIZED memory id so the hub's existing "AI
+        # enrichment" UI (which reads EnrichmentStore, not relay_item_enrichment)
+        # picks it up without the hub running its own LLM enrichment pass.
+        if visible and (payload.title or payload.abstract):
+            await EnrichmentStore(self.db).upsert(
+                memory_id=self._materialized_memory_id(current_memory_id),
+                title=payload.title or "",
+                abstract=payload.abstract or "",
+                tags=payload.tags,
+                display_kind=payload.display_kind or "",
+                model="relay:sender-provided",
+            )
         return current_memory_id
 
     async def _sync_materialized_memory_locked(
