@@ -96,6 +96,8 @@ export class SettingsPage extends HTMLElement {
         </div>
       </div>
 
+      <!-- LLM & Relay: 2-column — Chat Assistant (left), Routing + Worker (right) -->
+      <div class="settings-2col">
       <!-- Chat Assistant -->
       <div class="settings-section" id="settings-chat">
         <div class="section-header">
@@ -150,6 +152,7 @@ export class SettingsPage extends HTMLElement {
         </div>
       </div>
 
+      <div class="settings-2col-stack">
       <!-- LLM Routing -->
       <div class="settings-section" id="settings-llm-routing">
         <div class="section-header">
@@ -191,6 +194,11 @@ export class SettingsPage extends HTMLElement {
         </div>
       </div>
 
+      </div><!-- .settings-2col-stack -->
+      </div><!-- .settings-2col -->
+
+      <!-- Embeddings & Data: 2-column — Embedding Status (left), Migration + Data Management (right) -->
+      <div class="settings-2col">
       <!-- Embedding Status -->
       <div class="settings-section">
         <div class="section-header">
@@ -213,6 +221,7 @@ export class SettingsPage extends HTMLElement {
         </div>
       </div>
 
+      <div class="settings-2col-stack">
       <!-- Migration -->
       <div class="settings-section">
         <div class="section-header">
@@ -263,6 +272,9 @@ export class SettingsPage extends HTMLElement {
           </div>
         </div>
       </div>
+
+      </div><!-- .settings-2col-stack -->
+      </div><!-- .settings-2col -->
 
       <!-- Rules Manager -->
       <div class="settings-section">
@@ -1451,6 +1463,26 @@ style.textContent = `
   overflow: hidden;
 }
 
+/* Generic 2-column settings group: a tall section (left) + a stack of shorter
+   sections (right). Collapses to a single column on narrow viewports. */
+.settings-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  align-items: start;
+  margin-bottom: var(--space-3);
+}
+.settings-2col > * { min-width: 0; }
+.settings-2col .settings-section { margin-bottom: 0; }
+.settings-2col-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+@media (max-width: 860px) {
+  .settings-2col { grid-template-columns: 1fr; }
+}
+
 .section-header {
   display: flex;
   align-items: center;
@@ -2239,10 +2271,26 @@ style.textContent = `
   margin-bottom: var(--space-1);
 }
 
+/* Client Setup & Security: lay the env-var status rows out in 2 columns (8 rows
+   -> 2x4) and the two action cards side by side on wide screens. The section is
+   scoped by #settings-access so it never touches the shared .data-actions used
+   by Data Management. Collapses to a single column when narrow. */
 .env-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px var(--space-6);
+}
+.env-list .env-warn { grid-column: 1 / -1; }
+#settings-access .settings-access-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+@media (max-width: 1080px) {
+  .env-list,
+  #settings-access .settings-access-actions {
+    grid-template-columns: 1fr;
+  }
 }
 
 .env-item {
