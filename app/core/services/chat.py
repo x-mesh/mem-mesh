@@ -523,10 +523,11 @@ class ChatService:
     ) -> dict:
         """Generate a grounded project overview from recent memory items.
 
-        ``items`` is a list of ``{id, category, title, abstract, has_problem,
-        has_resolution, created_at}`` (title/abstract from enrichment when
-        available, else a content snippet). One LLM call over the batch — a
-        summary, not a per-item loop. Low temperature for stable output.
+        ``items`` is a list of ``{id, category, title, abstract, created_at}``
+        (title/abstract from enrichment when available, else a content snippet).
+        The prompt leans on ``category`` (bug/incident/task) and the abstract to
+        infer unresolved issues. One LLM call over the batch — a summary, not a
+        per-item loop. Low temperature for stable output.
         """
         if not language:
             language, _ = await self._effective_setting_value(

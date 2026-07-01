@@ -24,6 +24,8 @@ import weakref
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from app.core.services.enrich_store import EnrichmentStore
+
 logger = logging.getLogger(__name__)
 
 _RECENT_LIMIT = 20
@@ -51,6 +53,10 @@ class OverviewService:
     async def ensure_schema(self) -> None:
         if self.db in OverviewService._schema_ready:
             return
+        # memory_enrichment is lazy-created by EnrichmentStore; _gather_items
+        # LEFT JOINs it, so guarantee it exists here (else 'no such table' 500
+        # on a DB that never ran enrichment — see curation.py's same-join guard).
+        await EnrichmentStore(self.db).ensure_schema()
         async with self.db.transaction():
             await self.db.execute("""
                 CREATE TABLE IF NOT EXISTS project_overview (
@@ -67,8 +73,10 @@ class OverviewService:
     async def _gather_items(self, project_id: str) -> tuple[list, str]:
         """Recent memories of a project as overview input + a source hash.
 
-        The hash covers each item's id + content_hash so the cached overview
-        goes stale exactly when the underlying memories change.
+        The hash covers every field fed to the LLM — id + content_hash plus
+        category and the enrichment title/abstract — so the cached overview
+        goes stale on any change that alters the input, including metadata-only
+        edits (category) and enrichment updates that leave content_hash intact.
         """
         rows = await self.db.fetchall(
             """
@@ -99,7 +107,10 @@ class OverviewService:
                     "created_at": str(r["created_at"] or ""),
                 }
             )
-            hash_parts.append(f"{r['id']}:{r['content_hash']}")
+            hash_parts.append(
+                f"{r['id']}:{r['content_hash']}:{r['category'] or ''}"
+                f":{r['e_title'] or ''}:{r['e_abstract'] or ''}"
+            )
         source_hash = hashlib.sha256("|".join(hash_parts).encode("utf-8")).hexdigest()
         return items, source_hash
 
