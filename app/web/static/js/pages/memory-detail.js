@@ -89,15 +89,23 @@ class MemoryDetailPage extends HTMLElement {
     this.addEventListener('memory-select', this.handleMemorySelect.bind(this));
     this.addEventListener('context-expand', this.handleContextExpand.bind(this));
     
-    // Listen for keyboard shortcuts
-    document.addEventListener('keydown', this.handleKeydown.bind(this));
+    // Listen for keyboard shortcuts. Store the bound reference so
+    // removeEventListener actually removes THIS listener on disconnect —
+    // `this.handleKeydown.bind(this)` creates a new function each call, so
+    // removing the unbound method left the document listener leaked and firing
+    // number-key navigation on other pages (e.g. Settings).
+    this._boundKeydown = this.handleKeydown.bind(this);
+    document.addEventListener('keydown', this._boundKeydown);
   }
-  
+
   /**
    * Remove event listeners
    */
   removeEventListeners() {
-    document.removeEventListener('keydown', this.handleKeydown);
+    if (this._boundKeydown) {
+      document.removeEventListener('keydown', this._boundKeydown);
+      this._boundKeydown = null;
+    }
   }
   
   /**
@@ -201,8 +209,16 @@ class MemoryDetailPage extends HTMLElement {
       }
     }
     
-    // 숫자 키로 관련 메모리 빠른 접근
-    if (event.key >= '1' && event.key <= '9' && !this.isEditing) {
+    // 숫자 키로 관련 메모리 빠른 접근 — 단, 입력 필드에 포커스가 있으면
+    // 무시(설정 페이지 등에서 숫자 입력이 페이지 이동으로 새지 않도록).
+    const t = event.target;
+    const inField =
+      t &&
+      (t.tagName === 'INPUT' ||
+        t.tagName === 'TEXTAREA' ||
+        t.tagName === 'SELECT' ||
+        t.isContentEditable);
+    if (event.key >= '1' && event.key <= '9' && !this.isEditing && !inField) {
       const index = parseInt(event.key) - 1;
       if (this.contextData && this.contextData[index]) {
         const memoryId = this.contextData[index].id;
