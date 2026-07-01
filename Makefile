@@ -17,6 +17,33 @@ DOCKER_PLATFORMS := linux/amd64,linux/arm64
 UVX := uvx
 UV_PKG := mem-mesh[server]
 
+# Dev DB path: a git worktree does not inherit the gitignored .env, so `make dev`
+# there would silently fall back to the shared per-user store. When this checkout
+# has no .env, pin a project-local DB instead; checkouts WITH a .env are left
+# untouched (the app loads MEM_MESH_DATABASE_PATH from it). Override any time with
+# `MEM_MESH_DATABASE_PATH=... make dev`.
+ifeq ($(wildcard .env),)
+export MEM_MESH_DATABASE_PATH ?= $(CURDIR)/data/dev.db
+MM_DB_SOURCE := worktree fallback (no .env)
+MM_DB_PATH := $(MEM_MESH_DATABASE_PATH)
+PORT ?= 8010
+PORT_ARG := --port $(PORT)
+MM_PORT_DISPLAY := $(PORT)
+else
+MM_DB_SOURCE := .env
+MM_DB_PATH := (resolved by app from .env)
+# Respect .env's MEM_MESH_SERVER_PORT: only force --port when PORT was set
+# explicitly (command line / environment), never from this in-Makefile default.
+PORT ?= 8000
+ifeq ($(origin PORT),file)
+PORT_ARG :=
+MM_PORT_DISPLAY := from .env (MEM_MESH_SERVER_PORT, default 8000)
+else
+PORT_ARG := --port $(PORT)
+MM_PORT_DISPLAY := $(PORT)
+endif
+endif
+
 help: ## Show this help message
 	@echo "mem-mesh - AI Memory Management System"
 	@echo ""
@@ -61,8 +88,12 @@ test-watch: ## Run tests in watch mode
 	@echo "✓ Test watch mode"
 
 run-api: ## Run FastAPI web server (development)
-	$(PYTHON) -m app.web --reload
-	@echo "✓ Web server running at http://localhost:8000"
+	@echo "▶ mem-mesh dev DB source : $(MM_DB_SOURCE)"
+	@echo "▶ mem-mesh dev DB path   : $(MM_DB_PATH)"
+	@echo "▶ mem-mesh dev port      : $(MM_PORT_DISPLAY)"
+	@test -z "$(MEM_MESH_DATABASE_PATH)" || mkdir -p "$(dir $(MEM_MESH_DATABASE_PATH))"
+	$(PYTHON) -m app.web --reload $(PORT_ARG)
+	@echo "✓ Web server running (port: $(MM_PORT_DISPLAY))"
 
 run-mcp: ## Run MCP stdio server
 	$(PYTHON) -m app.mcp_stdio

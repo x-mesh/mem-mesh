@@ -1330,13 +1330,38 @@ export class RelayPage extends HTMLElement {
       <button class="secondary-button" type="button" id="relay-copy-issued-token">Copy</button>
     `;
     target.querySelector('#relay-copy-issued-token')?.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(token);
+      if (await this.copyText(token)) {
         showToast('Relay token copied.', 'success');
-      } catch {
+      } else {
         showToast('Copy failed.', 'error');
       }
     });
+  }
+
+  async copyText(text) {
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        // fall through to legacy fallback below
+      }
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    let succeeded = false;
+    try {
+      succeeded = document.execCommand('copy');
+    } catch {
+      succeeded = false;
+    }
+    document.body.removeChild(textarea);
+    return succeeded;
   }
 
   renderMetric(label, value) {
