@@ -18,7 +18,32 @@ export class CurationPage extends HTMLElement {
     this.innerHTML = this._skeleton();
     this._injectStyles();
     this.addEventListener('click', (e) => this._onClick(e));
+    this._applyDeepLink();
     this.loadData();
+  }
+
+  /**
+   * Honor /curation?tab=...&filter=... — the project-card progress bar links
+   * here so a stuck/failing batch can be investigated in one click.
+   */
+  _applyDeepLink() {
+    let params;
+    try {
+      params = new URLSearchParams(window.location.search);
+    } catch (_) {
+      return;
+    }
+    const filter = params.get('filter');
+    if (filter && this.querySelector(`.cur-filter-btn[data-filter="${filter}"]`)) {
+      this._activityFilter = filter;
+      this.querySelectorAll('.cur-filter-btn').forEach((b) =>
+        b.classList.toggle('cur-filter-active', b.dataset.filter === filter)
+      );
+    }
+    const tab = params.get('tab');
+    if (tab && this.querySelector(`.cur-tab-btn[data-tab="${tab}"]`)) {
+      this._switchTab(tab);
+    }
   }
 
   disconnectedCallback() {

@@ -31,6 +31,21 @@ from app.core.services.relay_worker import (
             '{"content":"code: if (x) { y() }","rationale":"ok"}',
             {"content", "rationale"},
         ),
+        (
+            # Fenced response whose JSON string VALUE itself contains a code
+            # fence (memories carry fenced code blocks; refine echoes them
+            # back) — the non-greedy fence extract truncates, the balanced
+            # scan over the original text must salvage it.
+            '```json\n{"content":"use:\\n```bash\\naic config get x\\n```\\n",'
+            '"category":"code_snippet"}\n```',
+            {"content", "category"},
+        ),
+        (
+            # Literal (unescaped) newline inside a string value —
+            # strict=False parsing must tolerate it.
+            '{"content":"line one\nline two","summary":"s"}',
+            {"content", "summary"},
+        ),
     ],
 )
 def test_extract_json_object_salvages_wrapped_json(text, expected):

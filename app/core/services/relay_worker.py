@@ -221,22 +221,34 @@ class RelayEnricher:
         if not text:
             raise ValueError("relay LLM response did not contain text")
 
+        # Candidate readings, most-literal first. The fenced extract uses a
+        # non-greedy match, so a ``` INSIDE a JSON string value (memories often
+        # carry fenced code blocks, and refine echoes them back) truncates it —
+        # never let that candidate be the only attempt. The string-aware
+        # balanced scan over the ORIGINAL text is the reliable fallback: it
+        # skips braces/fences inside string literals. A truncated response
+        # (never closes) still fails every candidate → caller retries.
+        candidates = [text]
         fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.DOTALL)
         if fenced:
-            text = fenced.group(1).strip()
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            # Salvage the outermost balanced {...} even when the model wrapped
-            # it in prose / leading chatter (common on rewrite-style prompts).
-            # A truncated response (never closes) still fails → caller retries.
-            snippet = RelayEnricher._first_json_object(text)
-            if snippet is None:
-                raise ValueError("relay LLM response was not valid JSON")
+            candidates.append(fenced.group(1).strip())
+        salvaged = RelayEnricher._first_json_object(text)
+        if salvaged is not None:
+            candidates.append(salvaged)
+
+        data = None
+        for candidate in candidates:
+            if not candidate:
+                continue
             try:
-                data = json.loads(snippet)
-            except json.JSONDecodeError as exc:
-                raise ValueError("relay LLM response was not valid JSON") from exc
+                # strict=False: tolerate literal newlines/tabs inside string
+                # values — models regularly emit them in rewrite-style output.
+                data = json.loads(candidate, strict=False)
+                break
+            except json.JSONDecodeError:
+                continue
+        if data is None:
+            raise ValueError("relay LLM response was not valid JSON")
         if not isinstance(data, dict):
             raise ValueError("relay LLM response JSON must be an object")
         return data

@@ -268,6 +268,20 @@ class ProjectsPage extends HTMLElement {
       return;
     }
 
+    // Clicking the progress area (anywhere but Retry) means "what's going on
+    // with this batch?" — go to Curation → Activity, not the memories list.
+    const maintProgress = event.target.closest('.maint-progress');
+    if (maintProgress) {
+      event.stopPropagation();
+      const url = '/curation?tab=activity&filter=maintenance';
+      if (window.app && window.app.router) {
+        window.app.router.navigate(url);
+      } else {
+        window.location.href = url;
+      }
+      return;
+    }
+
     const autoShareBtn = event.target.closest('.relay-autoshare-btn');
     if (autoShareBtn) {
       event.stopPropagation();
@@ -772,7 +786,7 @@ class ProjectsPage extends HTMLElement {
         </div>`;
     }).filter(Boolean).join('');
     if (!rows) return '';
-    return `<div class="maint-progress" data-project-id="${this._escapeHtml(projectId)}">${rows}</div>`;
+    return `<div class="maint-progress" data-project-id="${this._escapeHtml(projectId)}" title="View batch details in Curation → Activity">${rows}</div>`;
   }
 
   /**
@@ -1341,6 +1355,13 @@ style.textContent = `
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
+    cursor: pointer;
+    border-radius: var(--border-radius);
+    padding: 2px 4px;
+  }
+
+  .maint-progress:hover {
+    background: var(--bg-tertiary);
   }
 
   .maint-progress-row {
