@@ -408,3 +408,30 @@ class TestUnifiedSearchIdLookup:
 
         miss = await unified_search_service.search(query=prefix, project_id="proj-b")
         assert all(r.id != mem_id for r in miss.results)
+
+    @pytest.mark.asyncio
+    async def test_id_embedded_in_prose_is_found(
+        self, unified_search_service, memory_service
+    ):
+        """Tools report ids embedded in a sentence ('mem-mesh f9732f1e'), not
+        as a bare query — pasting the whole message must still resolve it."""
+        mem_id = await self._seed_one(memory_service)
+        prefix = mem_id[:8]
+
+        response = await unified_search_service.search(
+            query=f"제안 저장 완료(mem-mesh {prefix}). 어느 Phase부터 구현할지 정해주면 진행한다."
+        )
+
+        assert [r.id for r in response.results] == [mem_id]
+
+    @pytest.mark.asyncio
+    async def test_id_substring_inside_longer_word_not_extracted(
+        self, unified_search_service, memory_service
+    ):
+        """An 8-hex run glued to other word characters (not a standalone
+        token) must not be sliced out and used as an id lookup."""
+        await self._seed_one(memory_service)
+
+        response = await unified_search_service.search(query="xdeadbeefx")
+
+        assert all(r.id != "deadbeef" for r in response.results)

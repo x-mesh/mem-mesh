@@ -535,9 +535,12 @@ class MaintenanceService:
         (``last_error`` is kept for traceability — a successful run clears it in
         ``_finish``). Rows whose (memory, operation) already has a live
         pending/processing job are skipped: requeueing them would violate the
-        ``idx_maintenance_queue_live`` partial unique index. Optional
-        ``operation`` / ``project_id`` / ``job_id`` narrow the scope. Returns
-        the number requeued.
+        ``idx_maintenance_queue_live`` partial unique index. For the same reason,
+        a bulk retry requeues only ONE dead_letter per (memory, operation) — the
+        newest — since flipping two duplicates to ``pending`` in a single UPDATE
+        would itself collide on that index (IntegrityError → whole retry rolls
+        back). Older duplicates stay dead-lettered. Optional ``operation`` /
+        ``project_id`` / ``job_id`` narrow the scope. Returns the number requeued.
         """
         await self.ensure_schema()
         clauses = ["status = 'dead_letter'"]
@@ -551,6 +554,17 @@ class MaintenanceService:
         if job_id:
             clauses.append("id = ?")
             where_params.append(job_id)
+        else:
+            # Bulk retry: at most one row per (memory, operation) may go live at
+            # once, so pick the newest dead_letter in each group and leave the
+            # rest. (An explicit job_id retry is a single row → no collision.)
+            clauses.append(
+                "id = (SELECT d.id FROM maintenance_queue d "
+                "WHERE d.memory_id = maintenance_queue.memory_id "
+                "AND d.operation = maintenance_queue.operation "
+                "AND d.status = 'dead_letter' "
+                "ORDER BY d.updated_at DESC, d.id DESC LIMIT 1)"
+            )
         clauses.append(
             "NOT EXISTS (SELECT 1 FROM maintenance_queue live "
             "WHERE live.memory_id = maintenance_queue.memory_id "

@@ -37,9 +37,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# A query that looks like a memory id: at least the 8-hex short form that tools
-# print (e.g. "mem-mesh f9732f1e"), optionally continuing toward a full UUID.
-_MEMORY_ID_QUERY_RE = re.compile(r"^[0-9a-fA-F]{8}[0-9a-fA-F-]{0,28}$")
+# A memory-id-shaped token: 8-36 hex/hyphen chars (the short prefix tools print,
+# up to a full UUID), bounded so it isn't a slice of a longer word/identifier.
+# Matched with .search (not .fullmatch) — tools print ids embedded in prose
+# ("mem-mesh f9732f1e" or a full sentence around it), not as a bare query.
+_MEMORY_ID_QUERY_RE = re.compile(r"(?<![\w-])[0-9a-fA-F]{8}[0-9a-fA-F-]{0,28}(?![\w-])")
 
 
 class UnifiedSearchService:
@@ -268,16 +270,20 @@ class UnifiedSearchService:
         query = query.replace("+", " ").strip() if query else ""
         original_query = query
 
-        # 0. Memory-id lookup: tools surface short hex ids ("mem-mesh f9732f1e")
-        # and pasting one into search must find that memory directly — FTS/vector
-        # can't match an id. Only returns when the prefix actually hits; an
-        # id-looking string that matches nothing falls through to normal search.
-        if query and _MEMORY_ID_QUERY_RE.fullmatch(query):
-            id_response = await self._search_by_id_prefix(
-                query, project_id=project_id, limit=limit
-            )
-            if id_response is not None:
-                return id_response
+        # 0. Memory-id lookup: tools surface short hex ids embedded in prose
+        # ("제안 저장 완료(mem-mesh f9732f1e)"), not as a bare query — pasting the
+        # whole message must still find that memory, so search for an id-shaped
+        # token anywhere in the query rather than requiring the query to BE one.
+        # FTS/vector can't match an id. Only returns when the prefix actually
+        # hits; an id-looking token that matches nothing falls through below.
+        if query:
+            id_match = _MEMORY_ID_QUERY_RE.search(query)
+            if id_match:
+                id_response = await self._search_by_id_prefix(
+                    id_match.group(0), project_id=project_id, limit=limit
+                )
+                if id_response is not None:
+                    return id_response
 
         # 1. Intent analysis (when quality feature is enabled)
         intent = None

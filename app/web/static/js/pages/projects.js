@@ -808,9 +808,16 @@ class ProjectsPage extends HTMLElement {
     });
   }
 
-  /** Start the 3s progress poll if not already running (idempotent). */
+  /**
+   * Start the 3s progress poll if not already running/in-flight (idempotent).
+   * ``_maintPollBusy`` (not just the timer handle) guards this: the timer is
+   * cleared at the START of each tick before the awaited fetch, so without a
+   * separate busy flag a call landing mid-fetch (e.g. right after queueing a
+   * new batch) would pass the timer check and spawn a second concurrent loop.
+   */
   _startMaintenancePoll() {
-    if (this._maintPollTimer) return;
+    if (this._maintPollTimer || this._maintPollBusy) return;
+    this._maintPollFailures = 0;
     this._pollMaintenanceStatus();
   }
 
@@ -825,24 +832,35 @@ class ProjectsPage extends HTMLElement {
    * One poll tick: fetch all projects' queue counts in a single request and
    * reschedule only while something is still active — the poll terminates
    * itself when every batch has drained (recursive setTimeout, no overlap).
+   * A transient fetch failure must NOT be mistaken for "nothing active" (that
+   * would silently stop the poll on the very first hiccup) — it keeps polling
+   * up to a few consecutive failures before giving up.
    */
   async _pollMaintenanceStatus() {
     this._maintPollTimer = null;
     if (!this.isConnected) return;
+    this._maintPollBusy = true;
     const api = window.app?.apiClient;
-    if (!api) return;
-    if (!document.hidden) {
+    let anyActive = true; // stay alive unless a successful poll proves otherwise
+    if (api && !document.hidden) {
       try {
         // Status polls must bypass APIClient's permanent GET cache.
         api.invalidateCache?.('/maintenance/status');
         const res = await api.get('/maintenance/status?by_project=true');
         this._maintByProject = res?.queue_by_project || {};
         this._updateMaintProgressNodes();
-      } catch (_) { /* transient — retry on the next tick */ }
+        this._maintPollFailures = 0;
+        anyActive = Object.values(this._maintByProject || {}).some((ops) =>
+          Object.values(ops).some((c) => (c.pending || 0) + (c.processing || 0) > 0)
+        );
+      } catch (_) {
+        this._maintPollFailures = (this._maintPollFailures || 0) + 1;
+        // Give up after repeated failures — a permanently broken endpoint
+        // shouldn't poll forever; queueing a new batch restarts the poll.
+        anyActive = this._maintPollFailures < 5;
+      }
     }
-    const anyActive = Object.values(this._maintByProject || {}).some((ops) =>
-      Object.values(ops).some((c) => (c.pending || 0) + (c.processing || 0) > 0)
-    );
+    this._maintPollBusy = false;
     if (anyActive && this.isConnected) {
       this._maintPollTimer = setTimeout(() => this._pollMaintenanceStatus(), 3000);
     }

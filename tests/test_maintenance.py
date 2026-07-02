@@ -323,6 +323,35 @@ async def test_retry_skips_dead_letter_with_live_duplicate():
 
 
 @pytest.mark.asyncio
+async def test_bulk_retry_requeues_one_per_duplicate_group_without_error():
+    """Two dead_letter rows can share (memory_id, operation) — e.g. re-enqueued
+    with force=True after the first dead-lettered. A bulk retry flipping BOTH
+    to pending in one UPDATE would itself violate idx_maintenance_queue_live
+    (IntegrityError, whole retry rolled back, nothing requeued). Only the
+    newest of each duplicate group should go live; the rest stay dead_letter."""
+    async with _temp_db() as db:
+        svc = MaintenanceService(db, max_attempts=1)
+        await svc.ensure_schema()
+        await _add_memory(db, "m1")
+        await svc.enqueue_project(
+            project_id="proj", operations=["improve"], force=False
+        )
+        await _dead_letter_all(db, svc)
+        # Re-enqueue + dead-letter again → a second dead_letter row for the
+        # SAME (memory_id, operation).
+        await svc.enqueue_project(project_id="proj", operations=["improve"], force=True)
+        await _dead_letter_all(db, svc)
+        counts = await svc.status_counts()
+        assert counts["improve"] == {"dead_letter": 2}
+
+        retried = await svc.retry_dead_letters()  # must not raise IntegrityError
+
+        assert retried == 1
+        counts = await svc.status_counts()
+        assert counts["improve"] == {"dead_letter": 1, "pending": 1}
+
+
+@pytest.mark.asyncio
 async def test_status_counts_project_scope():
     async with _temp_db() as db:
         svc = MaintenanceService(db)

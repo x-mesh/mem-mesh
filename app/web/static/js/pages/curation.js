@@ -33,16 +33,27 @@ export class CurationPage extends HTMLElement {
     } catch (_) {
       return;
     }
+    // Compare dataset values in JS rather than interpolating the URL param
+    // into a querySelector string — an unescaped value there (e.g. a `"]`
+    // sequence) is a selector-syntax break, not just a lookup miss.
     const filter = params.get('filter');
-    if (filter && this.querySelector(`.cur-filter-btn[data-filter="${filter}"]`)) {
-      this._activityFilter = filter;
-      this.querySelectorAll('.cur-filter-btn').forEach((b) =>
-        b.classList.toggle('cur-filter-active', b.dataset.filter === filter)
+    if (filter) {
+      const known = Array.from(this.querySelectorAll('.cur-filter-btn')).some(
+        (b) => b.dataset.filter === filter
       );
+      if (known) {
+        this._activityFilter = filter;
+        this.querySelectorAll('.cur-filter-btn').forEach((b) =>
+          b.classList.toggle('cur-filter-active', b.dataset.filter === filter)
+        );
+      }
     }
     const tab = params.get('tab');
-    if (tab && this.querySelector(`.cur-tab-btn[data-tab="${tab}"]`)) {
-      this._switchTab(tab);
+    if (tab) {
+      const known = Array.from(this.querySelectorAll('.cur-tab-btn')).some(
+        (b) => b.dataset.tab === tab
+      );
+      if (known) this._switchTab(tab);
     }
   }
 
