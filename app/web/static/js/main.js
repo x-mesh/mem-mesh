@@ -33,6 +33,7 @@ import { AlertPanel } from './components/alert-panel.js';
 // Import chart components
 import './components/chroma-charts.js';
 import './components/chat-widget.js';
+import './components/notification-center.js';
 
 // Import pages
 import { DashboardPage } from './pages/dashboard.js';
@@ -105,6 +106,13 @@ class App {
 
       // Mount the floating chat assistant once, globally across all pages
       this.mountChatWidget();
+
+      // Global notification center: memory/pin/relay events toast on EVERY
+      // page and accumulate in one history panel (bell, bottom-left) — the
+      // per-page listeners only update their own lists.
+      if (!document.querySelector('notification-center')) {
+        document.body.appendChild(document.createElement('notification-center'));
+      }
 
       // P5: 전역 WebSocket 연결 — 모든 페이지에서 실시간 업데이트 수신
       wsClient.connect().catch(err => {

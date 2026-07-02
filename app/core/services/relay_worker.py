@@ -916,6 +916,10 @@ class RelayWorker:
         maintenance_service: Optional[Any] = None,
         chat_service: Optional[Any] = None,
         chat_settings: Optional[Any] = None,
+        overview_scheduler: Optional[Any] = None,
+        overview_service: Optional[Any] = None,
+        overview_notifier: Optional[Any] = None,
+        overview_interval_hours: int = 12,
     ):
         if lease_seconds < 1:
             raise ValueError("lease_seconds must be at least 1")
@@ -938,6 +942,12 @@ class RelayWorker:
         self.maintenance_service = maintenance_service
         self.chat_service = chat_service
         self.chat_settings = chat_settings
+        # Scheduled project-overview refresh (opt-in per project). Enabled only
+        # when the scheduler + overview service + a chat LLM are all wired.
+        self.overview_scheduler = overview_scheduler
+        self.overview_service = overview_service
+        self.overview_notifier = overview_notifier
+        self.overview_interval_hours = overview_interval_hours
 
     async def run_once(self) -> Dict[str, int]:
         stats = {
@@ -951,6 +961,8 @@ class RelayWorker:
             "reconcile_failed": 0,
             "maintenance_processed": 0,
             "maintenance_failed": 0,
+            "overview_processed": 0,
+            "overview_failed": 0,
         }
 
         if self.outbox_sender is not None and self.outbox_bearer_token:
@@ -1024,6 +1036,27 @@ class RelayWorker:
                     stats["maintenance_processed"] += 1
                 else:
                     stats["maintenance_failed"] += 1
+
+        if (
+            self.overview_scheduler is not None
+            and self.overview_service is not None
+            and self.chat_service is not None
+            and self.chat_settings is not None
+        ):
+            result = await self.overview_scheduler.process_next(
+                chat_service=self.chat_service,
+                settings=self.chat_settings,
+                overview_service=self.overview_service,
+                interval_hours=self.overview_interval_hours,
+                notifier=self.overview_notifier,
+            )
+            # A failed run returns processed=False WITH an error (the claim was
+            # consumed but generation failed) — check error first, or the
+            # failure counter can never increment.
+            if result.get("error"):
+                stats["overview_failed"] += 1
+            elif result.get("processed"):
+                stats["overview_processed"] += 1
 
         return stats
 

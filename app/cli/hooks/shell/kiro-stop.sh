@@ -83,8 +83,37 @@ if [ ${#RESPONSE} -lt 300 ] && printf '%s' "$RESPONSE" | head -c 160 | grep -qiE
   exit 0
 fi
 
+# Readability transform: panel/review runs on kiro/agy emit their final answer
+# as a raw findings JSON envelope, sometimes ```json-fenced. Saved verbatim it
+# is a one-line unreadable blob. Render it as markdown — one bullet per finding
+# with severity/file:line/claim/evidence — so the stored memory reads and
+# FTS-searches as prose. Non-envelope JSON and normal prose pass through as-is.
+_MM_BODY="$(printf '%s\n' "$RESPONSE" | sed -e '1{/^[[:space:]]*```[a-zA-Z]*[[:space:]]*$/d;}' -e '${/^[[:space:]]*```[[:space:]]*$/d;}')"
+_MM_FINDINGS_MD="$(printf '%s' "$_MM_BODY" | jq -r '
+  select(type == "object" and (.findings | type == "array") and (.findings | length > 0))
+  | "## Review findings (\(.findings | length))\n\n" +
+    ([ .findings[]
+       | "- [\(.severity // "?")] `\(.file // "?")\(if .line != null then ":\(.line)" else "" end)` — \(.claim // .summary // .title // "")"
+         + (if (.evidence // "") != "" then "\n  - evidence: \(.evidence | gsub("[\\n\\r]+"; " "))" else "" end)
+     ] | join("\n"))
+' 2>/dev/null || true)"
+if [ -n "$_MM_FINDINGS_MD" ]; then
+  mem_mesh_log "response" "transform" "findings-envelope -> markdown"
+  RESPONSE="$_MM_FINDINGS_MD"
+fi
+
 PROJECT_DIR="$(mem_mesh_project_id_from_input "$RAW_INPUT")"
 [ -n "$PROJECT_DIR" ] || PROJECT_DIR="unknown"
+# agy spawns its hooks from ~/.gemini/... (not the caller's directory), and a
+# print-mode run without a registered workspace sends workspacePaths: [] — the
+# cwd fallback then misfiles every memory under "config". When the envelope
+# carried no workspace and we're running out of the client's own config tree,
+# "unknown" is the honest project id.
+if [ -z "$HOOK_WORKSPACE_PATH" ]; then
+  case "$PWD" in
+    "$HOME/.gemini"|"$HOME/.gemini/"*) PROJECT_DIR="unknown" ;;
+  esac
+fi
 
 # Char-safe truncation: jq slices by Unicode codepoint (no UTF-8 byte corruption)
 SUMMARY=$(printf '%s' "$RESPONSE" | jq -Rrs '.[0:9500]')
@@ -106,7 +135,13 @@ PAYLOAD=$(jq -n \
   }')
 
 CURL_EXIT=0
-HTTP_META=$(curl -s -o /dev/null --max-time 5 -w '%{http_code} %{time_total}' \
+# 8s (not 5): the remote API occasionally exceeds 5s right after a deploy
+# reload — a lost save (curl_exit=28) costs more than three extra seconds.
+# Stays under agy's 10s Stop-hook budget.
+# Verbose breadcrumb BEFORE the network send: if the host kills this hook
+# mid-curl, the kill trap logs last_stage=posting — the exact stalled stage.
+mem_mesh_logv "response" "posting"
+HTTP_META=$(curl -s -o /dev/null --max-time 8 -w '%{http_code} %{time_total}' \
   -X POST "${API_URL}/api/memories" \
   -H "Content-Type: application/json" \
   ${AUTH[@]+"${AUTH[@]}"} \

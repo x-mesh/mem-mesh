@@ -249,8 +249,9 @@ class ProjectDetailPage extends HTMLElement {
       return;
     }
     
-    // Show first 10 memories
-    const displayMemories = this.memories.slice(0, 10);
+    // Incrementally revealed list (Show More adds 20 per click)
+    if (!this.displayCount) this.displayCount = 10;
+    const displayMemories = this.memories.slice(0, this.displayCount);
     
     container.innerHTML = `
       <h3>Recent Memories (${displayMemories.length} of ${this.memories.length})</h3>
@@ -270,27 +271,37 @@ class ProjectDetailPage extends HTMLElement {
           </div>
         `).join('')}
       </div>
-      ${this.memories.length > 10 ? `
+      ${this.memories.length > this.displayCount ? `
         <div class="show-more">
-          <button class="show-more-btn">Show More (${this.memories.length - 10} remaining)</button>
+          <button class="show-more-btn">Show More (${this.memories.length - this.displayCount} remaining)</button>
         </div>
       ` : ''}
     `;
-    
-    // Add click handlers for memory cards
-    container.addEventListener('click', (event) => {
-      const memoryCard = event.target.closest('.memory-card');
-      if (memoryCard) {
-        const memoryId = memoryCard.getAttribute('data-memory-id');
-        if (memoryId) {
-          if (window.app && window.app.router) {
-            window.app.router.navigate(`/memory/${memoryId}`);
-          } else {
-            window.location.href = `/memory/${memoryId}`;
+
+    // Bind once — renderMemories() re-runs on Show More, and re-adding the
+    // listener each time stacked duplicate handlers on the container.
+    if (!this._memoriesListBound) {
+      this._memoriesListBound = true;
+      container.addEventListener('click', (event) => {
+        const showMoreBtn = event.target.closest('.show-more-btn');
+        if (showMoreBtn) {
+          this.displayCount = (this.displayCount || 10) + 20;
+          this.renderMemories();
+          return;
+        }
+        const memoryCard = event.target.closest('.memory-card');
+        if (memoryCard) {
+          const memoryId = memoryCard.getAttribute('data-memory-id');
+          if (memoryId) {
+            if (window.app && window.app.router) {
+              window.app.router.navigate(`/memory/${memoryId}`);
+            } else {
+              window.location.href = `/memory/${memoryId}`;
+            }
           }
         }
-      }
-    });
+      });
+    }
   }
   
   /**

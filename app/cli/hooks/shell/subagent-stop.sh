@@ -36,6 +36,9 @@ PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   '. + {project_id: $pid, hook_source: $source, client: $client}' 2>/dev/null) || PAYLOAD="$INPUT"
 
 CURL_EXIT=0
+# Verbose breadcrumb BEFORE the network send: if the host kills this hook
+# mid-curl, the kill trap logs last_stage=posting — the exact stalled stage.
+mem_mesh_logv "subagent-stop" "posting"
 HTTP_META=$(curl -s -o /dev/null --max-time 8 \
   -w '%{http_code} %{time_total} %header{x-mem-mesh-hook-status}' \
   -X POST "${API_URL}/api/hooks/claude/subagent-stop" \

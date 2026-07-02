@@ -149,6 +149,7 @@ class MCPToolHandlers:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         temporal_mode: str = "boost",
+        scope: str = "local",
     ) -> Dict[str, Any]:
         """Search memories using hybrid search (vector + metadata)
 
@@ -164,6 +165,8 @@ class MCPToolHandlers:
             date_from: Start date (YYYY-MM-DD)
             date_to: End date (YYYY-MM-DD)
             temporal_mode: Temporal mode (filter/boost/decay)
+            scope: Search scope — local (default) / hub (team hub only) /
+                all (local + hub fused via weighted RRF)
 
         Returns:
             dict: 검색 결과 (압축 가능)
@@ -200,32 +203,68 @@ class MCPToolHandlers:
                         f"from query, cleaned: '{query}'"
                     )
 
-            params = SearchParams(
-                query=query,
-                project_id=project_id,
-                category=category,
-                limit=(
-                    limit * 2 if enable_noise_filter else limit
-                ),  # 필터링 고려하여 더 많이 가져옴
-                recency_weight=recency_weight,
-                time_range=time_range,
-                date_from=date_from,
-                date_to=date_to,
-                temporal_mode=temporal_mode,
-            )
-            result = await self._storage.search_memories(params)
+            async def _local_search():
+                params = SearchParams(
+                    query=query,
+                    project_id=project_id,
+                    category=category,
+                    limit=(
+                        limit * 2 if enable_noise_filter else limit
+                    ),  # 필터링 고려하여 더 많이 가져옴
+                    recency_weight=recency_weight,
+                    time_range=time_range,
+                    date_from=date_from,
+                    date_to=date_to,
+                    temporal_mode=temporal_mode,
+                )
+                local_result = await self._storage.search_memories(params)
 
-            # 노이즈 필터 적용
-            if enable_noise_filter and result.results:
-                from ..core.services.noise_filter import SmartSearchFilter
+                # 노이즈 필터 적용 (로컬 결과 전용 — hub 결과는 필터 대상 아님)
+                if enable_noise_filter and local_result.results:
+                    from ..core.services.noise_filter import SmartSearchFilter
 
-                filter_service = SmartSearchFilter()
-                context = {
-                    "project": project_id,
-                    "max_results": limit,
-                    "aggressive_filter": False,
-                }
-                result = filter_service.apply(result, query, context)
+                    filter_service = SmartSearchFilter()
+                    context = {
+                        "project": project_id,
+                        "max_results": limit,
+                        "aggressive_filter": False,
+                    }
+                    local_result = filter_service.apply(local_result, query, context)
+                return local_result
+
+            if scope not in ("local", "hub", "all"):
+                scope = "local"
+            if scope == "local":
+                result = await _local_search()
+            else:
+                # Federated: this node reaches the hub server-side; the caller
+                # still only ever talks to this personal endpoint.
+                db = getattr(self._storage, "db", None)
+                if db is None:
+                    # API-backed storage has no local DB handle; federation is
+                    # handled by the remote server instead (Phase 2). Degrade —
+                    # but never answer a hub-only request with local results.
+                    if scope == "hub":
+                        from ..core.schemas.responses import SearchResponse
+
+                        result = SearchResponse(
+                            results=[], total=0, hub_status="skipped"
+                        )
+                    else:
+                        result = await _local_search()
+                        result.hub_status = "skipped"
+                else:
+                    from ..core.config import get_settings
+                    from ..core.services.federated_search import FederatedHubSearch
+
+                    federated = FederatedHubSearch(db, get_settings())
+                    result = await federated.search(
+                        scope=scope,
+                        query=query,
+                        limit=limit,
+                        local_search=_local_search,
+                        categories=[category] if category else None,
+                    )
 
             logger.info(
                 "Search completed",

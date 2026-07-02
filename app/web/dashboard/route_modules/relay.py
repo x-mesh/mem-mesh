@@ -544,6 +544,7 @@ async def search_relay_view(
             team_project_ids=payload.team_project_ids,
             limit=payload.limit,
             embedding_service=embedding_service,
+            exclude_source_node=payload.exclude_source_node,
         )
     except RelayUnauthorized as exc:
         raise HTTPException(status_code=401, detail=str(exc))

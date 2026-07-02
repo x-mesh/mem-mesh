@@ -55,6 +55,7 @@ from ..schemas.relay import (
     RelayQueueJob,
     RelayQueueSummary,
     RelayRetryResponse,
+    RelaySearchRequest,
     RelaySearchResponse,
     RelaySearchResult,
     RelaySettingsResponse,
@@ -108,6 +109,51 @@ class RelayHTTPClient:
         if response.status_code >= 400:
             raise RuntimeError(self._response_detail(response))
         return RelayIngestResponse(**response.json())
+
+    async def send_search(
+        self,
+        *,
+        target_hub: str,
+        bearer_token: str,
+        payload: RelaySearchRequest,
+        timeout: Optional[float] = None,
+    ) -> RelaySearchResponse:
+        """Query the hub's relay search endpoint (federated read path)."""
+        client = self.http_client
+        close_client = False
+        if client is None:
+            import httpx
+
+            client = httpx.AsyncClient()
+            close_client = True
+
+        try:
+            response = await client.post(
+                self._search_url(target_hub),
+                headers={"Authorization": f"Bearer {bearer_token}"},
+                json=payload.model_dump(mode="json"),
+                timeout=timeout if timeout is not None else self.timeout,
+            )
+        finally:
+            if close_client:
+                await client.aclose()
+
+        if response.status_code == 401 or response.status_code == 403:
+            raise RelayUnauthorized(self._response_detail(response))
+        if response.status_code >= 400:
+            raise RuntimeError(self._response_detail(response))
+        return RelaySearchResponse(**response.json())
+
+    @staticmethod
+    def _search_url(target_hub: str) -> str:
+        base = target_hub.rstrip("/")
+        if base.endswith("/api/relay/v1/search"):
+            return base
+        for suffix in ("/api/relay/v1/health", "/api/relay/v1/ingest", "/api/relay/v1"):
+            if base.endswith(suffix):
+                base = base[: -len(suffix)]
+                break
+        return f"{base}/api/relay/v1/search"
 
     @staticmethod
     def _ingest_url(target_hub: str) -> str:
@@ -2347,12 +2393,36 @@ class RelayService:
             content = current["content"] or ""
             embedding = await embedding_service.aembed(content)
             embedding_values = [float(value) for value in embedding]
-            enrichment = RelayEnrichmentData.from_result(
-                await text_enricher.enrich(content)
+            # Sender-provided enrichment: the personal node already ran its own
+            # LLM enrich and shipped title/abstract in the share payload (ingest
+            # stored it in EnrichmentStore as model='relay:sender-provided').
+            # Re-enriching the same content on the hub is a duplicate LLM spend —
+            # copy the sender's result into relay_item_enrichment instead. The
+            # embedding above still runs (it never ships in the payload), and a
+            # hub-side force enrich / content change re-enriches as before.
+            sender = await EnrichmentStore(self.db).get(
+                self._materialized_memory_id(job.ref_id)
             )
+            if (
+                sender
+                and str(sender.get("model") or "") == "relay:sender-provided"
+                and (sender.get("title") or sender.get("abstract"))
+            ):
+                enrichment = RelayEnrichmentData(
+                    title=str(sender.get("title") or ""),
+                    abstract=str(sender.get("abstract") or ""),
+                    tags=list(sender.get("tags") or []),
+                    display_kind=str(sender.get("display_kind") or ""),
+                )
+                model = "relay:sender-provided"
+                model_version = "relay:sender-provided"
+            else:
+                enrichment = RelayEnrichmentData.from_result(
+                    await text_enricher.enrich(content)
+                )
+                model = getattr(text_enricher, "model", "unknown")
+                model_version = getattr(text_enricher, "model_version", model)
             now = _utc_now()
-            model = getattr(text_enricher, "model", "unknown")
-            model_version = getattr(text_enricher, "model_version", model)
             embedding_model = getattr(embedding_service, "model_name", "unknown")
             embedding_dim = int(
                 getattr(embedding_service, "dimension", len(embedding_values))
@@ -2632,12 +2702,16 @@ class RelayService:
         team_project_ids: Optional[Sequence[str]] = None,
         limit: int = 10,
         embedding_service: Any = None,
+        exclude_source_node: Optional[str] = None,
     ) -> RelaySearchResponse:
         """Simple visible-current search for the relay MVP.
 
         This is a safe fallback until relay sqlite-vec indexing is added. It
         keeps the read surface testable without pretending cross-corpus vector
         fusion is complete.
+
+        ``exclude_source_node`` omits memories a federated caller pushed itself
+        (those already rank in its local results).
         """
 
         limit = max(1, min(limit, 50))
@@ -2647,6 +2721,7 @@ class RelayService:
                 embedding_service=embedding_service,
                 team_project_ids=team_project_ids,
                 limit=limit,
+                exclude_source_node=exclude_source_node,
             )
             if vector_response is not None:
                 return vector_response
@@ -2661,6 +2736,9 @@ class RelayService:
             placeholders = ",".join("?" for _ in team_project_ids)
             where.append(f"c.team_project_id IN ({placeholders})")
             params.extend(team_project_ids)
+        if exclude_source_node:
+            where.append("c.source_node_id != ?")
+            params.append(exclude_source_node)
         params.append(limit)
 
         rows = await self.db.fetchall(
@@ -3321,6 +3399,7 @@ class RelayService:
         embedding_service: Any,
         team_project_ids: Optional[Sequence[str]],
         limit: int,
+        exclude_source_node: Optional[str] = None,
     ) -> Optional[RelaySearchResponse]:
         table = await self.db.fetchone(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='relay_memory_vec'"
@@ -3340,6 +3419,9 @@ class RelayService:
                 placeholders = ",".join("?" for _ in team_project_ids)
                 where.append(f"c.team_project_id IN ({placeholders})")
                 params.extend(team_project_ids)
+            if exclude_source_node:
+                where.append("c.source_node_id != ?")
+                params.append(exclude_source_node)
             params.append(limit)
 
             rows = await self.db.fetchall(
@@ -3369,6 +3451,12 @@ class RelayService:
             )
         except Exception as exc:
             logger.warning("Relay vector search failed, falling back: %s", exc)
+            return None
+
+        if not rows:
+            # An empty vec index (fresh hub, enrichment not yet run) yields zero
+            # candidates even though relay_memory_current has content — fall back
+            # to the text path instead of returning an empty vector response.
             return None
 
         results = []
@@ -3403,6 +3491,7 @@ class RelayService:
             abstract=row["abstract"],
             rank=rank,
             score=score,
+            updated_at=row["updated_at"] if "updated_at" in row.keys() else None,
         )
 
     async def _db_backed_setting(

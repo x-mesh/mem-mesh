@@ -170,6 +170,7 @@ class RelaySearchResult(BaseModel):
     abstract: Optional[str] = None
     rank: int
     score: float
+    updated_at: Optional[str] = None
 
 
 class RelaySearchRequest(BaseModel):
@@ -178,6 +179,10 @@ class RelaySearchRequest(BaseModel):
     query: str = ""
     team_project_ids: Optional[List[str]] = None
     limit: int = Field(default=10, ge=1, le=50)
+    # Federated search: a personal node passes its own source_node_id so the hub
+    # omits memories that node itself pushed (they already rank in local results).
+    # Older hubs ignore this field; callers must also filter client-side.
+    exclude_source_node: Optional[str] = Field(default=None, max_length=200)
 
 
 class RelaySearchResponse(BaseModel):

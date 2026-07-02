@@ -114,6 +114,7 @@ class MCPDispatcher:
             date_from=args.get("date_from"),
             date_to=args.get("date_to"),
             temporal_mode=args.get("temporal_mode", "boost"),
+            scope=args.get("scope", "local"),
         )
         return format_tool_response(result)
 

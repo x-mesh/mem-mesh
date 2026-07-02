@@ -1056,7 +1056,8 @@ class MemoriesPage extends HTMLElement {
       setTimeout(() => { if (newEl) newEl.style.background = ''; }, 3000);
     }
     this.renderFooter();
-    this.showToast('New memory created', 'success');
+    // Toast comes from the global <notification-center>; this page only
+    // updates its own list (row highlight above marks the new entry).
   }
 
   handleMemoryUpdated(data) {

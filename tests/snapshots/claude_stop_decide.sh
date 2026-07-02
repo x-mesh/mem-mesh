@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 23
+# mem-mesh-hooks prompt-version: 25
 # Claude Code Stop hook (decide variant) → mem-mesh /api/hooks/claude/stop
 #
 # Thin forwarder: the server keyword-matches the finished turn, pairs the
@@ -111,9 +111,35 @@ esac
 # Client tag, substituted by the renderer at install time (claude_code).
 # Falls back to "hook" when the block is used unrendered (e.g. tests).
 _MM_CLIENT="claude_code"
+# Kill observability: when the host (Claude Code hook timeout, shell teardown)
+# SIGTERMs this hook, the script used to die BEFORE its "sent" log line — the
+# failure was invisible in hooks.log, which made timeout kills look like "no
+# failure at all" and cost real diagnosis time. The first mem_mesh_log call
+# arms a TERM/INT/HUP trap that writes one "killed" line carrying the LAST
+# logged stage and the elapsed seconds, then exits 0 (the hook is best-effort;
+# the kill is now observable in the log instead of as host-side error noise).
+# SIGKILL cannot be trapped — a "fired"/"posting" line without a matching
+# "sent"/"killed" line means a hard kill.
+_MM_STAGE="init"
+_MM_HOOK_NAME=""
+_mm_on_kill() {
+  trap - TERM INT HUP
+  mem_mesh_log "${_MM_HOOK_NAME:-?}" "killed" \
+    "signal=$1 last_stage=$_MM_STAGE elapsed=${SECONDS:-?}s"
+  exit 0
+}
+_mm_arm_kill_trap() {
+  [ -n "$_MM_HOOK_NAME" ] && return 0
+  _MM_HOOK_NAME="$1"
+  trap '_mm_on_kill TERM' TERM
+  trap '_mm_on_kill INT' INT
+  trap '_mm_on_kill HUP' HUP
+}
 mem_mesh_log() {
   [ "${_MM_LOG:-0}" -ge 1 ] 2>/dev/null || return 0
   _mm_hook="${1:-?}"; _mm_stage="${2:-?}"
+  _mm_arm_kill_trap "$_mm_hook"
+  _MM_STAGE="$_mm_stage"
   if [ "$#" -gt 2 ]; then shift 2; _mm_detail=" $*"; else _mm_detail=""; fi
   _mm_ts="$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo '-')"
   mkdir -p "${HOME}/.mem-mesh" 2>/dev/null || true
@@ -165,6 +191,9 @@ PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   '. + {project_id: $pid, hook_source: $source, client: $client}' 2>/dev/null) || PAYLOAD="$INPUT"
 
 CURL_EXIT=0
+# Verbose breadcrumb BEFORE the network send: if the host kills this hook
+# mid-curl, the kill trap logs last_stage=posting — the exact stalled stage.
+mem_mesh_logv "stop-decide" "posting"
 HTTP_META=$(curl -s -o /dev/null --max-time 8 -w '%{http_code} %{time_total}' \
   -X POST "${API_URL}/api/hooks/claude/stop" \
   -H "Content-Type: application/json" \

@@ -576,6 +576,9 @@ class MemoryDetailPage extends HTMLElement {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      // Raw fetch() write — clear APIClient's permanent GET cache or the
+      // reload shows the pre-write content until a hard refresh (F5).
+      window.app?.apiClient?.invalidateCache?.();
       overlay.remove();
       this.loadMemoryData();
     } catch (err) {
@@ -658,6 +661,10 @@ class MemoryDetailPage extends HTMLElement {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      // This write went through raw fetch(), so APIClient's permanent GET
+      // cache was never invalidated — without this, the reload below serves
+      // the stale cached memory and the merged tags only appear after F5.
+      window.app?.apiClient?.invalidateCache?.();
       // reload to pick up merged tags, then show the enrichment panel
       await this.loadMemoryData();
       this._renderEnrichment(data);
@@ -856,6 +863,9 @@ class MemoryDetailPage extends HTMLElement {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      // Raw fetch() write — clear APIClient's permanent GET cache or the
+      // reload shows the pre-write content until a hard refresh (F5).
+      window.app?.apiClient?.invalidateCache?.();
       overlay.remove();
       this.loadMemoryData();
     } catch (err) {

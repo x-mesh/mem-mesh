@@ -80,6 +80,9 @@ fi
 
 # Fire-and-forget: never block the session on the write-signal POST.
 CURL_EXIT=0
+# Verbose breadcrumb BEFORE the network send: if the host kills this hook
+# mid-curl, the kill trap logs last_stage=posting — the exact stalled stage.
+mem_mesh_logv "post-tool-use" "posting"
 HTTP_META=$(curl -s -o /dev/null --max-time 5 -w '%{http_code} %{time_total}' \
   -X POST "${API_URL}/api/hooks/claude/post-tool-use" \
   -H "Content-Type: application/json" \

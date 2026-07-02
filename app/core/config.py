@@ -439,6 +439,23 @@ class Settings(BaseSettings):
         default="",
         description="Bearer token used by personal-node outbox delivery to hub",
     )
+    relay_federated_timeout: float = Field(
+        default=2.5,
+        ge=0.5,
+        description=(
+            "Timeout for the federated hub search call in seconds; on timeout "
+            "the search degrades to local-only results"
+        ),
+    )
+    relay_federated_hub_weight: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=2.0,
+        description=(
+            "RRF weight for hub results in federated search (local is 1.0); "
+            "below 1.0 ranks local results above hub at equal rank"
+        ),
+    )
     relay_prompt_version: str = Field(
         default="relay-v1",
         description="Prompt version stamped on relay enrichment and digest outputs",

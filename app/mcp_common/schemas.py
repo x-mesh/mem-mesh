@@ -146,6 +146,12 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "default": "boost",
                         "enum": ["filter", "boost", "decay"],
                     },
+                    "scope": {
+                        "type": "string",
+                        "description": "Search scope: local (this node only, default), hub (team hub only), all (local + hub fused; hub outage degrades to local)",
+                        "default": "local",
+                        "enum": ["local", "hub", "all"],
+                    },
                 },
                 "required": ["query"],
                 "additionalProperties": False,

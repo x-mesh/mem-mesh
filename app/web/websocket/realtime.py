@@ -32,6 +32,7 @@ class EventType(str, Enum):
     STATS_UPDATED = "stats_updated"
     RELAY_INGESTED = "relay_ingested"
     RELAY_MATERIALIZED = "relay_materialized"
+    OVERVIEW_GENERATED = "overview_generated"
     CONNECTION_ESTABLISHED = "connection_established"
     HEARTBEAT = "heartbeat"
 
@@ -369,6 +370,11 @@ class RealtimeNotifier:
     async def notify_relay_materialized(result_data: Dict[str, Any]) -> None:
         """Relay materialize/backfill 알림"""
         await RealtimeNotifier.broadcast(EventType.RELAY_MATERIALIZED, result_data)
+
+    @staticmethod
+    async def notify_overview_generated(overview_data: Dict[str, Any]) -> None:
+        """Scheduled project-overview regeneration 알림"""
+        await RealtimeNotifier.broadcast(EventType.OVERVIEW_GENERATED, overview_data)
 
     @staticmethod
     async def notify_stats_updated(stats_data: Dict[str, Any]) -> None:

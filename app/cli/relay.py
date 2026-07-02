@@ -105,8 +105,9 @@ async def _run_relay_materialize(*, limit: int = 1000) -> dict:
         await db.close()
 
 
-_KNOWN_TASKS = {"outbox", "item", "aggregate", "reconcile", "maintenance"}
+_KNOWN_TASKS = {"outbox", "item", "aggregate", "reconcile", "maintenance", "overview"}
 _DEFAULT_TASKS = "outbox,item,aggregate"
+_DEFAULT_OVERVIEW_INTERVAL_HOURS = 12
 
 
 def _parse_tasks(raw: str) -> set[str]:
@@ -270,6 +271,14 @@ async def _probe_active(
                 "no chat LLM (set the Chat Assistant LLM in Settings)"
             )
 
+    if "overview" in enabled:
+        from app.core.services.chat import ChatService
+
+        if await ChatService(db).is_configured(settings):
+            active.add("overview")
+        else:
+            waiting["overview"] = "no chat LLM (set the Chat Assistant LLM in Settings)"
+
     for task in sorted(waiting):
         logger.debug("relay task '%s' waiting: %s", task, waiting[task])
     return active, waiting
@@ -381,6 +390,39 @@ async def _build_relay_worker(
         chat_settings = settings
         logger.info("maintenance worker: enrich/improve via chat LLM")
 
+    # Scheduled project-overview refresh via the chat LLM. Opt-in per project
+    # (overview_schedule); regenerates one due project per cycle.
+    overview_scheduler = None
+    overview_service = None
+    overview_notifier = None
+    overview_interval_hours = _DEFAULT_OVERVIEW_INTERVAL_HOURS
+    if "overview" in active:
+        from app.core.notifier import HttpNotifier
+        from app.core.services.chat import ChatService
+        from app.core.services.overview import (
+            OverviewScheduler,
+            OverviewService,
+            clamp_interval_hours,
+        )
+
+        overview_scheduler = OverviewScheduler(db)
+        overview_service = OverviewService(db)
+        if chat_service is None:
+            chat_service = ChatService(db)
+            chat_settings = settings
+        overview_interval_hours = clamp_interval_hours(
+            await db.get_app_config("overview.refresh_interval_hours")
+            or _DEFAULT_OVERVIEW_INTERVAL_HOURS
+        )
+        # Best-effort WS notification when an overview regenerates (same
+        # cross-process bridge the MCP servers use); silent if the web server
+        # is down.
+        overview_notifier = HttpNotifier(f"http://localhost:{settings.server_port}")
+        logger.info(
+            "overview worker: scheduled refresh every %sh via chat LLM",
+            overview_interval_hours,
+        )
+
     return RelayWorker(
         service=service,
         worker_id=worker_id,
@@ -397,6 +439,10 @@ async def _build_relay_worker(
         maintenance_service=maintenance_service,
         chat_service=chat_service,
         chat_settings=chat_settings,
+        overview_scheduler=overview_scheduler,
+        overview_service=overview_service,
+        overview_notifier=overview_notifier,
+        overview_interval_hours=overview_interval_hours,
     )
 
 

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.25.0] - 2026-07-02
+
+**백그라운드 자동화(Overview 스케줄러)·전역 실시간 알림·분산 LLM 비용 절감(hub enrichment 재사용)·연합 검색**을 담은 minor 릴리스. WHY: (1) 프로젝트 Overview는 on-demand뿐이라 캐시가 stale로 방치됐다 — 워커가 주기적으로, 활동이 있는 프로젝트만 골라 갱신하게 한다. (2) 메모리 생성/삭제 알림이 페이지 의존적이라(WS는 정상인데 memories 페이지에서만 toast) "팝업이 안 뜬다"로 보였다 — 전역 알림 센터로 모든 페이지에서 받고 한곳에 모은다. (3) 개인 노드에서 이미 enrich한 메모리를 hub가 또 LLM으로 enrich해 공유 1건당 LLM 1회가 낭비됐다. (4) panel/review 실행 결과가 raw findings JSON 한 줄 blob으로 저장돼 읽을 수 없었다 — kiro/agy(클라이언트 셸)와 codex/claude(서버사이드) 두 저장 경로 모두에서 markdown으로 변환한다.
+
+### Added
+- **Overview 자동 갱신 스케줄러** — relay worker의 신규 `overview` task가 `overview_schedule`(프로젝트별 토글, Projects 페이지)에서 due+활동 있는 프로젝트를 골라 chat LLM으로 Overview를 재생성. idle 프로젝트는 스킵, 캐시가 fresh면 LLM 없이 시계만 전진, 실패는 격리·통계 기록 후 다음 주기 재시도. 생성 시 `overview_generated` 실시간 이벤트 발행. `app/core/services/overview.py`, `app/core/services/relay_worker.py`, `app/web/dashboard/route_modules/overview.py`, `app/cli/relay.py`, `app/web/static/js/pages/projects.js`, `app/web/static/js/pages/settings-page.js`
+- **전역 실시간 알림 센터** — `<notification-center>`(body 1회 마운트)가 memory/pin/relay 이벤트 8종을 모든 페이지에서 toast + 좌하단 벨 패널(최근 100건 이력, unread 배지, WS 연결 상태 점)로 수집. 이벤트 도달 여부를 한곳에서 확인 가능(디버깅 뷰 겸용). 페이지 자체 toast는 제거(중복 방지). `app/web/static/js/components/notification-center.js`, `app/web/static/js/main.js`
+- **연합 hub 검색** — 검색 스코프 local/hub/all로 개인 노드와 팀 hub를 함께 검색. `app/core/services/relay.py`, `app/web/static/js`
+- **hub의 sender enrichment 재사용** — relay 공유 payload에 실려 온 개인 노드의 enrichment(`model='relay:sender-provided'`)가 있으면 hub item worker가 LLM 호출 없이 복사(embedding만 계산) — 공유 1건당 LLM 1회 절감. content 변경·강제 enrich는 기존대로 재실행. `app/core/services/relay.py`
+- **findings JSON 저장의 markdown 변환** — panel/review 최종 응답이 `{"findings":[...]}` envelope이면 severity/file:line/claim/evidence markdown으로 저장. kiro/agy는 훅 셸(prompt v24)에서, codex/claude는 서버(`/api/hooks/claude/stop` → `_save_memory`)에서 변환 — 두 저장 경로 모두 커버. `app/cli/hooks/shell/kiro-stop.sh`, `app/web/dashboard/route_modules/hooks.py`
+- **hook kill-trap 로깅** — 호스트가 훅을 죽였을 때(타임아웃/SIGTERM) `last_stage` breadcrumb을 남겨 "안 떴다 vs 중간에 죽었다"를 구분. `app/cli/hooks/hook_log.py`, shell 훅 전체
+
+### Fixed
+- **모바일 햄버거 메뉴 미동작** — 스크롤 hide용 transform이 걸린 헤더가 `position:fixed` 오버레이의 containing block이 되어 메뉴가 페이지 콘텐츠에 가려지고 탭이 뒤로 빠지던 문제. 오버레이를 body 직속으로 reparent. 실브라우저 E2E 검증. `app/web/static/js/components/chroma-header.js`
+- **improve/enrich 후 화면 미갱신(F5 필요)** — raw fetch() 쓰기가 APIClient 영구 GET 캐시를 무효화하지 않아 reload가 stale 메모리를 반환하던 문제. enrich/refine-apply/dedup-apply/save-memory 4곳에서 캐시 클리어. `app/web/static/js/pages/memory-detail.js`, `app/web/static/js/components/chat-widget.js`
+- **agy 저장 project 오귀속** — agy가 훅을 `~/.gemini/...`에서 spawn해 워크스페이스 미등록 실행이 전부 `config` 프로젝트로 저장되던 문제 → 워크스페이스 부재 시 `unknown`. 훅 저장 curl 타임아웃 5s→8s(배포 직후 유실 방지). `app/cli/hooks/shell/kiro-stop.sh`
+- **overview_failed 통계 도달 불가** — 스케줄 실패가 `processed:False+error`로 반환되는데 worker가 processed를 먼저 검사해 실패 카운터가 0에 고정되던 문제(cross-vendor 리뷰). `app/core/services/relay_worker.py`
+- **프로젝트 카드 상세 열기/Show More 동작** 수정. `app/web/static/js`
+
 ## [1.24.0] - 2026-07-02
 
 **maintenance 배치의 신뢰성 회복(재시도·정확한 상태 표기·카드 진행률)과 id 기반 메모리 탐색**을 담은 minor 릴리스. WHY: (1) improve 배치에서 코드 펜스를 포함한 메모리가 LLM JSON 파싱에 결정적으로 실패해 dead_letter로 고착됐고, 재시도 수단이 없어 영구 방치됐다. 게다가 재시도 끝에 성공한 job에도 이전 에러가 남아 done 항목이 실패처럼 보였다(1.23.0 스크린샷 증상). (2) 배치 진행 상황을 보려면 Curation → Activity까지 가야 해서, 시작점인 Projects 카드에서 진행률이 보이지 않았다. (3) LLM 도구가 "mem-mesh f9732f1e"처럼 짧은 id로 메모리를 알려주는데 대시보드 검색(FTS/벡터)으로는 id를 찾을 수 없었다. 구현 후 cross-vendor 패널 리뷰(claude/codex/agy/cursor/kiro × security/logic)로 5건의 결함을 잡아 반영했다.

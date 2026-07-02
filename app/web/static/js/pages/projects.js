@@ -14,6 +14,7 @@ class ProjectsPage extends HTMLElement {
     this.sortDirection = 'asc';
     this.searchQuery = '';
     this.autoShareSubs = new Map();
+    this.overviewSchedules = new Map();
   }
 
   _autoShareSub(projectId) {
@@ -97,6 +98,8 @@ class ProjectsPage extends HTMLElement {
       if (data && data.projects) {
         this.projects = data.projects;
         await this.loadAutoShare();
+        await this.loadOverviewSchedules();
+        await this.loadOverviewWorkerState();
         this.sortProjects();
         this.renderProjects();
         this.updateSummary();
@@ -290,6 +293,18 @@ class ProjectsPage extends HTMLElement {
       return;
     }
 
+    const overviewScheduleBtn = event.target.closest('.overview-schedule-btn');
+    if (overviewScheduleBtn) {
+      event.stopPropagation();
+      if (!this._overviewTaskEnabled()) {
+        showToast("Enable the 'overview' worker task in Settings → Worker tasks first", 'warning');
+        return;
+      }
+      const projectId = overviewScheduleBtn.getAttribute('data-project-id');
+      if (projectId) this.toggleOverviewSchedule(projectId);
+      return;
+    }
+
     const overviewBtn = event.target.closest('.overview-btn');
     if (overviewBtn) {
       event.stopPropagation();
@@ -334,12 +349,13 @@ class ProjectsPage extends HTMLElement {
     if (projectCard) {
       const projectId = projectCard.getAttribute('data-project-id');
       if (projectId) {
-        // Navigate to unified memories page with project filter
+        // Card click → project dashboard detail (/project/:id). The memories
+        // list stays one click away via the View button above.
         if (window.app && window.app.router) {
-          window.app.router.navigate(`/memories?view=project&project_id=${encodeURIComponent(projectId)}`);
+          window.app.router.navigate(`/project/${encodeURIComponent(projectId)}`);
         } else {
           // Fallback to direct navigation
-          window.location.href = `/memories?view=project&project_id=${encodeURIComponent(projectId)}`;
+          window.location.href = `/project/${encodeURIComponent(projectId)}`;
         }
       }
     }
@@ -357,6 +373,63 @@ class ProjectsPage extends HTMLElement {
       );
     } catch {
       this.autoShareSubs = new Map();
+    }
+  }
+
+  _isOverviewScheduleOn(projectId) {
+    return Boolean(this.overviewSchedules?.get(projectId)?.enabled);
+  }
+
+  /** The per-project toggle is inert unless the global 'overview' worker task
+   *  is enabled (Settings → Worker tasks), so gate the control on it. */
+  _overviewTaskEnabled() {
+    return this._overviewWorkerOn === true;
+  }
+
+  /** Which projects have scheduled overview auto-refresh enabled. */
+  async loadOverviewSchedules() {
+    try {
+      const data = await window.app.apiClient.get('/projects/overview/schedules');
+      this.overviewSchedules = new Map(
+        (data?.schedules || []).map(s => [s.project_id, s])
+      );
+    } catch {
+      this.overviewSchedules = new Map();
+    }
+  }
+
+  /** Whether the global 'overview' worker task is on (drives toggle enablement). */
+  async loadOverviewWorkerState() {
+    try {
+      const data = await window.app.apiClient.get('/settings/worker');
+      const tasks = Array.isArray(data?.worker_tasks) ? data.worker_tasks : [];
+      this._overviewWorkerOn = tasks.includes('overview');
+    } catch {
+      this._overviewWorkerOn = false;
+    }
+  }
+
+  /** Toggle scheduled overview auto-refresh for a project. */
+  async toggleOverviewSchedule(projectId) {
+    const api = window.app?.apiClient;
+    if (!api) { showToast('API not available', 'error'); return; }
+    const enable = !this._isOverviewScheduleOn(projectId);
+    try {
+      const res = await api.put(
+        `/projects/${encodeURIComponent(projectId)}/overview/schedule`,
+        { enabled: enable }
+      );
+      if (!this.overviewSchedules) this.overviewSchedules = new Map();
+      this.overviewSchedules.set(projectId, { project_id: projectId, enabled: !!res?.enabled });
+      this.renderProjects();
+      showToast(
+        enable
+          ? `"${projectId}" auto-summary on — Overview refreshes when the project is active`
+          : `"${projectId}" auto-summary off`,
+        enable ? 'success' : 'info'
+      );
+    } catch (error) {
+      showToast(error?.data?.detail || error?.message || 'Failed to update auto-summary', 'error');
     }
   }
 
@@ -748,6 +821,9 @@ class ProjectsPage extends HTMLElement {
           <button class="relay-share-btn" data-project-id="${project.id}">Share to relay</button>
           <button class="relay-autoshare-btn ${this._isAutoShareOn(project.id) ? 'on' : ''}" data-project-id="${project.id}">
             ${this._isAutoShareOn(project.id) ? '● Auto-share on' : '○ Auto-share off'}
+          </button>
+          <button class="overview-schedule-btn ${this._isOverviewScheduleOn(project.id) ? 'on' : ''}${this._overviewTaskEnabled() ? '' : ' disabled'}" data-project-id="${project.id}" title="${this._overviewTaskEnabled() ? "Auto-refresh this project's Overview on a schedule (only when it has recent activity)" : "Enable the 'overview' worker task in Settings to use auto-summary"}">
+            ${this._isOverviewScheduleOn(project.id) ? '● Auto-summary on' : '○ Auto-summary off'}
           </button>
         </div>
         ${this._autoShareStatusHtml(project.id)}
@@ -1355,6 +1431,41 @@ style.textContent = `
     background: var(--success-color, #16a34a);
     color: #fff;
     border-color: var(--success-color, #16a34a);
+  }
+
+  .overview-schedule-btn {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    transition: var(--transition);
+  }
+
+  .overview-schedule-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+  }
+
+  .overview-schedule-btn.on {
+    background: var(--primary-color);
+    color: var(--bg-primary);
+    border-color: var(--primary-color);
+  }
+
+  .overview-schedule-btn.disabled,
+  .overview-schedule-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .overview-schedule-btn.disabled:hover,
+  .overview-schedule-btn:disabled:hover {
+    border-color: var(--border-color);
+    color: var(--text-muted);
   }
 
   .relay-autoshare-status {

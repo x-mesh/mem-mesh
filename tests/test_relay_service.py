@@ -1110,6 +1110,59 @@ async def test_process_next_item_writes_enrichment_and_coalesces_aggregate_queue
         assert before_memory["embedding"] != after_memory["embedding"]
 
 
+class _MustNotEnrich:
+    """Enricher stub that fails the test if the hub burns an LLM call."""
+
+    model = "fake-llm"
+    model_version = "fake-llm-v1"
+
+    async def enrich(self, content: str):
+        raise AssertionError("hub must not re-enrich sender-enriched memories")
+
+
+@pytest.mark.asyncio
+async def test_process_next_item_skips_llm_when_sender_provided_enrichment():
+    """A share that carries the sender's local enrichment must not trigger a
+    second LLM pass on the hub — the item worker copies the sender's result
+    into relay_item_enrichment and still computes the embedding."""
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        request = _request()
+        request.title = "Sender title"
+        request.abstract = "Sender abstract from the personal node."
+        request.display_kind = "decision"
+        ingest = await service.ingest("relay-token", request)
+        memory_id = f"relay:{ingest.current_memory_id}"
+        before_memory = await db.fetchone(
+            "SELECT embedding FROM memories WHERE id = ?", (memory_id,)
+        )
+
+        result = await service.process_next_item(
+            worker_id="worker-1",
+            embedding_service=_FakeEmbeddingService(),
+            text_enricher=_MustNotEnrich(),
+            prompt_version="test-prompt-v1",
+        )
+
+        assert result.processed is True
+        assert result.error is None
+        row = await db.fetchone(
+            "SELECT title, abstract, display_kind, model, model_version "
+            "FROM relay_item_enrichment"
+        )
+        assert row["title"] == "Sender title"
+        assert row["abstract"] == "Sender abstract from the personal node."
+        assert row["model"] == "relay:sender-provided"
+        assert row["model_version"] == "relay:sender-provided"
+        # Embedding still runs — it never ships in the payload.
+        after_memory = await db.fetchone(
+            "SELECT embedding FROM memories WHERE id = ?", (memory_id,)
+        )
+        assert before_memory["embedding"] != after_memory["embedding"]
+        item_status = await db.fetchone("SELECT status FROM relay_queue_item")
+        assert item_status["status"] == "done"
+
+
 @pytest.mark.asyncio
 async def test_process_next_item_failure_requeues_without_losing_job():
     async with _temp_db() as db:
@@ -1705,3 +1758,172 @@ class _RelaySettingsStub:
     relay_llm_model = ""
     relay_llm_base_url = ""
     relay_prompt_version = "relay-v1"
+
+
+@pytest.mark.asyncio
+async def test_search_exclude_source_node_omits_that_nodes_memories():
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        await service.register_identity(
+            token="relay-token-2",
+            user_id="user-2",
+            source_node_id="node-2",
+            display_name="Teammate",
+            home_domain="local.test",
+        )
+        mine = _request(
+            memory_id="memory-mine",
+            payload_hash="sha256:mine",
+            content="Relay shared queue design from my node.",
+        )
+        theirs = RelayIngestRequest(
+            idempotency_key="node-2:memory-theirs:v1:create",
+            payload_hash="sha256:theirs",
+            event_type="create",
+            source_memory_id="memory-theirs",
+            source_version=1,
+            source_project_key="relay",
+            kind="decision",
+            status="active",
+            content="Relay shared queue design from teammate node.",
+            tags=["relay"],
+            links=[],
+        )
+        await service.ingest("relay-token", mine)
+        await service.ingest("relay-token-2", theirs)
+
+        everyone = await service.search(query="queue design", limit=10)
+        assert {r.source_node_id for r in everyone.results} == {"node-1", "node-2"}
+
+        excluded = await service.search(
+            query="queue design", limit=10, exclude_source_node="node-1"
+        )
+        assert [r.source_node_id for r in excluded.results] == ["node-2"]
+        assert excluded.results[0].source_memory_id == "memory-theirs"
+
+
+@pytest.mark.asyncio
+async def test_vector_search_exclude_source_node_omits_that_nodes_memories():
+    async with _temp_db() as db:
+        if not db._connection.is_vec_available:
+            pytest.skip("sqlite-vec is not available in this environment")
+
+        service = await _service_with_identity(db)
+        await service.register_identity(
+            token="relay-token-2",
+            user_id="user-2",
+            source_node_id="node-2",
+            display_name="Teammate",
+            home_domain="local.test",
+        )
+        mine = _request(
+            memory_id="memory-mine",
+            payload_hash="sha256:mine",
+            content="Relay target vector memory.",
+        )
+        theirs = RelayIngestRequest(
+            idempotency_key="node-2:memory-theirs:v1:create",
+            payload_hash="sha256:theirs",
+            event_type="create",
+            source_memory_id="memory-theirs",
+            source_version=1,
+            source_project_key="relay",
+            kind="decision",
+            status="active",
+            content="Relay target vector memory from teammate.",
+            tags=["relay"],
+            links=[],
+        )
+        await service.ingest("relay-token", mine)
+        await service.ingest("relay-token-2", theirs)
+        embedding_service = _VectorSearchEmbeddingService()
+        for _ in range(2):
+            processed = await service.process_next_item(
+                worker_id="item-worker",
+                embedding_service=embedding_service,
+                text_enricher=_FakeTextEnricher(),
+                prompt_version="item-prompt-v1",
+            )
+            assert processed.processed is True
+
+        results = await service.search(
+            query="target vector",
+            embedding_service=embedding_service,
+            limit=5,
+            exclude_source_node="node-1",
+        )
+
+        assert results.metadata["search_mode"] == "vector"
+        assert results.results, "expected teammate results to remain"
+        assert {r.source_node_id for r in results.results} == {"node-2"}
+
+
+@pytest.mark.asyncio
+async def test_relay_http_client_send_search_posts_bearer_and_parses_response():
+    response = _FakeHTTPResponse(
+        200,
+        {
+            "results": [
+                {
+                    "id": "cur-1",
+                    "content": "hub content",
+                    "team_project_id": "team-proj",
+                    "source_node_id": "node-2",
+                    "source_memory_id": "mem-9",
+                    "source_version": 1,
+                    "kind": "decision",
+                    "status": "active",
+                    "tags": ["relay"],
+                    "title": "Hub title",
+                    "abstract": "Hub abstract",
+                    "rank": 1,
+                    "score": 0.9,
+                    "updated_at": "2026-07-01T00:00:00Z",
+                }
+            ],
+            "total": 1,
+        },
+    )
+    http_client = _FakeAsyncHTTPClient(response)
+    client = RelayHTTPClient(http_client=http_client)
+
+    from app.core.schemas.relay import RelaySearchRequest
+
+    result = await client.send_search(
+        target_hub="https://hub.example.com",
+        bearer_token="hub-token",
+        payload=RelaySearchRequest(
+            query="queue", limit=5, exclude_source_node="node-1"
+        ),
+        timeout=2.0,
+    )
+
+    call = http_client.calls[0]
+    assert call["url"] == "https://hub.example.com/api/relay/v1/search"
+    assert call["headers"]["Authorization"] == "Bearer hub-token"
+    assert call["json"]["exclude_source_node"] == "node-1"
+    assert call["timeout"] == 2.0
+    assert result.total == 1
+    assert result.results[0].source_node_id == "node-2"
+    assert result.results[0].updated_at == "2026-07-01T00:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_vector_search_with_empty_index_falls_back_to_text():
+    async with _temp_db() as db:
+        if not db._connection.is_vec_available:
+            pytest.skip("sqlite-vec is not available in this environment")
+
+        service = await _service_with_identity(db)
+        await service.ingest("relay-token", _request())
+        # No process_next_item → relay_memory_vec stays empty (fresh hub).
+        embedding_service = _VectorSearchEmbeddingService()
+
+        results = await service.search(
+            query="sqlite queue",
+            embedding_service=embedding_service,
+            limit=5,
+        )
+
+        assert results.metadata["search_mode"] == "text"
+        assert results.results, "text fallback should find the ingested memory"

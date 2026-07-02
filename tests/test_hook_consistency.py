@@ -335,7 +335,14 @@ async def test_noise_artifacts_skip_save_in_http_stop_path(monkeypatch) -> None:
         ),
     )
 
-    response = await http_hooks.stop(payload, hook_service=FakeHookService())
+    from fastapi import BackgroundTasks
+
+    background_tasks = BackgroundTasks()
+    response = await http_hooks.stop(
+        payload, background_tasks, hook_service=FakeHookService()
+    )
+    # Saves are queued as background tasks now — run them before asserting.
+    await background_tasks()
 
     assert response.status_code == 200
     save_memory.assert_not_awaited()

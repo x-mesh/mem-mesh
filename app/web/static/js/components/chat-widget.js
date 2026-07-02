@@ -439,6 +439,9 @@ export class ChatWidget extends HTMLElement {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      // Raw fetch() write — clear APIClient's permanent GET cache so memory
+      // lists / project counts show the new memory without a hard refresh.
+      window.app?.apiClient?.invalidateCache?.();
       msg.textContent = `Saved as ${data.category} (${String(data.id).slice(0, 8)}).`;
       msg.classList.add('cm-ok');
       setTimeout(() => overlay.remove(), 1300);

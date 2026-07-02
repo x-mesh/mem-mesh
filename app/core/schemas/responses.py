@@ -53,6 +53,16 @@ class SearchResult(BaseModel):
         default=None, description="생성 도구 (cursor, kiro, claude_code 등)"
     )
     tags: Optional[List[str]] = Field(default=None, description="태그 목록")
+    origin: str = Field(
+        default="local",
+        description="결과 출처: 'local'(내 노드) 또는 'hub'(팀 hub, federated)",
+    )
+    title: Optional[str] = Field(
+        default=None, description="hub enrichment 제목 (hub 결과에만)"
+    )
+    abstract: Optional[str] = Field(
+        default=None, description="hub enrichment 요약 (hub 결과에만)"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -80,6 +90,13 @@ class SearchResponse(BaseModel):
     )
     related_memories: Optional[List[SearchResult]] = Field(
         None, description="관계 그래프 기반 관련 메모리"
+    )
+    hub_status: Optional[str] = Field(
+        None,
+        description=(
+            "federated 검색 시 hub 상태: 'ok' | 'unavailable'(타임아웃/에러, "
+            "로컬만 반환) | 'skipped'(hub 미설정). scope=local이면 None"
+        ),
     )
 
     model_config = {

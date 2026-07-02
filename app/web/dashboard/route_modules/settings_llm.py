@@ -32,7 +32,7 @@ _STR_FIELDS = {
 }
 
 # Relay worker task settings (mirror app.cli.relay._KNOWN_TASKS / _DEFAULT_TASKS).
-_KNOWN_TASKS = ("outbox", "item", "aggregate", "reconcile", "maintenance")
+_KNOWN_TASKS = ("outbox", "item", "aggregate", "reconcile", "maintenance", "overview")
 _DEFAULT_TASKS = ("outbox", "item", "aggregate")
 
 

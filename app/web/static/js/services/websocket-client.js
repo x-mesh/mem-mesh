@@ -237,6 +237,10 @@ export class WebSocketClient {
           this.emit('relay_materialized', data);
           break;
 
+        case 'overview_generated':
+          this.emit('overview_generated', data);
+          break;
+
         default:
           console.warn('Unknown WebSocket message type:', type);
       }

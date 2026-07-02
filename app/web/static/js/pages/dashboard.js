@@ -126,7 +126,7 @@ class DashboardPage extends HTMLElement {
     this.refreshStats();
     // Push viz event
     this._pushVizEvent(memory);
-    showToast('New memory created', 'success');
+    // Toast comes from the global <notification-center>.
   }
 
   onMemoryUpdated({ memory_id, memory }) {

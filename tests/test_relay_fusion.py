@@ -29,3 +29,28 @@ def test_fuse_relay_results_rrf_accepts_custom_id_key_and_limits():
     fused = fuse_relay_results_rrf(local, hub, id_key="memory_id", limit=2)
 
     assert [item["memory_id"] for item in fused] == ["a", "c"]
+
+
+def test_fuse_relay_results_rrf_weights_rank_local_above_hub_at_equal_rank():
+    local = [{"id": "local-a"}, {"id": "local-b"}]
+    hub = [{"id": "hub-a"}, {"id": "hub-b"}]
+
+    fused = fuse_relay_results_rrf(
+        local, hub, limit=4, weights={"local": 1.0, "hub": 0.75}
+    )
+
+    # With k=60 a 0.75 hub weight ranks the whole local list above hub:
+    # 1.0/61 > 1.0/62 > 0.75/61 > 0.75/62
+    assert [item["id"] for item in fused] == ["local-a", "local-b", "hub-a", "hub-b"]
+    assert fused[0]["rrf_score"] > fused[1]["rrf_score"] > fused[2]["rrf_score"]
+
+
+def test_fuse_relay_results_rrf_weights_none_matches_default_behavior():
+    local = [{"id": "a"}, {"id": "s"}]
+    hub = [{"id": "s"}, {"id": "b"}]
+
+    default = fuse_relay_results_rrf(local, hub, limit=3)
+    explicit = fuse_relay_results_rrf(local, hub, limit=3, weights=None)
+
+    assert [i["id"] for i in default] == [i["id"] for i in explicit]
+    assert [i["rrf_score"] for i in default] == [i["rrf_score"] for i in explicit]

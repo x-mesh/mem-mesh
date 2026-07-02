@@ -645,8 +645,11 @@ def test_kiro_stop_skips_model_banner(tmp_path: Path, hook_api_server) -> None:
     assert "last_payload" not in state
 
 
-def test_kiro_stop_saves_json_findings(tmp_path: Path, hook_api_server) -> None:
-    """A genuine JSON response (review findings) is not the hook envelope: save it."""
+def test_kiro_stop_saves_json_findings_as_markdown(
+    tmp_path: Path, hook_api_server
+) -> None:
+    """A genuine findings JSON envelope is saved, but rendered as readable
+    markdown (severity/file:line/claim/evidence) — not the raw one-line blob."""
     state, url = hook_api_server
     script = _render_and_write(
         tmp_path,
@@ -665,7 +668,67 @@ def test_kiro_stop_saves_json_findings(tmp_path: Path, hook_api_server) -> None:
     result = _run_hook(script, {}, env={"KIRO_RESULT": findings}, api_url=url)
 
     assert result.returncode == 0
-    assert findings in state["last_payload"]["content"]
+    content = state["last_payload"]["content"]
+    assert "## Review findings (1)" in content
+    assert "[medium] `internal/resolve/resolver.go:421`" in content
+    assert "AI failure silently skips the file" in content
+    assert "evidence: the fallthrough leaves resolutions empty" in content
+    assert '{"findings"' not in content
+
+
+def test_kiro_stop_saves_fenced_json_findings_as_markdown(
+    tmp_path: Path, hook_api_server
+) -> None:
+    """kiro wraps the findings envelope in a ```json fence — strip it and
+    render the same markdown (the shape that produced unreadable saves)."""
+    state, url = hook_api_server
+    script = _render_and_write(
+        tmp_path,
+        KIRO_STOP_HOOK_TEMPLATE,
+        source_tag="kiro-hook",
+        client_tag="kiro",
+        ide_tag="kiro",
+        project_id="test-project",
+    )
+    fenced = (
+        "```json\n"
+        '{"findings":[{"severity":"high","file":"a.swift","line":9,'
+        '"claim":"stale snapshot","evidence":"guard returns early\\nsecond line"}]}'
+        "\n```"
+    )
+
+    result = _run_hook(script, {}, env={"KIRO_RESULT": fenced}, api_url=url)
+
+    assert result.returncode == 0
+    content = state["last_payload"]["content"]
+    assert "## Review findings (1)" in content
+    assert "[high] `a.swift:9` — stale snapshot" in content
+    # multi-line evidence is flattened to one line
+    assert "evidence: guard returns early second line" in content
+
+
+def test_kiro_stop_non_findings_json_saved_verbatim(
+    tmp_path: Path, hook_api_server
+) -> None:
+    """JSON that is not a findings envelope passes through unchanged."""
+    state, url = hook_api_server
+    script = _render_and_write(
+        tmp_path,
+        KIRO_STOP_HOOK_TEMPLATE,
+        source_tag="kiro-hook",
+        client_tag="kiro",
+        ide_tag="kiro",
+        project_id="test-project",
+    )
+    payload = (
+        '{"status":"ok","message":"deployment completed successfully on the '
+        'remote server after fast-forwarding the checkout to v1.24.0"}'
+    )
+
+    result = _run_hook(script, {}, env={"KIRO_RESULT": payload}, api_url=url)
+
+    assert result.returncode == 0
+    assert payload in state["last_payload"]["content"]
 
 
 # ---------------------------------------------------------------------------

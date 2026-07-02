@@ -13,9 +13,40 @@ class ChromaHeader extends HTMLElement {
 
   connectedCallback() {
     this.render();
+    this._detachMobileOverlay();
     this.setupEventListeners();
     this.setupScrollBehavior();
     this.fetchVersion();
+  }
+
+  disconnectedCallback() {
+    // The overlay was moved to <body> (see _detachMobileOverlay) — remove it
+    // so a re-mounted header doesn't leave a duplicate behind.
+    this._mobileOverlay?.remove();
+    this._mobileOverlay = null;
+  }
+
+  /**
+   * Move the mobile-nav overlay out of <header> and onto <body>.
+   *
+   * The header carries a `transform` (hide-on-scroll animation), which makes it
+   * the containing block for its `position: fixed` descendants — trapping the
+   * full-screen overlay inside the header's stacking/clip context, so page
+   * content painted over the opened menu and taps fell through to the page
+   * behind ("hamburger doesn't work"). As a direct child of <body> the overlay
+   * is viewport-fixed and stacks above page content as intended.
+   */
+  _detachMobileOverlay() {
+    const overlay = this.querySelector('#mobile-nav-overlay');
+    if (overlay) {
+      document.body.appendChild(overlay);
+      this._mobileOverlay = overlay;
+    }
+  }
+
+  /** The overlay lives on <body>; header-local queries must not scope to it. */
+  _overlay() {
+    return this._mobileOverlay || document.getElementById('mobile-nav-overlay');
   }
 
   async fetchVersion() {
@@ -352,7 +383,7 @@ class ChromaHeader extends HTMLElement {
 
     // Mobile menu toggle
     const mobileMenuToggle = this.querySelector('#mobile-menu-toggle');
-    const mobileNavOverlay = this.querySelector('#mobile-nav-overlay');
+    const mobileNavOverlay = this._overlay();
     mobileMenuToggle?.addEventListener('click', () => {
       this.toggleMobileMenu();
     });
@@ -367,8 +398,13 @@ class ChromaHeader extends HTMLElement {
     // Touch gestures for mobile menu
     this.setupTouchGestures();
 
-    // Navigation link handling
-    this.querySelectorAll('[data-route]').forEach(link => {
+    // Navigation link handling. Header links are children of this component;
+    // mobile-nav links moved to <body> with the overlay, so bind both scopes.
+    const routeLinks = [
+      ...this.querySelectorAll('[data-route]'),
+      ...(mobileNavOverlay ? mobileNavOverlay.querySelectorAll('[data-route]') : []),
+    ];
+    routeLinks.forEach(link => {
       link.addEventListener('click', (e) => {
         e.preventDefault();
         const route = link.getAttribute('data-route');
@@ -389,7 +425,7 @@ class ChromaHeader extends HTMLElement {
   }
 
   setupTouchGestures() {
-    const mobileNav = this.querySelector('.mobile-nav');
+    const mobileNav = this._overlay()?.querySelector('.mobile-nav');
     if (!mobileNav) return;
 
     let startX = 0;
@@ -439,9 +475,9 @@ class ChromaHeader extends HTMLElement {
 
   toggleMobileMenu() {
     this.isMobileMenuOpen = !this.isMobileMenuOpen;
-    const mobileNavOverlay = this.querySelector('#mobile-nav-overlay');
+    const mobileNavOverlay = this._overlay();
     const mobileMenuToggle = this.querySelector('#mobile-menu-toggle');
-    
+
     mobileNavOverlay?.classList.toggle('open', this.isMobileMenuOpen);
     mobileMenuToggle?.classList.toggle('open', this.isMobileMenuOpen);
     document.body.classList.toggle('mobile-menu-open', this.isMobileMenuOpen);
@@ -549,23 +585,30 @@ class ChromaHeader extends HTMLElement {
 
   closeMobileMenu() {
     this.isMobileMenuOpen = false;
-    const mobileNavOverlay = this.querySelector('#mobile-nav-overlay');
+    const mobileNavOverlay = this._overlay();
     const mobileMenuToggle = this.querySelector('#mobile-menu-toggle');
-    
+
     mobileNavOverlay?.classList.remove('open');
     mobileMenuToggle?.classList.remove('open');
     document.body.classList.remove('mobile-menu-open');
   }
 
+  /** Header links + the reparented mobile-nav links (now under <body>). */
+  _navLinks() {
+    const ov = this._overlay();
+    return [
+      ...this.querySelectorAll('.nav-link, .mobile-nav-link'),
+      ...(ov ? ov.querySelectorAll('.mobile-nav-link') : []),
+    ];
+  }
+
   handleNavigation(route) {
     // Update active state
-    this.querySelectorAll('.nav-link, .mobile-nav-link').forEach(link => {
-      link.classList.remove('active');
-    });
-    
-    this.querySelectorAll(`[data-route="${route}"]`).forEach(link => {
-      link.classList.add('active');
-    });
+    this._navLinks().forEach(link => link.classList.remove('active'));
+
+    const sel = `[data-route="${route}"]`;
+    [...this.querySelectorAll(sel), ...(this._overlay()?.querySelectorAll(sel) || [])]
+      .forEach(link => link.classList.add('active'));
 
     // Dispatch navigation event
     window.dispatchEvent(new CustomEvent('navigate', { detail: { route } }));
@@ -573,7 +616,7 @@ class ChromaHeader extends HTMLElement {
 
   updateActiveNavigation() {
     const currentPath = window.location.pathname;
-    this.querySelectorAll('.nav-link, .mobile-nav-link').forEach(link => {
+    this._navLinks().forEach(link => {
       const route = link.getAttribute('data-route');
       if (!route) return;
       const isActive = currentPath === route ||

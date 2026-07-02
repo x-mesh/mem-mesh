@@ -47,6 +47,9 @@ PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
 }' 2>/dev/null) || PAYLOAD="$INPUT"
 
 CURL_EXIT=0
+# Verbose breadcrumb BEFORE the network send: if the host kills this hook
+# mid-curl, the kill trap logs last_stage=posting — the exact stalled stage.
+mem_mesh_logv "stop" "posting"
 HTTP_META=$(curl -s -o /dev/null --max-time 8 -w '%{http_code} %{time_total}' \
   -X POST "${API_URL}/api/hooks/claude/stop" \
   -H "Content-Type: application/json" \

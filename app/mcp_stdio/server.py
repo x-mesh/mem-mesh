@@ -134,6 +134,7 @@ async def search(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     temporal_mode: str = "boost",
+    scope: str = "local",
 ) -> dict:
     """Internal handler for search tool."""
     return await _get_handlers().search(
@@ -147,6 +148,7 @@ async def search(
         date_from=date_from,
         date_to=date_to,
         temporal_mode=temporal_mode,
+        scope=scope,
     )
 
 

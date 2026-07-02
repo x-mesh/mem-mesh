@@ -19,13 +19,14 @@ Design rules:
   loading model yields graceful degradation instead of a 503.
 """
 
+import json
 import logging
 import os
 import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Response
 from fastapi.responses import JSONResponse
 
 from app.cli.hooks.keywords import match_category
@@ -109,6 +110,79 @@ _DEFAULT_HOOK_CLIENT = "claude_code"
 _DEFAULT_HOOK_SOURCE = "claude-code-http-hook"
 _CLIENT_RE = re.compile(r"[^a-z0-9_]+")
 _SOURCE_RE = re.compile(r"[^a-z0-9_.-]+")
+
+# Fence wrapper around a JSON body (```json ... ```), tolerated when detecting
+# a findings envelope below.
+_FENCE_RE = re.compile(r"^\s*```[a-zA-Z]*\s*\n(.*)\n\s*```\s*$", re.DOTALL)
+# Split point between the paired question and the assistant answer in the
+# combined "Q: …\n\nA: …" content the stop hooks save.
+_ANSWER_SPLIT = "\n\nA: "
+
+
+def _findings_to_markdown(text: str) -> Optional[str]:
+    """Render a review-findings JSON envelope as markdown, or None.
+
+    Panel/review runs (notably through the codex/claude stop hooks, which save
+    server-side) sometimes end the turn with a raw ``{"findings": [...]}``
+    object — stored verbatim it is a one-line unreadable blob. Mirrors the
+    jq transform in the kiro/agy stop-hook shell template: one bullet per
+    finding (severity/file:line/claim/evidence, evidence newlines flattened).
+    Anything that isn't a non-empty findings envelope returns None.
+    """
+    body = text.strip()
+    fenced = _FENCE_RE.match(body)
+    if fenced:
+        body = fenced.group(1).strip()
+    if not body.startswith("{"):
+        return None
+    try:
+        data = json.loads(body, strict=False)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    findings = data.get("findings")
+    if not isinstance(findings, list) or not findings:
+        return None
+    lines = [f"## Review findings ({len(findings)})", ""]
+    for f in findings:
+        if not isinstance(f, dict):
+            return None
+        severity = str(f.get("severity") or "?")
+        file_ = str(f.get("file") or "?")
+        line = f.get("line")
+        loc = f"{file_}:{line}" if line is not None else file_
+        claim = str(f.get("claim") or f.get("summary") or f.get("title") or "")
+        entry = f"- [{severity}] `{loc}` — {claim}"
+        evidence = str(f.get("evidence") or "")
+        if evidence:
+            flat = re.sub(r"[\r\n]+", " ", evidence)
+            entry += f"\n  - evidence: {flat}"
+        lines.append(entry)
+    return "\n".join(lines)
+
+
+def _render_json_answer(content: str) -> str:
+    """Rewrite a findings-envelope answer inside hook-save content as markdown.
+
+    The content is either the bare assistant answer or the combined
+    "Q: …\\n\\nA: …" pair — try the whole text first, then just the answer
+    part. Non-envelope content passes through unchanged.
+    """
+    whole = _findings_to_markdown(content)
+    if whole is not None:
+        return whole
+    # The question itself may contain a literal "\n\nA: " — try every
+    # occurrence (first match that parses as an envelope wins) instead of
+    # trusting the first one.
+    idx = content.find(_ANSWER_SPLIT)
+    while idx != -1:
+        answer = content[idx + len(_ANSWER_SPLIT) :]
+        rendered = _findings_to_markdown(answer)
+        if rendered is not None:
+            return content[: idx + len(_ANSWER_SPLIT)] + rendered
+        idx = content.find(_ANSWER_SPLIT, idx + 1)
+    return content
 
 
 def _ok(status: str) -> Response:
@@ -267,7 +341,16 @@ async def _save_memory(
     source: str = _DEFAULT_HOOK_SOURCE,
     client: str = _DEFAULT_HOOK_CLIENT,
 ) -> bool:
-    """Save a memory via MemoryService if the embedding model is ready."""
+    """Save a memory via MemoryService if the embedding model is ready.
+
+    Hook endpoints run this AFTER the response via BackgroundTasks: the save
+    path goes through embedding inference and the single-writer SQLite queue,
+    so under a concurrent batch (relay worker enrich/improve) its tail latency
+    can exceed the shell hooks' curl --max-time and even Claude Code's hook
+    timeout — which killed hooks and lost saves. Hooks never consume the save
+    result, so answering first and saving after removes that failure mode
+    structurally. Failures here still land in the log (best-effort contract).
+    """
     services = get_services()
     memory_service = services.get("memory_service")
     embedding_service = services.get("embedding_service")
@@ -279,6 +362,9 @@ async def _save_memory(
         logger.info("hook save skipped: memory service / embedding model not ready")
         return False
     try:
+        # A findings-envelope answer (panel/review JSON) is rewritten as
+        # markdown first — stored raw it is an unreadable one-line blob.
+        content = _render_json_answer(content)
         # Redact secrets/PII before persisting. Hook saves capture whole
         # assistant turns, so a leaked key/token/email could otherwise land in
         # long-term memory. Redact first, then truncate, so a secret near the
@@ -608,6 +694,7 @@ async def post_tool_use(
 @router.post("/stop")
 async def stop(
     payload: StopPayload,
+    background_tasks: BackgroundTasks,
     hook_service: HookService = Depends(get_hook_service),
 ) -> Response:
     """Keyword-matched structured save of the finished turn.
@@ -657,7 +744,8 @@ async def stop(
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Q&A pairing failed: {e}")
 
-    saved = await _save_memory(
+    background_tasks.add_task(
+        _save_memory,
         project_id,
         content,
         category,
@@ -665,11 +753,7 @@ async def stop(
         source=source,
         client=client,
     )
-    return _ok(
-        f"stop: saved memory as {category} (project={project_id})"
-        if saved
-        else f"stop: save skipped (category={category})"
-    )
+    return _ok(f"stop: queued save as {category} (project={project_id})")
 
 
 # ───────────────────────── SubagentStop ──────────────────────────
@@ -678,6 +762,7 @@ async def stop(
 @router.post("/subagent-stop")
 async def subagent_stop(
     payload: SubagentStopPayload,
+    background_tasks: BackgroundTasks,
     hook_service: HookService = Depends(get_hook_service),
 ) -> Response:
     """Keyword-matched save of a notable subagent result."""
@@ -709,7 +794,8 @@ async def subagent_stop(
         return _ok(f"subagent-stop: skip (no keyword match: {category})")
 
     agent_type = payload.agent_type or "unknown"
-    saved = await _save_memory(
+    background_tasks.add_task(
+        _save_memory,
         project_id,
         f"[{agent_type} agent] {message}",
         category,
@@ -717,7 +803,7 @@ async def subagent_stop(
         source=source,
         client=client,
     )
-    return _ok("subagent-stop: saved" if saved else "subagent-stop: save skipped")
+    return _ok(f"subagent-stop: queued save as {category}")
 
 
 # ───────────────────────── TaskCompleted ─────────────────────────
@@ -726,6 +812,7 @@ async def subagent_stop(
 @router.post("/task-completed")
 async def task_completed(
     payload: TaskCompletedPayload,
+    background_tasks: BackgroundTasks,
     hook_service: HookService = Depends(get_hook_service),
 ) -> Response:
     """Save a completed team task to mem-mesh."""
@@ -750,7 +837,8 @@ async def task_completed(
     if payload.teammate_name:
         lines.append(f"\nCompleted by: {payload.teammate_name}")
 
-    saved = await _save_memory(
+    background_tasks.add_task(
+        _save_memory,
         project_id,
         "\n".join(lines)[:5000],
         "task",
@@ -758,4 +846,4 @@ async def task_completed(
         source=source,
         client=client,
     )
-    return _ok("task-completed: saved" if saved else "task-completed: save skipped")
+    return _ok("task-completed: queued save")

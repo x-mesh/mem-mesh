@@ -89,3 +89,6 @@ class HttpNotifier:
 
     async def notify_relay_materialized(self, result_data: Dict[str, Any]) -> None:
         await self._send("relay_materialized", result_data)
+
+    async def notify_overview_generated(self, overview_data: Dict[str, Any]) -> None:
+        await self._send("overview_generated", overview_data)
