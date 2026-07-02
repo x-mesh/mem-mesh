@@ -114,7 +114,9 @@ class MemoryDetailPage extends HTMLElement {
   handleClick(event) {
     const target = event.target;
     
-    if (target.classList.contains('edit-btn')) {
+    if (target.classList.contains('memory-id-value')) {
+      this.copyMemoryId(target);
+    } else if (target.classList.contains('edit-btn')) {
       this.toggleEditMode();
     } else if (target.classList.contains('save-btn')) {
       this.saveMemory();
@@ -980,6 +982,23 @@ class MemoryDetailPage extends HTMLElement {
     }
   }
   
+  /** Copy the full memory ID (the meta row shows it; tools reference it). */
+  async copyMemoryId(el) {
+    const id = this.memory?.id;
+    if (!id) return;
+    try {
+      await navigator.clipboard.writeText(id);
+      window.app?.errorHandler?.showSuccess('Memory ID copied');
+    } catch (_) {
+      // Clipboard unavailable (http origin etc.) — select the text instead.
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
+
   /**
    * Export memory
    */
@@ -1516,6 +1535,10 @@ class MemoryDetailPage extends HTMLElement {
               <span class="meta-label">Length:</span>
               <span class="meta-value">${(this.memory.content || '').length.toLocaleString()} chars</span>
             </div>
+            <div class="meta-item">
+              <span class="meta-label">ID:</span>
+              <code class="memory-id-value" title="Click to copy the full memory ID">${this.memory.id}</code>
+            </div>
           </div>
           
           <div class="memory-body">
@@ -1772,6 +1795,21 @@ style.textContent = `
   
   .meta-value {
     font-size: 0.875rem;
+    color: var(--text-primary);
+  }
+
+  .memory-id-value {
+    font-size: 0.75rem;
+    font-family: monospace;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    word-break: break-all;
+  }
+
+  .memory-id-value:hover {
     color: var(--text-primary);
   }
   

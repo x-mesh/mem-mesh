@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
@@ -35,6 +36,10 @@ if TYPE_CHECKING:
     from .metrics_collector import MetricsCollector
 
 logger = logging.getLogger(__name__)
+
+# A query that looks like a memory id: at least the 8-hex short form that tools
+# print (e.g. "mem-mesh f9732f1e"), optionally continuing toward a full UUID.
+_MEMORY_ID_QUERY_RE = re.compile(r"^[0-9a-fA-F]{8}[0-9a-fA-F-]{0,28}$")
 
 
 class UnifiedSearchService:
@@ -262,6 +267,17 @@ class UnifiedSearchService:
         # FastAPI does not auto-convert '+' to space, so handle manually
         query = query.replace("+", " ").strip() if query else ""
         original_query = query
+
+        # 0. Memory-id lookup: tools surface short hex ids ("mem-mesh f9732f1e")
+        # and pasting one into search must find that memory directly — FTS/vector
+        # can't match an id. Only returns when the prefix actually hits; an
+        # id-looking string that matches nothing falls through to normal search.
+        if query and _MEMORY_ID_QUERY_RE.fullmatch(query):
+            id_response = await self._search_by_id_prefix(
+                query, project_id=project_id, limit=limit
+            )
+            if id_response is not None:
+                return id_response
 
         # 1. Intent analysis (when quality feature is enabled)
         intent = None
@@ -848,6 +864,46 @@ class UnifiedSearchService:
                 if any("가" <= c <= "힣" for c in chunk) and len(chunk) >= 2:
                     sub_tokens.add(chunk)
         return list(sub_tokens)
+
+    async def _search_by_id_prefix(
+        self, query: str, *, project_id: Optional[str] = None, limit: int = 25
+    ) -> Optional[SearchResponse]:
+        """Direct lookup for an id-shaped query (8+ hex chars, optional UUID
+        rest). Returns None when nothing matches so the caller falls through to
+        normal search. Deliberately ignores the canonical-status filter — an
+        explicit id hunt should find deprecated/superseded memories too."""
+        sql = (
+            "SELECT id, content, created_at, project_id, category, source, "
+            "client, tags FROM memories WHERE id LIKE ?"
+        )
+        params: list = [query.lower() + "%"]
+        if project_id:
+            sql += " AND project_id = ?"
+            params.append(project_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(max(1, min(limit, 50)))
+        try:
+            rows = await self.db.fetchall(sql, tuple(params))
+        except Exception as e:
+            logger.debug(f"Id-prefix lookup failed: {e}")
+            return None
+        if not rows:
+            return None
+        results = [
+            SearchResult(
+                id=row["id"],
+                content=row["content"],
+                similarity_score=1.0,
+                created_at=row["created_at"],
+                project_id=row["project_id"],
+                category=row["category"],
+                source=row["source"],
+                client=row["client"] if "client" in row.keys() else None,
+                tags=self._parse_tags(row),
+            )
+            for row in rows
+        ]
+        return SearchResponse(results=results, total=len(results))
 
     async def _exact_search(
         self, query: str, filters: Dict[str, Any], limit: int

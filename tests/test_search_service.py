@@ -344,3 +344,67 @@ class TestUnifiedSearchMultiCategory:
         # Then
         returned = {r.category for r in response.results}
         assert returned == {"bug"}
+
+
+class TestUnifiedSearchIdLookup:
+    """id 형태 쿼리(8+ hex prefix)의 직접 조회 경로 테스트.
+
+    LLM 도구가 "mem-mesh f9732f1e"처럼 짧은 id를 알려주는데, 대시보드 검색은
+    FTS/벡터라 id로는 못 찾던 문제의 회귀 방지.
+    """
+
+    async def _seed_one(self, memory_service, project_id=None):
+        res = await memory_service.create(
+            content=(
+                "Id-lookup fixture memory — long enough content to pass the "
+                "quality gate. Describes a stored proposal referenced by its id."
+            ),
+            category="idea",
+            source="test",
+            project_id=project_id,
+        )
+        return res.id
+
+    @pytest.mark.asyncio
+    async def test_short_hex_prefix_finds_memory(
+        self, unified_search_service, memory_service
+    ):
+        mem_id = await self._seed_one(memory_service)
+        prefix = mem_id[:8]
+
+        response = await unified_search_service.search(query=prefix)
+
+        assert [r.id for r in response.results] == [mem_id]
+        assert response.results[0].similarity_score == 1.0
+
+    @pytest.mark.asyncio
+    async def test_full_uuid_finds_memory(self, unified_search_service, memory_service):
+        mem_id = await self._seed_one(memory_service)
+
+        response = await unified_search_service.search(query=mem_id)
+
+        assert [r.id for r in response.results] == [mem_id]
+
+    @pytest.mark.asyncio
+    async def test_unmatched_hex_falls_through_to_normal_search(
+        self, unified_search_service, memory_service
+    ):
+        await self._seed_one(memory_service)
+
+        # id-looking query with no matching row → normal search path (no crash).
+        response = await unified_search_service.search(query="deadbeef")
+
+        assert all(not r.id.startswith("deadbeef") for r in response.results)
+
+    @pytest.mark.asyncio
+    async def test_project_filter_scopes_id_lookup(
+        self, unified_search_service, memory_service
+    ):
+        mem_id = await self._seed_one(memory_service, project_id="proj-a")
+        prefix = mem_id[:8]
+
+        hit = await unified_search_service.search(query=prefix, project_id="proj-a")
+        assert [r.id for r in hit.results] == [mem_id]
+
+        miss = await unified_search_service.search(query=prefix, project_id="proj-b")
+        assert all(r.id != mem_id for r in miss.results)
