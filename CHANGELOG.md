@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.24.0] - 2026-07-02
+
+**maintenance 배치의 신뢰성 회복(재시도·정확한 상태 표기·카드 진행률)과 id 기반 메모리 탐색**을 담은 minor 릴리스. WHY: (1) improve 배치에서 코드 펜스를 포함한 메모리가 LLM JSON 파싱에 결정적으로 실패해 dead_letter로 고착됐고, 재시도 수단이 없어 영구 방치됐다. 게다가 재시도 끝에 성공한 job에도 이전 에러가 남아 done 항목이 실패처럼 보였다(1.23.0 스크린샷 증상). (2) 배치 진행 상황을 보려면 Curation → Activity까지 가야 해서, 시작점인 Projects 카드에서 진행률이 보이지 않았다. (3) LLM 도구가 "mem-mesh f9732f1e"처럼 짧은 id로 메모리를 알려주는데 대시보드 검색(FTS/벡터)으로는 id를 찾을 수 없었다. 구현 후 cross-vendor 패널 리뷰(claude/codex/agy/cursor/kiro × security/logic)로 5건의 결함을 잡아 반영했다.
+
+### Added
+- **dead_letter 재시도** — `POST /api/maintenance/retry`(operation/project_id/job_id 스코프)로 dead_letter job을 pending으로 되돌려 워커가 자연 드레인. Curation Activity 워커 카드의 'Retry N failed' 일괄 버튼 + dead_letter 행 개별 retry 버튼. live(pending/processing) 중복이 있으면 해당 행은 제외(부분 unique 인덱스 `idx_maintenance_queue_live` 충돌 방지), 일괄 재시도는 중복 dead_letter 그룹당 최신 1건만 되돌린다. `app/core/services/maintenance.py`, `app/web/dashboard/route_modules/maintenance.py`, `app/web/static/js/pages/curation.js`
+- **프로젝트 카드 배치 진행률** — 카드에 op별 진행 바(N/M done · K failed + Retry). `GET /api/maintenance/status?by_project=true`가 전 프로젝트 큐 카운트(reconcile 포함)를 한 요청으로 반환하고, 활성 job이 있을 때만 3초 재귀 폴링(active 0이면 자기 종료, 연속 5회 실패 시 포기). 진행률 영역 클릭(Retry 제외) 시 `/curation?tab=activity&filter=maintenance`로 이동해 문제를 바로 조사할 수 있다(curation 딥링크 `?tab=`/`?filter=` 신설). `app/web/static/js/pages/projects.js`, `app/web/static/js/pages/curation.js`
+- **hex id로 메모리 검색** — 쿼리에 id 형태 토큰(8+ hex, UUID 부분/전체)이 있으면 id-prefix 직접 조회를 우선 수행(score 1.0), 미매치 시 일반 검색으로 폴백. "제안 저장 완료(mem-mesh f9732f1e)" 같은 도구 출력 문장을 통째로 붙여넣어도 동작. 메모리 상세 메타에 전체 ID 표시 + 클릭 복사. `app/core/services/unified_search.py`, `app/web/static/js/pages/memory-detail.js`
+
+### Fixed
+- **improve JSON 파싱 결정적 실패 (펜스 안의 펜스)** — 모델이 ```json으로 감싼 응답의 JSON 문자열 값 내부에 코드 펜스가 있으면 non-greedy 펜스 정규식이 조기 절단해 매 재시도가 실패 → 3회 후 dead_letter로 고착되던 문제. 파서를 후보 순차(raw → 펜스 추출 → 원본 텍스트 string-aware balanced salvage)로 재구성하고 `strict=False`로 문자열 내 literal 개행 허용. refine 프롬프트에 "no markdown fences" 명시. enrich/merge/overview/summary 동일 파서 공유. `app/core/services/relay_worker.py`, `app/core/services/chat.py`
+- **done 오표기 (stale last_error)** — `_finish()`가 done 전환 시 `last_error`를 지우지 않아 재시도 끝에 성공한 job이 실패처럼 표시되던 문제. done/stale 시 클리어 + UI는 실패 상태(dead_letter, 재시도 대기)에서만 에러 표시(activity에 `attempts` 노출). `app/core/services/maintenance.py`, `app/core/services/curation.py`, `app/web/static/js/pages/curation.js`
+- **파싱 실패 진단 불가** — "Could not parse ... as JSON"만 남던 last_error에 모델 출력 head 160자(secret redact)를 포함해 원인 추적 가능. `app/core/services/chat.py`
+- **(리뷰) bulk retry unique 위반** — 같은 (memory, operation)에 dead_letter 2건이면 단일 UPDATE가 IntegrityError로 전체 롤백돼 0건 재큐잉되던 문제(재현 확인) → 그룹당 최신 1건만 전환. `app/core/services/maintenance.py`
+- **(리뷰) 카드 폴링 이중 루프/영구 정지** — in-flight 중 start 호출이 idempotency 가드를 통과해 루프가 증식하던 문제(busy 플래그 추가), 첫 poll 일시 실패를 "활성 없음"으로 오판해 영구 정지하던 문제(연속 5회 실패까지 지속). `app/web/static/js/pages/projects.js`
+- **(리뷰) curation 딥링크 셀렉터 인젝션** — URL 쿼리 값을 querySelector 문자열에 그대로 삽입해 조작값이 페이지 로드를 깨뜨릴 수 있던 문제 → dataset 값 JS 비교로 전환. `app/web/static/js/pages/curation.js`
+
 ## [1.23.0] - 2026-07-01
 
 **프로젝트 Overview(LLM 서사 요약)**를 도입한 minor 릴리스. WHY: 프로젝트에 쌓인 메모리가 늘어날수록 "이 프로젝트가 지금 어떤 상태이고 무엇이 미결인가"를 한눈에 보기 어려웠다. 개별 메모리 enrich(title/abstract)는 있지만 프로젝트 전체를 관통하는 서사 요약이 없었다. 그래서 최근 20개 메모리를 한 번의 LLM 호출로 요약(summary/themes/recent_activity/open_issues/key_decisions)해 두 곳(Projects 카드 모달 · 메모리 상세 사이드바)에서 동일 렌더러로 노출하고, 입력 메모리의 source_hash로 stale을 감지해 on-demand 재생성한다.
