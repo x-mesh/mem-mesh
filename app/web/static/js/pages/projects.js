@@ -100,6 +100,7 @@ class ProjectsPage extends HTMLElement {
         await this.loadAutoShare();
         await this.loadOverviewSchedules();
         await this.loadOverviewWorkerState();
+        await this.loadCoverage();
         this.sortProjects();
         this.renderProjects();
         this.updateSummary();
@@ -772,6 +773,7 @@ class ProjectsPage extends HTMLElement {
           <h3 class="project-name">${project.name}</h3>
           <div class="project-stats">
             <span class="memory-count">${project.memory_count} memories</span>
+            ${this.enrichBadge(project.id)}
           </div>
         </div>
         
@@ -1017,6 +1019,10 @@ class ProjectsPage extends HTMLElement {
             <span class="summary-label">Average per Project</span>
             <span class="summary-value" id="avg-memories">0</span>
           </div>
+          <div class="summary-card" title="Memories with an LLM title/abstract. Injection works without it (structural fallback) — enrichment raises summary quality.">
+            <span class="summary-label">✨ Enriched</span>
+            <span class="summary-value" id="enrich-coverage">–</span>
+          </div>
         </div>
         
         <div class="projects-grid"></div>
@@ -1034,14 +1040,45 @@ class ProjectsPage extends HTMLElement {
     const totalProjects = this.querySelector('#total-projects');
     const totalMemories = this.querySelector('#total-memories');
     const avgMemories = this.querySelector('#avg-memories');
-    
+
     if (totalProjects) totalProjects.textContent = this.projects.length;
-    
+
     const memoryCount = this.projects.reduce((sum, p) => sum + p.memory_count, 0);
     if (totalMemories) totalMemories.textContent = memoryCount;
-    
+
     const avg = this.projects.length > 0 ? Math.round(memoryCount / this.projects.length) : 0;
     if (avgMemories) avgMemories.textContent = avg;
+
+    const enrichEl = this.querySelector('#enrich-coverage');
+    if (enrichEl) {
+      const cov = this.coverage?.enrichment;
+      enrichEl.textContent = cov
+        ? `${cov.enriched_count}/${cov.total_memories} (${(cov.coverage_ratio * 100).toFixed(1)}%)`
+        : '–';
+    }
+  }
+
+  /** Enrichment coverage — 사용자가 "개선되고 있는지" 볼 수 있는 지표.
+   *  실패해도 페이지는 정상 동작(배지만 생략). */
+  async loadCoverage() {
+    try {
+      this.coverage = await window.app.apiClient.get('/stats/coverage');
+      this.coverageByProject = {};
+      for (const row of this.coverage?.enrichment?.by_project || []) {
+        this.coverageByProject[row.project_id] = row;
+      }
+    } catch (error) {
+      console.warn('coverage load failed:', error);
+      this.coverage = null;
+      this.coverageByProject = {};
+    }
+  }
+
+  enrichBadge(projectId) {
+    const row = this.coverageByProject?.[projectId];
+    if (!row || !row.total) return '';
+    const pct = (row.coverage_ratio * 100).toFixed(row.coverage_ratio >= 0.1 ? 0 : 1);
+    return `<span class="enrich-badge" title="${row.enriched}/${row.total} memories enriched (LLM title/abstract)">✨ ${pct}%</span>`;
   }
 }
 
@@ -1222,6 +1259,16 @@ style.textContent = `
     border-radius: var(--border-radius-sm);
     font-size: 0.875rem;
     font-weight: 500;
+  }
+
+  .enrich-badge {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--border-radius-sm);
+    font-size: 0.8rem;
+    margin-left: 0.375rem;
+    white-space: nowrap;
   }
   
   .project-details {

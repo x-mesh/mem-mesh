@@ -1512,6 +1512,33 @@ class MCPToolHandlers:
                 (project_id, cutoff),
             )
 
+            # Enrichment coverage — "개선되고 있는가"를 세션 안에서 볼 수 있는
+            # 지표. memory_enrichment는 lazy 테이블이라 부재 시 0으로 폴백.
+            enrichment_coverage = {"total": 0, "enriched": 0, "ratio": 0.0}
+            try:
+                cov_row = await db.fetchone(
+                    """
+                    SELECT COUNT(*) AS total,
+                           SUM(CASE WHEN e.title IS NOT NULL
+                                     AND TRIM(e.title) != '' THEN 1 ELSE 0 END)
+                               AS enriched
+                    FROM memories m
+                    LEFT JOIN memory_enrichment e ON e.memory_id = m.id
+                    WHERE m.project_id = ?
+                    """,
+                    (project_id,),
+                )
+                if cov_row and cov_row["total"]:
+                    enrichment_coverage = {
+                        "total": cov_row["total"],
+                        "enriched": cov_row["enriched"] or 0,
+                        "ratio": round(
+                            (cov_row["enriched"] or 0) / cov_row["total"], 4
+                        ),
+                    }
+            except Exception as cov_exc:  # noqa: BLE001 — lazy 테이블 부재 등
+                logger.debug(f"enrichment coverage skipped: {cov_exc}")
+
             import json as _json
 
             report = {
@@ -1527,6 +1554,7 @@ class MCPToolHandlers:
                     "sessions_count": len(recent_sessions),
                     "zero_result_searches": len(zero_result_queries),
                     "injection_stats": injection_stats,
+                    "enrichment_coverage": enrichment_coverage,
                 },
                 "incomplete_pins": [
                     {

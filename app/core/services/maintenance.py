@@ -332,9 +332,19 @@ class MaintenanceService:
         )
 
     async def process_next(
-        self, *, worker_id: str, chat_service: Any, settings: Any
+        self,
+        *,
+        worker_id: str,
+        chat_service: Any,
+        settings: Any,
+        notifier: Any = None,
     ) -> dict:
-        """Claim and run one enrich/improve job. Returns a small result dict."""
+        """Claim and run one enrich/improve job. Returns a small result dict.
+
+        ``notifier``(optional, HttpNotifier/RealtimeNotifier 호환)가 주어지면
+        enrich 완료 시 ``memory_enriched`` 이벤트를 best-effort로 발행한다 —
+        사용자가 "무엇이 방금 enrich됐는지" 알림 센터에서 볼 수 있게.
+        """
         await self.ensure_schema()
         now = _epoch_now()
         item = await self._claim(worker_id, now)
@@ -357,7 +367,18 @@ class MaintenanceService:
                 return {"job_id": item["id"], "processed": True, "stale": True}
 
             if item["operation"] == "enrich":
-                await self._run_enrich(memory, chat_service, settings)
+                enriched_title = await self._run_enrich(memory, chat_service, settings)
+                if notifier is not None:
+                    try:
+                        await notifier.notify_memory_enriched(
+                            {
+                                "memory_id": str(memory["id"]),
+                                "project_id": memory["project_id"],
+                                "title": enriched_title,
+                            }
+                        )
+                    except Exception as exc:  # noqa: BLE001 — 알림은 잡을 못 막는다
+                        logger.debug("memory_enriched notify failed: %s", exc)
             elif item["operation"] == "improve":
                 await self._run_improve(memory, chat_service, settings)
             else:
@@ -375,20 +396,22 @@ class MaintenanceService:
             await self._retry_or_dead(item, str(exc), now)
             return {"job_id": item["id"], "processed": False, "error": str(exc)}
 
-    async def _run_enrich(self, memory: Any, chat_service: Any, settings: Any) -> None:
+    async def _run_enrich(self, memory: Any, chat_service: Any, settings: Any) -> str:
         from ..redaction import redact_secrets
 
         data = await chat_service.enrich_memory_content(
             content=str(memory["content"] or ""), settings=settings
         )
+        title = redact_secrets(str(data.get("title", "")))
         await EnrichmentStore(self.db).upsert(
             memory_id=str(memory["id"]),
-            title=redact_secrets(str(data.get("title", ""))),
+            title=title,
             abstract=redact_secrets(str(data.get("abstract", ""))),
             tags=list(data.get("tags") or []),
             display_kind=str(data.get("display_kind", "")),
             model=str(data.get("model", "")),
         )
+        return title
 
     async def _run_improve(self, memory: Any, chat_service: Any, settings: Any) -> None:
         from ..redaction import redact_secrets

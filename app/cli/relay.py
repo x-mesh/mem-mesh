@@ -390,14 +390,26 @@ async def _build_relay_worker(
         chat_settings = settings
         logger.info("maintenance worker: enrich/improve via chat LLM")
 
+    # Cross-process WS notifier — overview 재생성과 maintenance enrich 완료 알림이
+    # 공유한다(fire-and-forget, 웹서버가 꺼져 있으면 무해). 별도 컨테이너에서 돌 때는
+    # localhost가 웹서버가 아니므로 MEM_MESH_NOTIFY_BASE_URL로 서비스 주소를 지정한다
+    # (docker-compose: http://mem-mesh:8000).
+    import os as _os
+
+    from app.core.notifier import HttpNotifier
+
+    ws_notifier = HttpNotifier(
+        _os.getenv("MEM_MESH_NOTIFY_BASE_URL")
+        or f"http://localhost:{settings.server_port}"
+    )
+
     # Scheduled project-overview refresh via the chat LLM. Opt-in per project
     # (overview_schedule); regenerates one due project per cycle.
     overview_scheduler = None
     overview_service = None
-    overview_notifier = None
+    overview_notifier = ws_notifier
     overview_interval_hours = _DEFAULT_OVERVIEW_INTERVAL_HOURS
     if "overview" in active:
-        from app.core.notifier import HttpNotifier
         from app.core.services.chat import ChatService
         from app.core.services.overview import (
             OverviewScheduler,
@@ -414,10 +426,6 @@ async def _build_relay_worker(
             await db.get_app_config("overview.refresh_interval_hours")
             or _DEFAULT_OVERVIEW_INTERVAL_HOURS
         )
-        # Best-effort WS notification when an overview regenerates (same
-        # cross-process bridge the MCP servers use); silent if the web server
-        # is down.
-        overview_notifier = HttpNotifier(f"http://localhost:{settings.server_port}")
         logger.info(
             "overview worker: scheduled refresh every %sh via chat LLM",
             overview_interval_hours,

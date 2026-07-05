@@ -152,6 +152,8 @@ async def internal_notify(payload: dict) -> dict:
         await _notifier.notify_relay_materialized(data)
     elif event_type == "overview_generated":
         await _notifier.notify_overview_generated(data)
+    elif event_type == "memory_enriched":
+        await _notifier.notify_memory_enriched(data)
     else:
         return {"status": "ignored", "reason": f"unknown event type: {event_type}"}
 

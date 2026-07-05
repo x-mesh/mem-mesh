@@ -140,6 +140,57 @@ async def test_process_enrich_writes_enrichment_store():
 
 
 @pytest.mark.asyncio
+async def test_process_enrich_fires_notifier():
+    """enrich 완료 시 memory_enriched 이벤트 발행 — 사용자 가시성 (알림 센터)."""
+
+    class _SpyNotifier:
+        def __init__(self):
+            self.events = []
+
+        async def notify_memory_enriched(self, data):
+            self.events.append(data)
+
+    async with _temp_db() as db:
+        svc = MaintenanceService(db)
+        await svc.ensure_schema()
+        await _add_memory(db, "m1")
+        await svc.enqueue_project(project_id="proj", operations=["enrich"], force=False)
+
+        spy = _SpyNotifier()
+        result = await svc.process_next(
+            worker_id="w", chat_service=_StubChat(), settings=None, notifier=spy
+        )
+        assert result["processed"] is True
+        assert len(spy.events) == 1
+        assert spy.events[0]["memory_id"] == "m1"
+        assert spy.events[0]["title"] == "T"
+
+
+@pytest.mark.asyncio
+async def test_process_enrich_notifier_failure_does_not_fail_job():
+    """알림 실패는 잡 성공을 뒤집지 않는다 (best-effort)."""
+
+    class _BrokenNotifier:
+        async def notify_memory_enriched(self, data):
+            raise RuntimeError("web server down")
+
+    async with _temp_db() as db:
+        svc = MaintenanceService(db)
+        await svc.ensure_schema()
+        await _add_memory(db, "m1")
+        await svc.enqueue_project(project_id="proj", operations=["enrich"], force=False)
+
+        result = await svc.process_next(
+            worker_id="w",
+            chat_service=_StubChat(),
+            settings=None,
+            notifier=_BrokenNotifier(),
+        )
+        assert result["processed"] is True
+        assert (await EnrichmentStore(db).get("m1"))["title"] == "T"
+
+
+@pytest.mark.asyncio
 async def test_process_improve_stores_proposal_not_applied():
     async with _temp_db() as db:
         svc = MaintenanceService(db)

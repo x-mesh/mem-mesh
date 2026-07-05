@@ -29,6 +29,7 @@ const EVENT_META = {
   relay_ingested: { icon: '📡', label: 'Relay received', toast: 'info' },
   relay_materialized: { icon: '📥', label: 'Relay memory added', toast: 'info' },
   overview_generated: { icon: '📋', label: 'Project overview updated', toast: 'info' },
+  memory_enriched: { icon: '✨', label: 'Memory enriched', toast: 'info' },
 };
 
 export class NotificationCenter extends HTMLElement {
@@ -98,8 +99,10 @@ export class NotificationCenter extends HTMLElement {
     };
     if (event.startsWith('memory_')) {
       const id = memory.id || data?.memory_id || '';
-      const proj = memory.project_id ? ` (${memory.project_id})` : '';
-      const text = `${head(memory.title || memory.content) || String(id).slice(0, 8)}${proj}`;
+      const projId = memory.project_id || data?.project_id;
+      const proj = projId ? ` (${projId})` : '';
+      // memory_enriched sends a flat {memory_id, project_id, title} payload.
+      const text = `${head(memory.title || data?.title || memory.content) || String(id).slice(0, 8)}${proj}`;
       return {
         text,
         href: event !== 'memory_deleted' && id ? `/memory/${encodeURIComponent(id)}` : null,

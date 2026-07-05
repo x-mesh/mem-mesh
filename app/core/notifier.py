@@ -92,3 +92,6 @@ class HttpNotifier:
 
     async def notify_overview_generated(self, overview_data: Dict[str, Any]) -> None:
         await self._send("overview_generated", overview_data)
+
+    async def notify_memory_enriched(self, enrich_data: Dict[str, Any]) -> None:
+        await self._send("memory_enriched", enrich_data)

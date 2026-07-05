@@ -1030,6 +1030,8 @@ class RelayWorker:
                 worker_id=self.worker_id,
                 chat_service=self.chat_service,
                 settings=self.chat_settings,
+                # overview와 공유하는 WS 브리지 — enrich 완료를 알림 센터로.
+                notifier=self.overview_notifier,
             )
             if result.get("job_id"):
                 if result.get("processed"):

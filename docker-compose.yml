@@ -91,6 +91,49 @@ services:
       retries: 3
       start_period: 40s
 
+  # Relay/maintenance background worker — drains relay outbox, maintenance
+  # queue (enrich/improve), reconcile, and scheduled overview refresh in a
+  # SEPARATE process so LLM batches never compete with API latency. Shares the
+  # SQLite volume with the web service (WAL mode + busy_timeout make the
+  # two-process access safe; keep it to exactly these two).
+  # NOTE: without this container, batch enrich / overview schedules / archive
+  # prune simply never run — the queues fill and sit idle.
+  mem-mesh-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: xmesh/mem-mesh:latest
+    container_name: mem-mesh-worker
+    command: ["python", "-m", "app.cli.main", "relay", "worker"]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    volumes:
+      # Same named volumes as the web service: one DB, one model cache.
+      - mem-mesh-data:/app/data
+      - model-cache:/home/memmesh/.cache/huggingface
+      - ./logs:/app/logs
+    environment:
+      - MEM_MESH_DATABASE_PATH=/app/data/memories.db
+      - MEM_MESH_LOG_LEVEL=INFO
+      - MEM_MESH_LOG_FORMAT=text
+      - MEM_MESH_LOG_OUTPUT=both
+      # Separate log file so worker lines don't interleave with API access logs.
+      - MEM_MESH_LOG_FILE=/app/logs/mem-mesh-worker.log
+      - HOME=/home/memmesh
+      # Cross-container WS bridge: enrich/overview completion events POST to the
+      # web service (service name, not localhost) so the dashboard notification
+      # center shows them. Auth = the shared hook token from the data volume.
+      - MEM_MESH_NOTIFY_BASE_URL=http://mem-mesh:8000
+      - MEM_MESH_HOOK_TOKEN=${MEM_MESH_HOOK_TOKEN:-}
+    depends_on:
+      mem-mesh:
+        condition: service_healthy
+    restart: unless-stopped
+    # The worker loads the same embedding model for relay materialization —
+    # budget RAM like the web service.
+    mem_limit: 4g
+    mem_reservation: 2g
+    cpus: 2.0
+
 volumes:
   model-cache:
     name: mem-mesh-model-cache

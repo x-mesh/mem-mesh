@@ -124,6 +124,35 @@ async def test_weekly_review_injection_stats_empty():
 
 
 @pytest.mark.asyncio
+async def test_weekly_review_enrichment_coverage():
+    """summary.enrichment_coverage — 커버리지 개선 추이를 세션 안에서 확인."""
+    from app.core.services.enrich_store import EnrichmentStore
+
+    async with _temp_db() as db:
+        # 빈 프로젝트 → zeroed block (누락/None 금지)
+        empty = await _handlers(db).weekly_review("mem-mesh")
+        assert empty["summary"]["enrichment_coverage"] == {
+            "total": 0,
+            "enriched": 0,
+            "ratio": 0.0,
+        }
+
+        for mid in ("e1", "e2"):
+            await db.execute(
+                "INSERT INTO memories (id, content, content_hash, project_id, "
+                "category, source, embedding, created_at, updated_at) "
+                "VALUES (?, 'c', ?, 'mem-mesh', 'decision', 't', ?, "
+                "'2026-07-01', '2026-07-01')",
+                (mid, f"h-{mid}", b"\x00" * 4),
+            )
+        await EnrichmentStore(db).upsert(memory_id="e1", title="T")
+
+        report = await _handlers(db).weekly_review("mem-mesh")
+        cov = report["summary"]["enrichment_coverage"]
+        assert cov == {"total": 2, "enriched": 1, "ratio": 0.5}
+
+
+@pytest.mark.asyncio
 async def test_weekly_review_zero_result_queries_from_search_metrics():
     """zero_result_queries returns real search_metrics rows with result_count=0,
     excluding hits and other projects — the previously-dead search_logs query."""
