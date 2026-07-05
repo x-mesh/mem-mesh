@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.26.2] - 2026-07-05
+
+**훅 rules 프롬프트 v26** — 1.26.0의 신규 기능(anchors/stale 검증/doc_proposal)을 에이전트가 실제로 쓰도록 행동 지침을 추가하는 patch. WHY: M3(수명)·M4(승격)는 클라이언트(에이전트)의 능동 행동이 전제인데, 기존 rules(v25)에는 관련 지침이 없어 도구만 있고 채택이 안 되는 상태였다. prod 실측(enrichment 0.06%, hook prompts 2,758건)도 이 릴리스 직전 완료 — A1/A3 가정 검증됨.
+
+### Changed
+- **CORE_RULES 신규 3건 (PROMPT_VERSION 25→26)** — ① 코드 상태에 묶인 메모리 저장 시 git anchors(commit_hash/file_paths/branch) 전달, ② 미검증 anchor 경고를 만나면 로컬 확인 후 `report_anchor_status` 보고(관련 작업 한정, 스윕 금지), ③ 승인된 doc_proposals를 로컬 Edit로 적용 후 `doc_proposal_applied` 보고. content hash 드리프트 가드 갱신, 훅 스냅샷 10건 재생성. `app/cli/prompts/behaviors.py`, `tests/snapshots/*.sh`
+
 ## [1.26.1] - 2026-07-05
 
 v1.26.0의 **반쪽 발행을 복구**하는 patch. WHY: 1.26.0은 PyPI에는 정상 발행됐지만, Docker publish 워크플로의 Test gate와 CI가 `test_validate_db_path_warns_without_copy_marker` 1건으로 실패해 **이미지가 발행되지 못했다**(1.21.1과 동일 패턴). 원인은 플랫폼 의존 테스트 — replay 하네스의 copy-marker 검사는 경로 문자열 전체에서 `tmp`를 마커로 인정하는데, pytest `tmp_path`가 Linux에선 `/tmp/...`(마커 매치 → 경고 없음), macOS에선 `/private/var/folders/...`(마커 없음 → 경고 발생)라 로컬(mac)은 green, CI(Linux)만 red였다. 기능 변경 없이 테스트만 정리한다.
