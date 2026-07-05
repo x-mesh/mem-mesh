@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.27.2] - 2026-07-05
+
+v1.27.1의 **반쪽 발행을 복구**하는 patch. WHY: 1.27.1은 PyPI에는 발행됐지만 Docker publish Test gate와 CI가 `test_relay_cli.py` 2건으로 실패해 이미지가 발행되지 못했다. 원인은 1.27.1의 ws_notifier 신설이 `settings.server_port`에 무조건 접근하는데, relay CLI 테스트는 settings를 최소 필드 스텁으로 주입하기 때문 — 로컬 검증이 `-k` 서브셋이라 test_relay_cli를 놓쳤다. `getattr(settings, "server_port", 8000)` 방어 접근으로 수정하고 전체 스위트(1607 passed)로 재검증. `app/cli/relay.py`
+
+### Fixed
+- **relay worker ws_notifier의 스텁 settings 호환** — server_port 부재 시 8000 폴백. `app/cli/relay.py`
+
 ## [1.27.1] - 2026-07-05
 
 **enrich 가시성 + 전용 worker 컨테이너**를 담은 릴리스 (기능은 1.27.0로 예정됐으나, 1.27.0 태그가 기능 커밋 전에 병행 수동 릴리스로 발행되어 버전만 소모됨 — 아래 1.27.0 항목 참조). WHY: (1) prod 실측(v1.26.1)에서 enrichment 커버리지 0.06%·hook_events prune 7주 미가동이 확인됐는데, 근본 원인은 **worker 프로세스가 배포에 없던 것** — enrich 배치·overview 스케줄·archive prune이 전부 잠들어 있었다. compose에 worker 컨테이너를 추가해 구조적으로 해소한다. (2) 선별 enrich 전략(계측 축적 → 자주 주입되는 메모리만 배치)을 채택하면서, enrich가 실제로 일어나고 커버리지가 개선되는지 사용자가 볼 수 있는 층위가 없었다 — 실시간 알림·대시보드 지표·weekly_review 필드 3층으로 채운다.
