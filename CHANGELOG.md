@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.26.0] - 2026-07-05
+
+**세션 메모리 실효성 강화(memory-effectiveness)** — "세션 기록 검색은 에이전트에 유용하지 않다"(12gramsofcarbon) 비판을 냉정 평가해, 주장 대신 계측으로 답하는 체계를 넣은 minor 릴리스. WHY: (1) 훅 주입 라인이 content[:300] 문장 중간 절단·나이/출처 미표시로 컨텍스트를 오염시켰고 LLM 미등록 사용자는 개선 경로가 없었다. (2) 주입된 memory_id가 어디에도 기록되지 않아 "메모리가 실제로 도움이 되는가"에 데이터로 답할 수 없었다(session_start 주석의 dead_ratio ~0.999 write-only sink). (3) 오래된/superseded 메모리가 무감쇠로 주입 후보에 경쟁했고 메모리에 수명 개념이 없었다. (4) 고가치 메모리가 버전 관리되는 문서로 승격될 경로가 없었다. 구현 후 cross-vendor 패널 리뷰(claude/codex/agy/cursor/kiro × security/logic)로 결함 8건(F1~F8)을 잡아 반영했다.
+
+### Added
+- **주입 포맷 3단 fallback + 나이·출처 표기** — 두 훅(session_start/user_prompt_submit)이 공유 포맷터를 경유해 `- [category] (나이 · enriched|extracted) title — abstract` 라인 생성. ① enrichment title/abstract → ② 구조 추출(마크다운 제목+첫 문장) → ③ 문장 경계 절단의 3단 fallback으로 **LLM 미등록 환경 포함 동일 동작**, 문장 중간 절단 0건. superseded(status!='canonical')·클라이언트 검증 stale 메모리는 주입 제외. `app/core/services/recall.py`, `app/web/dashboard/route_modules/hooks.py`, `app/core/services/unified_search.py`
+- **주입 효용 계측(injection-tracking)** — 주입된 memory_id를 `injected_memories`(v12)에 세션·턴·경로별 기록하고, Stop 시점 결정적 휴리스틱(id 언급/키워드/활동, LLM 불필요)으로 utilized 판정(v13). `weekly_review`에 `injection_stats`(주입/판정/활용/방법별) 노출 + 존재하지 않는 `search_logs`를 조회하던 죽은 zero-result 코드를 `search_metrics` 기반으로 수리. `app/core/services/hook.py`, `app/mcp_common/tools.py`, `app/core/database/schema_migrator.py`
+- **오프라인 replay 하네스** — 축적된 실제 프롬프트로 구/신 주입 포맷을 blind A/B 비교(결정적 지표 + 선택적 LLM judge, 순서 랜덤화). prod `.backup` 복사본 강제, L1~L5 체크리스트 헤더, LLM 미등록 시 결정적 지표만 부분 실행. 실측은 2주+ 데이터 축적 후 — **null 결과면 주입 축소도 유효한 결론**. `scripts/replay_injection_eval.py`
+- **git anchors + stale 2단 게이트** — `add`/`pin_promote`에 optional `anchors`(commit_hash/file_paths/branch, 클라이언트가 `git rev-parse`로 수집·전달 — 서버는 git 접근 불가 확정). `report_anchor_status`로 클라이언트 검증 보고(v14 `stale_status`): 보고된 stale은 주입 제외(강신호), 미검증 90일+ anchor는 경고 표기(약신호). `app/core/services/memory.py`, `app/mcp_common/tools.py`
+- **doc_proposal 문서 승격** — refine_proposal 패턴의 파일판 상태 머신(pending→approved→applied/rejected) + LLM 개정안 생성(미등록 시 승격 후보 목록만 — feature gate) + Curation diff 승인 UI + MCP 도구 2종(`doc_proposals`/`doc_proposal_applied`). **서버는 파일에 쓰지 않는다**(project_id→경로 매핑 부재 + Docker 미마운트) — 적용은 대상 저장소의 에이전트, 서버는 상태·diff 보관만. "메모리는 스테이징, git이 영구 계층". `app/core/services/doc_proposal.py`, `app/web/dashboard/route_modules/curation.py`, `app/web/static/js/pages/curation.js`
+- **파생성 pre-check** — 대화 덤프(`Q:`/`A:` 페어, 턴 마커)·git 파생(diff/헌크/로그 나열) 콘텐츠를 write-time 순수 규칙으로 판별해 저장은 허용하되 improve 큐 자동 enqueue(동기 LLM 호출 없음 — L1/L5), `AddResponse.quality_hint`로 호출자에 안내. LLM 미등록 시 enqueue 스킵(큐 오염 방지). `app/core/services/quality_gate.py`, `app/core/services/memory.py`, `app/core/services/maintenance.py`
+- **실측 API + 운영 가이드** — `GET /api/stats/coverage`: enrichment title 커버리지(전체/프로젝트별) + hook_events 축적 통계(archive 포함 `replay_prompts_total`). A1/A3 가정의 prod 실측 절차 문서화. `app/core/services/stats.py`, `app/web/dashboard/route_modules/stats.py`, `docs/ops-measure-coverage.md`
+- **hook_events 보안·보존** — `_record()` 경로에 `redact_secrets` 적용(M4 — 기존엔 prompt 평문 저장), 14일 prune 전 `hook_events_archive`로 이동 보존 + 이동 시 방어적 재redact(소급 미적용 행 커버). `app/web/dashboard/route_modules/hooks.py`, `app/core/services/hook.py`
+
+### Fixed
+- **(cross-vendor 리뷰 F1~F8)** replay 검색 `project_id=None` 하드코딩으로 A/B 왜곡+타 프로젝트 유출(F1) · judge 전송 memory 블록 미redact — 4/5 벤더 독립 지적(F2) · coverage stats의 archive 미집계로 prune 직후 축적량 과소보고(F3) · FastMCP stdio에 doc_proposal 도구 2종 미등록(F4) · doc_proposal 소스 메모리 project 미스코프(F5) · anchors JSON 손상 시 context 조회 전체 실패 → tolerant parse(F6) · `report_anchor_status`에 anchorless 가드 부재+detail 로그 미redact(F7) · doc revision LLM 전송 전 file_content/메모리 블록 미redact(F8). 회귀 테스트 3건 신설. F9~F15(휴리스틱 정밀도·문장경계 엣지 등)는 later 백로그(l1~l7).
+
+### Changed
+- **PRODUCT.md 포지셔닝 재정의** — 방어 가능 코어 3축(세션 간 작업 상태 복원 / git에 남지 않는 지식 / 관측성·회고) 중심으로 전면 개정. "과거 세션 검색 = 코딩 성능 부스트" 주장은 계측 데이터 확보 전까지 유보(Empirical Stance: "포지셔닝은 측정을 따른다"), Honest Limits 명시. README 2종 정합. `PRODUCT.md`, `README.md`, `README.ko.md`
+
 ## [1.25.0] - 2026-07-02
 
 **백그라운드 자동화(Overview 스케줄러)·전역 실시간 알림·분산 LLM 비용 절감(hub enrichment 재사용)·연합 검색**을 담은 minor 릴리스. WHY: (1) 프로젝트 Overview는 on-demand뿐이라 캐시가 stale로 방치됐다 — 워커가 주기적으로, 활동이 있는 프로젝트만 골라 갱신하게 한다. (2) 메모리 생성/삭제 알림이 페이지 의존적이라(WS는 정상인데 memories 페이지에서만 toast) "팝업이 안 뜬다"로 보였다 — 전역 알림 센터로 모든 페이지에서 받고 한곳에 모은다. (3) 개인 노드에서 이미 enrich한 메모리를 hub가 또 LLM으로 enrich해 공유 1건당 LLM 1회가 낭비됐다. (4) panel/review 실행 결과가 raw findings JSON 한 줄 blob으로 저장돼 읽을 수 없었다 — kiro/agy(클라이언트 셸)와 codex/claude(서버사이드) 두 저장 경로 모두에서 markdown으로 변환한다.
