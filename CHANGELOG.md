@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.26.1] - 2026-07-05
+
+v1.26.0의 **반쪽 발행을 복구**하는 patch. WHY: 1.26.0은 PyPI에는 정상 발행됐지만, Docker publish 워크플로의 Test gate와 CI가 `test_validate_db_path_warns_without_copy_marker` 1건으로 실패해 **이미지가 발행되지 못했다**(1.21.1과 동일 패턴). 원인은 플랫폼 의존 테스트 — replay 하네스의 copy-marker 검사는 경로 문자열 전체에서 `tmp`를 마커로 인정하는데, pytest `tmp_path`가 Linux에선 `/tmp/...`(마커 매치 → 경고 없음), macOS에선 `/private/var/folders/...`(마커 없음 → 경고 발생)라 로컬(mac)은 green, CI(Linux)만 red였다. 기능 변경 없이 테스트만 정리한다.
+
+### Fixed
+- **replay 하네스 db-path 테스트 플랫폼 독립화** — `validate_db_path`가 파일시스템을 건드리지 않는 점을 이용해, 경고 케이스를 tmp_path 기반에서 마커 없는 합성 경로(`/srv/...`)로 교체. Linux `/tmp` 마커 매치로 인한 분기 제거(양쪽 조건 회귀 검증 포함). `tests/test_replay_harness.py`
+
 ## [1.26.0] - 2026-07-05
 
 **세션 메모리 실효성 강화(memory-effectiveness)** — "세션 기록 검색은 에이전트에 유용하지 않다"(12gramsofcarbon) 비판을 냉정 평가해, 주장 대신 계측으로 답하는 체계를 넣은 minor 릴리스. WHY: (1) 훅 주입 라인이 content[:300] 문장 중간 절단·나이/출처 미표시로 컨텍스트를 오염시켰고 LLM 미등록 사용자는 개선 경로가 없었다. (2) 주입된 memory_id가 어디에도 기록되지 않아 "메모리가 실제로 도움이 되는가"에 데이터로 답할 수 없었다(session_start 주석의 dead_ratio ~0.999 write-only sink). (3) 오래된/superseded 메모리가 무감쇠로 주입 후보에 경쟁했고 메모리에 수명 개념이 없었다. (4) 고가치 메모리가 버전 관리되는 문서로 승격될 경로가 없었다. 구현 후 cross-vendor 패널 리뷰(claude/codex/agy/cursor/kiro × security/logic)로 결함 8건(F1~F8)을 잡아 반영했다.
