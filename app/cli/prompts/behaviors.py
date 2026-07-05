@@ -19,7 +19,7 @@ from typing import List
 # compute_content_hash().
 # ---------------------------------------------------------------------------
 
-PROMPT_VERSION: int = 25
+PROMPT_VERSION: int = 26
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +133,46 @@ CORE_RULES: List[Rule] = [
         description=(
             "When the user explicitly says the session is done, finish the "
             'request and then call session_end(project_id="{project_id}").'
+        ),
+    ),
+    Rule(
+        key="anchors_collection",
+        title="Attach git anchors to code-tied memories",
+        description=(
+            "When saving a memory whose validity depends on the code state "
+            "(decision, bug, code_snippet about specific files), run "
+            "`git rev-parse HEAD` and pass anchors={commit_hash, file_paths, "
+            "branch} to add() or pin_promote(). The server has no git access — "
+            "the client is the only party that can anchor a memory. Skip when "
+            "not in a git repository or the memory is code-independent."
+        ),
+    ),
+    Rule(
+        key="anchor_verification",
+        title="Report anchor staleness you can verify",
+        description=(
+            "When an injected memory line carries an unverified-anchor warning "
+            "(aged anchor), verify it locally when convenient: check the "
+            "anchored file_paths still exist and the commit is reachable "
+            "(`git cat-file -e <commit_hash>`), then call "
+            'report_anchor_status(memory_id, "fresh"|"stale"). A stale verdict '
+            "removes the memory from future auto-injection; fresh clears the "
+            "warning. Only do this for memories relevant to the current work — "
+            "do not sweep."
+        ),
+    ),
+    Rule(
+        key="doc_proposals_apply",
+        title="Apply approved doc proposals locally",
+        description=(
+            'If doc_proposals(project_id="{project_id}", status="approved") '
+            "returns entries, the user has approved promoting memory into "
+            "version-controlled docs. Verify the target file still matches "
+            "original_hash, apply proposed_content with your local edit tool, "
+            "then call doc_proposal_applied(proposal_id). The server never "
+            "writes files — the agent in the repository is the only applier. "
+            "Check at session start or when the user asks about pending "
+            "promotions; skip silently when there are none."
         ),
     ),
 ]
@@ -256,4 +296,4 @@ def compute_content_hash() -> str:
 # Pinned fingerprint of the definitions above. Regenerate after an intended
 # rule change with:
 #   python -c "from app.cli.prompts.behaviors import compute_content_hash as h; print(h())"
-PROMPT_CONTENT_HASH: str = "2633ee6db0c6bc89"
+PROMPT_CONTENT_HASH: str = "456e656b011ba47a"

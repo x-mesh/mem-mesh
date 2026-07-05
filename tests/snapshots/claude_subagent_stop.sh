@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 25
+# mem-mesh-hooks prompt-version: 26
 # Claude Code SubagentStop hook → mem-mesh /api/hooks/claude/subagent-stop
 #
 # Thin forwarder: the server keyword-matches the subagent result and saves the
