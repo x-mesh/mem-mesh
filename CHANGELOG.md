@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.27.1] - 2026-07-05
+
+**enrich 가시성 + 전용 worker 컨테이너**를 담은 릴리스 (기능은 1.27.0로 예정됐으나, 1.27.0 태그가 기능 커밋 전에 병행 수동 릴리스로 발행되어 버전만 소모됨 — 아래 1.27.0 항목 참조). WHY: (1) prod 실측(v1.26.1)에서 enrichment 커버리지 0.06%·hook_events prune 7주 미가동이 확인됐는데, 근본 원인은 **worker 프로세스가 배포에 없던 것** — enrich 배치·overview 스케줄·archive prune이 전부 잠들어 있었다. compose에 worker 컨테이너를 추가해 구조적으로 해소한다. (2) 선별 enrich 전략(계측 축적 → 자주 주입되는 메모리만 배치)을 채택하면서, enrich가 실제로 일어나고 커버리지가 개선되는지 사용자가 볼 수 있는 층위가 없었다 — 실시간 알림·대시보드 지표·weekly_review 필드 3층으로 채운다.
+
+### Added
+- **memory_enriched 실시간 알림** — maintenance enrich 완료 시 worker가 cross-process 브리지(`/api/internal/notify`)로 이벤트를 보내 알림 센터에 `✨ Memory enriched — <제목> (프로젝트)` toast·이력 표시. 알림 실패는 잡 성공에 영향 없음(best-effort). 별도 컨테이너 대응을 위해 `MEM_MESH_NOTIFY_BASE_URL` env 신설(기본 localhost). `app/core/services/maintenance.py`, `app/core/notifier.py`, `app/web/websocket/realtime.py`, `app/web/dashboard/routes.py`, `app/cli/relay.py`, `app/web/static/js/components/notification-center.js`
+- **Projects 페이지 enrichment 커버리지 지표** — 상단 요약 `✨ Enriched N/M (X%)` 카드 + 프로젝트 카드별 `✨ X%` 뱃지 (coverage API 소비, 실패 시 조용히 생략). 배치 진행에 따라 개선 추이를 바로 확인. `app/web/static/js/pages/projects.js`
+- **weekly_review `enrichment_coverage`** — summary에 프로젝트 커버리지(total/enriched/ratio) 추가 — 세션 안에서 개선 추이 확인. lazy 테이블 부재 시 zeroed 폴백. `app/mcp_common/tools.py`
+- **worker 컨테이너 (compose 2종)** — `mem-mesh-worker`(prod)/`mem-mesh-worker-dev`(dev): relay/maintenance/reconcile/overview를 API 프로세스와 분리 실행. SQLite WAL 볼륨 공유(웹+worker 2프로세스 한정), healthy 의존, 별도 로그 파일, 4g 메모리 제한. 이 컨테이너 없이는 enrich 배치·overview 스케줄·hook_events prune이 전혀 돌지 않는다(prod 실측으로 확인된 공백). `docker-compose.yml`, `docker-compose.dev.yml`
+
+## [1.27.0] - 2026-07-05
+
+버전 문자열 변경 외 **기능 변경 없음** (1.26.2와 동일 코드). 기능 커밋 전에 수동 `make release`가 병행 실행되어 pyproject bump만 담긴 태그가 발행됨. 기능 본체는 1.27.1에 수록.
+
 ## [1.26.2] - 2026-07-05
 
 **훅 rules 프롬프트 v26** — 1.26.0의 신규 기능(anchors/stale 검증/doc_proposal)을 에이전트가 실제로 쓰도록 행동 지침을 추가하는 patch. WHY: M3(수명)·M4(승격)는 클라이언트(에이전트)의 능동 행동이 전제인데, 기존 rules(v25)에는 관련 지침이 없어 도구만 있고 채택이 안 되는 상태였다. prod 실측(enrichment 0.06%, hook prompts 2,758건)도 이 릴리스 직전 완료 — A1/A3 가정 검증됨.
