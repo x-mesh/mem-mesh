@@ -69,9 +69,14 @@ services:
       - MEM_MESH_LOG_FILE=/app/logs/mem-mesh-worker.log
       # 웹 컨테이너로 WS 브리지 알림 (enrich/overview 완료 → 알림 센터)
       - MEM_MESH_NOTIFY_BASE_URL=http://mem-mesh-dev:${MEM_MESH_SERVER_PORT:-8000}
+      - MEM_MESH_WORKER_CONCURRENCY=${MEM_MESH_WORKER_CONCURRENCY:-1}
     depends_on:
       - mem-mesh-dev
-    command: python -m app.cli.main relay worker -v
+    # concurrency = N asyncio worker instances (병렬 LLM 처리). MEM_MESH_WORKER_CONCURRENCY로 조절.
+    command:
+      - sh
+      - -c
+      - exec python -m app.cli.main relay worker -v --concurrency ${MEM_MESH_WORKER_CONCURRENCY:-1}
 
 volumes:
   model-cache:

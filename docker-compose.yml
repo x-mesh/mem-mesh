@@ -104,7 +104,15 @@ services:
       dockerfile: Dockerfile
     image: xmesh/mem-mesh:latest
     container_name: mem-mesh-worker
-    command: ["python", "-m", "app.cli.main", "relay", "worker"]
+    # Concurrency = N asyncio worker instances in ONE process (asyncio.gather),
+    # each claiming a different job — so N enrich/improve LLM calls run in
+    # parallel (LLM latency, not CPU, is the bottleneck). Tune via
+    # MEM_MESH_WORKER_CONCURRENCY (default 1). sh -c so the env var expands;
+    # `exec` keeps the python process as PID 1 for clean signal handling.
+    command:
+      - sh
+      - -c
+      - exec python -m app.cli.main relay worker --concurrency ${MEM_MESH_WORKER_CONCURRENCY:-1}
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     volumes:
       # Same named volumes as the web service: one DB, one model cache.
@@ -124,6 +132,7 @@ services:
       # center shows them. Auth = the shared hook token from the data volume.
       - MEM_MESH_NOTIFY_BASE_URL=http://mem-mesh:8000
       - MEM_MESH_HOOK_TOKEN=${MEM_MESH_HOOK_TOKEN:-}
+      - MEM_MESH_WORKER_CONCURRENCY=${MEM_MESH_WORKER_CONCURRENCY:-1}
     depends_on:
       mem-mesh:
         condition: service_healthy
