@@ -7,6 +7,7 @@ prod-DB safety checks.
 """
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import List
 
@@ -143,8 +144,13 @@ def test_validate_db_path_refuses_prod(tmp_path):
 
 
 def test_validate_db_path_warns_without_copy_marker(tmp_path):
-    other = (tmp_path / "memories.db").resolve()
-    warnings = rh.validate_db_path(other, (tmp_path / "elsewhere.db").resolve())
+    # Marker detection is string-based on the WHOLE path, and pytest tmp_path
+    # lives under /tmp on Linux — which IS a copy marker — so a tmp_path-based
+    # fixture asserts differently per platform (broke CI on v1.26.0 while
+    # passing on macOS). validate_db_path never touches the filesystem, so a
+    # synthetic marker-free path keeps this case identical everywhere.
+    other = Path("/srv/memmesh-live/memories.db")
+    warnings = rh.validate_db_path(other, Path("/srv/other-host/prod.db"))
     assert warnings and "copy" in warnings[0].lower()
     backup = (tmp_path / "replay_eval.db").resolve()
     assert rh.validate_db_path(backup, None) == []
