@@ -307,20 +307,35 @@ class PinService:
             auto_importance=pin.auto_importance,
         )
 
-    async def promote_to_memory(self, pin_id: str, category: str = "task") -> dict:
+    async def promote_to_memory(
+        self,
+        pin_id: str,
+        category: str = "task",
+        anchors: Optional[dict] = None,
+    ) -> dict:
         """
         Pin을 Memory로 승격.
 
         Args:
             pin_id: Pin ID
             category: Memory 카테고리 (task, decision, bug, incident, idea, code_snippet)
+            anchors: git 앵커 dict (commit_hash/file_paths/branch) — 승격된 메모리에
+                부착할 표시·수명 판단용 메타데이터. 검증 후 저장된다.
 
         Returns:
             {"memory_id": str, "pin_deleted": bool, "message": str, "already_promoted": bool}
 
         Raises:
             PinNotFoundError: Pin이 없을 때
+            ValueError: anchors 검증 실패
         """
+        # Validate anchors at the single source of truth (same as AddParams). The
+        # MCP pin_promote path hands us a raw dict that never passed through the
+        # request schema, so validation must happen here too.
+        from app.core.schemas.requests import validate_anchors
+
+        anchors = validate_anchors(anchors)
+
         pin = await self.get_pin(pin_id)
         if not pin:
             raise PinNotFoundError(f"Pin not found: {pin_id}")
@@ -357,6 +372,7 @@ class PinService:
             category=category,
             source="pin_promotion",
             tags=promote_tags,
+            anchors=anchors,
             skip_quality_gate=True,
         )
 

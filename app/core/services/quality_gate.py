@@ -5,6 +5,7 @@ Quality Gate for Memory Content
 
 import logging
 import re
+from typing import Optional
 
 from ..errors import (
     MemoryContentTooShortError,
@@ -89,3 +90,79 @@ def content_quality_gate(content: str) -> str:
             raise MemoryLowQualityError(prefix=prefix)
 
     return cleaned
+
+
+# ---------------------------------------------------------------------------
+# Derivability pre-check (R17)
+#
+# A *soft* signal, unlike ``content_quality_gate``: conversation transcripts and
+# pasted git output are low-value as long-term memory, but rejecting them would
+# lose real content. Instead these pure/synchronous rule checks (no LLM — see
+# CLAUDE.md L1/L5) let the caller store the memory and route it to the async
+# ``improve`` worker to be distilled.
+# ---------------------------------------------------------------------------
+
+# The stop-hook Q&A pairing format is ``Q: <prompt>\n\nA: <reply>`` (see
+# route_modules/hooks.py). Match a "Q:" opener followed by a blank-line "A:".
+_QA_DUMP_RE = re.compile(r"^\s*Q:\s.*?\n\s*\n\s*A:\s", re.DOTALL)
+
+# Speaker turn markers at line start (a transcript, not a distilled note).
+_TURN_MARKER_RE = re.compile(
+    r"^\s*(?:User|Human|Assistant|AI)\s*:\s",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+# Unambiguous git-diff markers.
+_GIT_DIFF_RE = re.compile(r"^diff --git ", re.MULTILINE)
+_GIT_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@", re.MULTILINE)
+
+# ``git log --oneline`` rows: short/long hash + space + subject.
+_GIT_LOG_LINE_RE = re.compile(r"^[0-9a-f]{7,40}\s+\S", re.MULTILINE)
+
+
+def is_conversation_dump(content: str) -> bool:
+    """Whether ``content`` looks like a raw Q/A or multi-turn transcript.
+
+    True when it opens with the hook ``Q: …\\n\\nA: …`` pairing format, or when
+    it carries two or more speaker turn markers (``User:`` / ``Assistant:`` …).
+    A normal note or code block — which does neither — is not flagged.
+    """
+    if not content:
+        return False
+    if _QA_DUMP_RE.match(content):
+        return True
+    # Two or more distinct speaker turns → a transcript.
+    return len(_TURN_MARKER_RE.findall(content)) >= 2
+
+
+def is_derivable_from_git(content: str, category: str = "") -> bool:
+    """Whether ``content`` is reconstructable from git history (diff/log paste).
+
+    True for unambiguous ``diff --git`` / ``@@ … @@`` hunk markers in any
+    category, or three-plus ``git log --oneline`` rows. The commit-log
+    heuristic can false-match hex-heavy code, so it is skipped for
+    ``code_snippet`` where a legitimate code block is the expected content.
+    """
+    if not content:
+        return False
+    if _GIT_DIFF_RE.search(content) or _GIT_HUNK_RE.search(content):
+        return True
+    if category == "code_snippet":
+        return False
+    return len(_GIT_LOG_LINE_RE.findall(content)) >= 3
+
+
+def derivability_hint(content: str, category: str = "") -> Optional[str]:
+    """Classify write-time derivable content for the improve queue.
+
+    Returns a short hint kind — ``"conversation_dump"`` or
+    ``"derivable_from_git"`` — when the content is a raw transcript or pasted
+    git output, else ``None``. Pure and synchronous (no LLM); the caller stores
+    the memory regardless and uses the hint to route it to the async improve
+    worker.
+    """
+    if is_conversation_dump(content):
+        return "conversation_dump"
+    if is_derivable_from_git(content, category):
+        return "derivable_from_git"
+    return None

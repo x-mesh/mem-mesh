@@ -306,6 +306,16 @@ def _hook_source(payload: HookEventBase) -> str:
     return _clean_source(payload.hook_source or legacy_source)
 
 
+def _redact_optional(text: Optional[str]) -> Optional[str]:
+    """Redact secrets/PII from an optional hook field, passing ``None`` through.
+
+    ``redact_secrets`` already returns a falsy value unchanged, but keeping the
+    ``None`` short-circuit here makes the "don't touch absent fields" contract
+    explicit and skips a pointless regex pass on the common empty/absent case.
+    """
+    return redact_secrets(text) if text is not None else None
+
+
 async def _record(
     hook_service: HookService,
     *,
@@ -315,21 +325,33 @@ async def _record(
     client_type: Optional[str] = None,
     prompt: Optional[str] = None,
     assistant_message: Optional[str] = None,
-) -> None:
-    """Best-effort event recording — never raises into the handler."""
+) -> Optional[int]:
+    """Best-effort event recording — never raises into the handler.
+
+    ``prompt``/``assistant_message`` are redacted before persistence. The
+    ``hook_events`` table accumulates whole user/assistant turns for the replay
+    dataset, so a leaked key/token/email must be masked here (M4 security rule)
+    to keep the stored corpus clean and usable for measurement. ``None`` fields
+    pass through untouched.
+
+    Returns the recorded event's turn index so a caller can tag same-turn side
+    records (e.g. injection tracking) with it; ``None`` when no session id or the
+    record failed.
+    """
     if not ide_session_id:
-        return
+        return None
     try:
-        await hook_service.record_event(
+        return await hook_service.record_event(
             project_id=project_id,
             ide_session_id=ide_session_id,
             event_name=event_name,
             client_type=client_type,
-            prompt=prompt,
-            assistant_message=assistant_message,
+            prompt=_redact_optional(prompt),
+            assistant_message=_redact_optional(assistant_message),
         )
     except Exception as e:  # noqa: BLE001 - hooks must not break the session
         logger.warning(f"hook event record failed ({event_name}): {e}")
+        return None
 
 
 async def _save_memory(
@@ -411,7 +433,7 @@ async def session_start(
         except Exception as e:  # noqa: BLE001
             logger.warning(f"continuation check failed: {e}")
 
-    await _record(
+    turn_index = await _record(
         hook_service,
         project_id=project_id,
         ide_session_id=ide_session_id,
@@ -467,7 +489,10 @@ async def session_start(
     memory_lines: list[str] = []
     if open_pin_texts:
         try:
-            from app.core.services.recall import surface_relevant_memories
+            from app.core.services.recall import (
+                render_memory_lines,
+                surface_relevant_memories,
+            )
 
             services = get_services()
             search_service = services.get("search_service")
@@ -478,9 +503,22 @@ async def session_start(
                 mems = await surface_relevant_memories(
                     search_service, project_id, query=" ".join(open_pin_texts)
                 )
-                for m in mems:
-                    memory_lines.append(
-                        f"- [{m['category']}] ({m['created_at']}) {m['content']}"
+                # Shared formatter (recall.render_memory_lines): normalize →
+                # enrichment batch-merge → same "- [cat] (date) content" line.
+                memory_lines = await render_memory_lines(
+                    getattr(search_service, "db", None), mems
+                )
+                # Record what is actually injected (t8): render emits one line
+                # per surfaced memory in order, so ``mems`` maps 1:1 to the
+                # injected lines. Only recorded when a non-empty block will be
+                # placed into additionalContext below (memory_lines truthy).
+                if ide_session_id and memory_lines:
+                    await hook_service.record_injected(
+                        project_id=project_id,
+                        ide_session_id=ide_session_id,
+                        memory_ids=[m.get("id") for m in mems],
+                        turn_index=turn_index or 0,
+                        injected_via="session_start",
                     )
         except Exception as e:  # noqa: BLE001
             logger.warning(f"relevant-memory surfacing failed: {e}")
@@ -543,7 +581,7 @@ async def user_prompt_submit(
     client = _hook_client(payload)
     prompt = payload.prompt or ""
 
-    await _record(
+    turn_index = await _record(
         hook_service,
         project_id=project_id,
         ide_session_id=ide_session_id,
@@ -587,13 +625,37 @@ async def user_prompt_submit(
                     if (getattr(r, "similarity_score", 0) or 0) > threshold
                 ]
                 if relevant:
-                    lines = ["## Related Memories (auto-retrieved)", ""]
-                    for r in relevant[:limit]:
-                        cat = getattr(r, "category", "unknown")
-                        content = (getattr(r, "content", "") or "")[:300]
-                        created = (getattr(r, "created_at", "") or "")[:10]
-                        lines.append(f"- [{cat}] ({created}) {content}")
-                    parts.append("\n".join(lines))
+                    # SearchResult 객체를 공유 포맷터(recall.render_memory_lines)로
+                    # 넘긴다: 정규화(SearchResult→dict) → enrichment 배치 병합 →
+                    # session_start과 동일한 포맷. 헤더는 이 훅이 소유.
+                    from app.core.services.recall import (
+                        filter_injectable,
+                        render_memory_lines,
+                    )
+
+                    # Selection-stage stale gate (t12): drop client-verified stale
+                    # memories before both render and record so the injection and
+                    # the record_injected set stay 1:1 (aged anchors are kept and
+                    # flagged by the formatter, not dropped here).
+                    injected = await filter_injectable(
+                        getattr(search_service, "db", None), relevant[:limit]
+                    )
+                    if injected:
+                        bullets = await render_memory_lines(
+                            getattr(search_service, "db", None), injected
+                        )
+                        lines = ["## Related Memories (auto-retrieved)", "", *bullets]
+                        parts.append("\n".join(lines))
+                        # Record only the threshold-passing, limit-capped,
+                        # non-stale set actually placed into the context (t8).
+                        if ide_session_id:
+                            await hook_service.record_injected(
+                                project_id=project_id,
+                                ide_session_id=ide_session_id,
+                                memory_ids=[getattr(r, "id", None) for r in injected],
+                                turn_index=turn_index or 0,
+                                injected_via="user_prompt_submit",
+                            )
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"hook memory search failed: {e}")
 
@@ -720,6 +782,17 @@ async def stop(
         client_type=client,
         assistant_message=message,
     )
+
+    # Judge whether this session's injected memories were utilized (t9). Runs on
+    # every Stop against the latest assistant message, before the save-gate
+    # early-returns, so a short/keyword-less turn is still scored. judge_injected
+    # swallows its own errors and touches only NULL rows; the call itself is
+    # wrapped best-effort so a degraded/stub service can never break the Stop.
+    if ide_session_id:
+        try:
+            await hook_service.judge_injected(ide_session_id, message)
+        except Exception as e:  # noqa: BLE001 — a hook must never raise into the caller
+            logger.warning(f"injected-memory judge call failed: {e}")
 
     if len(message) < 50:
         return _ok("stop: skip (message too short)")

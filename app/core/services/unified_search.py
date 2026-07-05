@@ -623,6 +623,7 @@ class UnifiedSearchService:
                     source=row["source"],
                     client=row["client"] if "client" in row.keys() else None,
                     tags=self._parse_tags(row),
+                    anchors=self._parse_anchors(row),
                 )
             )
 
@@ -699,6 +700,7 @@ class UnifiedSearchService:
                             source=row["source"],
                             client=row["client"] if "client" in row.keys() else None,
                             tags=self._parse_tags(row),
+                            anchors=self._parse_anchors(row),
                         )
                     )
 
@@ -880,7 +882,7 @@ class UnifiedSearchService:
         explicit id hunt should find deprecated/superseded memories too."""
         sql = (
             "SELECT id, content, created_at, project_id, category, source, "
-            "client, tags FROM memories WHERE id LIKE ?"
+            "client, tags, anchors FROM memories WHERE id LIKE ?"
         )
         params: list = [query.lower() + "%"]
         if project_id:
@@ -906,6 +908,7 @@ class UnifiedSearchService:
                 source=row["source"],
                 client=row["client"] if "client" in row.keys() else None,
                 tags=self._parse_tags(row),
+                anchors=self._parse_anchors(row),
             )
             for row in rows
         ]
@@ -938,7 +941,7 @@ class UnifiedSearchService:
 
         # Execute FTS query
         sql = """
-            SELECT m.id, m.content, m.created_at, m.project_id, m.category, m.source, m.client, m.tags
+            SELECT m.id, m.content, m.created_at, m.project_id, m.category, m.source, m.client, m.tags, m.anchors
             FROM memories_fts fts
             JOIN memories m ON fts.id = m.id
             WHERE fts.memories_fts MATCH ?
@@ -980,6 +983,7 @@ class UnifiedSearchService:
                         source=row["source"],
                         client=row["client"] if "client" in row.keys() else None,
                         tags=self._parse_tags(row),
+                        anchors=self._parse_anchors(row),
                     )
                 )
 
@@ -1040,6 +1044,7 @@ class UnifiedSearchService:
                     source=row["source"],
                     client=row["client"] if "client" in row.keys() else None,
                     tags=self._parse_tags(row),
+                    anchors=self._parse_anchors(row),
                 )
             )
 
@@ -1055,8 +1060,12 @@ class UnifiedSearchService:
         """퍼지 검색 (오타 허용)"""
         from difflib import SequenceMatcher
 
-        # Fetch all memories
-        base_query = "SELECT * FROM memories WHERE 1=1"
+        # Fetch candidate memories (reconcile: hide deprecated/superseded, same
+        # canonical gate as the vector and FTS paths).
+        base_query = (
+            "SELECT * FROM memories WHERE 1=1 "
+            "AND COALESCE(status, 'canonical') = 'canonical'"
+        )
         params = []
 
         if filters:
@@ -1128,6 +1137,7 @@ class UnifiedSearchService:
                     source=row["source"],
                     client=row["client"] if "client" in row.keys() else None,
                     tags=self._parse_tags(row),
+                    anchors=self._parse_anchors(row),
                 )
             )
 
@@ -1182,6 +1192,7 @@ class UnifiedSearchService:
                     source=row["source"],
                     client=row["client"] if "client" in row.keys() else None,
                     tags=self._parse_tags(row),
+                    anchors=self._parse_anchors(row),
                 )
             )
 
@@ -1215,6 +1226,7 @@ class UnifiedSearchService:
                     "source": r.source,
                     "client": r.client,
                     "tags": r.tags or [],
+                    "anchors": r.anchors,
                 }
                 for r in result.results
             ]
@@ -1239,6 +1251,7 @@ class UnifiedSearchService:
                         source=item.get("source", ""),
                         client=item.get("client"),
                         tags=item.get("tags"),
+                        anchors=item.get("anchors"),
                     )
                 )
 
@@ -1316,7 +1329,7 @@ class UnifiedSearchService:
             # Step 2: Batch lookup to eliminate N+1
             placeholders = ",".join("?" for _ in candidate_ids)
             rows = await self.db.fetchall(
-                f"SELECT id, content, created_at, project_id, category, source, client, tags FROM memories WHERE id IN ({placeholders})",
+                f"SELECT id, content, created_at, project_id, category, source, client, tags, anchors FROM memories WHERE id IN ({placeholders})",
                 tuple(candidate_ids.keys()),
             )
 
@@ -1335,6 +1348,7 @@ class UnifiedSearchService:
                         source=row["source"] or "",
                         client=row["client"] if "client" in row.keys() else None,
                         tags=tags,
+                        anchors=self._parse_anchors(row),
                     )
                 )
 
@@ -1574,6 +1588,29 @@ class UnifiedSearchService:
                     return None
         except Exception as e:
             logger.debug(f"Failed to parse tags: {e}")
+            return None
+        return None
+
+    def _parse_anchors(self, row: "sqlite3.Row") -> Optional[dict]:
+        """anchors(JSON) 파싱 — {commit_hash, file_paths, branch} dict 또는 None.
+
+        Tolerates rows without the anchors column and legacy/corrupt JSON.
+        """
+        import json
+
+        try:
+            anchors_value = row["anchors"] if "anchors" in row.keys() else None
+            if anchors_value is None:
+                return None
+            if isinstance(anchors_value, dict):
+                return anchors_value or None
+            if isinstance(anchors_value, str):
+                if not anchors_value:
+                    return None
+                parsed = json.loads(anchors_value)
+                return parsed if isinstance(parsed, dict) and parsed else None
+        except Exception as e:
+            logger.debug(f"Failed to parse anchors: {e}")
             return None
         return None
 

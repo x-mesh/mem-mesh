@@ -23,7 +23,7 @@ from ..schemas.responses import (
     DeleteResponse,
     UpdateResponse,
 )
-from .quality_gate import content_quality_gate
+from .quality_gate import content_quality_gate, derivability_hint
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +152,7 @@ class MemoryService:
         source: str = "unknown",
         client: Optional[str] = None,
         tags: Optional[List[str]] = None,
+        anchors: Optional[dict] = None,
         skip_quality_gate: bool = False,
     ) -> AddResponse:
         """
@@ -163,6 +164,8 @@ class MemoryService:
             category: 메모리 카테고리
             source: 메모리 생성 소스
             tags: 태그 목록
+            anchors: git 앵커 dict (commit_hash/file_paths/branch) — 표시·수명
+                판단용 메타데이터. 검색/임베딩에는 포함하지 않는다.
 
         Returns:
             AddResponse: 생성 결과
@@ -186,6 +189,15 @@ class MemoryService:
         # 0.5 Quality gate (stripping + validation)
         if not skip_quality_gate:
             content = content_quality_gate(content)
+
+        # 0.6 Derivability pre-check (R17). Conversation dumps and pasted git
+        # output are low-value long-term memory, but a hard reject would lose
+        # real content. So this pure/synchronous rule check (no LLM on the write
+        # path — CLAUDE.md L1/L5) only *classifies*; the memory is still stored
+        # and later routed to the async improve worker to be distilled.
+        quality_hint_kind = (
+            None if skip_quality_gate else derivability_hint(content, category)
+        )
 
         # 1. Calculate content_hash
         content_hash = Memory.compute_hash(content)
@@ -228,6 +240,7 @@ class MemoryService:
             client=client,
             embedding=embedding_bytes,
             tags=json.dumps(tags) if tags else None,
+            anchors=json.dumps(anchors) if anchors else None,
         )
 
         # 5. Save + enqueue reconcile in ONE transaction (C2: a canonical memory
@@ -276,9 +289,51 @@ class MemoryService:
                     "Post-commit reconcile re-scan failed (non-blocking): %s", e
                 )
 
+        # R17: route derivable content to the async improve worker (best-effort,
+        # outside the save transaction). Sets response.quality_hint so the caller
+        # (agent) knows the memory was stored but flagged for distillation.
+        if quality_hint_kind:
+            response.quality_hint = await self._route_derivable_to_improve(
+                memory.id, memory.content_hash, project_id, quality_hint_kind
+            )
+
         # Continuous relay sharing (best-effort, outside the save transaction).
         await self._relay_auto_share(memory, event_type="create")
         return response
+
+    async def _route_derivable_to_improve(
+        self,
+        memory_id: str,
+        content_hash: str,
+        project_id: Optional[str],
+        hint_kind: str,
+    ) -> str:
+        """Enqueue a derivable memory for the improve worker; return a quality_hint.
+
+        Skips the enqueue when no chat LLM is configured — the improve worker
+        needs one to run, so queuing a job nothing can drain would just pollute
+        the queue; the hint is still returned so the caller knows the memory
+        should be distilled. Best-effort: any failure degrades to a hint-only
+        result and never blocks the save.
+        """
+        from ..config import get_settings
+        from .chat import ChatService
+        from .maintenance import MaintenanceService
+
+        try:
+            settings = get_settings()
+            if not await ChatService(self.db).is_configured(settings):
+                return f"{hint_kind} — improve 큐 미등록 (LLM 미설정)"
+            await MaintenanceService(self.db).enqueue_memory(
+                memory_id=memory_id,
+                operation="improve",
+                project_id=project_id,
+                content_hash=content_hash,
+            )
+            return f"{hint_kind} — improve 큐에 등록됨"
+        except Exception as e:  # noqa: BLE001 - hint is best-effort, never blocks
+            logger.warning("Derivable improve enqueue failed (non-blocking): %s", e)
+            return f"{hint_kind} — improve 큐 등록 실패"
 
     async def enqueue_project_reconcile(self, project_id: str) -> dict:
         """Retroactively enqueue reconcile candidate pairs for a whole project.
@@ -352,6 +407,7 @@ class MemoryService:
         category: str = "task",
         source: str = "unknown",
         tags: Optional[List[str]] = None,
+        anchors: Optional[dict] = None,
     ) -> AddResponse:
         """
         미리 계산된 임베딩과 함께 새 메모리 생성.
@@ -409,6 +465,7 @@ class MemoryService:
             category=category,
             source=source,
             tags=json.dumps(tags) if tags else None,
+            anchors=json.dumps(anchors) if anchors else None,
             embedding=embedding_bytes,
         )
 
@@ -626,6 +683,82 @@ class MemoryService:
         # Continuous relay sharing (best-effort): retract from the team hub.
         await self._relay_auto_share(existing_memory, event_type="retract")
         return response
+
+    async def report_anchor_status(
+        self,
+        memory_id: str,
+        status: str,
+        detail: Optional[str] = None,
+    ) -> dict:
+        """Persist a client's local anchor-verification verdict (t12, strong signal).
+
+        The server has no git access, so it cannot verify a memory's anchors
+        itself. An agent that ran the check locally (file_paths exist, commit
+        reachable via ``git cat-file -e``) reports the verdict here. A ``stale``
+        memory is then excluded from auto-injection and ``fresh`` clears the weak
+        aged-anchor warning.
+
+        Args:
+            memory_id: Memory whose anchors were verified.
+            status: ``fresh`` (intact) or ``stale`` (files gone / commit gone).
+            detail: Optional free-text note; not persisted beyond logs (kept off
+                the row so no client payload can smuggle content into the store).
+
+        Returns:
+            dict: ``{memory_id, stale_status, stale_checked_at}``.
+
+        Raises:
+            InvalidAnchorStatusError: status is not ``fresh``/``stale``.
+            MemoryNotFoundError: no memory with that id.
+        """
+        from ..errors import InvalidAnchorStatusError
+
+        if status not in InvalidAnchorStatusError.VALID_STATUSES:
+            raise InvalidAnchorStatusError(status)
+
+        existing = await self.get(memory_id)
+        if existing is None:
+            raise MemoryNotFoundError(memory_id)
+
+        # A verdict only makes sense for anchored memories — without this guard
+        # any bearer could flip arbitrary (anchor-less) memories to stale and
+        # silently drop them from injection (cross-vendor review F7).
+        has_anchors = bool(
+            existing.get_anchors()
+            if hasattr(existing, "get_anchors")
+            else getattr(existing, "anchors", None)
+        )
+        if not has_anchors:
+            from ..errors import ValidationError
+
+            raise ValidationError(
+                "memory has no anchors — report_anchor_status applies only to "
+                "anchored memories. Save anchors first via add(anchors={...}) "
+                "or pin_promote(anchors={...})."
+            )
+
+        checked_at = datetime.utcnow().isoformat() + "Z"
+        try:
+            await self.db.execute(
+                "UPDATE memories SET stale_status = ?, stale_checked_at = ? "
+                "WHERE id = ?",
+                (status, checked_at, memory_id),
+            )
+        except Exception as e:
+            logger.error("Failed to record anchor status for %s: %s", memory_id, e)
+            raise DatabaseError(f"Failed to record anchor status: {e}") from e
+
+        logger.info(
+            "Recorded anchor status: %s -> %s%s",
+            memory_id,
+            status,
+            f" ({redact_secrets(detail)})" if detail else "",
+        )
+        return {
+            "memory_id": memory_id,
+            "stale_status": status,
+            "stale_checked_at": checked_at,
+        }
 
     async def _relay_auto_share(self, memory: Any, *, event_type: str) -> None:
         """Forward a memory write to relay auto-share, if a subscription exists.

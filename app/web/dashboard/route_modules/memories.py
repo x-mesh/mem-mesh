@@ -52,6 +52,7 @@ async def add_memory(
             source=params.source or "api",
             client=params.client or "web",
             tags=params.tags,
+            anchors=params.anchors,
         )
 
         # WebSocket real-time notification
@@ -97,6 +98,7 @@ async def get_memory(
             "project_id": memory.project_id,
             "category": memory.category,
             "tags": memory.tags,
+            "anchors": memory.get_anchors(),
             "source": memory.source,
             "client": memory.client,
             "created_at": memory.created_at,

@@ -3,6 +3,13 @@
 This module provides request and response schemas.
 """
 
+from .doc_proposal import (
+    DocProposalAgentView,
+    DocProposalAppliedResponse,
+    DocProposalCreate,
+    DocProposalListParams,
+    DocProposalResponse,
+)
 from .optimization import (
     OptimizedSessionContext,
     PinStatistics,
@@ -75,6 +82,12 @@ __all__ = [
     "PinUpdate",
     "PinResponse",
     "PinListParams",
+    # Doc proposals
+    "DocProposalCreate",
+    "DocProposalListParams",
+    "DocProposalResponse",
+    "DocProposalAgentView",
+    "DocProposalAppliedResponse",
     # Sessions
     "SessionCreate",
     "SessionResponse",

@@ -23,6 +23,36 @@ VALID_CATEGORIES = [
 # Valid search mode list
 VALID_SEARCH_MODES = ["hybrid", "exact", "semantic", "fuzzy"]
 
+# Git anchors: client-collected metadata pinning a memory to the commit/files/
+# branch it was written against. Metadata only — never embedded or searched.
+ANCHORS_SCHEMA = {
+    "type": "object",
+    "description": (
+        "Git anchors the client collected for this memory. When saving a "
+        "code/commit-related memory in a git repo, pass `git rev-parse HEAD` "
+        "and the relevant relative file paths. Omit if not a git repository."
+    ),
+    "properties": {
+        "commit_hash": {
+            "type": "string",
+            "description": "Commit hash (7-64 hex chars, e.g. from `git rev-parse HEAD`)",
+            "pattern": "^[0-9a-fA-F]{7,64}$",
+        },
+        "file_paths": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "description": "Relative file paths (no absolute paths, no '..')",
+            "maxItems": 20,
+        },
+        "branch": {
+            "type": "string",
+            "description": "Git branch name (optional)",
+            "minLength": 1,
+        },
+    },
+    "additionalProperties": False,
+}
+
 # Server info imported from central module
 
 
@@ -70,6 +100,7 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "description": "Memory tags",
                         "maxItems": 20,
                     },
+                    "anchors": ANCHORS_SCHEMA,
                 },
                 "required": ["content"],
                 "additionalProperties": False,
@@ -376,6 +407,7 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
                         ],
                         "default": "task",
                     },
+                    "anchors": ANCHORS_SCHEMA,
                 },
                 "required": ["pin_id"],
                 "additionalProperties": False,
@@ -518,14 +550,120 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
 
 
 def get_all_tool_schemas() -> List[Dict[str, Any]]:
-    """모든 MCP tool 스키마 반환 (memory + pin/session + batch + relations + review)"""
+    """모든 MCP tool 스키마 반환 (memory + pin/session + batch + relations + review + doc proposal + anchor)"""
     return (
         get_tool_schemas()
         + get_pin_tool_schemas()
         + get_batch_tool_schemas()
         + get_relation_tool_schemas()
         + get_review_tool_schemas()
+        + get_doc_proposal_tool_schemas()
+        + get_anchor_tool_schemas()
     )
+
+
+def get_anchor_tool_schemas() -> List[Dict[str, Any]]:
+    """Anchor-verification MCP tools/list 응답용 스키마 반환.
+
+    검증 주체는 클라이언트(에이전트)다: 서버는 git 접근이 없어 앵커의 file_paths 존재·
+    commit 도달성을 확인할 수 없으므로, 로컬에서 확인한 결과만 받아 stale 게이트에
+    반영한다.
+    """
+    return [
+        {
+            "name": "report_anchor_status",
+            "description": TOOL_DESCRIPTIONS["report_anchor_status"],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "memory_id": {
+                        "type": "string",
+                        "description": (
+                            "Memory ID (full 36-char UUID from add/search/get) "
+                            "whose anchors you verified locally"
+                        ),
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100,
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": (
+                            "Verification verdict: 'fresh' (file_paths exist and "
+                            "commit reachable) or 'stale' (files gone / commit "
+                            "unreachable)"
+                        ),
+                        "enum": ["fresh", "stale"],
+                    },
+                    "detail": {
+                        "type": "string",
+                        "description": (
+                            "Optional note on what failed (e.g. which file or "
+                            "commit) — logged, not stored on the memory"
+                        ),
+                        "maxLength": 500,
+                    },
+                },
+                "required": ["memory_id", "status"],
+                "additionalProperties": False,
+            },
+        },
+    ]
+
+
+def get_doc_proposal_tool_schemas() -> List[Dict[str, Any]]:
+    """Doc proposal(문서 승격) MCP tools/list 응답용 스키마 반환.
+
+    적용은 클라이언트(에이전트)가 하고 서버는 상태 전이만 관리한다: doc_proposals로
+    승인된 제안을 조회해 로컬 파일에 적용한 뒤 doc_proposal_applied로 보고한다.
+    """
+    return [
+        {
+            "name": "doc_proposals",
+            "description": TOOL_DESCRIPTIONS["doc_proposals"],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project identifier",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100,
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Filter by proposal status (default: approved)",
+                        "enum": ["pending", "approved", "applied", "rejected"],
+                        "default": "approved",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of proposals to return",
+                        "default": 50,
+                        "minimum": 1,
+                        "maximum": 200,
+                    },
+                },
+                "required": ["project_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "doc_proposal_applied",
+            "description": TOOL_DESCRIPTIONS["doc_proposal_applied"],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "proposal_id": {
+                        "type": "string",
+                        "description": "Full doc proposal ID to mark applied",
+                        "maxLength": 100,
+                    },
+                },
+                "required": ["proposal_id"],
+                "additionalProperties": False,
+            },
+        },
+    ]
 
 
 def get_batch_tool_schemas() -> List[Dict[str, Any]]:

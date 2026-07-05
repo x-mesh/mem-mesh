@@ -1078,3 +1078,205 @@ class StatsService:
         except Exception as e:
             logger.error(f"Failed to get activity trend: {e}")
             raise
+
+    # ===== Coverage / accumulation stats (enrichment + hook_events) =====
+
+    async def _table_exists(self, name: str) -> bool:
+        """True if a table exists. ``memory_enrichment`` is lazily created by
+        EnrichmentStore, so a DB that never ran enrichment won't have it — the
+        coverage query must not 500 with 'no such table' (see overview.py:67)."""
+        row = await self.db.fetchone(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (name,),
+        )
+        return row is not None
+
+    async def get_coverage_stats(
+        self, project_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Enrichment title coverage + hook_events accumulation stats.
+
+        Grounds the A1 (enrichment coverage) / A3 (replay data volume)
+        assumptions with real numbers when deployed against prod. A memory is
+        "enriched" when its ``memory_enrichment.title`` is present and non-blank.
+        """
+        start_time = time.time()
+        try:
+            enrichment = await self._enrichment_coverage(project_id)
+            hook_events = await self._hook_events_stats(project_id)
+            query_time_ms = (time.time() - start_time) * 1000
+            return {
+                "enrichment": enrichment,
+                "hook_events": hook_events,
+                "query_time_ms": round(query_time_ms, 2),
+            }
+        except Exception as e:
+            logger.error(f"Failed to get coverage stats: {e}")
+            raise
+
+    async def _enrichment_coverage(self, project_id: Optional[str]) -> Dict[str, Any]:
+        """Overall + per-project title-fill coverage over the memories table.
+
+        LEFT JOINs memory_enrichment (like overview.py:95); when that lazy table
+        is absent every memory simply counts as not-enriched."""
+        has_enrichment = await self._table_exists("memory_enrichment")
+
+        where = ""
+        params: list = []
+        if project_id:
+            where = "WHERE m.project_id = ?"
+            params.append(project_id)
+
+        if has_enrichment:
+            join = "LEFT JOIN memory_enrichment e ON e.memory_id = m.id"
+            enriched_expr = (
+                "SUM(CASE WHEN e.title IS NOT NULL AND TRIM(e.title) != '' "
+                "THEN 1 ELSE 0 END)"
+            )
+        else:
+            join = ""
+            enriched_expr = "0"
+
+        overall_row = await self.db.fetchone(
+            f"""
+            SELECT COUNT(*) AS total, {enriched_expr} AS enriched
+            FROM memories m
+            {join}
+            {where}
+            """,
+            tuple(params),
+        )
+        total = overall_row["total"] if overall_row else 0
+        enriched = (overall_row["enriched"] or 0) if overall_row else 0
+
+        project_rows = await self.db.fetchall(
+            f"""
+            SELECT COALESCE(m.project_id, 'global') AS project_id,
+                   COUNT(*) AS total,
+                   {enriched_expr} AS enriched
+            FROM memories m
+            {join}
+            {where}
+            GROUP BY COALESCE(m.project_id, 'global')
+            ORDER BY total DESC
+            """,
+            tuple(params),
+        )
+
+        by_project = [
+            {
+                "project_id": row["project_id"],
+                "total": row["total"],
+                "enriched": row["enriched"] or 0,
+                "coverage_ratio": (
+                    round((row["enriched"] or 0) / row["total"], 4)
+                    if row["total"]
+                    else 0.0
+                ),
+            }
+            for row in project_rows
+        ]
+
+        return {
+            "total_memories": total,
+            "enriched_count": enriched,
+            "coverage_ratio": (round(enriched / total, 4) if total else 0.0),
+            "by_project": by_project,
+        }
+
+    async def _hook_events_stats(self, project_id: Optional[str]) -> Dict[str, Any]:
+        """hook_events accumulation: totals, per-event / per-project breakdown,
+        prompt-capture count, and the recorded time span.
+
+        hook_events is created at DB init, but guard its existence anyway so a
+        bare/partial DB returns zeros rather than 'no such table'."""
+        empty = {
+            "total_events": 0,
+            "prompt_events": 0,
+            "by_event": {},
+            "by_project": {},
+            "first_event_at": None,
+            "last_event_at": None,
+        }
+        if not await self._table_exists("hook_events"):
+            return empty
+
+        where = ""
+        params: list = []
+        if project_id:
+            where = "WHERE project_id = ?"
+            params.append(project_id)
+
+        span_row = await self.db.fetchone(
+            f"""
+            SELECT COUNT(*) AS total,
+                   MIN(created_at) AS first_at,
+                   MAX(created_at) AS last_at
+            FROM hook_events
+            {where}
+            """,
+            tuple(params),
+        )
+        total_events = span_row["total"] if span_row else 0
+
+        # UserPromptSubmit rows that actually captured a prompt — the replay
+        # signal A3 depends on (empty prompts are lifecycle-only events).
+        prompt_where = (where + " AND ") if where else "WHERE "
+        prompt_row = await self.db.fetchone(
+            f"""
+            SELECT COUNT(*) AS c FROM hook_events
+            {prompt_where} event_name = 'UserPromptSubmit'
+                AND prompt IS NOT NULL AND TRIM(prompt) != ''
+            """,
+            tuple(params),
+        )
+        prompt_events = prompt_row["c"] if prompt_row else 0
+
+        # Archived prompts survive the 14-day prune (t4 move-then-delete) —
+        # without them the replay-data figure under-reports right after a prune
+        # and can wrongly defer the M2b measurement.
+        archived_prompt_events = 0
+        if await self._table_exists("hook_events_archive"):
+            try:
+                arch_row = await self.db.fetchone(
+                    f"""
+                    SELECT COUNT(*) AS c FROM hook_events_archive
+                    {prompt_where} event_name = 'UserPromptSubmit'
+                        AND prompt IS NOT NULL AND TRIM(prompt) != ''
+                    """,
+                    tuple(params),
+                )
+                archived_prompt_events = arch_row["c"] if arch_row else 0
+            except Exception as exc:  # noqa: BLE001 — archive must never break stats
+                logger.warning(f"hook_events_archive stats failed: {exc}")
+
+        event_rows = await self.db.fetchall(
+            f"""
+            SELECT event_name, COUNT(*) AS c FROM hook_events
+            {where}
+            GROUP BY event_name
+            ORDER BY c DESC
+            """,
+            tuple(params),
+        )
+        project_rows = await self.db.fetchall(
+            f"""
+            SELECT COALESCE(project_id, 'global') AS project_id, COUNT(*) AS c
+            FROM hook_events
+            {where}
+            GROUP BY COALESCE(project_id, 'global')
+            ORDER BY c DESC
+            """,
+            tuple(params),
+        )
+
+        return {
+            "total_events": total_events,
+            "prompt_events": prompt_events,
+            "archived_prompt_events": archived_prompt_events,
+            "replay_prompts_total": prompt_events + archived_prompt_events,
+            "by_event": {row["event_name"]: row["c"] for row in event_rows},
+            "by_project": {row["project_id"]: row["c"] for row in project_rows},
+            "first_event_at": span_row["first_at"] if span_row else None,
+            "last_event_at": span_row["last_at"] if span_row else None,
+        }

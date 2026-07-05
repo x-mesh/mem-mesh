@@ -187,3 +187,235 @@ async def test_add_column_if_missing():
             p = path + ext
             if os.path.exists(p):
                 os.unlink(p)
+
+
+def test_current_schema_version_is_14():
+    """CURRENT_SCHEMA_VERSION bumped to 14 for stale-anchor verification columns."""
+    assert CURRENT_SCHEMA_VERSION == 14
+
+
+@pytest.mark.asyncio
+async def test_v12_new_db_has_injection_table_and_anchors(temp_db_path):
+    """DoD (a): a freshly created DB exposes injected_memories + memories.anchors."""
+    db = Database(temp_db_path)
+    await db.connect()
+
+    # injected_memories table exists
+    cursor = await db.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='injected_memories'"
+    )
+    assert cursor.fetchone() is not None
+
+    # injected_memories has the full column set
+    cursor = await db.execute("PRAGMA table_info(injected_memories)")
+    inj_cols = [row["name"] for row in cursor.fetchall()]
+    for col in (
+        "id",
+        "project_id",
+        "ide_session_id",
+        "memory_id",
+        "turn_index",
+        "position",
+        "injected_via",
+        "created_at",
+        # v13 utilization-verdict columns.
+        "utilized",
+        "judged_at",
+        "judge_method",
+    ):
+        assert col in inj_cols
+
+    # memories.anchors column exists
+    cursor = await db.execute("PRAGMA table_info(memories)")
+    memory_cols = [row["name"] for row in cursor.fetchall()]
+    assert "anchors" in memory_cols
+
+    # both injected_memories indexes exist
+    cursor = await db.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name IN "
+        "('idx_injected_memories_session', 'idx_injected_memories_project_created')"
+    )
+    idx_names = {row["name"] for row in cursor.fetchall()}
+    assert "idx_injected_memories_session" in idx_names
+    assert "idx_injected_memories_project_created" in idx_names
+
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_v12_migration_from_v11_state_and_idempotent():
+    """DoD (b): a v11-state DB migrates to v12, and re-running is harmless."""
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+
+    try:
+        conn = DatabaseConnection(path)
+        await conn.connect()
+
+        # Simulate an existing v11 database: memories table without anchors,
+        # migration bookkeeping pinned at version 11.
+        conn.connection.execute(
+            "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL)"
+        )
+        conn.connection.execute(
+            "CREATE TABLE _schema_migrations ("
+            "version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL, description TEXT)"
+        )
+        conn.connection.execute(
+            "INSERT INTO _schema_migrations (version, applied_at) "
+            "VALUES (11, '2026-01-01T00:00:00+00:00')"
+        )
+        conn.commit()
+
+        migrator = SchemaMigrator(conn)
+        await migrator.migrate()
+
+        assert await migrator._table_exists("injected_memories")
+        assert await migrator._column_exists("memories", "anchors")
+
+        cursor = await conn.execute(
+            "SELECT MAX(version) AS version FROM _schema_migrations"
+        )
+        assert cursor.fetchone()["version"] == CURRENT_SCHEMA_VERSION
+
+        # Re-running the full migration path is a no-op (already up to date).
+        await migrator.migrate()
+        cursor = await conn.execute(
+            "SELECT MAX(version) AS version FROM _schema_migrations"
+        )
+        assert cursor.fetchone()["version"] == CURRENT_SCHEMA_VERSION
+
+        # Re-applying the v12 step directly must not raise (IF NOT EXISTS /
+        # _add_column_if_missing guard against the columns/tables already existing).
+        await migrator._migration_v12_injection_anchors(migrator)
+        assert await migrator._table_exists("injected_memories")
+        assert await migrator._column_exists("memories", "anchors")
+
+        await conn.close()
+    finally:
+        for ext in ["", "-wal", "-shm"]:
+            p = path + ext
+            if os.path.exists(p):
+                os.unlink(p)
+
+
+@pytest.mark.asyncio
+async def test_v13_adds_utilization_columns_from_v12_state():
+    """A v12-state injected_memories (no verdict columns) gains them at v13, and
+    re-applying the v13 step is idempotent."""
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+
+    try:
+        conn = DatabaseConnection(path)
+        await conn.connect()
+
+        # Simulate a v12 database: injected_memories as v12 shipped it (no
+        # utilized/judged_at/judge_method), bookkeeping pinned at version 12.
+        conn.connection.execute(
+            "CREATE TABLE injected_memories ("
+            "id TEXT PRIMARY KEY, project_id TEXT NOT NULL, "
+            "ide_session_id TEXT NOT NULL, memory_id TEXT NOT NULL, "
+            "turn_index INTEGER NOT NULL DEFAULT 0, "
+            "position INTEGER NOT NULL DEFAULT 0, "
+            "injected_via TEXT NOT NULL, created_at TEXT NOT NULL)"
+        )
+        conn.connection.execute(
+            "CREATE TABLE _schema_migrations ("
+            "version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL, description TEXT)"
+        )
+        conn.connection.execute(
+            "INSERT INTO _schema_migrations (version, applied_at) "
+            "VALUES (12, '2026-01-01T00:00:00+00:00')"
+        )
+        conn.commit()
+
+        migrator = SchemaMigrator(conn)
+        await migrator.migrate()
+
+        for col in ("utilized", "judged_at", "judge_method"):
+            assert await migrator._column_exists("injected_memories", col)
+
+        cursor = await conn.execute(
+            "SELECT MAX(version) AS version FROM _schema_migrations"
+        )
+        assert cursor.fetchone()["version"] == CURRENT_SCHEMA_VERSION
+
+        # Re-applying the v13 step directly must not raise (_add_column_if_missing
+        # short-circuits on the already-present columns).
+        await migrator._migration_v13_injection_utilization(migrator)
+        for col in ("utilized", "judged_at", "judge_method"):
+            assert await migrator._column_exists("injected_memories", col)
+
+        await conn.close()
+    finally:
+        for ext in ["", "-wal", "-shm"]:
+            p = path + ext
+            if os.path.exists(p):
+                os.unlink(p)
+
+
+@pytest.mark.asyncio
+async def test_v14_new_db_has_stale_columns(temp_db_path):
+    """A freshly created DB exposes memories.stale_status + stale_checked_at."""
+    db = Database(temp_db_path)
+    await db.connect()
+
+    cursor = await db.execute("PRAGMA table_info(memories)")
+    memory_cols = [row["name"] for row in cursor.fetchall()]
+    assert "stale_status" in memory_cols
+    assert "stale_checked_at" in memory_cols
+
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_v14_adds_stale_columns_from_v13_state():
+    """A v13-state memories table (no stale columns) gains them at v14, and
+    re-applying the v14 step is idempotent."""
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+
+    try:
+        conn = DatabaseConnection(path)
+        await conn.connect()
+
+        # Simulate a v13 database: memories without stale columns, bookkeeping
+        # pinned at version 13.
+        conn.connection.execute(
+            "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL)"
+        )
+        conn.connection.execute(
+            "CREATE TABLE _schema_migrations ("
+            "version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL, description TEXT)"
+        )
+        conn.connection.execute(
+            "INSERT INTO _schema_migrations (version, applied_at) "
+            "VALUES (13, '2026-01-01T00:00:00+00:00')"
+        )
+        conn.commit()
+
+        migrator = SchemaMigrator(conn)
+        await migrator.migrate()
+
+        for col in ("stale_status", "stale_checked_at"):
+            assert await migrator._column_exists("memories", col)
+
+        cursor = await conn.execute(
+            "SELECT MAX(version) AS version FROM _schema_migrations"
+        )
+        assert cursor.fetchone()["version"] == CURRENT_SCHEMA_VERSION == 14
+
+        # Re-applying the v14 step directly must not raise (_add_column_if_missing
+        # short-circuits on the already-present columns).
+        await migrator._migration_v14_stale_status(migrator)
+        for col in ("stale_status", "stale_checked_at"):
+            assert await migrator._column_exists("memories", col)
+
+        await conn.close()
+    finally:
+        for ext in ["", "-wal", "-shm"]:
+            p = path + ext
+            if os.path.exists(p):
+                os.unlink(p)

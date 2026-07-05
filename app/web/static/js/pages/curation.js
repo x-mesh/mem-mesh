@@ -398,6 +398,9 @@ export class CurationPage extends HTMLElement {
     if (tab === 'improve') {
       this.loadImproveProposals();
     }
+    if (tab === 'docs') {
+      this.loadDocProposals();
+    }
   }
 
   async loadImproveProposals() {
@@ -449,6 +452,95 @@ export class CurationPage extends HTMLElement {
       </div>`).join('');
   }
 
+  // ---- Docs tab (doc-promotion proposals) ---------------------------------
+
+  _docMsg(text, isError = false) {
+    const el = this.querySelector('.cur-doc-msg');
+    if (!el) return;
+    el.textContent = text;
+    el.className = `cur-doc-msg${isError ? ' cur-msg-error' : ' cur-msg-ok'}`;
+    if (text) setTimeout(() => {
+      el.textContent = '';
+      el.className = 'cur-doc-msg';
+    }, 2600);
+  }
+
+  async loadDocProposals() {
+    const api = window.app?.apiClient;
+    const list = this.querySelector('.cur-doc-list');
+    if (!api || !list) return;
+    list.innerHTML = '<div class="cur-empty">Loading…</div>';
+    try {
+      api.invalidateCache?.('/curation/doc-proposals');
+      const data = await api.getDocProposals();
+      const proposals = data?.proposals || [];
+      const countEl = this.querySelector('.cur-doc-count');
+      if (countEl) countEl.textContent = String(proposals.length);
+      this.renderDocProposals(proposals);
+    } catch (err) {
+      list.innerHTML = `<div class="cur-empty cur-msg-error">Failed to load: ${this._esc(err.message)}</div>`;
+    }
+  }
+
+  renderDocProposals(proposals) {
+    const list = this.querySelector('.cur-doc-list');
+    if (!list) return;
+    if (!proposals.length) {
+      list.innerHTML = '<div class="cur-empty">No doc proposals. Generate one from a memory to promote it into a versioned doc.</div>';
+      return;
+    }
+    list.innerHTML = proposals.map((p) => this._docCard(p)).join('');
+  }
+
+  _docCard(p) {
+    const status = String(p.status || 'pending');
+    const isPending = status === 'pending';
+    // The server stores no original file content (only original_hash), so there
+    // is no left/right diff — render the proposed doc in full plus its rationale
+    // and the memories it folds in.
+    const sources = (p.source_memory_ids || [])
+      .map(
+        (id) =>
+          `<code class="cur-doc-src" title="${this._esc(id)}">${this._esc(
+            String(id).slice(0, 8)
+          )}</code>`
+      )
+      .join('');
+    const actions = isPending
+      ? `<div class="cur-actions">
+          <button class="cur-btn cur-approve cur-doc-approve" data-proposal="${this._esc(p.id)}">✓ Approve</button>
+          <button class="cur-btn cur-reject cur-doc-reject" data-proposal="${this._esc(p.id)}">✗ Reject</button>
+        </div>`
+      : `<div class="cur-doc-note cur-doc-note-${this._esc(status)}">${this._docNote(status)}</div>`;
+    return `
+      <div class="cur-card cur-doc-card" data-proposal="${this._esc(p.id)}">
+        <div class="cur-head">
+          <span class="cur-type cur-doc-status cur-doc-status-${this._esc(status)}">${this._esc(status)}</span>
+          <code class="cur-doc-path">${this._esc(p.file_path || '')}</code>
+        </div>
+        ${p.rationale ? `<div class="cur-rationale">💡 ${this._esc(p.rationale)}</div>` : ''}
+        ${sources ? `<div class="cur-doc-sources"><span class="cur-muted">Sources:</span> ${sources}</div>` : ''}
+        <div class="cur-doc-proposed">
+          <div class="cur-diff-label">Proposed content</div>
+          <pre class="cur-diff-text cur-diff-new">${this._esc(p.proposed_content || '')}</pre>
+        </div>
+        ${actions}
+      </div>`;
+  }
+
+  _docNote(status) {
+    if (status === 'approved') {
+      return 'Approved — awaiting the agent to apply it locally and report back.';
+    }
+    if (status === 'applied') {
+      return 'Applied — the agent wrote this to the file in the target repo.';
+    }
+    if (status === 'rejected') {
+      return 'Rejected.';
+    }
+    return this._esc(status);
+  }
+
   async _onClick(e) {
     const tabBtn = e.target.closest('.cur-tab-btn');
     if (tabBtn) {
@@ -473,6 +565,10 @@ export class CurationPage extends HTMLElement {
     }
     if (e.target.closest('.cur-improve-refresh')) {
       this.loadImproveProposals();
+      return;
+    }
+    if (e.target.closest('.cur-doc-refresh')) {
+      this.loadDocProposals();
       return;
     }
     const cancelBtn = e.target.closest('.cur-cancel');
@@ -515,6 +611,26 @@ export class CurationPage extends HTMLElement {
 
     const api = window.app?.apiClient;
     if (!api) return;
+
+    const docApprove = e.target.closest('.cur-doc-approve');
+    const docReject = e.target.closest('.cur-doc-reject');
+    if (docApprove || docReject) {
+      const pid = (docApprove || docReject).dataset.proposal;
+      try {
+        if (docApprove) {
+          await api.approveDocProposal(pid);
+          this._docMsg('Approved — the agent will apply it locally and report back.');
+        } else {
+          if (!window.confirm('Reject this doc proposal?')) return;
+          await api.rejectDocProposal(pid);
+          this._docMsg('Proposal rejected.');
+        }
+        this.loadDocProposals();
+      } catch (err) {
+        this._docMsg(`Failed: ${err?.data?.message || err?.data?.detail || err.message}`, true);
+      }
+      return;
+    }
 
     const improveApprove = e.target.closest('.cur-improve-approve');
     const improveReject = e.target.closest('.cur-improve-reject');
@@ -575,6 +691,7 @@ export class CurationPage extends HTMLElement {
         <div class="cur-tabs">
           <button class="cur-tab-btn cur-tab-active" data-tab="pending">Reconcile</button>
           <button class="cur-tab-btn" data-tab="improve">Improve</button>
+          <button class="cur-tab-btn" data-tab="docs">Docs</button>
           <button class="cur-tab-btn" data-tab="activity">Activity</button>
         </div>
 
@@ -596,6 +713,16 @@ export class CurationPage extends HTMLElement {
           <p class="cur-hint">Rewritten content proposed by batch Improve. Nothing is applied until you approve — the memory's content only changes on approval.</p>
           <div class="cur-improve-msg"></div>
           <div class="cur-improve-list"></div>
+        </div>
+
+        <div class="cur-tab-panel cur-tab-panel-docs" data-tab-panel="docs" hidden>
+          <div class="cur-header">
+            <h1>Doc Promotion <span class="cur-count-badge">(<span class="cur-doc-count">0</span>)</span></h1>
+            <button class="cur-btn cur-doc-refresh">Refresh</button>
+          </div>
+          <p class="cur-hint">High-value memories folded into versioned docs. Approving flips state only — the server writes no files. The agent in the target repo applies approved proposals locally (via the <code>doc_proposals</code> tool) and reports back.</p>
+          <div class="cur-doc-msg"></div>
+          <div class="cur-doc-list"></div>
         </div>
 
         <div class="cur-tab-panel cur-tab-panel-activity" data-tab-panel="activity" hidden>
@@ -644,6 +771,18 @@ export class CurationPage extends HTMLElement {
       .cur-diff-old { background: var(--bg-tertiary); color: var(--text-secondary); }
       .cur-diff-new { background: color-mix(in oklch, var(--success-color, #16a34a) 8%, var(--bg-secondary)); color: var(--text-primary); }
       .cur-improve-msg { min-height: 20px; font-size: 0.9rem; margin-bottom: 10px; }
+      .cur-doc-msg { min-height: 20px; font-size: 0.9rem; margin-bottom: 10px; }
+      .cur-doc-path { font-size: 0.85rem; color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 2px 8px; word-break: break-all; }
+      .cur-doc-status { text-transform: uppercase; }
+      .cur-doc-status-pending { color: var(--info, #3b82f6); border-color: var(--info, #3b82f6); }
+      .cur-doc-status-approved { color: #16a34a; border-color: #16a34a; }
+      .cur-doc-status-applied { color: var(--text-secondary); }
+      .cur-doc-status-rejected { color: var(--error-color, #ef4444); border-color: var(--error-color, #ef4444); }
+      .cur-doc-sources { font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+      .cur-doc-src { font-size: 0.74rem; color: var(--text-secondary); background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 1px 6px; }
+      .cur-doc-proposed { margin: 10px 0; }
+      .cur-doc-note { font-size: 0.85rem; color: var(--text-secondary); padding: 6px 0; }
+      .cur-doc-note-rejected { color: var(--error-color, #ef4444); }
       @media (max-width: 640px) { .cur-diff { grid-template-columns: 1fr; } }
       .cur-type-conflicts { color: var(--error-color, #ef4444); border-color: var(--error-color, #ef4444); }
       .cur-verdict { font-size: 0.8rem; color: var(--text-secondary); }

@@ -115,10 +115,11 @@ async def add(
     source: str = "mcp",
     client: Optional[str] = None,
     tags: Optional[list[str]] = None,
+    anchors: Optional[dict] = None,
 ) -> dict:
     """Internal handler for add tool."""
     return await _get_handlers().add(
-        content, project_id, category, source, client, tags
+        content, project_id, category, source, client, tags, anchors
     )
 
 
@@ -221,9 +222,11 @@ async def pin_complete(
 
 
 @mcp.tool(description=TOOL_DESCRIPTIONS["pin_promote"])
-async def pin_promote(pin_id: str, category: str = "task") -> dict:
+async def pin_promote(
+    pin_id: str, category: str = "task", anchors: Optional[dict] = None
+) -> dict:
     """Internal handler for pin_promote tool."""
-    return await _get_handlers().pin_promote(pin_id, category=category)
+    return await _get_handlers().pin_promote(pin_id, category=category, anchors=anchors)
 
 
 @mcp.tool(description=TOOL_DESCRIPTIONS["pin_list"])
@@ -318,6 +321,32 @@ async def weekly_review(
 ) -> dict:
     """Internal handler for weekly_review tool."""
     return await _get_handlers().weekly_review(project_id, days)
+
+
+@mcp.tool(description=TOOL_DESCRIPTIONS["report_anchor_status"])
+async def report_anchor_status(
+    memory_id: str,
+    status: str,
+    detail: Optional[str] = None,
+) -> dict:
+    """Internal handler for report_anchor_status tool."""
+    return await _get_handlers().report_anchor_status(memory_id, status, detail)
+
+
+@mcp.tool(description=TOOL_DESCRIPTIONS["doc_proposals"])
+async def doc_proposals(
+    project_id: str,
+    status: str = "approved",
+    limit: int = 50,
+) -> dict:
+    """Internal handler for doc_proposals tool."""
+    return await _get_handlers().doc_proposals(project_id, status=status, limit=limit)
+
+
+@mcp.tool(description=TOOL_DESCRIPTIONS["doc_proposal_applied"])
+async def doc_proposal_applied(proposal_id: str) -> dict:
+    """Internal handler for doc_proposal_applied tool."""
+    return await _get_handlers().doc_proposal_applied(proposal_id)
 
 
 @mcp.tool()

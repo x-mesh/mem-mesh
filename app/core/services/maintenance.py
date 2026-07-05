@@ -189,6 +189,34 @@ class MaintenanceService:
             result["skipped"][op] = skipped_done
         return result
 
+    async def enqueue_memory(
+        self,
+        *,
+        memory_id: str,
+        operation: str,
+        project_id: Optional[str],
+        content_hash: str,
+    ) -> bool:
+        """Enqueue a single enrich/improve job for one memory.
+
+        Used by the write-time derivability pre-check (quality_gate R17) to route
+        a conversation-dump / git-derivable memory to the improve worker without
+        scanning a whole project. Returns False for an unknown operation or when
+        a live (pending/processing) job for the same (memory, operation) already
+        exists — the ``idx_maintenance_queue_live`` partial unique index makes a
+        re-enqueue a no-op, not a duplicate.
+        """
+        if operation not in MAINTENANCE_OPERATIONS:
+            return False
+        await self.ensure_schema()
+        return await self._insert_job(
+            memory_id=memory_id,
+            operation=operation,
+            project_id=project_id,
+            content_hash=content_hash,
+            now=_utc_now(),
+        )
+
     async def _already_done_ids(self, operation: str, ids: List[str]) -> set[str]:
         if not ids:
             return set()

@@ -74,6 +74,12 @@ class MCPDispatcher:
                 return await self._dispatch_batch_operations(args)
             elif tool_name == "weekly_review":
                 return await self._dispatch_weekly_review(args)
+            elif tool_name == "doc_proposals":
+                return await self._dispatch_doc_proposals(args)
+            elif tool_name == "doc_proposal_applied":
+                return await self._dispatch_doc_proposal_applied(args)
+            elif tool_name == "report_anchor_status":
+                return await self._dispatch_report_anchor_status(args)
             else:
                 logger.warning(f"Unknown tool: {tool_name}")
                 return format_tool_error(f"Unknown tool: {tool_name}")
@@ -96,6 +102,7 @@ class MCPDispatcher:
             source=args.get("source", "mcp"),
             client=args.get("client"),
             tags=args.get("tags"),
+            anchors=args.get("anchors"),
         )
         return format_tool_response(result)
 
@@ -188,6 +195,7 @@ class MCPDispatcher:
         result = await self._tool_handlers.pin_promote(
             pin_id=args["pin_id"],
             category=args.get("category", "task"),
+            anchors=args.get("anchors"),
         )
         return format_tool_response(result)
 
@@ -280,6 +288,41 @@ class MCPDispatcher:
         result = await self._tool_handlers.weekly_review(
             project_id=args["project_id"],
             days=args.get("days", 7),
+        )
+        return format_tool_response(result)
+
+    async def _dispatch_doc_proposals(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if "project_id" not in args:
+            return format_tool_error("Missing required argument: project_id")
+
+        result = await self._tool_handlers.doc_proposals(
+            project_id=args["project_id"],
+            status=args.get("status", "approved"),
+            limit=args.get("limit", 50),
+        )
+        return format_tool_response(result)
+
+    async def _dispatch_doc_proposal_applied(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        if "proposal_id" not in args:
+            return format_tool_error("Missing required argument: proposal_id")
+
+        result = await self._tool_handlers.doc_proposal_applied(
+            proposal_id=args["proposal_id"],
+        )
+        return format_tool_response(result)
+
+    async def _dispatch_report_anchor_status(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        if "memory_id" not in args or "status" not in args:
+            return format_tool_error("Missing required arguments: memory_id, status")
+
+        result = await self._tool_handlers.report_anchor_status(
+            memory_id=args["memory_id"],
+            status=args["status"],
+            detail=args.get("detail"),
         )
         return format_tool_response(result)
 

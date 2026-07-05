@@ -56,6 +56,7 @@ class MCPToolHandlers:
         source: str = "mcp",
         client: Optional[str] = None,
         tags: Optional[List[str]] = None,
+        anchors: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Add a new memory to the memory store
 
@@ -66,6 +67,8 @@ class MCPToolHandlers:
             source: Memory source
             client: Client tool name (cursor, kiro, claude_code, etc.)
             tags: Memory tags
+            anchors: Git anchors {commit_hash, file_paths, branch} the client
+                collected for this memory (metadata only, not embedded)
 
         Returns:
             dict: 생성된 메모리 정보
@@ -95,6 +98,7 @@ class MCPToolHandlers:
                 source=source,
                 client=client,
                 tags=tags,
+                anchors=anchors,
             )
             result = await self._storage.add_memory(params)
             logger.info("Successfully added memory", memory_id=result.id)
@@ -298,6 +302,7 @@ class MCPToolHandlers:
                 "created_at": r.created_at,
                 "project_id": r.project_id,
                 "tags": r.tags,
+                "anchors": r.anchors,
             }
             for r in result.results
         ]
@@ -714,12 +719,19 @@ class MCPToolHandlers:
             logger.error("Error in pin_complete", error=str(e))
             raise
 
-    async def pin_promote(self, pin_id: str, category: str = "task") -> Dict[str, Any]:
+    async def pin_promote(
+        self,
+        pin_id: str,
+        category: str = "task",
+        anchors: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """Promote a pin to a permanent memory
 
         Args:
             pin_id: Pin ID to promote
             category: Memory category (task, decision, bug, incident, idea, code_snippet)
+            anchors: Git anchors {commit_hash, file_paths, branch} to attach to the
+                promoted memory (metadata only, not embedded)
 
         Returns:
             dict: Promotion result with memory_id
@@ -734,7 +746,9 @@ class MCPToolHandlers:
                 db, getattr(self._storage, "embedding_service", None)
             )
 
-            result = await pin_service.promote_to_memory(pin_id, category=category)
+            result = await pin_service.promote_to_memory(
+                pin_id, category=category, anchors=anchors
+            )
 
             logger.info(
                 "Successfully promoted pin to memory",
@@ -1404,27 +1418,78 @@ class MCPToolHandlers:
                 (project_id, cutoff),
             )
 
-            # 4. zero-result 검색 쿼리 (monitoring 테이블이 있는 경우)
+            # 4. zero-result 검색 쿼리. 실측 테이블은 search_metrics이며 컬럼은
+            # result_count / timestamp(존재하지 않는 search_logs.results_count/
+            # created_at가 아님) — 이 쿼리는 이전엔 항상 예외로 빈 리스트를 반환하던
+            # 죽은 코드였다. search_metrics는 initializer가 항상 생성하지만, 구버전
+            # 스키마 대비 방어적으로 try/except는 유지한다.
             zero_result_queries = []
             try:
                 zero_rows = await db.fetchall(
                     """
-                    SELECT query, created_at
-                    FROM search_logs
+                    SELECT query, timestamp
+                    FROM search_metrics
                     WHERE project_id = ?
-                    AND results_count = 0
-                    AND created_at >= ?
-                    ORDER BY created_at DESC
+                    AND result_count = 0
+                    AND timestamp >= ?
+                    ORDER BY timestamp DESC
                     LIMIT 10
                     """,
                     (project_id, cutoff),
                 )
                 zero_result_queries = [
-                    {"query": r["query"], "created_at": r["created_at"]}
+                    {"query": r["query"], "created_at": r["timestamp"]}
                     for r in zero_rows
                 ]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("zero-result query lookup failed", error=str(e))
+
+            # 4.5. 주입 메모리 적중률 (t9). injected_memories의 utilized 판정을
+            # 집계하여 "주입된 세션 메모리가 실제로 활용됐는가"를 지표로 노출한다.
+            # judged = 판정 완료(utilized IS NOT NULL) 건수, hit_rate = utilized/judged.
+            # v13 이전 스키마(utilized 컬럼 부재) 대비 방어적으로 try/except 유지.
+            injection_stats = {
+                "injected": 0,
+                "judged": 0,
+                "utilized": 0,
+                "hit_rate": 0.0,
+                "by_method": {},
+            }
+            try:
+                inj_row = await db.fetchone(
+                    """
+                    SELECT
+                        COUNT(*) AS injected,
+                        SUM(CASE WHEN utilized IS NOT NULL THEN 1 ELSE 0 END)
+                            AS judged,
+                        SUM(CASE WHEN utilized = 1 THEN 1 ELSE 0 END) AS utilized
+                    FROM injected_memories
+                    WHERE project_id = ? AND created_at >= ?
+                    """,
+                    (project_id, cutoff),
+                )
+                by_method_rows = await db.fetchall(
+                    """
+                    SELECT judge_method, COUNT(*) AS c
+                    FROM injected_memories
+                    WHERE project_id = ? AND created_at >= ?
+                    AND judge_method IS NOT NULL
+                    GROUP BY judge_method
+                    """,
+                    (project_id, cutoff),
+                )
+                injected = (inj_row["injected"] if inj_row else 0) or 0
+                judged = (inj_row["judged"] if inj_row else 0) or 0
+                utilized = (inj_row["utilized"] if inj_row else 0) or 0
+                injection_stats = {
+                    "injected": injected,
+                    "judged": judged,
+                    "utilized": utilized,
+                    "hit_rate": round(utilized / judged, 4) if judged else 0.0,
+                    "by_method": {r["judge_method"]: r["c"] for r in by_method_rows},
+                }
+            except Exception as e:
+                logger.warning("injection stats lookup failed", error=str(e))
 
             # 5. 통계 집계
             total_memories = await db.fetchone(
@@ -1461,6 +1526,7 @@ class MCPToolHandlers:
                     "pins_incomplete": len(incomplete_pins),
                     "sessions_count": len(recent_sessions),
                     "zero_result_searches": len(zero_result_queries),
+                    "injection_stats": injection_stats,
                 },
                 "incomplete_pins": [
                     {
@@ -1555,6 +1621,117 @@ class MCPToolHandlers:
             recommendations.append("특별한 조치 사항이 없습니다. 잘 운영되고 있습니다!")
 
         return recommendations
+
+    async def doc_proposals(
+        self,
+        project_id: str,
+        status: str = "approved",
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """Approved doc-promotion 제안을 조회한다 (에이전트가 로컬 적용).
+
+        서버는 파일에 쓰지 않으므로 적용 주체는 대상 저장소 cwd의 에이전트다. 각
+        제안은 file_path(상대 경로) + proposed_content(개정 전문) + original_hash를
+        담는다. 에이전트는 원본이 original_hash와 여전히 일치하는지 확인한 뒤 파일을
+        수정하고 doc_proposal_applied로 보고한다.
+
+        Args:
+            project_id: 프로젝트 ID
+            status: 제안 상태 필터 (기본 approved)
+            limit: 최대 반환 개수
+
+        Returns:
+            dict: {proposals: [...], count, project_id, status}
+        """
+        logger.info(
+            "Tool doc_proposals called",
+            project_id=project_id,
+            status=status,
+        )
+
+        from ..core.schemas.doc_proposal import DocProposalAgentView
+        from ..core.services.doc_proposal import DocProposalService
+
+        db = self._get_database()
+        service = DocProposalService(db)
+        rows = await service.list_proposals(
+            project_id=project_id, status=status, limit=limit
+        )
+        proposals = [DocProposalAgentView.from_row(r).model_dump() for r in rows]
+        return {
+            "proposals": proposals,
+            "count": len(proposals),
+            "project_id": project_id,
+            "status": status,
+        }
+
+    async def doc_proposal_applied(self, proposal_id: str) -> Dict[str, Any]:
+        """적용 보고: approved 제안을 applied(terminal)로 전이한다.
+
+        에이전트가 proposed_content를 로컬 파일에 반영한 뒤 호출한다. 서버는 파일을
+        쓰지 않으므로 여기서 하는 일은 상태 전이 기록뿐이다. 승인되지 않은 제안에
+        대한 호출은 상태 머신이 ``InvalidStatusTransitionError``로 거부한다.
+
+        Args:
+            proposal_id: 적용된 제안 ID
+
+        Returns:
+            dict: {proposal_id, status: "applied", applied: True}
+        """
+        logger.info("Tool doc_proposal_applied called", proposal_id=proposal_id)
+
+        from ..core.services.doc_proposal import DocProposalService
+
+        db = self._get_database()
+        service = DocProposalService(db)
+        updated = await service.mark_applied(proposal_id)
+        return {
+            "proposal_id": proposal_id,
+            "status": updated["status"],
+            "applied": True,
+        }
+
+    async def report_anchor_status(
+        self,
+        memory_id: str,
+        status: str,
+        detail: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Record a client's local anchor-verification verdict (fresh|stale).
+
+        The server has no git access, so the agent verifies a memory's anchors
+        locally (file_paths exist, commit reachable) and reports here. A 'stale'
+        memory is excluded from future auto-injection; 'fresh' clears the weak
+        aged-anchor warning.
+
+        Args:
+            memory_id: Memory whose anchors were verified (full UUID)
+            status: 'fresh' (intact) or 'stale' (rotted)
+            detail: Optional note on what failed (logged only)
+
+        Returns:
+            dict: {memory_id, stale_status, stale_checked_at}
+        """
+        logger.info(
+            "Tool report_anchor_status called",
+            memory_id=memory_id,
+            status=status,
+        )
+
+        try:
+            memory_service = getattr(self._storage, "memory_service", None)
+            if memory_service is None:
+                raise RuntimeError(
+                    "report_anchor_status requires a local memory service"
+                )
+            result = await memory_service.report_anchor_status(
+                memory_id, status, detail
+            )
+            logger.info("Recorded anchor status", memory_id=memory_id, status=status)
+            return result
+        except Exception as e:
+            logger.error("Error in report_anchor_status", error=str(e))
+            raise
 
     def _get_database(self) -> "Database":
         """Storage에서 Database 인스턴스 가져오기"""

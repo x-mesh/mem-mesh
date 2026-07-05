@@ -73,7 +73,10 @@ class DatabaseInitializer:
                 tags TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                content_bytes INTEGER
+                content_bytes INTEGER,
+                anchors TEXT,
+                stale_status TEXT,
+                stale_checked_at TEXT
             )
         """)
 
@@ -279,6 +282,22 @@ class DatabaseInitializer:
             )
         """)
 
+        # Injection instrumentation (M2): one row per memory surfaced into an IDE
+        # session, keyed by (ide_session_id, memory_id). No FK to memories — an
+        # injection event should survive the injected memory being deleted.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS injected_memories (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                ide_session_id TEXT NOT NULL,
+                memory_id TEXT NOT NULL,
+                turn_index INTEGER NOT NULL DEFAULT 0,
+                position INTEGER NOT NULL DEFAULT 0,
+                injected_via TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+
     async def _create_monitoring_tables(self) -> None:
         """Create monitoring system tables."""
         conn = self.connection.connection
@@ -422,6 +441,8 @@ class DatabaseInitializer:
         hook_indexes = [
             "CREATE INDEX IF NOT EXISTS idx_hook_events_session ON hook_events(ide_session_id, turn_index)",
             "CREATE INDEX IF NOT EXISTS idx_hook_events_created ON hook_events(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_injected_memories_session ON injected_memories(ide_session_id, memory_id)",
+            "CREATE INDEX IF NOT EXISTS idx_injected_memories_project_created ON injected_memories(project_id, created_at)",
         ]
 
         all_indexes = (

@@ -216,6 +216,7 @@ class DirectStorageBackend(StorageBackend):
                 source=params.source or "mcp",
                 client=params.client,
                 tags=params.tags,
+                anchors=params.anchors,
             )
 
             logger.info(f"Memory added successfully: {result.id}")

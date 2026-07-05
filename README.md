@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05%20%7C%202025--03--26-green.svg)](https://modelcontextprotocol.io/)
 
-> Persistent memory for AI agents — hybrid vector + FTS5 search, pin-based session tracking, and NLI conflict detection. Zero external dependencies.
+> Persistent memory for AI coding tools — resumable session state, the decision context that never reaches git, and injection that is measured rather than assumed. Hybrid vector + FTS5 search over a single SQLite file, zero external services.
 
 [한국어](./README.ko.md) · [Quick Start](#quick-start) · [MCP Setup](#mcp-setup) · [MCP Tools](#mcp-tools-15) · [Session & Pins](#session--pins) · [Architecture](#architecture) · [Docker](#docker) · [Contributing](#contributing)
 
@@ -14,11 +14,18 @@
 
 ## Why mem-mesh?
 
-Most MCP memory servers are glorified key-value stores. mem-mesh is built for how AI agents actually work — sessions with multiple steps, decisions that need to survive reboots, and cross-machine context that has to stay coherent.
+mem-mesh does not claim that searching your past sessions makes a model write better code — it treats that as a hypothesis it instruments and measures ([Measured, not assumed](#measured-not-assumed)). It earns its place on three things git, pull requests, and well-kept docs do not capture:
+
+- **Session-to-session work state** — `pin_add` / `pin_complete` track the unit of work; `session_resume` restores where the last session stopped. "Where was I" answered directly.
+- **Knowledge that never reaches git** — the *why* of a decision, the approach that failed, the constraint learned during an incident. First-class categories with typed relations, so a superseded decision links to the one that replaced it.
+- **Observability and retrospective** — `weekly_review`, the dashboard, and team relay show what your agents recorded, retrieved, and let go stale.
 
 | Differentiator | What it means |
 |---|---|
-| **Pin lifecycle** | Lightweight kanban inside every session: `pin_add` → `pin_complete` → `pin_promote`. No other MCP memory server has this. |
+| **Pin lifecycle** | Lightweight kanban inside every session: `pin_add` → `pin_complete` → `pin_promote`. Restore in-progress work with `session_resume`. |
+| **Injection instrumentation** | Every auto-surfaced memory is tracked in `injected_memories`; a deterministic Stop-time heuristic judges whether it was used; `weekly_review` reports the hit rate. Utility is measured, not assumed. |
+| **Git-anchored staleness** | Code memories carry commit + file anchors; the client verifies freshness and reports it, so stale context is dropped from injection instead of misleading the agent. |
+| **Human-gated doc promotion** | `doc_proposal` drafts a promotion to version-controlled docs; a person approves; the client applies it. Memory is the staging area, git is the durable layer. |
 | **Hybrid search** | sqlite-vec vector embeddings + FTS5 full-text fused with Reciprocal Rank Fusion (RRF). Korean n-gram optimized out of the box. |
 | **NLI conflict detection** | 2-stage pipeline: vector similarity pre-filter → mDeBERTa NLI model catches contradictory memories before they're stored. |
 | **4-Tier Smart Expand** | `session_resume(expand="smart")` uses an importance × status matrix to load only what matters — ~60% token savings. |
@@ -27,6 +34,10 @@ Most MCP memory servers are glorified key-value stores. mem-mesh is built for ho
 | **25+ client auto-detection** | Identifies the calling IDE/AI platform from MCP handshake or User-Agent. |
 | **Batch operations** | Pack multiple memory ops into one round-trip: 30–50% token savings. |
 
+### Measured, not assumed
+
+The "past-session search boosts coding" claim is instrumented rather than asserted. Every injected memory is recorded in `injected_memories` (one row per turn); a Stop-time heuristic with no LLM judges whether it was later referenced; `weekly_review` surfaces the injection hit rate. Offline, `scripts/replay_injection_eval.py` replays real captured prompts through the legacy and current injection formats and scores both with deterministic metrics plus an optional blind LLM judge. The premise is honest: if the current format shows no advantage, shrinking injection is a valid outcome. For pure code work in a repository whose commits, PRs, and docs are already well kept, the marginal value of retrieving past *sessions* is unproven — mem-mesh ships the tools to measure it, and the three capabilities above stand regardless of how that measurement resolves.
+
 ---
 
 ## Features
@@ -34,6 +45,10 @@ Most MCP memory servers are glorified key-value stores. mem-mesh is built for ho
 - **Memory CRUD** — `add`, `search`, `context`, `update`, `delete`
 - **Hybrid search** — sentence-transformers vectors + FTS5 RRF fusion, Korean n-gram support
 - **Session & pins** — short-lived work tracking with importance-based promotion to permanent memory
+- **Injection instrumentation** — `injected_memories` tracking + Stop-time usage heuristic + `weekly_review` injection stats; offline replay harness to validate injection value
+- **Git-anchored lifespan** — commit/file anchors with client-side staleness verification; stale memories excluded from injection
+- **Human-gated promotion** — `doc_proposal` promotes memory toward version-controlled docs (LLM drafts, human approves, client applies)
+- **Auto-redaction** — deterministic secret/PII masking on auto-captured content before it reaches long-term memory
 - **Memory relations** — `link`, `unlink`, `get_links` across 7 relation types
 - **Conflict detection** — mDeBERTa NLI prevents storing contradictory facts
 - **Batch operations** — 30–50% fewer tokens per multi-op workflow

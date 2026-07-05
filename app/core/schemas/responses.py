@@ -26,6 +26,14 @@ class AddResponse(BaseModel):
         default=None,
         description="충돌 감지된 기존 메모리 목록 (conflict_detection 활성화 시)",
     )
+    quality_hint: Optional[str] = Field(
+        default=None,
+        description=(
+            "저장은 됐으나 대화 덤프/파생 가능 콘텐츠로 판별되어 improve 큐로 "
+            "라우팅된 경우의 안내 (예: 'conversation_dump — improve 큐에 등록됨'). "
+            "정상 콘텐츠는 None"
+        ),
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -53,6 +61,10 @@ class SearchResult(BaseModel):
         default=None, description="생성 도구 (cursor, kiro, claude_code 등)"
     )
     tags: Optional[List[str]] = Field(default=None, description="태그 목록")
+    anchors: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="git 앵커 (commit_hash/file_paths/branch) — 표시·수명 판단용",
+    )
     origin: str = Field(
         default="local",
         description="결과 출처: 'local'(내 노드) 또는 'hub'(팀 hub, federated)",
@@ -245,6 +257,91 @@ class StatsResponse(BaseModel):
                 "projects_breakdown": {"my-app": 60, "web-project": 45, "global": 45},
                 "date_range": {"start": "2024-01-01", "end": "2024-01-31"},
                 "query_time_ms": 15.5,
+            }
+        }
+    }
+
+
+class EnrichmentProjectCoverage(BaseModel):
+    """프로젝트별 enrichment 커버리지"""
+
+    project_id: str = Field(description="프로젝트 ID ('global'=미지정)")
+    total: int = Field(description="프로젝트 메모리 수")
+    enriched: int = Field(description="title이 채워진 메모리 수")
+    coverage_ratio: float = Field(description="커버리지 비율 (0.0~1.0)")
+
+
+class EnrichmentCoverage(BaseModel):
+    """enrichment title 커버리지 요약"""
+
+    total_memories: int = Field(description="전체 메모리 수")
+    enriched_count: int = Field(description="title이 채워진 메모리 수")
+    coverage_ratio: float = Field(description="전체 커버리지 비율 (0.0~1.0)")
+    by_project: List[EnrichmentProjectCoverage] = Field(
+        description="프로젝트별 커버리지"
+    )
+
+
+class HookEventsStats(BaseModel):
+    """hook_events 축적 통계"""
+
+    total_events: int = Field(description="총 hook 이벤트 수")
+    prompt_events: int = Field(
+        description="prompt가 기록된 UserPromptSubmit 이벤트 수 (replay 신호)"
+    )
+    by_event: Dict[str, int] = Field(description="이벤트명별 분포")
+    by_project: Dict[str, int] = Field(description="프로젝트별 분포")
+    first_event_at: Optional[str] = Field(
+        None, description="가장 오래된 이벤트 시각 (ISO8601)"
+    )
+    last_event_at: Optional[str] = Field(
+        None, description="가장 최근 이벤트 시각 (ISO8601)"
+    )
+    archived_prompt_events: int = Field(
+        0,
+        description="hook_events_archive에 보존된 prompt 이벤트 수 (prune 이후 장기 보관분)",
+    )
+    replay_prompts_total: int = Field(
+        0, description="replay 가용 prompt 총량 (live + archive) — A3 판단 기준"
+    )
+
+
+class CoverageStatsResponse(BaseModel):
+    """커버리지·축적 통계 응답 (enrichment 커버리지 + hook_events 축적)"""
+
+    enrichment: EnrichmentCoverage = Field(description="enrichment title 커버리지")
+    hook_events: HookEventsStats = Field(description="hook_events 축적 통계")
+    query_time_ms: float = Field(description="쿼리 실행 시간 (밀리초)")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "enrichment": {
+                    "total_memories": 150,
+                    "enriched_count": 120,
+                    "coverage_ratio": 0.8,
+                    "by_project": [
+                        {
+                            "project_id": "mem-mesh",
+                            "total": 60,
+                            "enriched": 55,
+                            "coverage_ratio": 0.9167,
+                        }
+                    ],
+                },
+                "hook_events": {
+                    "total_events": 4200,
+                    "prompt_events": 1800,
+                    "by_event": {
+                        "UserPromptSubmit": 1800,
+                        "SessionStart": 1200,
+                        "Stop": 1200,
+                    },
+                    "by_project": {"mem-mesh": 3000, "web-project": 1200},
+                    "first_event_at": "2026-06-21T09:00:00Z",
+                    "last_event_at": "2026-07-05T18:30:00Z",
+                },
+                "query_time_ms": 12.3,
             }
         }
     }

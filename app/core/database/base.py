@@ -324,7 +324,13 @@ class Database:
     async def _fallback_search(
         self, limit: int, filters: Optional[Dict[str, Any]] = None
     ) -> List[Tuple]:
-        base_query = "SELECT * FROM memories WHERE 1=1"
+        # Mirror the vec path's reconcile filter: this fallback runs when
+        # sqlite-vec is unavailable or the vector table is empty, and it must
+        # not surface deprecated (superseded) memories either.
+        base_query = (
+            "SELECT * FROM memories WHERE 1=1 "
+            "AND COALESCE(status, 'canonical') = 'canonical'"
+        )
         params = []
 
         if filters:
@@ -450,8 +456,8 @@ class Database:
         await self.execute(
             """
             INSERT INTO memories
-            (id, content, content_hash, project_id, category, status, source, client, embedding, tags, created_at, updated_at, content_bytes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, content, content_hash, project_id, category, status, source, client, embedding, tags, anchors, created_at, updated_at, content_bytes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 data["id"],
@@ -464,6 +470,7 @@ class Database:
                 data.get("client"),
                 data.get("embedding"),
                 data.get("tags"),
+                data.get("anchors"),
                 data["created_at"],
                 data["updated_at"],
                 len(data["content"]),  # denormalized; keeps content_bytes in sync

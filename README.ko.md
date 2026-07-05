@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05%20%7C%202025--03--26-green.svg)](https://modelcontextprotocol.io/)
 
-> AI 에이전트를 위한 중앙 집중식 메모리 시스템 — 벡터 검색과 맥락 조회로 실시간 기억 저장·조정
+> AI 코딩 도구를 위한 지속 메모리 — 이어서 복원하는 세션 상태, git에는 남지 않는 결정 맥락, 그리고 가정이 아니라 계측으로 검증하는 주입. 단일 SQLite 파일, 외부 서비스 불필요.
 
 [English](./README.md)
 
@@ -17,13 +17,27 @@
 
 ## mem-mesh란?
 
-mem-mesh는 AI 도구(Cursor, Claude Desktop, Kiro 등)가 **벡터 검색**과 **맥락 조회**를 활용해 작업 중 생성되는 메모리를 중앙에서 관리하는 시스템입니다. MCP(Model Context Protocol)를 통해 15개의 도구로 메모리 추가, 검색, 세션·핀 관리, 관계 연결, 배치 연산을 지원합니다.
+mem-mesh는 "과거 세션을 검색하면 코딩 성능이 오른다"고 주장하지 않습니다. 그 효용은 계측해서 데이터로 판단하는 가설로 다룹니다([계측으로 검증](#계측으로-검증)). mem-mesh의 근거는 git·PR·잘 관리된 문서가 담지 못하는 세 가지입니다.
+
+- **세션 간 작업 상태 복원** — `pin_add` / `pin_complete`로 작업 단위를 추적하고, `session_resume`이 지난 세션이 멈춘 지점을 복원합니다. "어디까지 했더라"에 바로 답합니다.
+- **git에 남지 않는 지식** — 결정의 *왜*, 시도했다 실패한 접근(반복하지 않을 부정적 결과), 장애에서 배운 운영 제약. 커밋·PR·설계 문서가 잘 관리돼도 이 지식은 아티팩트에 남지 않습니다. 카테고리와 타입 관계(`supersedes` 등)로 대체된 결정이 새 결정에 연결됩니다.
+- **관측성·회고** — `weekly_review`, 대시보드, 팀 relay가 에이전트가 무엇을 기록·조회했고 무엇이 stale해졌는지 보여줍니다.
+
+MCP(Model Context Protocol)를 통해 메모리 추가·검색, 세션·핀 관리, 관계 연결, 배치 연산, 주입 계측, 문서 승격을 지원합니다.
+
+### 계측으로 검증
+
+"과거 세션 검색이 코딩 성능을 올린다"는 주장은 단정하지 않고 계측합니다. 주입된 모든 메모리는 `injected_memories`에 기록되고(턴당 1행), LLM을 쓰지 않는 Stop 시점 휴리스틱이 이후 실제로 참조됐는지 판정하며, `weekly_review`가 주입 적중률을 보고합니다. 오프라인에서는 `scripts/replay_injection_eval.py`가 실제로 수집된 프롬프트를 레거시·현행 주입 포맷으로 다시 렌더링해 결정적 지표와 선택적 블라인드 LLM 심판으로 양쪽을 채점합니다. 전제는 정직합니다 — 현행 포맷이 이점을 보이지 않으면 주입을 축소하는 것이 타당한 결론입니다. 커밋·PR·문서가 이미 잘 관리된 repo의 순수 코드 작업에서 과거 *세션* 검색의 한계 효용은 검증 대상이며, mem-mesh는 그 검증 도구를 내장합니다. 위 세 가지 근거는 이 측정 결과와 무관하게 성립합니다.
 
 ### 주요 기능
 
 - **메모리 CRUD**: add, search, context, update, delete
 - **하이브리드 검색**: 벡터 + FTS5 RRF 융합, 한국어 n-gram 최적화
 - **세션 & 핀**: 단기 작업 추적, 중요도 기반 영구 메모리 승격
+- **주입 계측**: injected_memories 추적 + Stop 시점 사용 판정 + weekly_review 주입 통계, 오프라인 replay 하네스로 주입 효용 검증
+- **git 앵커 수명 관리**: 커밋·파일 앵커 + 클라이언트 stale 검증, stale 메모리는 주입에서 제외
+- **문서 승격 (사람 승인)**: doc_proposal로 메모리를 버전 관리 문서로 승격 (LLM 초안, 사람 승인, 클라이언트 적용)
+- **자동 마스킹**: 자동 수집 콘텐츠의 시크릿/PII를 결정적으로 `<REDACTED>` 치환
 - **메모리 관계**: link, unlink, get_links (7가지 관계 타입)
 - **배치 연산**: 30–50% 토큰 절감
 - **웹 대시보드**: FastAPI 기반 REST API + 실시간 UI

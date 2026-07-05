@@ -35,7 +35,10 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "For short-term work tracking, use pin_add instead. "
         'Example: {"content": "Chose PostgreSQL because...", "category": "decision"}\n'
         "Set client to your tool/IDE name (e.g. 'claude_code', 'cursor', 'kiro', 'vscode') "
-        "so memories are tagged with their source."
+        "so memories are tagged with their source. "
+        "For code/commit-related memories in a git repo, pass anchors: run "
+        "`git rev-parse HEAD` for commit_hash and include the relevant relative "
+        "file_paths. Omit anchors if not a git repository."
     ),
     "pin_add": (
         "Track a short-term work item in the current session. "
@@ -68,7 +71,11 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     # ===== T3: Occasionally used (1 sentence) =====
     "delete": "Permanently delete a memory by memory_id.",
     "stats": "Get memory count, category breakdown, and project distribution statistics.",
-    "pin_promote": "Promote a completed pin to a permanent memory for long-term retention.",
+    "pin_promote": (
+        "Promote a completed pin to a permanent memory for long-term retention. "
+        "For code/commit-related work, pass anchors (`git rev-parse HEAD` + relative "
+        "file_paths); omit if not a git repository."
+    ),
     "pin_list": (
         "List pins for a project with filters (status, min_importance, tags, session_id). "
         "Unlike session_resume (active pins of the latest session only), this reads any pin "
@@ -86,4 +93,25 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "unlink": "Remove a relation between two memories. Omit relation_type to remove all.",
     "get_links": "List relations for a memory. Filter by direction (outgoing, incoming, both) and relation_type.",
     "weekly_review": "Generate a review report with incomplete pins, recent memories, and recommendations for a project.",
+    "doc_proposals": (
+        "List approved doc-promotion proposals for THIS repo so the agent can apply them locally. "
+        "The server never writes files — you are the applier. Each item has file_path (relative to repo root), "
+        "proposed_content (the full revised file), and original_hash. "
+        "To apply: read file_path, confirm its current content hashes to original_hash (if it changed, skip as "
+        "stale — do not overwrite), Edit the file to proposed_content, then report with doc_proposal_applied. "
+        'Default status="approved".'
+    ),
+    "doc_proposal_applied": (
+        "Report that an approved doc proposal was written to its local file (approved → applied). "
+        "Call only after you have applied proposed_content to file_path. Records the terminal state "
+        "transition; the server still writes no files."
+    ),
+    "report_anchor_status": (
+        "Report a local verification of a memory's git anchors (fresh|stale). The server has no git "
+        "access, so YOU verify: read the memory's anchors from any search/get result, then confirm "
+        "each file_paths entry still exists AND the commit is reachable (`git cat-file -e "
+        "<commit_hash>`). Report status='fresh' when everything holds; report status='stale' when "
+        "files are gone or the commit is unreachable. A 'stale' memory is excluded from future "
+        "auto-injection; 'fresh' clears the aged-anchor warning. Skip memories without anchors."
+    ),
 }

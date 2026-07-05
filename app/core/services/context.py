@@ -3,6 +3,7 @@ Context Service for mem-mesh
 메모리 맥락 조회를 담당하는 서비스
 """
 
+import json
 import logging
 from datetime import datetime
 from typing import List, Optional
@@ -13,6 +14,18 @@ from ..errors import ContextNotFoundError
 from ..schemas.responses import ContextResponse, RelatedMemory, SearchResult
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_anchors(raw: Optional[str]) -> Optional[dict]:
+    """anchors JSON을 관용적으로 파싱한다 — 손상된 값이 조회 전체를 죽이면 안 된다."""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except (ValueError, TypeError):
+        logger.warning("Corrupt anchors JSON ignored (len=%d)", len(raw))
+        return None
 
 
 class ContextService:
@@ -65,7 +78,7 @@ class ContextService:
             cursor = self.db.connection.cursor()
             cursor.execute(
                 """
-                SELECT id, content, created_at, project_id, category, source, client
+                SELECT id, content, created_at, project_id, category, source, client, anchors
                 FROM memories
                 WHERE id = ?
             """,
@@ -85,6 +98,7 @@ class ContextService:
                 category=row[4],
                 source=row[5],
                 client=row[6],
+                anchors=_parse_anchors(row[7]),
             )
         except Exception as e:
             logger.error(f"Error getting primary memory: {e}")

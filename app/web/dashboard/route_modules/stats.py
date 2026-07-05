@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.core.schemas.responses import StatsResponse
+from app.core.schemas.responses import CoverageStatsResponse, StatsResponse
 from app.core.services.stats import StatsService
 
 from ...common.dependencies import get_stats_service
@@ -102,6 +102,24 @@ async def get_projects(service: StatsService = Depends(get_stats_service)):
         }
     except Exception as e:
         logger.error(f"Get projects error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/stats/coverage", response_model=CoverageStatsResponse)
+async def get_coverage_stats(
+    project_id: str = None,
+    service: StatsService = Depends(get_stats_service),
+) -> CoverageStatsResponse:
+    """Enrichment title 커버리지 + hook_events 축적 통계 (실측용).
+
+    A1(enrichment 커버리지)/A3(replay 데이터 축적량) 가정을 prod에서
+    검증하기 위한 관리자 stats. project_id 미지정 시 전역 집계.
+    """
+    try:
+        data = await service.get_coverage_stats(project_id=project_id)
+        return CoverageStatsResponse(**data)
+    except Exception as e:
+        logger.error(f"Get coverage stats error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

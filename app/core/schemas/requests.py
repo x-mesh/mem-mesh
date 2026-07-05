@@ -1,13 +1,84 @@
 """요청 스키마 정의"""
 
 import re
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
 # Git-worktree checkouts append ``-wt-<hex>`` / ``_wt_<hex>`` to the repo dir;
 # that suffix would otherwise fragment one repo into many project ids.
 _WT_SUFFIX_RE = re.compile(r"[-_]wt[-_][0-9a-f]{6,}$", re.IGNORECASE)
+
+# Git commit hash: abbreviated (7) up to full sha-256 (64) hex chars.
+_COMMIT_HASH_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
+
+# Anchor keys the server accepts; anything else is rejected so a typo can't be
+# silently swallowed and lost.
+_ANCHOR_KEYS = {"commit_hash", "file_paths", "branch"}
+_MAX_ANCHOR_FILE_PATHS = 20
+
+
+def validate_anchors(v: Optional[dict]) -> Optional[dict]:
+    """Validate a memory git-anchor payload and return a cleaned dict (or None).
+
+    Single source of truth for the ``anchors`` field. Anchors are metadata the
+    client (agent) collects — the server has no git access — pinning a memory to
+    the commit/files/branch it was written against, used for display and
+    lifetime judgement only (never embedded or searched).
+
+    Shape: ``{commit_hash: str(7-64 hex), file_paths: list[str] (relative, no
+    ``..``, <=20), branch: str}``. Every field is optional; an all-empty payload
+    normalizes to ``None``. Raises ``ValueError`` (→ HTTP 422 via Pydantic) on a
+    bad hash, an absolute/traversal path, an over-long list, or an unknown key.
+    """
+    if v is None:
+        return None
+    if not isinstance(v, dict):
+        raise ValueError("anchors must be an object")
+
+    unknown = set(v) - _ANCHOR_KEYS
+    if unknown:
+        raise ValueError(
+            f"anchors has unknown keys: {sorted(unknown)}. "
+            f"Allowed: {sorted(_ANCHOR_KEYS)}"
+        )
+
+    cleaned: dict = {}
+
+    commit_hash = v.get("commit_hash")
+    if commit_hash is not None:
+        if not isinstance(commit_hash, str) or not _COMMIT_HASH_RE.match(commit_hash):
+            raise ValueError("anchors.commit_hash must be 7-64 hexadecimal characters")
+        cleaned["commit_hash"] = commit_hash
+
+    file_paths = v.get("file_paths")
+    if file_paths is not None:
+        if not isinstance(file_paths, list):
+            raise ValueError("anchors.file_paths must be a list of relative paths")
+        if len(file_paths) > _MAX_ANCHOR_FILE_PATHS:
+            raise ValueError(
+                f"anchors.file_paths cannot exceed {_MAX_ANCHOR_FILE_PATHS} entries"
+            )
+        validated_paths: List[str] = []
+        for path in file_paths:
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("anchors.file_paths entries must be non-empty strings")
+            # Reject absolute paths (POSIX ``/foo`` and Windows ``C:\\foo``).
+            if path.startswith("/") or (len(path) >= 2 and path[1] == ":"):
+                raise ValueError(f"anchors.file_paths must be relative: {path!r}")
+            # Reject ``..`` traversal in any segment (both separators).
+            if ".." in re.split(r"[\\/]+", path):
+                raise ValueError(f"anchors.file_paths must not contain '..': {path!r}")
+            validated_paths.append(path)
+        cleaned["file_paths"] = validated_paths
+
+    branch = v.get("branch")
+    if branch is not None:
+        if not isinstance(branch, str) or not branch.strip():
+            raise ValueError("anchors.branch must be a non-empty string")
+        cleaned["branch"] = branch
+
+    return cleaned or None
 
 
 def normalize_project_id(v: Optional[str], *, strict: bool = True) -> Optional[str]:
@@ -94,11 +165,23 @@ class AddParams(BaseModel):
     source: Optional[str] = Field(default=None)
     client: Optional[str] = Field(default=None, max_length=50)
     tags: Optional[List[str]] = Field(default=None)
+    anchors: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Git anchors collected by the client: "
+            "{commit_hash, file_paths, branch}. Metadata only — not embedded."
+        ),
+    )
 
     @field_validator("project_id")
     @classmethod
     def validate_project_id(cls, v: Optional[str]) -> Optional[str]:
         return normalize_project_id(v)
+
+    @field_validator("anchors")
+    @classmethod
+    def validate_anchors_field(cls, v: Optional[dict]) -> Optional[dict]:
+        return validate_anchors(v)
 
     @field_validator("category")
     @classmethod

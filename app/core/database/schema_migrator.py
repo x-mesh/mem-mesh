@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Current schema version - increment when adding new migrations
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 14
 
 
 class SchemaMigrator:
@@ -44,6 +44,9 @@ class SchemaMigrator:
             9: self._migration_v9_content_bytes,
             10: self._migration_v10_access_tracking,
             11: self._migration_v11_reconcile,
+            12: self._migration_v12_injection_anchors,
+            13: self._migration_v13_injection_utilization,
+            14: self._migration_v14_stale_status,
         }
 
     async def migrate(self) -> None:
@@ -371,3 +374,111 @@ class SchemaMigrator:
             "ON reconcile_queue(status, next_attempt_at, created_at)"
         )
         logger.info("Added memories.status + reconcile_queue via migration v11")
+
+    async def _migration_v12_injection_anchors(
+        self, migrator: "SchemaMigrator"
+    ) -> None:
+        """Injection instrumentation (M2) + memory anchors (M3) foundation.
+
+        - injected_memories: records every memory surfaced into an IDE session,
+          keyed by (ide_session_id, memory_id), so injection effectiveness can be
+          measured per turn/position. Written by the injection path (t8), queried
+          by the effectiveness analytics (t11). No FK to memories: an injected
+          memory may be deleted later, but its injection event should still count.
+        - memories.anchors: JSON blob {commit_hash, file_paths, branch} pinning a
+          memory to the code state it was captured against. NULL default so
+          existing rows and add_memory inserts (which omit it) stay valid.
+        """
+        await self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS injected_memories (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                ide_session_id TEXT NOT NULL,
+                memory_id TEXT NOT NULL,
+                turn_index INTEGER NOT NULL DEFAULT 0,
+                position INTEGER NOT NULL DEFAULT 0,
+                injected_via TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """)
+        await self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_injected_memories_session "
+            "ON injected_memories(ide_session_id, memory_id)"
+        )
+        await self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_injected_memories_project_created "
+            "ON injected_memories(project_id, created_at)"
+        )
+        if await self._table_exists("memories"):
+            await self._add_column_if_missing("memories", "anchors", "TEXT", "NULL")
+        logger.info(
+            "Added injected_memories table + memories.anchors via migration v12"
+        )
+
+    async def _migration_v13_injection_utilization(
+        self, migrator: "SchemaMigrator"
+    ) -> None:
+        """Injection *utilization* verdict columns on injected_memories (t9).
+
+        v12 recorded what was *injected*; this records whether it was *utilized*.
+        The Stop-time judge (HookService.judge_injected) writes one verdict per
+        injected row so the weekly review can report an injection hit rate even
+        for users with no LLM judge configured — a conservative deterministic
+        proxy is better than no signal.
+
+        - utilized: NULL = not yet judged, 0 = judged unused, 1 = judged used.
+          NULL default so the v12 rows already on disk stay unjudged until the
+          next Stop sweeps them.
+        - judged_at: ISO8601 timestamp the verdict was written.
+        - judge_method: how the verdict was reached — 'id_ref' | 'keyword' |
+          'activity_only' | 'none' (deterministic), reserved for a future
+          'llm' method.
+
+        Added via _add_column_if_missing (not folded into the v12 DDL) so a dev
+        DB already migrated to v12 gains the columns without a table rebuild.
+        """
+        if await self._table_exists("injected_memories"):
+            await self._add_column_if_missing(
+                "injected_memories", "utilized", "INTEGER", "NULL"
+            )
+            await self._add_column_if_missing(
+                "injected_memories", "judged_at", "TEXT", "NULL"
+            )
+            await self._add_column_if_missing(
+                "injected_memories", "judge_method", "TEXT", "NULL"
+            )
+            logger.info(
+                "Added utilized/judged_at/judge_method on injected_memories "
+                "via migration v13"
+            )
+
+    async def _migration_v14_stale_status(self, migrator: "SchemaMigrator") -> None:
+        """Anchor-verification stale columns on memories (t12 — 2-stage stale).
+
+        The server has no git access, so it can only compute a weak *age* signal
+        from anchors + created_at at read time (no column needed for that). The
+        strong signal is a client that locally verified a memory's anchors
+        (file_paths exist, commit reachable) and reported the verdict via the
+        ``report_anchor_status`` tool — that verdict is persisted here.
+
+        - stale_status: NULL = never client-verified, 'fresh' = verified intact,
+          'stale' = verified rotten (files gone / commit unreachable). A 'stale'
+          memory is excluded from auto-injection; 'fresh' clears the weak
+          aged-anchor warning. NULL default so v12/v13 rows already on disk stay
+          unverified until the next report.
+        - stale_checked_at: ISO8601 timestamp the verdict was written.
+
+        Added via _add_column_if_missing (idempotent) so a fresh DB that already
+        got the columns from the initializer, and an existing DB that did not,
+        both converge without a table rebuild.
+        """
+        if await self._table_exists("memories"):
+            await self._add_column_if_missing(
+                "memories", "stale_status", "TEXT", "NULL"
+            )
+            await self._add_column_if_missing(
+                "memories", "stale_checked_at", "TEXT", "NULL"
+            )
+            logger.info(
+                "Added stale_status/stale_checked_at on memories via migration v14"
+            )

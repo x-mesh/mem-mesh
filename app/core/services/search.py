@@ -51,6 +51,29 @@ def _parse_tags(row) -> Optional[List[str]]:
     return None
 
 
+def _parse_anchors(row) -> Optional[dict]:
+    """DB Row에서 anchors(JSON) 값을 파싱하여 dict로 변환 (없으면 None).
+
+    Tolerates rows that predate the anchors column (``"anchors" not in row``)
+    and legacy/corrupt JSON, returning None rather than raising in the hot path.
+    """
+    try:
+        anchors_value = row["anchors"] if "anchors" in row.keys() else None
+        if anchors_value is None:
+            return None
+        if isinstance(anchors_value, dict):
+            return anchors_value or None
+        if isinstance(anchors_value, str):
+            if not anchors_value:
+                return None
+            parsed = json.loads(anchors_value)
+            return parsed if isinstance(parsed, dict) and parsed else None
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Failed to parse anchors: {e}")
+        return None
+    return None
+
+
 class SearchService:
     """하이브리드 검색 서비스"""
 
@@ -205,6 +228,7 @@ class SearchService:
                                     row["client"] if "client" in row.keys() else None
                                 ),
                                 tags=_parse_tags(row),
+                                anchors=_parse_anchors(row),
                             )
                             search_results.append(search_result)
                         except Exception as e:
@@ -435,6 +459,7 @@ class SearchService:
                         source=row["source"],
                         client=row["client"] if "client" in row.keys() else None,
                         tags=_parse_tags(row),
+                        anchors=_parse_anchors(row),
                     )
                     search_results.append(search_result)
                 except Exception as e:
@@ -543,6 +568,7 @@ class SearchService:
                         source=row["source"],
                         client=row["client"] if "client" in row.keys() else None,
                         tags=_parse_tags(row),
+                        anchors=_parse_anchors(row),
                     )
                     search_results.append(search_result)
                 except Exception as e:
@@ -630,6 +656,7 @@ class SearchService:
                         source=row["source"],
                         client=row["client"] if "client" in row.keys() else None,
                         tags=_parse_tags(row),
+                        anchors=_parse_anchors(row),
                     )
                     search_results.append(search_result)
                 except Exception as e:
@@ -722,6 +749,7 @@ class SearchService:
                         source=row["source"],
                         client=row["client"] if "client" in row.keys() else None,
                         tags=_parse_tags(row),
+                        anchors=_parse_anchors(row),
                     )
                     search_results.append(search_result)
                 except Exception as e:
@@ -838,6 +866,7 @@ class SearchService:
                     source=row["source"],
                     client=row["client"] if "client" in row.keys() else None,
                     tags=_parse_tags(row),
+                    anchors=_parse_anchors(row),
                 )
                 search_results.append(search_result)
 

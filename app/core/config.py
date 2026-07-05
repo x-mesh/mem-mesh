@@ -229,6 +229,20 @@ class Settings(BaseSettings):
         le=50,
         description="Maximum number of candidates to check for conflicts",
     )
+
+    # Stale-anchor detection (t12): weak, server-side age signal. A memory that
+    # carries a git-commit anchor and was captured this many days ago is treated
+    # as an unverified "aged" anchor and flagged in injection lines. A client
+    # verification (report_anchor_status) overrides this: 'fresh' clears the
+    # flag, 'stale' excludes the memory from injection entirely.
+    stale_anchor_age_days: int = Field(
+        default=90,
+        ge=1,
+        description=(
+            "Age in days past which a git-anchored memory is flagged as an "
+            "unverified aged anchor in auto-injection lines"
+        ),
+    )
     reranking_top_k_multiplier: int = Field(
         default=3,
         ge=2,

@@ -376,6 +376,31 @@ export class APIClient {
   }
 
   /**
+   * Doc-promotion proposals (P4). The server never writes files — approval only
+   * flips state; the actual file edit is applied by the agent in the target repo.
+   */
+  async getDocProposals(projectId = null, status = null, limit = 50) {
+    const params = { limit };
+    if (projectId) params.project_id = projectId;
+    if (status) params.status = status;
+    return this.get('/curation/doc-proposals', params);
+  }
+
+  async approveDocProposal(proposalId) {
+    return this.post(
+      `/curation/doc-proposals/${encodeURIComponent(proposalId)}/approve`,
+      {}
+    );
+  }
+
+  async rejectDocProposal(proposalId) {
+    return this.post(
+      `/curation/doc-proposals/${encodeURIComponent(proposalId)}/reject`,
+      {}
+    );
+  }
+
+  /**
    * Health check
    */
   async healthCheck() {

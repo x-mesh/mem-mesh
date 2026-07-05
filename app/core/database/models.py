@@ -25,6 +25,12 @@ class Memory(BaseModel):
     client: Optional[str] = Field(default=None)
     embedding: bytes
     tags: Optional[str] = Field(default=None)
+    anchors: Optional[str] = Field(
+        default=None
+    )  # JSON: {commit_hash, file_paths, branch}
+    # Client anchor-verification verdict (t12): None=unverified, 'fresh'|'stale'.
+    stale_status: Optional[str] = Field(default=None)
+    stale_checked_at: Optional[str] = Field(default=None)
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
     updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
 
@@ -53,6 +59,22 @@ class Memory(BaseModel):
             self.tags = None
         else:
             self.tags = json.dumps(tags)
+
+    def get_anchors(self) -> Optional[dict]:
+        """anchors JSON 문자열을 dict로 변환 (없으면 None)"""
+        if self.anchors is None:
+            return None
+        try:
+            return json.loads(self.anchors)
+        except json.JSONDecodeError:
+            return None
+
+    def set_anchors(self, anchors: Optional[dict]) -> None:
+        """anchors dict를 JSON 문자열로 설정"""
+        if anchors is None:
+            self.anchors = None
+        else:
+            self.anchors = json.dumps(anchors)
 
 
 class SearchMetric(BaseModel):

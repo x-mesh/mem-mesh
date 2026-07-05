@@ -17,6 +17,8 @@ class ErrorCode:
     INVALID_CONTENT_LENGTH = "INVALID_CONTENT_LENGTH"
     INVALID_IMPORTANCE = "INVALID_IMPORTANCE"
     INVALID_STATUS_TRANSITION = "INVALID_STATUS_TRANSITION"
+    INVALID_ANCHOR_STATUS = "INVALID_ANCHOR_STATUS"
+    INVALID_DOC_PROPOSAL_PATH = "INVALID_DOC_PROPOSAL_PATH"
     MEMORY_CONTENT_TOO_SHORT = "MEMORY_CONTENT_TOO_SHORT"
     MEMORY_LOW_QUALITY = "MEMORY_LOW_QUALITY"
     RELAY_SECRET_BLOCKED = "RELAY_SECRET_BLOCKED"
@@ -34,6 +36,7 @@ class ErrorCode:
     NO_ACTIVE_SESSION = "NO_ACTIVE_SESSION"
     CONTEXT_NOT_FOUND = "CONTEXT_NOT_FOUND"
     RELATION_NOT_FOUND = "RELATION_NOT_FOUND"
+    DOC_PROPOSAL_NOT_FOUND = "DOC_PROPOSAL_NOT_FOUND"
 
     # 409 Conflict
     DUPLICATE_MEMORY = "DUPLICATE_MEMORY"
@@ -57,6 +60,8 @@ ERROR_HTTP_STATUS = {
     ErrorCode.INVALID_CONTENT_LENGTH: 400,
     ErrorCode.INVALID_IMPORTANCE: 400,
     ErrorCode.INVALID_STATUS_TRANSITION: 400,
+    ErrorCode.INVALID_ANCHOR_STATUS: 400,
+    ErrorCode.INVALID_DOC_PROPOSAL_PATH: 400,
     ErrorCode.MEMORY_CONTENT_TOO_SHORT: 422,
     ErrorCode.MEMORY_LOW_QUALITY: 422,
     ErrorCode.RELAY_SECRET_BLOCKED: 400,
@@ -70,6 +75,7 @@ ERROR_HTTP_STATUS = {
     ErrorCode.NO_ACTIVE_SESSION: 404,
     ErrorCode.CONTEXT_NOT_FOUND: 404,
     ErrorCode.RELATION_NOT_FOUND: 404,
+    ErrorCode.DOC_PROPOSAL_NOT_FOUND: 404,
     ErrorCode.DUPLICATE_MEMORY: 409,
     ErrorCode.DUPLICATE_PROMOTION: 409,
     ErrorCode.RELAY_IDEMPOTENCY_CONFLICT: 409,
@@ -87,6 +93,8 @@ ERROR_JSONRPC_CODE = {
     ErrorCode.INVALID_CONTENT_LENGTH: -32602,
     ErrorCode.INVALID_IMPORTANCE: -32602,
     ErrorCode.INVALID_STATUS_TRANSITION: -32602,
+    ErrorCode.INVALID_ANCHOR_STATUS: -32602,
+    ErrorCode.INVALID_DOC_PROPOSAL_PATH: -32602,
     ErrorCode.MEMORY_CONTENT_TOO_SHORT: -32602,
     ErrorCode.MEMORY_LOW_QUALITY: -32602,
     ErrorCode.RELAY_SECRET_BLOCKED: -32602,
@@ -100,6 +108,7 @@ ERROR_JSONRPC_CODE = {
     ErrorCode.NO_ACTIVE_SESSION: -32602,
     ErrorCode.CONTEXT_NOT_FOUND: -32602,
     ErrorCode.RELATION_NOT_FOUND: -32602,
+    ErrorCode.DOC_PROPOSAL_NOT_FOUND: -32602,
     ErrorCode.DUPLICATE_MEMORY: -32602,
     ErrorCode.DUPLICATE_PROMOTION: -32602,
     ErrorCode.RELAY_IDEMPOTENCY_CONFLICT: -32602,
@@ -197,6 +206,15 @@ class RelationNotFoundError(MemMeshError):
         )
 
 
+class DocProposalNotFoundError(MemMeshError):
+    error_code = ErrorCode.DOC_PROPOSAL_NOT_FOUND
+
+    def __init__(self, proposal_id: str):
+        super().__init__(
+            f"Doc proposal not found: {proposal_id}", proposal_id=proposal_id
+        )
+
+
 # ---------------------------------------------------------------------------
 # 400 Bad Request
 # ---------------------------------------------------------------------------
@@ -260,6 +278,44 @@ class InvalidStatusTransitionError(MemMeshError):
             f"Invalid status transition: {current} -> {target}",
             current_status=current,
             target_status=target,
+        )
+
+
+class InvalidAnchorStatusError(MemMeshError):
+    """report_anchor_status was given a verdict other than 'fresh' or 'stale'.
+
+    The anchor-verification tool only accepts the two terminal verdicts a client
+    can reach after locally checking a memory's anchors; anything else is a
+    caller bug, rejected before it can corrupt the stale gate.
+    """
+
+    error_code = ErrorCode.INVALID_ANCHOR_STATUS
+
+    VALID_STATUSES = ("fresh", "stale")
+
+    def __init__(self, status: str):
+        super().__init__(
+            f"Invalid anchor status: {status!r}. Must be one of "
+            f"{list(self.VALID_STATUSES)}",
+            status=status,
+        )
+
+
+class DocProposalPathError(MemMeshError):
+    """file_path is absolute, empty, or contains a path-traversal segment.
+
+    Validated when a proposal is stored so an unsafe path never reaches the
+    client that applies the edit — even though the server itself never writes
+    to the filesystem.
+    """
+
+    error_code = ErrorCode.INVALID_DOC_PROPOSAL_PATH
+
+    def __init__(self, file_path: str, reason: str):
+        super().__init__(
+            f"Invalid doc proposal file_path {file_path!r}: {reason}",
+            file_path=file_path,
+            reason=reason,
         )
 
 
