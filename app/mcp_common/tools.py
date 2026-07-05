@@ -1564,7 +1564,7 @@ class MCPToolHandlers:
                         "status": p["status"],
                         "tags": (
                             _json.loads(p["tags"])
-                            if isinstance(p.get("tags"), str) and p["tags"]
+                            if isinstance(p["tags"], str) and p["tags"]
                             else []
                         ),
                         "created_at": p["created_at"],

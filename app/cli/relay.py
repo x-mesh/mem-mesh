@@ -431,6 +431,21 @@ async def _build_relay_worker(
             overview_interval_hours,
         )
 
+    # hook_events retention prune — always wired (no LLM cost, no task opt-in):
+    # the worker is the only long-lived process that can archive-then-delete
+    # aged hook rows. MEM_MESH_HOOK_RETENTION_DAYS<=0 disables it.
+    from app.core.services.hook import HookService
+
+    hook_service = HookService(db)
+    try:
+        hook_retention_days = int(_os.getenv("MEM_MESH_HOOK_RETENTION_DAYS", "14"))
+    except ValueError:
+        hook_retention_days = 14
+    logger.info(
+        "hook prune: retention %sd (0=disabled)",
+        hook_retention_days,
+    )
+
     return RelayWorker(
         service=service,
         worker_id=worker_id,
@@ -451,6 +466,8 @@ async def _build_relay_worker(
         overview_service=overview_service,
         overview_notifier=overview_notifier,
         overview_interval_hours=overview_interval_hours,
+        hook_service=hook_service,
+        hook_retention_days=hook_retention_days,
     )
 
 

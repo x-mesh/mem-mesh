@@ -498,3 +498,64 @@ def test_openai_relay_enricher_normalizes_v1_root_base_url():
         ).base_url
         == "http://localhost:8000/v1/chat/completions"
     )
+
+
+class _SpyHookService:
+    """Records prune_old_events calls for worker retention wiring tests."""
+
+    def __init__(self, removed: int = 3):
+        self.calls: list = []
+        self._removed = removed
+
+    async def prune_old_events(self, retention_days: int = 14) -> int:
+        self.calls.append(retention_days)
+        return self._removed
+
+
+@pytest.mark.asyncio
+async def test_worker_prunes_hook_events_on_first_cycle_then_throttles():
+    spy = _SpyHookService(removed=5)
+    worker = RelayWorker(
+        service=object(),
+        worker_id="w",
+        hook_service=spy,
+        hook_retention_days=14,
+        hook_prune_interval_hours=24,
+    )
+
+    s1 = await worker.run_once()
+    assert spy.calls == [14]
+    assert s1["hook_events_pruned"] == 5
+
+    # Second cycle within the interval must NOT prune again.
+    s2 = await worker.run_once()
+    assert spy.calls == [14]
+    assert "hook_events_pruned" not in s2
+
+
+@pytest.mark.asyncio
+async def test_worker_prune_disabled_when_retention_non_positive():
+    spy = _SpyHookService()
+    worker = RelayWorker(
+        service=object(),
+        worker_id="w",
+        hook_service=spy,
+        hook_retention_days=0,
+    )
+    await worker.run_once()
+    assert spy.calls == []
+
+
+@pytest.mark.asyncio
+async def test_worker_prune_failure_does_not_stop_cycle():
+    class _BrokenHook:
+        async def prune_old_events(self, retention_days: int = 14) -> int:
+            raise RuntimeError("db locked")
+
+    worker = RelayWorker(
+        service=object(),
+        worker_id="w",
+        hook_service=_BrokenHook(),
+    )
+    stats = await worker.run_once()  # must not raise
+    assert "hook_events_pruned" not in stats

@@ -124,6 +124,38 @@ async def test_weekly_review_injection_stats_empty():
 
 
 @pytest.mark.asyncio
+async def test_weekly_review_incomplete_pin_with_tags_does_not_crash():
+    """Regression: an incomplete pin carrying tags must not crash weekly_review.
+
+    sqlite3.Row has no .get(), so the old `p.get("tags")` raised
+    AttributeError whenever any open/in_progress pin existed — breaking the
+    tool for every active project.
+    """
+    async with _temp_db() as db:
+        await db.execute(
+            "INSERT INTO projects (id, name, created_at, updated_at) "
+            "VALUES ('mem-mesh', 'mem-mesh', '2026-07-01', '2026-07-01')"
+        )
+        await db.execute(
+            "INSERT INTO sessions (id, project_id, started_at, created_at, "
+            "updated_at) VALUES ('s1', 'mem-mesh', '2026-07-01', '2026-07-01', "
+            "'2026-07-01')"
+        )
+        await db.execute(
+            "INSERT INTO pins (id, session_id, project_id, content, status, "
+            "tags, created_at, updated_at) VALUES "
+            "('p1', 's1', 'mem-mesh', 'open work', 'open', '[\"alpha\", \"beta\"]', "
+            "'2026-07-02', '2026-07-02')"
+        )
+
+        report = await _handlers(db).weekly_review("mem-mesh")
+        assert report["summary"]["pins_incomplete"] == 1
+        pin = report["incomplete_pins"][0]
+        assert pin["id"] == "p1"
+        assert pin["tags"] == ["alpha", "beta"]
+
+
+@pytest.mark.asyncio
 async def test_weekly_review_enrichment_coverage():
     """summary.enrichment_coverage — 커버리지 개선 추이를 세션 안에서 확인."""
     from app.core.services.enrich_store import EnrichmentStore

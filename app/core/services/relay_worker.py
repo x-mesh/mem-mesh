@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -920,6 +921,9 @@ class RelayWorker:
         overview_service: Optional[Any] = None,
         overview_notifier: Optional[Any] = None,
         overview_interval_hours: int = 12,
+        hook_service: Optional[Any] = None,
+        hook_retention_days: int = 14,
+        hook_prune_interval_hours: int = 24,
     ):
         if lease_seconds < 1:
             raise ValueError("lease_seconds must be at least 1")
@@ -948,6 +952,14 @@ class RelayWorker:
         self.overview_service = overview_service
         self.overview_notifier = overview_notifier
         self.overview_interval_hours = overview_interval_hours
+        # hook_events retention: the worker is the only long-lived process that
+        # can prune (prune_old_events archives-then-deletes, so replay data
+        # survives in hook_events_archive). Throttled to once per interval;
+        # <=0 retention disables it. Runs on the first cycle after startup.
+        self.hook_service = hook_service
+        self.hook_retention_days = hook_retention_days
+        self.hook_prune_interval_s = max(1, hook_prune_interval_hours) * 3600
+        self._last_prune_monotonic: Optional[float] = None
 
     async def run_once(self) -> Dict[str, int]:
         stats = {
@@ -1059,6 +1071,29 @@ class RelayWorker:
                 stats["overview_failed"] += 1
             elif result.get("processed"):
                 stats["overview_processed"] += 1
+
+        # hook_events retention prune (throttled to once per interval). Best-
+        # effort: a failure never stops the worker loop. Archives before delete,
+        # so replay data stays reachable in hook_events_archive.
+        if self.hook_service is not None and self.hook_retention_days > 0:
+            now = time.monotonic()
+            due = (
+                self._last_prune_monotonic is None
+                or (now - self._last_prune_monotonic) >= self.hook_prune_interval_s
+            )
+            if due:
+                try:
+                    removed = await self.hook_service.prune_old_events(
+                        retention_days=self.hook_retention_days
+                    )
+                    self._last_prune_monotonic = now
+                    if removed:
+                        stats["hook_events_pruned"] = removed
+                        logger.info(
+                            "hook_events pruned: %d rows archived + removed", removed
+                        )
+                except Exception as exc:  # noqa: BLE001 — prune must not stop worker
+                    logger.warning("hook_events prune failed: %s", exc)
 
         return stats
 
