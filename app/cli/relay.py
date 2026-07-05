@@ -400,7 +400,7 @@ async def _build_relay_worker(
 
     ws_notifier = HttpNotifier(
         _os.getenv("MEM_MESH_NOTIFY_BASE_URL")
-        or f"http://localhost:{settings.server_port}"
+        or f"http://localhost:{getattr(settings, 'server_port', 8000)}"
     )
 
     # Scheduled project-overview refresh via the chat LLM. Opt-in per project
