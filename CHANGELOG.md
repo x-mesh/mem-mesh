@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.28.2] - 2026-07-05
+
+**원격 prod(1.28.1)에서 발견된 실사용 버그 2건**을 수정하는 patch. WHY: v1.27.x 배포 검증 중 원격 서버를 점검하다 발견 — 둘 다 이번 기능과 무관한 기존 결함이다. (1) weekly_review가 미완료 pin이 있는 프로젝트에서 무조건 크래시했고(2026-03-01부터), (2) hook_events 14일 retention 함수가 정의만 있고 호출부가 없어 이벤트가 무한 축적됐다(원격에 7주치 2,775건 잔존).
+
+### Fixed
+- **weekly_review 크래시 (sqlite3.Row.get)** — 미완료 pin의 tags 처리에서 `p.get("tags")`를 호출했는데 `db.fetchall`은 `sqlite3.Row`(`.get()` 없음)를 반환해, open/in_progress pin이 하나라도 있으면 `AttributeError`로 도구 전체가 실패했다. tags 컬럼은 쿼리에 항상 있으므로 `p["tags"]` 인덱스 접근으로 수정. `app/mcp_common/tools.py`
+- **hook_events retention prune 미가동** — `prune_old_events`(archive 후 삭제, replay 데이터는 `hook_events_archive`에 보존)가 어디서도 호출되지 않아 hook_events가 무한 증가했다. 장수 프로세스인 relay worker에 배선(사이클당 1회 throttle, 시작 첫 사이클에 실행, LLM 비용 없어 task opt-in 불필요). `MEM_MESH_HOOK_RETENTION_DAYS`(기본 14, 0=비활성)로 조절. replay 데이터는 archive 이동으로 무손실. `app/core/services/relay_worker.py`, `app/cli/relay.py`
+
+## [1.28.1] - 2026-07-05
+
+버전 문자열만 변경(1.27.2 → 1.28.1), **코드 변경 없음**. enrich 가시성/worker 컨테이너(1.27.1) 배포 과정에서 수동 `make release`가 병행 실행되어 1.28.0·1.28.1 태그가 pyproject bump만 담고 연속 발행됐다. 기능 본체는 1.27.1, 버그 수정은 1.28.2 참조.
+
+## [1.28.0] - 2026-07-05
+
+버전 문자열만 변경, **코드 변경 없음** (1.28.1과 동일 경위).
+
 ## [1.27.2] - 2026-07-05
 
 v1.27.1의 **반쪽 발행을 복구**하는 patch. WHY: 1.27.1은 PyPI에는 발행됐지만 Docker publish Test gate와 CI가 `test_relay_cli.py` 2건으로 실패해 이미지가 발행되지 못했다. 원인은 1.27.1의 ws_notifier 신설이 `settings.server_port`에 무조건 접근하는데, relay CLI 테스트는 settings를 최소 필드 스텁으로 주입하기 때문 — 로컬 검증이 `-k` 서브셋이라 test_relay_cli를 놓쳤다. `getattr(settings, "server_port", 8000)` 방어 접근으로 수정하고 전체 스위트(1607 passed)로 재검증. `app/cli/relay.py`
