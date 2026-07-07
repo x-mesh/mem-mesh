@@ -183,6 +183,9 @@ class RelaySearchRequest(BaseModel):
     # omits memories that node itself pushed (they already rank in local results).
     # Older hubs ignore this field; callers must also filter client-side.
     exclude_source_node: Optional[str] = Field(default=None, max_length=200)
+    # Category filter applied hub-side (kind == memory category). Older hubs
+    # ignore this field; callers must also filter client-side.
+    kinds: Optional[List[str]] = Field(default=None, max_length=20)
 
 
 class RelaySearchResponse(BaseModel):
@@ -492,6 +495,97 @@ class RelayIdentityUpdateRequest(BaseModel):
         if unknown:
             raise ValueError(f"unknown relay scope(s): {', '.join(sorted(unknown))}")
         return scopes
+
+
+class RelayInviteSummary(BaseModel):
+    """One pairing invite as stored on the hub (code never re-shown)."""
+
+    code_prefix: str
+    user_id: str
+    display_name: str
+    source_node_id: Optional[str] = None
+    home_domain: Optional[str] = None
+    scopes: List[str] = Field(default_factory=list)
+    expires_at: str
+    redeemed_at: Optional[str] = None
+    redeemed_source_node_id: Optional[str] = None
+    revoked: bool = False
+    created_at: str
+
+
+class RelayInviteCreateRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=200)
+    display_name: str = Field(min_length=1, max_length=200)
+    # Optional: pin the node id at invite time. Blank → the redeeming node
+    # proposes its own id (still subject to the registry uniqueness check).
+    source_node_id: Optional[str] = Field(default=None, max_length=200)
+    home_domain: Optional[str] = Field(default=None, max_length=300)
+    scopes: List[str] = Field(default_factory=lambda: ["read", "write"])
+    expires_in_seconds: int = Field(default=86400, ge=60, le=30 * 86400)
+
+    @field_validator("scopes")
+    @classmethod
+    def _validate_scopes(cls, value: List[str]) -> List[str]:
+        scopes = [scope for scope in value if scope]
+        if not scopes:
+            raise ValueError("at least one relay scope is required")
+        unknown = set(scopes) - {"read", "write"}
+        if unknown:
+            raise ValueError(f"unknown relay scope(s): {', '.join(sorted(unknown))}")
+        return scopes
+
+
+class RelayInviteCreateResponse(BaseModel):
+    invite: RelayInviteSummary
+    # The one-time pairing code, shown exactly once at creation.
+    code: str
+
+
+class RelayInviteListResponse(BaseModel):
+    invites: List[RelayInviteSummary] = Field(default_factory=list)
+
+
+class RelayInviteDeleteResponse(BaseModel):
+    ok: bool = True
+    code_prefix: str
+
+
+class RelayPairRequest(BaseModel):
+    """Hub-side invite redemption (the code itself is the credential)."""
+
+    code: str = Field(min_length=16, max_length=500)
+    # Node id the redeeming node proposes; used only when the invite did not
+    # pin one at creation time.
+    source_node_id: Optional[str] = Field(default=None, max_length=200)
+    display_name: Optional[str] = Field(default=None, max_length=200)
+
+
+class RelayPairResponse(BaseModel):
+    ok: bool = True
+    # Bearer token for this node, returned exactly once.
+    token: str
+    user_id: str
+    source_node_id: str
+    display_name: str
+    scopes: List[str] = Field(default_factory=list)
+
+
+class RelayPairConnectRequest(BaseModel):
+    """Personal-node side: redeem an invite against a hub and self-configure."""
+
+    hub_url: str = Field(min_length=1, max_length=500)
+    code: str = Field(min_length=16, max_length=500)
+    source_node_id: Optional[str] = Field(default=None, max_length=200)
+
+
+class RelayPairConnectResponse(BaseModel):
+    ok: bool = True
+    hub_url: str
+    source_node_id: str
+    user_id: str = ""
+    scopes: List[str] = Field(default_factory=list)
+    message: str = ""
+    check: Optional[RelayHubCheckResponse] = None
 
 
 class RelayShareMemoryRequest(BaseModel):

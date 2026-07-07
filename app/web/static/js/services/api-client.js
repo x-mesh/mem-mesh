@@ -300,6 +300,22 @@ export class APIClient {
     return this.post(`/relay/v1/admin/identities/${encodeURIComponent(tokenHashPrefix)}/rotate`, payload);
   }
 
+  async getRelayInvites() {
+    return this.get('/relay/v1/admin/invites');
+  }
+
+  async createRelayInvite(payload) {
+    return this.post('/relay/v1/admin/invites', payload);
+  }
+
+  async deleteRelayInvite(codePrefix) {
+    return this.delete(`/relay/v1/admin/invites/${encodeURIComponent(codePrefix)}`);
+  }
+
+  async pairRelayNode(payload) {
+    return this.post('/relay/v1/admin/pair', payload);
+  }
+
   async shareRelayMemory(memoryId, payload) {
     return this.post(`/relay/v1/outbox/share/${encodeURIComponent(memoryId)}`, payload);
   }

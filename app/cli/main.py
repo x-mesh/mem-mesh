@@ -153,7 +153,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     relay_worker.add_argument(
         "--max-attempts",
         type=int,
-        default=3,
+        default=8,
         help="Retry attempts before moving a relay job to dead_letter",
     )
     relay_worker.add_argument(

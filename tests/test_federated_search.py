@@ -12,6 +12,7 @@ from app.core.services.federated_search import (
     HUB_SKIPPED,
     HUB_UNAVAILABLE,
     FederatedHubSearch,
+    HubCircuitBreaker,
 )
 
 
@@ -87,9 +88,15 @@ def _federated(
     client: _FakeRelayHTTPClient,
     cfg: Optional[dict] = None,
     settings: Optional[SimpleNamespace] = None,
+    breaker: Optional[HubCircuitBreaker] = None,
 ) -> FederatedHubSearch:
+    # A fresh breaker per test keeps failure state from leaking through the
+    # process-wide shared instance.
     fed = FederatedHubSearch(
-        db=None, settings=settings or _settings(), http_client=client
+        db=None,
+        settings=settings or _settings(),
+        http_client=client,
+        breaker=breaker or HubCircuitBreaker(),
     )
 
     async def _fake_hub_config():
@@ -246,6 +253,70 @@ async def test_dispatcher_passes_scope_to_handlers():
     captured.clear()
     await dispatcher._dispatch_search({"query": "q"})
     assert captured["scope"] == "local"
+
+
+@pytest.mark.asyncio
+async def test_fetch_hub_results_sends_kinds_and_overfetches(monkeypatch):
+    client = _FakeRelayHTTPClient(
+        response=RelaySearchResponse(results=[_hub_item("hub-1")], total=1)
+    )
+    fed = _federated(monkeypatch, client=client)
+
+    await fed.fetch_hub_results(query="q", limit=5, categories=["bug", "decision"])
+
+    payload = client.calls[0]["payload"]
+    # Server-side kind filter travels with the request...
+    assert payload.kinds == ["bug", "decision"]
+    # ...and the request over-fetches to survive client-side re-filtering
+    # against older hubs that ignore the field.
+    assert payload.limit == 10
+
+    await fed.fetch_hub_results(query="q", limit=5)
+    assert client.calls[1]["payload"].kinds is None
+    assert client.calls[1]["payload"].limit == 5
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_skips_hub_after_consecutive_failures(monkeypatch):
+    client = _FakeRelayHTTPClient(error=RuntimeError("connection refused"))
+    now = [1000.0]
+    breaker = HubCircuitBreaker(clock=lambda: now[0])
+    settings = SimpleNamespace(
+        relay_federated_timeout=2.5,
+        relay_federated_hub_weight=0.75,
+        relay_federated_breaker_threshold=3,
+        relay_federated_breaker_cooldown=30.0,
+    )
+    fed = _federated(monkeypatch, client=client, settings=settings, breaker=breaker)
+
+    for _ in range(3):
+        results, status = await fed.fetch_hub_results(query="q", limit=5)
+        assert status == HUB_UNAVAILABLE
+    assert len(client.calls) == 3
+
+    # Breaker is open: the hub is not called at all inside the cooldown.
+    results, status = await fed.fetch_hub_results(query="q", limit=5)
+    assert status == HUB_UNAVAILABLE
+    assert len(client.calls) == 3
+
+    # After the cooldown a single probe goes through (half-open) and its
+    # failure re-opens the circuit.
+    now[0] += 31.0
+    await fed.fetch_hub_results(query="q", limit=5)
+    assert len(client.calls) == 4
+    await fed.fetch_hub_results(query="q", limit=5)
+    assert len(client.calls) == 4
+
+    # A successful probe closes the breaker again.
+    now[0] += 31.0
+    client.error = None
+    client.response = RelaySearchResponse(results=[_hub_item("hub-1")], total=1)
+    results, status = await fed.fetch_hub_results(query="q", limit=5)
+    assert status == HUB_OK
+    assert len(client.calls) == 5
+    results, status = await fed.fetch_hub_results(query="q", limit=5)
+    assert status == HUB_OK
+    assert len(client.calls) == 6
 
 
 @pytest.mark.asyncio

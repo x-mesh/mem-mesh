@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**Hub 브릿지(개인 노드 ↔ 팀 허브) 사용성·복원력 개선.** WHY: (1) 신규 팀원 연결이 "허브 admin이 identity 수동 등록 → 1회 표시 토큰을 대역외 복사 → 노드에 붙여넣기 → Check Hub" 4단계 수동 절차였고, (2) 허브가 다운되면 `scope=all/hub` 검색이 **매 요청마다** federated timeout(~3s)을 그대로 지불했으며, (3) 카테고리 필터가 허브에 전달되지 않아 클라이언트에서 버려져 결과 수가 조용히 줄었고, (4) outbox 백오프에 jitter가 없고(PRD FR-23 위반) 재시도 3회가 짧아 허브 재시작만으로 dead-letter가 발생했다.
+
+### Added
+- **페어링 초대 코드 흐름** — 허브가 1회용 초대 코드를 발급(`POST /relay/v1/admin/invites`, TTL·단일사용·해시 저장)하고, 신규 노드는 코드 하나로 자기 구성을 끝낸다: 공개 `POST /relay/v1/pair`(코드 상환 → identity 등록 + 토큰 반환), 노드측 `POST /relay/v1/admin/pair`(허브에 상환 → hub_url/hub_token/source_node_id 저장 → check_hub 검증까지 원스텝). 대시보드 Team Hub 탭에 "Pairing Invites"(발급/목록/회수), Personal Node 탭에 "Pair with Invite" UI 추가. `relay_invite` 테이블 신설. `app/core/services/relay.py`, `app/web/dashboard/route_modules/relay.py`, `app/core/schemas/relay.py`, `app/web/static/js/pages/relay.js`, `app/web/static/js/services/api-client.js`
+- **Federated 서킷 브레이커** — 연속 실패 N회(기본 3, `relay_federated_breaker_threshold`) 후 cooldown(기본 30s, `relay_federated_breaker_cooldown`) 동안 허브 호출을 생략(half-open probe 포함). 허브 다운 시 검색이 타임아웃 비용 없이 즉시 로컬로 degrade. `app/core/services/federated_search.py`, `app/core/config.py`
+- **허브 검색 `kinds` 필터** — `RelaySearchRequest.kinds`로 카테고리 필터를 허브측(text+vector 경로)에서 적용. federated 클라이언트는 kinds 전송 + 2×limit 오버페치 + 구허브 대비 클라이언트 재필터(belt-and-braces) 유지. `app/core/schemas/relay.py`, `app/core/services/relay.py`, `app/core/services/federated_search.py`
+- **문서: 허브 브릿지 설정 가이드** — 페어링/수동 설정/worker 프로세스 필요성/브레이커·백오프 설정을 한곳에 정리. `docs/RELAY_HUB_SETUP.md`
+
+### Changed
+- **outbox/queue 백오프 jitter + 재시도 상향** — 지수 백오프에 downward jitter(0.5–1.0×) 적용으로 허브 복구 시 재시도 동기화 해소(PRD FR-23), worker `--max-attempts` 기본 3→8(백오프 합계 ~2분: 허브 재시작이 dead-letter로 이어지지 않게). `app/core/services/relay.py`, `app/cli/relay.py`, `app/cli/main.py`
+
+### Security
+- **relay admin 라우트 게이트 일관화** — identity 등록/수정/회전/삭제와 settings PUT에 `_require_admin_access` 적용(기존에는 materialize/purge/retry만 게이트). 0.0.0.0 노출 + auth 미설정 서버에서 원격 비인증 호출자가 허브 토큰을 발급하거나 노드 설정을 바꿀 수 있던 경로 차단. 초대 발급/목록/회수도 동일 게이트. `app/web/dashboard/route_modules/relay.py`
+
 ## [1.28.2] - 2026-07-05
 
 **원격 prod(1.28.1)에서 발견된 실사용 버그 2건**을 수정하는 patch. WHY: v1.27.x 배포 검증 중 원격 서버를 점검하다 발견 — 둘 다 이번 기능과 무관한 기존 결함이다. (1) weekly_review가 미완료 pin이 있는 프로젝트에서 무조건 크래시했고(2026-03-01부터), (2) hook_events 14일 retention 함수가 정의만 있고 호출부가 없어 이벤트가 무한 축적됐다(원격에 7주치 2,775건 잔존).

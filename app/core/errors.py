@@ -24,6 +24,7 @@ class ErrorCode:
     RELAY_SECRET_BLOCKED = "RELAY_SECRET_BLOCKED"
     RELAY_TYPE_GATE_BLOCKED = "RELAY_TYPE_GATE_BLOCKED"
     RELAY_UNAUTHORIZED = "RELAY_UNAUTHORIZED"
+    RELAY_INVITE_INVALID = "RELAY_INVITE_INVALID"
     CHAT_NOT_CONFIGURED = "CHAT_NOT_CONFIGURED"
 
     # 502 Bad Gateway
@@ -67,6 +68,7 @@ ERROR_HTTP_STATUS = {
     ErrorCode.RELAY_SECRET_BLOCKED: 400,
     ErrorCode.RELAY_TYPE_GATE_BLOCKED: 403,
     ErrorCode.RELAY_UNAUTHORIZED: 401,
+    ErrorCode.RELAY_INVITE_INVALID: 400,
     ErrorCode.CHAT_NOT_CONFIGURED: 400,
     ErrorCode.CHAT_PROVIDER_ERROR: 502,
     ErrorCode.MEMORY_NOT_FOUND: 404,
@@ -100,6 +102,7 @@ ERROR_JSONRPC_CODE = {
     ErrorCode.RELAY_SECRET_BLOCKED: -32602,
     ErrorCode.RELAY_TYPE_GATE_BLOCKED: -32602,
     ErrorCode.RELAY_UNAUTHORIZED: -32603,
+    ErrorCode.RELAY_INVITE_INVALID: -32602,
     ErrorCode.CHAT_NOT_CONFIGURED: -32602,
     ErrorCode.CHAT_PROVIDER_ERROR: -32603,
     ErrorCode.MEMORY_NOT_FOUND: -32602,
@@ -242,6 +245,12 @@ class RelayTypeGateBlocked(RelayError):
     """Memory kind/status is not allowed to flow to team scope."""
 
     error_code = ErrorCode.RELAY_TYPE_GATE_BLOCKED
+
+
+class RelayInviteInvalid(RelayError):
+    """Pairing invite code is unknown, expired, revoked, or already redeemed."""
+
+    error_code = ErrorCode.RELAY_INVITE_INVALID
 
 
 class ChatError(MemMeshError):
