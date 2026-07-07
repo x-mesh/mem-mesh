@@ -6,6 +6,7 @@ export class RelayPage extends HTMLElement {
     super();
     this.overview = null;
     this.settings = null;
+    this.invites = [];
     this.activeTab = 'operations';
     this.limit = 10;
     this.loading = false;
@@ -377,6 +378,17 @@ export class RelayPage extends HTMLElement {
       event.preventDefault();
       this.createIdentity();
     });
+    this.querySelector('#relay-pair-form')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.pairWithInvite();
+    });
+    this.querySelector('#relay-invite-form')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.createInvite();
+    });
+    this.querySelectorAll('[data-invite-delete]').forEach((button) => {
+      button.addEventListener('click', () => this.deleteInvite(button.dataset.inviteDelete));
+    });
     this.querySelectorAll('[data-identity-save]').forEach((button) => {
       button.addEventListener('click', () => this.saveIdentity(button.dataset.identitySave));
     });
@@ -452,6 +464,13 @@ export class RelayPage extends HTMLElement {
     if (!this.api) return;
     try {
       this.settings = await this.api.getRelaySettings();
+      // Invites are hub-side extras — a node without them (older server)
+      // just renders an empty list.
+      try {
+        this.invites = (await this.api.getRelayInvites())?.invites || [];
+      } catch {
+        this.invites = [];
+      }
       this.renderSettings();
       this.applyShareDefaults();
     } catch (error) {
@@ -685,6 +704,110 @@ export class RelayPage extends HTMLElement {
     } catch (error) {
       lines.push(`Verified, but auto-save failed: ${this.errorMessage(error)}`);
     }
+  }
+
+  async pairWithInvite() {
+    if (!this.api) return;
+    const submit = this.querySelector('#relay-pair-submit');
+    const status = this.querySelector('#relay-pair-result');
+    const hubUrl = this.querySelector('#relay-setting-hub-url')?.value.trim()
+      || this.settings?.hub_url?.value
+      || '';
+    const code = this.querySelector('#relay-pair-code')?.value.trim() || '';
+    if (!hubUrl) {
+      showToast('Enter the Team Hub URL first.', 'warning');
+      return;
+    }
+    if (!code) {
+      showToast('Paste the invite code.', 'warning');
+      return;
+    }
+    submit.disabled = true;
+    status.dataset.state = '';
+    status.textContent = 'Pairing...';
+    try {
+      const result = await this.api.pairRelayNode({ hub_url: hubUrl, code });
+      status.dataset.state = 'ok';
+      const lines = [
+        `Paired as ${result.source_node_id}${result.user_id ? ` (${result.user_id})` : ''}`,
+        result.message || '',
+      ];
+      if (result.check) {
+        lines.push(result.check.ok ? `Hub verified: ${result.check.health_url}` : `Hub check: ${result.check.message}`);
+      }
+      status.textContent = lines.filter(Boolean).join('\n');
+      showToast('Paired with team hub.', 'success');
+      await this.loadSettings();
+    } catch (error) {
+      status.dataset.state = 'error';
+      status.textContent = this.errorMessage(error);
+      showToast(`Pairing failed: ${this.errorMessage(error)}`, 'error');
+    } finally {
+      submit.disabled = false;
+    }
+  }
+
+  async createInvite() {
+    if (!this.api) return;
+    const submit = this.querySelector('#relay-invite-submit');
+    const payload = {
+      user_id: this.querySelector('#invite-user-id')?.value.trim(),
+      display_name: this.querySelector('#invite-display-name')?.value.trim(),
+      scopes: Array.from(this.querySelectorAll('[name="invite_scope"]:checked')).map(
+        (item) => item.value
+      ),
+      expires_in_seconds: parseInt(this.querySelector('#invite-expiry')?.value || '86400', 10),
+    };
+    const nodeId = this.querySelector('#invite-source-node')?.value.trim();
+    if (nodeId) {
+      payload.source_node_id = nodeId;
+    }
+    if (!payload.user_id || !payload.display_name) {
+      showToast('Invite fields are missing.', 'warning');
+      return;
+    }
+    submit.disabled = true;
+    try {
+      const result = await this.api.createRelayInvite(payload);
+      await this.loadSettings();
+      if (result.code) {
+        this.showIssuedInvite(result.code);
+      }
+      showToast('Pairing invite issued.', 'success');
+    } catch (error) {
+      showToast(`Invite failed: ${this.errorMessage(error)}`, 'error');
+    } finally {
+      submit.disabled = false;
+    }
+  }
+
+  async deleteInvite(codePrefix) {
+    if (!this.api || !codePrefix) return;
+    try {
+      await this.api.deleteRelayInvite(codePrefix);
+      showToast('Invite revoked.', 'success');
+      await this.loadSettings();
+    } catch (error) {
+      showToast(`Invite revoke failed: ${this.errorMessage(error)}`, 'error');
+    }
+  }
+
+  showIssuedInvite(code) {
+    const target = this.querySelector('#relay-issued-invite');
+    if (!target) return;
+    target.classList.remove('hidden');
+    target.innerHTML = `
+      <span>Invite code</span>
+      <code>${this.escapeHtml(code)}</code>
+      <button class="secondary-button" type="button" id="relay-copy-issued-invite">Copy</button>
+    `;
+    target.querySelector('#relay-copy-issued-invite')?.addEventListener('click', async () => {
+      if (await this.copyText(code)) {
+        showToast('Invite code copied.', 'success');
+      } else {
+        showToast('Copy failed.', 'error');
+      }
+    });
   }
 
   async createIdentity() {
@@ -1185,6 +1308,33 @@ export class RelayPage extends HTMLElement {
           <div id="relay-hub-check-result" class="relay-hub-check-status" aria-live="polite"></div>
         </form>
 
+        <form class="relay-panel" id="relay-pair-form">
+          <div class="relay-panel-header">
+            <h2>Pair with Invite</h2>
+            <span class="relay-panel-meta">one-step setup</span>
+          </div>
+          <p class="relay-field-hint">
+            Got an invite code from your team hub admin? Paste it here — the node
+            redeems it against the Team Hub URL above and saves the hub URL,
+            token, and source node id in one step. No manual token copying.
+          </p>
+          <div class="relay-form-grid">
+            <label class="relay-field relay-field-wide">
+              <span>Invite Code</span>
+              <input
+                id="relay-pair-code"
+                type="password"
+                autocomplete="off"
+                placeholder="paste the one-time invite code"
+              >
+            </label>
+          </div>
+          <div class="relay-actions">
+            <button class="primary-button" id="relay-pair-submit" type="submit">Pair with Invite</button>
+          </div>
+          <div id="relay-pair-result" class="relay-hub-check-status" aria-live="polite"></div>
+        </form>
+
         <section class="relay-panel">
           <div class="relay-panel-header">
             <h2>Connection State</h2>
@@ -1282,6 +1432,55 @@ export class RelayPage extends HTMLElement {
             ${this.renderSettingRow(data.llm_model)}
           </div>
         </section>
+      </section>
+
+      <section class="relay-panel relay-identities">
+        <div class="relay-panel-header">
+          <h2>Pairing Invites</h2>
+          <span class="relay-panel-meta">${this.invites.length} issued</span>
+        </div>
+        <p class="relay-field-hint">
+          Issue a one-time code instead of registering identities by hand: the
+          new member pastes it into their node's "Pair with Invite" and gets a
+          token, node id, and hub URL configured automatically. Codes are shown
+          once, are single-use, and expire.
+        </p>
+        <form id="relay-invite-form" class="relay-identity-create">
+          <div class="relay-form-grid">
+            <label class="relay-field">
+              <span>User ID</span>
+              <input id="invite-user-id" type="text" autocomplete="off" required>
+            </label>
+            <label class="relay-field">
+              <span>Display Name</span>
+              <input id="invite-display-name" type="text" autocomplete="off" required>
+            </label>
+            <label class="relay-field">
+              <span>Source Node ID <small class="relay-field-hint">optional — blank lets the node choose</small></span>
+              <input id="invite-source-node" type="text" autocomplete="off">
+            </label>
+            <label class="relay-field">
+              <span>Expires</span>
+              <select id="invite-expiry">
+                <option value="3600">1 hour</option>
+                <option value="86400" selected>24 hours</option>
+                <option value="604800">7 days</option>
+              </select>
+            </label>
+            <div class="relay-scope-row relay-field-wide">
+              <label><input type="checkbox" name="invite_scope" value="read" checked> read</label>
+              <label><input type="checkbox" name="invite_scope" value="write" checked> write</label>
+            </div>
+          </div>
+          <div class="relay-actions">
+            <button class="primary-button" id="relay-invite-submit" type="submit">Issue Invite</button>
+            <span class="relay-inline-status">The code is shown once — send it to the new member.</span>
+          </div>
+          <div id="relay-issued-invite" class="relay-issued-token hidden"></div>
+        </form>
+        <div class="relay-table-wrap">
+          ${this.renderInviteTable(this.invites)}
+        </div>
       </section>
 
       <section class="relay-panel relay-identities">
@@ -1398,6 +1597,56 @@ export class RelayPage extends HTMLElement {
               </td>
             </tr>
           `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
+  renderInviteTable(rows) {
+    if (!rows?.length) {
+      return this.renderEmpty('No pairing invites');
+    }
+    const now = Date.now();
+    return `
+      <table class="relay-table">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Node</th>
+            <th>Scopes</th>
+            <th>State</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => {
+            const expired = row.expires_at && Date.parse(row.expires_at) < now;
+            const state = row.redeemed_at
+              ? `redeemed ${this.formatDate(row.redeemed_at)}`
+              : row.revoked
+                ? 'revoked'
+                : expired
+                  ? 'expired'
+                  : `expires ${this.formatDate(row.expires_at)}`;
+            const stateClass = row.redeemed_at ? 'status-completed' : (expired || row.revoked) ? 'status-pending' : 'status-in-progress';
+            return `
+              <tr>
+                <td>
+                  <strong>${this.escapeHtml(row.display_name)}</strong>
+                  <span class="relay-muted">${this.escapeHtml(row.user_id)}</span>
+                </td>
+                <td>
+                  ${this.escapeHtml(row.redeemed_source_node_id || row.source_node_id || 'node chooses')}
+                  <code>${this.escapeHtml(row.code_prefix)}</code>
+                </td>
+                <td>${this.escapeHtml((row.scopes || []).join('/'))}</td>
+                <td><span class="relay-status-chip ${stateClass}">${this.escapeHtml(state)}</span></td>
+                <td class="relay-table-actions">
+                  ${row.redeemed_at ? '' : `<button class="relay-table-action danger" type="button" data-invite-delete="${this.escapeHtml(row.code_prefix)}">Revoke</button>`}
+                </td>
+              </tr>
+            `;
+          }).join('')}
         </tbody>
       </table>
     `;

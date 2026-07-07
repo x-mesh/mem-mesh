@@ -25,7 +25,15 @@ from app.core.schemas.relay import (
     RelayIdentityUpdateRequest,
     RelayIngestRequest,
     RelayIngestResponse,
+    RelayInviteCreateRequest,
+    RelayInviteCreateResponse,
+    RelayInviteDeleteResponse,
+    RelayInviteListResponse,
     RelayMaterializeResponse,
+    RelayPairConnectRequest,
+    RelayPairConnectResponse,
+    RelayPairRequest,
+    RelayPairResponse,
     RelayProjectDigestResponse,
     RelayPurgeResponse,
     RelayRetryRequest,
@@ -39,7 +47,9 @@ from app.core.schemas.relay import (
     RelayShareProjectRequest,
     RelayShareProjectResponse,
 )
+from app.core.errors import RelayInviteInvalid
 from app.core.services.relay import (
+    RelayHTTPClient,
     RelayIdempotencyConflict,
     RelaySecretBlocked,
     RelayService,
@@ -325,6 +335,7 @@ async def get_relay_admin_settings(
 @router.put("/admin/settings", response_model=RelaySettingsResponse)
 async def update_relay_admin_settings(
     payload: RelaySettingsUpdateRequest,
+    _: None = Depends(_require_admin_access),
     service: RelayService = Depends(get_relay_service),
 ) -> RelaySettingsResponse:
     """Update relay defaults used by the dashboard share UI."""
@@ -363,9 +374,140 @@ async def check_relay_hub(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get("/admin/invites", response_model=RelayInviteListResponse)
+async def list_relay_invites(
+    _: None = Depends(_require_admin_access),
+    service: RelayService = Depends(get_relay_service),
+) -> RelayInviteListResponse:
+    """List pairing invites issued by this hub."""
+
+    try:
+        return RelayInviteListResponse(invites=await service.list_invites())
+    except Exception as exc:
+        logger.exception("Relay invite list failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/admin/invites", response_model=RelayInviteCreateResponse)
+async def create_relay_invite(
+    payload: RelayInviteCreateRequest,
+    _: None = Depends(_require_admin_access),
+    service: RelayService = Depends(get_relay_service),
+) -> RelayInviteCreateResponse:
+    """Issue a one-time pairing invite code (shown once — copy it immediately)."""
+
+    try:
+        invite, code = await service.create_invite(payload)
+        return RelayInviteCreateResponse(invite=invite, code=code)
+    except Exception as exc:
+        logger.exception("Relay invite creation failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.delete("/admin/invites/{code_prefix}", response_model=RelayInviteDeleteResponse)
+async def delete_relay_invite(
+    code_prefix: str,
+    _: None = Depends(_require_admin_access),
+    service: RelayService = Depends(get_relay_service),
+) -> RelayInviteDeleteResponse:
+    """Revoke a pairing invite by its visible code prefix."""
+
+    try:
+        removed = await service.delete_invite(code_prefix)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Relay invite delete failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+    if not removed:
+        raise HTTPException(status_code=404, detail="Relay invite not found")
+    return RelayInviteDeleteResponse(ok=True, code_prefix=code_prefix)
+
+
+@router.post("/pair", response_model=RelayPairResponse)
+async def pair_relay_node(
+    payload: RelayPairRequest,
+    service: RelayService = Depends(get_relay_service),
+) -> RelayPairResponse:
+    """Redeem a one-time invite code for a node identity + bearer token.
+
+    Public by design: the invite code itself is the credential (single-use,
+    TTL-bounded, hash-stored — the same trust model as the bearer tokens it
+    mints).
+    """
+
+    try:
+        return await service.redeem_invite(payload)
+    except RelayInviteInvalid as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Relay pairing failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/admin/pair", response_model=RelayPairConnectResponse)
+async def connect_relay_node_with_invite(
+    payload: RelayPairConnectRequest,
+    _: None = Depends(_require_admin_access),
+    service: RelayService = Depends(get_relay_service),
+) -> RelayPairConnectResponse:
+    """Personal-node side of pairing: redeem an invite against the hub and
+    self-configure hub_url / hub_token / source_node_id in one step."""
+
+    settings = get_settings()
+    hub_url = payload.hub_url.strip()
+    client = RelayHTTPClient(timeout=settings.relay_http_timeout)
+    try:
+        pair = await client.send_pair(
+            target_hub=hub_url,
+            payload=RelayPairRequest(
+                code=payload.code,
+                source_node_id=payload.source_node_id,
+            ),
+        )
+    except RelayInviteInvalid as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Relay pairing request failed")
+        raise HTTPException(status_code=502, detail=f"hub unreachable: {exc}")
+
+    try:
+        await service.update_admin_settings(
+            RelaySettingsUpdateRequest(
+                hub_url=hub_url,
+                hub_token=pair.token,
+                source_node_id=pair.source_node_id,
+            )
+        )
+    except Exception as exc:
+        logger.exception("Relay pairing settings persist failed")
+        raise HTTPException(
+            status_code=500, detail=f"paired but saving settings failed: {exc}"
+        )
+
+    check: Optional[RelayHubCheckResponse] = None
+    try:
+        check = await service.check_hub(
+            hub_url, token=pair.token, timeout=settings.relay_http_timeout
+        )
+    except Exception:
+        logger.warning("Relay pairing post-check failed", exc_info=True)
+
+    return RelayPairConnectResponse(
+        ok=True,
+        hub_url=hub_url,
+        source_node_id=pair.source_node_id,
+        user_id=pair.user_id,
+        scopes=pair.scopes,
+        message="paired — hub URL, token, and source node id saved",
+        check=check,
+    )
+
+
 @router.post("/admin/identities", response_model=RelayIdentityCreateResponse)
 async def create_relay_identity(
     payload: RelayIdentityCreateRequest,
+    _: None = Depends(_require_admin_access),
     service: RelayService = Depends(get_relay_service),
 ) -> RelayIdentityCreateResponse:
     """Register a source node token in the team hub identity registry."""
@@ -401,6 +543,7 @@ async def create_relay_identity(
 async def update_relay_identity(
     token_hash_prefix: str,
     payload: RelayIdentityUpdateRequest,
+    _: None = Depends(_require_admin_access),
     service: RelayService = Depends(get_relay_service),
 ) -> RelayIdentityCreateResponse:
     """Update a hub identity by its visible token hash prefix."""
@@ -430,6 +573,7 @@ async def update_relay_identity(
 )
 async def delete_relay_identity(
     token_hash_prefix: str,
+    _: None = Depends(_require_admin_access),
     service: RelayService = Depends(get_relay_service),
 ) -> RelayIdentityDeleteResponse:
     """Permanently remove a hub identity (hard delete; PUT with revoked=true is
@@ -454,6 +598,7 @@ async def delete_relay_identity(
 async def rotate_relay_identity(
     token_hash_prefix: str,
     payload: RelayIdentityRotateRequest,
+    _: None = Depends(_require_admin_access),
     service: RelayService = Depends(get_relay_service),
 ) -> RelayIdentityCreateResponse:
     """Rotate an identity's token (metadata kept, old token invalidated at once).
@@ -545,6 +690,7 @@ async def search_relay_view(
             limit=payload.limit,
             embedding_service=embedding_service,
             exclude_source_node=payload.exclude_source_node,
+            kinds=payload.kinds,
         )
     except RelayUnauthorized as exc:
         raise HTTPException(status_code=401, detail=str(exc))

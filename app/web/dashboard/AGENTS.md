@@ -33,6 +33,10 @@ Modular route structure for better maintainability:
   - POST /api/relay/v1/admin/hub/check - check configured team hub reachability
   - POST /api/relay/v1/admin/identities - register or generate hub identity token
   - PUT /api/relay/v1/admin/identities/{token_hash_prefix} - update hub identity metadata/scopes/revocation
+  - GET/POST /api/relay/v1/admin/invites - list / issue one-time pairing invite codes
+  - DELETE /api/relay/v1/admin/invites/{code_prefix} - revoke a pending invite
+  - POST /api/relay/v1/pair - redeem an invite code for a node identity + token (public; code is the credential)
+  - POST /api/relay/v1/admin/pair - node-side pairing: redeem against a hub and self-configure hub_url/token/source_node_id
   - POST /api/relay/v1/admin/materialize - backfill received relay rows into ordinary memories
   - POST /api/relay/v1/admin/purge-current - hide received relay current rows and delete materialized ordinary memories
   - POST /api/relay/v1/admin/retry-dead-letters - requeue dead-lettered outbox/item/aggregate jobs

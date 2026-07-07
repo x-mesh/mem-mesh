@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import secrets
 import time
 import uuid
@@ -26,6 +27,7 @@ from ..errors import (
 from ..errors import RelayError as RelayError
 from ..errors import (
     RelayIdempotencyConflict,
+    RelayInviteInvalid,
     RelaySecretBlocked,
     RelayTypeGateBlocked,
     RelayUnauthorized,
@@ -45,10 +47,14 @@ from ..schemas.relay import (
     RelayIdentityUpdateRequest,
     RelayIngestRequest,
     RelayIngestResponse,
+    RelayInviteCreateRequest,
+    RelayInviteSummary,
     RelayMaterializeResponse,
     RelayMemorySummary,
     RelayOutboxJob,
     RelayOutboxSummary,
+    RelayPairRequest,
+    RelayPairResponse,
     RelayProcessResult,
     RelayProjectDigestResponse,
     RelayPurgeResponse,
@@ -183,6 +189,54 @@ class RelayHTTPClient:
         return f"{base}/api/relay/v1/auth/check"
 
     @staticmethod
+    def pair_url(target_hub: str) -> str:
+        base = target_hub.rstrip("/")
+        if base.endswith("/api/relay/v1/pair"):
+            return base
+        for suffix in ("/api/relay/v1/health", "/api/relay/v1/ingest", "/api/relay/v1"):
+            if base.endswith(suffix):
+                base = base[: -len(suffix)]
+                break
+        return f"{base}/api/relay/v1/pair"
+
+    async def send_pair(
+        self,
+        *,
+        target_hub: str,
+        payload: RelayPairRequest,
+        timeout: Optional[float] = None,
+    ) -> RelayPairResponse:
+        """Redeem a pairing invite against the hub (no bearer — the code is
+        the credential)."""
+        client = self.http_client
+        close_client = False
+        if client is None:
+            import httpx
+
+            client = httpx.AsyncClient()
+            close_client = True
+
+        try:
+            response = await client.post(
+                self.pair_url(target_hub),
+                json=payload.model_dump(mode="json"),
+                timeout=timeout if timeout is not None else self.timeout,
+            )
+        finally:
+            if close_client:
+                await client.aclose()
+
+        if response.status_code in (404, 405):
+            raise RelayInviteInvalid(
+                "hub does not support invite pairing (update the hub)"
+            )
+        if response.status_code in (400, 401, 403, 409):
+            raise RelayInviteInvalid(self._response_detail(response))
+        if response.status_code >= 400:
+            raise RuntimeError(self._response_detail(response))
+        return RelayPairResponse(**response.json())
+
+    @staticmethod
     def _response_detail(response: Any) -> str:
         try:
             data = response.json()
@@ -261,7 +315,7 @@ class RelayService:
         self,
         db: Database,
         *,
-        max_attempts: int = 3,
+        max_attempts: int = 8,
         backoff_max_seconds: float = 300.0,
     ):
         if max_attempts < 1:
@@ -273,10 +327,13 @@ class RelayService:
         self.backoff_max_seconds = backoff_max_seconds
 
     def _retry_backoff_seconds(self, attempts: int) -> float:
-        return min(
+        # Downward jitter (PRD FR-23): desynchronizes retries across queued rows
+        # after a hub outage without ever exceeding the exponential base/cap.
+        base = min(
             self.backoff_max_seconds,
             float(2 ** max(attempts - 1, 0)),
         )
+        return base * random.uniform(0.5, 1.0)
 
     async def ensure_schema(self) -> None:
         """Create relay tables and indexes if they do not exist.
@@ -470,6 +527,22 @@ class RelayService:
                 source_node_id TEXT,
                 last_synced_at TEXT,
                 last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS relay_invite (
+                code_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                source_node_id TEXT,
+                home_domain TEXT,
+                scopes_json TEXT NOT NULL DEFAULT '["read","write"]',
+                expires_at TEXT NOT NULL,
+                redeemed_at TEXT,
+                redeemed_source_node_id TEXT,
+                revoked INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -1542,6 +1615,170 @@ class RelayService:
                     ),
                 )
         return token_hash
+
+    # ------------------------------------------------------------------
+    # Pairing invites — one-time codes a hub admin issues so a new node can
+    # self-configure (redeem code → identity registered → token returned)
+    # instead of copying a manually registered token out-of-band.
+    # ------------------------------------------------------------------
+
+    async def create_invite(
+        self, request: RelayInviteCreateRequest
+    ) -> tuple[RelayInviteSummary, str]:
+        """Issue a one-time pairing invite. Returns (summary, code).
+
+        Only the code hash is stored; the code itself is shown once.
+        """
+        code = secrets.token_urlsafe(24)
+        code_hash = self._hash_token(code)
+        now = _utc_now()
+        expires_at = datetime.fromtimestamp(
+            _epoch_now() + request.expires_in_seconds, tz=timezone.utc
+        ).isoformat()
+        await self.db.execute(
+            """
+            INSERT INTO relay_invite (
+                code_hash, user_id, display_name, source_node_id, home_domain,
+                scopes_json, expires_at, revoked, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+            """,
+            (
+                code_hash,
+                request.user_id,
+                request.display_name,
+                request.source_node_id,
+                request.home_domain,
+                _json_dumps(list(request.scopes)),
+                expires_at,
+                now,
+                now,
+            ),
+        )
+        summary = await self._invite_by_hash(code_hash)
+        if summary is None:
+            raise RuntimeError("created relay invite could not be loaded")
+        return summary, code
+
+    async def list_invites(self) -> list[RelayInviteSummary]:
+        rows = await self.db.fetchall(
+            "SELECT * FROM relay_invite ORDER BY created_at DESC"
+        )
+        return [self._invite_from_row(row) for row in rows]
+
+    async def delete_invite(self, code_prefix: str) -> bool:
+        """Remove an invite by its visible code hash prefix (revoke = delete;
+        a pending invite has no dependent state). Raises ValueError when the
+        prefix is ambiguous."""
+        prefix = str(code_prefix or "").strip()
+        if not prefix:
+            return False
+        rows = await self.db.fetchall(
+            "SELECT code_hash FROM relay_invite WHERE code_hash LIKE ? LIMIT 2",
+            (f"{prefix}%",),
+        )
+        if len(rows) > 1:
+            raise ValueError("relay invite code prefix is ambiguous")
+        if not rows:
+            return False
+        await self.db.execute(
+            "DELETE FROM relay_invite WHERE code_hash = ?",
+            (rows[0]["code_hash"],),
+        )
+        return True
+
+    async def redeem_invite(self, request: RelayPairRequest) -> RelayPairResponse:
+        """Exchange a one-time invite code for a registered identity + token.
+
+        The code is the credential: unknown, expired, revoked, or already
+        redeemed codes all fail with RelayInviteInvalid (uniform message so the
+        endpoint doesn't leak which invites exist).
+        """
+        code_hash = self._hash_token(request.code)
+        now = _utc_now()
+
+        async with self.db.transaction():
+            row = await self.db.fetchone(
+                "SELECT * FROM relay_invite WHERE code_hash = ?", (code_hash,)
+            )
+            if (
+                row is None
+                or bool(row["revoked"])
+                or row["redeemed_at"] is not None
+                or str(row["expires_at"]) <= now
+            ):
+                raise RelayInviteInvalid(
+                    "invite code is invalid, expired, or already used"
+                )
+
+            source_node_id = str(
+                row["source_node_id"] or request.source_node_id or ""
+            ).strip()
+            if not source_node_id:
+                raise RelayInviteInvalid(
+                    "invite has no pinned source node id — provide source_node_id"
+                )
+            taken = await self.db.fetchone(
+                "SELECT token_hash FROM relay_identity WHERE source_node_id = ?",
+                (source_node_id,),
+            )
+            if taken:
+                raise RelayInviteInvalid(
+                    f"source node id '{source_node_id}' is already registered"
+                )
+
+            display_name = str(request.display_name or "").strip() or str(
+                row["display_name"]
+            )
+            scopes = _json_loads(row["scopes_json"], ["read", "write"])
+            token = secrets.token_urlsafe(32)
+            await self.register_identity(
+                token=token,
+                user_id=str(row["user_id"]),
+                source_node_id=source_node_id,
+                display_name=display_name,
+                home_domain=row["home_domain"],
+                scopes=scopes,
+            )
+            await self.db.execute(
+                """
+                UPDATE relay_invite
+                SET redeemed_at = ?, redeemed_source_node_id = ?, updated_at = ?
+                WHERE code_hash = ?
+                """,
+                (now, source_node_id, now, code_hash),
+            )
+
+        return RelayPairResponse(
+            ok=True,
+            token=token,
+            user_id=str(row["user_id"]),
+            source_node_id=source_node_id,
+            display_name=display_name,
+            scopes=list(scopes),
+        )
+
+    async def _invite_by_hash(self, code_hash: str) -> Optional[RelayInviteSummary]:
+        row = await self.db.fetchone(
+            "SELECT * FROM relay_invite WHERE code_hash = ?", (code_hash,)
+        )
+        return self._invite_from_row(row) if row else None
+
+    @staticmethod
+    def _invite_from_row(row: Any) -> RelayInviteSummary:
+        return RelayInviteSummary(
+            code_prefix=str(row["code_hash"])[:12],
+            user_id=str(row["user_id"]),
+            display_name=str(row["display_name"]),
+            source_node_id=row["source_node_id"],
+            home_domain=row["home_domain"],
+            scopes=_json_loads(row["scopes_json"], []),
+            expires_at=str(row["expires_at"]),
+            redeemed_at=row["redeemed_at"],
+            redeemed_source_node_id=row["redeemed_source_node_id"],
+            revoked=bool(row["revoked"]),
+            created_at=str(row["created_at"]),
+        )
 
     async def enqueue_memory_share(
         self,
@@ -2703,6 +2940,7 @@ class RelayService:
         limit: int = 10,
         embedding_service: Any = None,
         exclude_source_node: Optional[str] = None,
+        kinds: Optional[Sequence[str]] = None,
     ) -> RelaySearchResponse:
         """Simple visible-current search for the relay MVP.
 
@@ -2711,10 +2949,13 @@ class RelayService:
         fusion is complete.
 
         ``exclude_source_node`` omits memories a federated caller pushed itself
-        (those already rank in its local results).
+        (those already rank in its local results). ``kinds`` filters by
+        authoritative kind hub-side so a category-scoped federated search does
+        not waste its top-k budget on kinds the caller will drop.
         """
 
         limit = max(1, min(limit, 50))
+        kinds = [k for k in (kinds or []) if k]
         if query and embedding_service is not None:
             vector_response = await self._search_vector(
                 query=query,
@@ -2722,6 +2963,7 @@ class RelayService:
                 team_project_ids=team_project_ids,
                 limit=limit,
                 exclude_source_node=exclude_source_node,
+                kinds=kinds,
             )
             if vector_response is not None:
                 return vector_response
@@ -2739,6 +2981,10 @@ class RelayService:
         if exclude_source_node:
             where.append("c.source_node_id != ?")
             params.append(exclude_source_node)
+        if kinds:
+            placeholders = ",".join("?" for _ in kinds)
+            where.append(f"c.authoritative_kind IN ({placeholders})")
+            params.extend(kinds)
         params.append(limit)
 
         rows = await self.db.fetchall(
@@ -3400,6 +3646,7 @@ class RelayService:
         team_project_ids: Optional[Sequence[str]],
         limit: int,
         exclude_source_node: Optional[str] = None,
+        kinds: Optional[Sequence[str]] = None,
     ) -> Optional[RelaySearchResponse]:
         table = await self.db.fetchone(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='relay_memory_vec'"
@@ -3413,7 +3660,10 @@ class RelayService:
             ]
             if len(query_embedding) != self.db.embedding_dim:
                 return None
-            params: list[Any] = [_json_dumps(query_embedding), limit * 3]
+            # Over-fetch more vec candidates when a kind filter applies, since
+            # the filter runs on the outer join and discards candidates.
+            overfetch = limit * (6 if kinds else 3)
+            params: list[Any] = [_json_dumps(query_embedding), overfetch]
             where = ["c.visible = 1"]
             if team_project_ids:
                 placeholders = ",".join("?" for _ in team_project_ids)
@@ -3422,6 +3672,10 @@ class RelayService:
             if exclude_source_node:
                 where.append("c.source_node_id != ?")
                 params.append(exclude_source_node)
+            if kinds:
+                placeholders = ",".join("?" for _ in kinds)
+                where.append(f"c.authoritative_kind IN ({placeholders})")
+                params.extend(kinds)
             params.append(limit)
 
             rows = await self.db.fetchall(

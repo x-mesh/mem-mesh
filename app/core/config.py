@@ -470,6 +470,22 @@ class Settings(BaseSettings):
             "below 1.0 ranks local results above hub at equal rank"
         ),
     )
+    relay_federated_breaker_threshold: int = Field(
+        default=3,
+        ge=1,
+        description=(
+            "Consecutive federated hub failures that open the circuit breaker; "
+            "while open, searches skip the hub instead of paying the timeout"
+        ),
+    )
+    relay_federated_breaker_cooldown: float = Field(
+        default=30.0,
+        ge=1.0,
+        description=(
+            "Seconds the federated circuit breaker stays open after tripping; "
+            "after the cooldown one probe request is allowed through"
+        ),
+    )
     relay_prompt_version: str = Field(
         default="relay-v1",
         description="Prompt version stamped on relay enrichment and digest outputs",

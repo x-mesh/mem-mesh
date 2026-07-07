@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Awaitable, Callable, Optional
 
 from ..schemas.relay import RelaySearchRequest, RelaySearchResult
@@ -49,6 +50,58 @@ def _get_shared_httpx_client() -> Any:
     return _shared_httpx_client
 
 
+class HubCircuitBreaker:
+    """Per-hub failure memory so a down hub stops costing the full timeout.
+
+    FederatedHubSearch instances are per-request; without cross-request state,
+    every scope=all/hub search against a dead hub blocks for
+    relay_federated_timeout (~2.5s). This breaker opens after ``threshold``
+    consecutive failures and short-circuits hub calls for ``cooldown`` seconds;
+    after the cooldown one probe request is let through (half-open) and a
+    success closes the breaker again.
+
+    In-process only (personal nodes are single-process); keyed by hub URL so a
+    hub_url change gets a fresh state. ``clock`` is injectable for tests.
+    """
+
+    def __init__(self, *, clock: Callable[[], float] = time.monotonic):
+        self._clock = clock
+        # hub_url -> [consecutive_failures, open_until_monotonic]
+        self._state: dict[str, list[float]] = {}
+
+    def allow(self, hub_url: str, *, threshold: int, cooldown: float) -> bool:
+        state = self._state.get(hub_url)
+        if state is None or state[0] < threshold:
+            return True
+        now = self._clock()
+        if now >= state[1]:
+            # Half-open: let one probe through; a failure re-opens (record_failure
+            # pushes open_until forward), a success resets entirely.
+            state[1] = now + cooldown
+            return True
+        return False
+
+    def record_success(self, hub_url: str) -> None:
+        self._state.pop(hub_url, None)
+
+    def record_failure(self, hub_url: str, *, threshold: int, cooldown: float) -> None:
+        state = self._state.setdefault(hub_url, [0, 0.0])
+        state[0] += 1
+        if state[0] >= threshold:
+            state[1] = self._clock() + cooldown
+            logger.warning(
+                "Federated search: circuit open for %s after %d consecutive "
+                "failures (cooldown %.1fs)",
+                hub_url,
+                int(state[0]),
+                cooldown,
+            )
+
+
+# Process-wide breaker shared by all per-request FederatedHubSearch instances.
+_shared_breaker = HubCircuitBreaker()
+
+
 class FederatedHubSearch:
     """Fuse local search results with the team hub's relay search."""
 
@@ -57,6 +110,7 @@ class FederatedHubSearch:
         db: Any,
         settings: Any,
         http_client: Optional[RelayHTTPClient] = None,
+        breaker: Optional[HubCircuitBreaker] = None,
     ):
         self.db = db
         self.settings = settings
@@ -64,6 +118,7 @@ class FederatedHubSearch:
             http_client=_get_shared_httpx_client(),
             timeout=getattr(settings, "relay_federated_timeout", 2.5),
         )
+        self.breaker = breaker or _shared_breaker
         self._relay_service: Optional[RelayService] = None
 
     def _relay(self) -> RelayService:
@@ -80,14 +135,24 @@ class FederatedHubSearch:
             "source_node_id": str(values.get("source_node_id") or "").strip(),
         }
 
+    def _breaker_params(self) -> tuple[int, float]:
+        threshold = int(
+            getattr(self.settings, "relay_federated_breaker_threshold", 3) or 3
+        )
+        cooldown = float(
+            getattr(self.settings, "relay_federated_breaker_cooldown", 30.0) or 30.0
+        )
+        return max(1, threshold), max(1.0, cooldown)
+
     async def fetch_hub_results(
         self, *, query: str, limit: int, categories: Optional[list[str]] = None
     ) -> tuple[list[SearchResult], str]:
         """Query the hub; never raises. Returns (results, hub_status).
 
-        ``categories`` filters hub results client-side by ``kind`` so a
-        category-scoped search doesn't get unrelated hub kinds mixed in (the
-        hub search endpoint has no kind filter yet).
+        ``categories`` is sent to the hub as a server-side ``kinds`` filter and
+        re-applied client-side (an older hub ignores the field). A circuit
+        breaker skips the hub call entirely while it is known-down, so degraded
+        searches don't pay the full timeout on every request.
         """
         try:
             cfg = await self._hub_config()
@@ -97,10 +162,25 @@ class FederatedHubSearch:
         if not cfg["hub_url"] or not cfg["hub_token"]:
             return [], HUB_SKIPPED
 
+        threshold, cooldown = self._breaker_params()
+        if not self.breaker.allow(
+            cfg["hub_url"], threshold=threshold, cooldown=cooldown
+        ):
+            logger.debug(
+                "Federated search: circuit open, skipping hub %s", cfg["hub_url"]
+            )
+            return [], HUB_UNAVAILABLE
+
+        category_set = {c for c in (categories or []) if c}
+        # Over-fetch when a category filter applies: an older hub ignores the
+        # kinds field, and the client-side re-filter below would otherwise
+        # silently shrink the hub's contribution under the requested limit.
+        hub_limit = min(limit * 2, 50) if category_set else min(limit, 50)
         payload = RelaySearchRequest(
             query=query,
-            limit=max(1, min(limit, 50)),
+            limit=max(1, hub_limit),
             exclude_source_node=cfg["source_node_id"] or None,
+            kinds=sorted(category_set) or None,
         )
         timeout = getattr(self.settings, "relay_federated_timeout", 2.5)
         try:
@@ -115,11 +195,14 @@ class FederatedHubSearch:
             )
         except Exception as exc:
             # Timeout, connection error, auth failure, old-hub 4xx — all degrade.
+            self.breaker.record_failure(
+                cfg["hub_url"], threshold=threshold, cooldown=cooldown
+            )
             logger.warning("Federated search: hub unavailable: %s", exc)
             return [], HUB_UNAVAILABLE
 
+        self.breaker.record_success(cfg["hub_url"])
         results = []
-        category_set = {c for c in (categories or []) if c}
         for item in response.results:
             # Belt-and-braces: an older hub ignores exclude_source_node, so we
             # also drop our own node's items client-side.
@@ -129,7 +212,9 @@ class FederatedHubSearch:
             if category_set and item.kind not in category_set:
                 continue
             results.append(self._to_search_result(item))
-        return results, HUB_OK
+        # The over-fetched window may survive filtering intact — honor the
+        # caller's limit.
+        return results[: max(1, limit)], HUB_OK
 
     @staticmethod
     def _to_search_result(item: RelaySearchResult) -> SearchResult:
