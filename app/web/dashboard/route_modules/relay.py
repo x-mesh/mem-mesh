@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
 from app.core import runtime_config as rc
 from app.core.config import get_settings
+from app.core.errors import RelayInviteInvalid
 from app.core.schemas.relay import (
     RelayAdminOverviewResponse,
     RelayAuthCheckResponse,
@@ -47,7 +48,6 @@ from app.core.schemas.relay import (
     RelayShareProjectRequest,
     RelayShareProjectResponse,
 )
-from app.core.errors import RelayInviteInvalid
 from app.core.services.relay import (
     RelayHTTPClient,
     RelayIdempotencyConflict,
