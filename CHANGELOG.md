@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.29.0] - 2026-07-09
 
 **Hub 브릿지(개인 노드 ↔ 팀 허브) 사용성·복원력 개선.** WHY: (1) 신규 팀원 연결이 "허브 admin이 identity 수동 등록 → 1회 표시 토큰을 대역외 복사 → 노드에 붙여넣기 → Check Hub" 4단계 수동 절차였고, (2) 허브가 다운되면 `scope=all/hub` 검색이 **매 요청마다** federated timeout(~3s)을 그대로 지불했으며, (3) 카테고리 필터가 허브에 전달되지 않아 클라이언트에서 버려져 결과 수가 조용히 줄었고, (4) outbox 백오프에 jitter가 없고(PRD FR-23 위반) 재시도 3회가 짧아 허브 재시작만으로 dead-letter가 발생했다.
 
