@@ -385,12 +385,18 @@ async def test_outbox_enqueue_is_idempotent_and_blocks_secrets_before_queueing()
         outbox_count = await db.fetchone("SELECT COUNT(*) AS count FROM relay_outbox")
         assert outbox_count["count"] == 1
 
-        collision = request.model_copy(update={"payload_hash": "sha256:changed"})
-        with pytest.raises(RelayIdempotencyConflict):
-            await service.enqueue_outbox(
-                payload=collision,
-                target_hub="https://hub.local",
-            )
+        # A different payload on a still-pending row supersedes it (the queued
+        # event was never delivered — replace with the latest instead of 409ing).
+        superseded = request.model_copy(update={"payload_hash": "sha256:changed"})
+        superseded_id = await service.enqueue_outbox(
+            payload=superseded,
+            target_hub="https://hub.local",
+        )
+        assert superseded_id == first_id
+        row = await db.fetchone(
+            "SELECT payload_hash FROM relay_outbox WHERE id = ?", (first_id,)
+        )
+        assert row["payload_hash"] == "sha256:changed"
 
         secret = _request(
             version=2,
@@ -442,6 +448,64 @@ async def test_enqueue_outbox_force_requeues_existing_terminal_row():
         assert outbox["locked_by"] is None
         assert outbox["locked_at"] is None
         assert outbox["last_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_enqueue_outbox_different_payload_on_delivered_row_conflicts():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        await service.enqueue_outbox(payload=_request(), target_hub="https://hub.local")
+        claimed = await service.claim_outbox("outbox-worker", lease_seconds=30)
+        await service.mark_outbox_sent(claimed.id)
+
+        # Already delivered → a different payload for the same key is a real
+        # conflict (only still-pending rows are superseded).
+        collision = _request().model_copy(update={"payload_hash": "sha256:changed"})
+        with pytest.raises(RelayIdempotencyConflict):
+            await service.enqueue_outbox(
+                payload=collision, target_hub="https://hub.local"
+            )
+
+
+@pytest.mark.asyncio
+async def test_project_share_skips_conflicting_memory_without_aborting(monkeypatch):
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        for mid in ("m1", "m2"):
+            await db.execute(
+                """
+                INSERT INTO memories (
+                    id, content, content_hash, project_id, category, source,
+                    embedding, tags, created_at, updated_at, content_bytes
+                )
+                VALUES (?, ?, ?, 'proj', 'decision', 'test', ?, '[]', ?, ?, ?)
+                """,
+                (
+                    mid,
+                    f"content {mid}",
+                    f"h-{mid}",
+                    b"1",
+                    "2026-01-01",
+                    "2026-01-01",
+                    0,
+                ),
+            )
+
+        async def _fake_share(memory, **kwargs):
+            if str(memory.id) == "m1":
+                raise RelayIdempotencyConflict("in-flight row, different payload")
+            return f"ob-{memory.id}"
+
+        monkeypatch.setattr(service, "enqueue_memory_share", _fake_share)
+
+        result = await service.enqueue_project_share(
+            "proj", source_node_id="node-1", target_hub="https://hub.local"
+        )
+        # m2 still queued; m1 reported as skipped rather than 409ing the batch.
+        assert result.queued_count == 1
+        assert [s["memory_id"] for s in result.skipped] == ["m1"]
 
 
 @pytest.mark.asyncio

@@ -95,3 +95,43 @@ async def test_no_deadlock_on_nested_transaction(db):
 
     rows = await db.fetchall("SELECT who FROM t ORDER BY who")
     assert [r["who"] for r in rows] == ["inner", "outer"]
+
+
+def test_busy_retry_recovers_from_transient_lock():
+    """_execute_with_busy_retry retries a transient 'database is locked' rather
+    than letting the (often best-effort) caller drop the write."""
+    from app.core.database.connection import DatabaseConnection
+    from app.core.database.connection import sqlite3 as conn_sqlite3
+
+    conn = DatabaseConnection(":memory:")  # not connected; inject a fake
+
+    class _Flaky:
+        def __init__(self):
+            self.calls = 0
+
+        def execute(self, sql):
+            self.calls += 1
+            if self.calls <= 2:
+                raise conn_sqlite3.OperationalError("database is locked")
+            return None
+
+    fake = _Flaky()
+    conn.connection = fake
+    conn._execute_with_busy_retry("BEGIN IMMEDIATE", base_sleep=0.001)
+    assert fake.calls == 3  # 2 locked + 1 success
+
+
+def test_busy_retry_reraises_after_exhaustion():
+    """A persistent lock still surfaces (not silently swallowed) after retries."""
+    from app.core.database.connection import DatabaseConnection
+    from app.core.database.connection import sqlite3 as conn_sqlite3
+
+    conn = DatabaseConnection(":memory:")
+
+    class _AlwaysLocked:
+        def execute(self, sql):
+            raise conn_sqlite3.OperationalError("database is locked")
+
+    conn.connection = _AlwaysLocked()
+    with pytest.raises(conn_sqlite3.OperationalError):
+        conn._execute_with_busy_retry("BEGIN IMMEDIATE", attempts=3, base_sleep=0.001)

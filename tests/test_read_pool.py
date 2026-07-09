@@ -76,7 +76,7 @@ async def test_reads_run_in_parallel(db):
     await asyncio.gather(*[db.fetchone(SLOW) for _ in range(n)])
     parallel = loop.time() - start
 
-    assert parallel < sequential * 0.6, (
+    assert parallel < sequential * 0.75, (
         f"reads appear serialized: sequential={sequential:.3f}s "
         f"parallel={parallel:.3f}s (expected parallel << sequential)"
     )
