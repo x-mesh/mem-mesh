@@ -706,27 +706,52 @@ export class RelayPage extends HTMLElement {
     }
   }
 
+  _decodeInviteHubUrl(code) {
+    // A pairing code may embed its hub URL as `<secret>.<b64url(hub_url)>`.
+    // Return the decoded http(s) URL, or '' for a legacy bare code.
+    const dot = code.indexOf('.');
+    if (dot === -1) return '';
+    const b64 = code.slice(dot + 1);
+    try {
+      const padded = b64.replace(/-/g, '+').replace(/_/g, '/')
+        + '==='.slice((b64.length + 3) % 4);
+      const url = decodeURIComponent(escape(atob(padded)));
+      return /^https?:\/\//i.test(url) ? url.replace(/\/+$/, '') : '';
+    } catch (error) {
+      return '';
+    }
+  }
+
   async pairWithInvite() {
     if (!this.api) return;
     const submit = this.querySelector('#relay-pair-submit');
     const status = this.querySelector('#relay-pair-result');
-    const hubUrl = this.querySelector('#relay-setting-hub-url')?.value.trim()
-      || this.settings?.hub_url?.value
-      || '';
     const code = this.querySelector('#relay-pair-code')?.value.trim() || '';
-    if (!hubUrl) {
-      showToast('Enter the Team Hub URL first.', 'warning');
-      return;
-    }
     if (!code) {
       showToast('Paste the invite code.', 'warning');
       return;
     }
+    // The code carries its hub URL — auto-fill it, falling back to the form/settings.
+    const embeddedHubUrl = this._decodeInviteHubUrl(code);
+    const hubField = this.querySelector('#relay-setting-hub-url');
+    if (embeddedHubUrl && hubField) hubField.value = embeddedHubUrl;
+    const hubUrl = embeddedHubUrl
+      || hubField?.value.trim()
+      || this.settings?.hub_url?.value
+      || '';
+    if (!hubUrl) {
+      showToast('Enter the Team Hub URL first, or use an invite code that includes it.', 'warning');
+      return;
+    }
+    // Offer this node's own id so codes that did not pin one still resolve.
+    const nodeId = (this.settings?.source_node_id?.value || '').trim();
     submit.disabled = true;
     status.dataset.state = '';
     status.textContent = 'Pairing...';
     try {
-      const result = await this.api.pairRelayNode({ hub_url: hubUrl, code });
+      const payload = { hub_url: hubUrl, code };
+      if (nodeId) payload.source_node_id = nodeId;
+      const result = await this.api.pairRelayNode(payload);
       status.dataset.state = 'ok';
       const lines = [
         `Paired as ${result.source_node_id}${result.user_id ? ` (${result.user_id})` : ''}`,
@@ -761,6 +786,10 @@ export class RelayPage extends HTMLElement {
     const nodeId = this.querySelector('#invite-source-node')?.value.trim();
     if (nodeId) {
       payload.source_node_id = nodeId;
+    }
+    const hubUrl = this.querySelector('#invite-hub-url')?.value.trim();
+    if (hubUrl) {
+      payload.hub_url = hubUrl;
     }
     if (!payload.user_id || !payload.display_name) {
       showToast('Invite fields are missing.', 'warning');
@@ -1314,9 +1343,10 @@ export class RelayPage extends HTMLElement {
             <span class="relay-panel-meta">one-step setup</span>
           </div>
           <p class="relay-field-hint">
-            Got an invite code from your team hub admin? Paste it here — the node
-            redeems it against the Team Hub URL above and saves the hub URL,
-            token, and source node id in one step. No manual token copying.
+            Got an invite code from your team hub admin? Just paste it here — the
+            code carries its Team Hub URL, so the node fills that in, redeems, and
+            saves the hub URL, token, and source node id in one step. No manual
+            URL or token copying.
           </p>
           <div class="relay-form-grid">
             <label class="relay-field relay-field-wide">
@@ -1447,6 +1477,12 @@ export class RelayPage extends HTMLElement {
         </p>
         <form id="relay-invite-form" class="relay-identity-create">
           <div class="relay-form-grid">
+            <label class="relay-field relay-field-wide">
+              <span>Hub URL <small class="relay-field-hint">embedded in the code (IP or domain) — defaults to MEM_MESH_PUBLIC_URL</small></span>
+              <input id="invite-hub-url" type="text" autocomplete="off"
+                placeholder="https://hub.example.com or http://10.0.0.5:8000"
+                value="${this.escapeHtml(data.public_url?.value || '')}">
+            </label>
             <label class="relay-field">
               <span>User ID</span>
               <input id="invite-user-id" type="text" autocomplete="off" required>

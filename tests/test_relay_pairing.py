@@ -1,6 +1,7 @@
 """Relay pairing invite tests — invite lifecycle, redemption, and the
 node-side /admin/pair self-configuration flow."""
 
+import base64
 import os
 import tempfile
 from contextlib import asynccontextmanager
@@ -215,6 +216,72 @@ async def test_invite_admin_endpoints_issue_list_and_revoke():
             assert revoked.status_code == 200
             missing = await client.delete(f"/api/relay/v1/admin/invites/{prefix}")
             assert missing.status_code == 404
+
+
+def _decode_code_hub_url(code: str) -> str:
+    suffix = code.split(".", 1)[1]
+    return base64.urlsafe_b64decode(suffix + "=" * (-len(suffix) % 4)).decode()
+
+
+@pytest.mark.asyncio
+async def test_create_invite_embeds_hub_url_and_still_redeems():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        hub_url = "https://hub.example.com"
+        _, code = await service.create_invite(_invite_request(), hub_url=hub_url)
+
+        # The code carries the hub URL as a b64url suffix the client can decode,
+        assert "." in code
+        assert _decode_code_hub_url(code) == hub_url
+        # and the whole compound string is still the credential that redeems.
+        result = await service.redeem_invite(RelayPairRequest(code=code))
+        assert result.source_node_id == "node-2"
+
+
+@pytest.mark.asyncio
+async def test_admin_invite_route_embeds_hub_url_in_code():
+    async with _temp_db() as db:
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(
+            transport=transport, base_url="http://hub.local"
+        ) as client:
+            # No hub_url given → falls back to public_url/request origin.
+            created = await client.post(
+                "/api/relay/v1/admin/invites",
+                json={"user_id": "user-9", "display_name": "Nine"},
+            )
+            assert created.status_code == 200
+            assert _decode_code_hub_url(created.json()["code"]).startswith("http")
+
+            # An explicit per-invite hub_url (IP or domain) wins and is embedded.
+            override = await client.post(
+                "/api/relay/v1/admin/invites",
+                json={
+                    "user_id": "user-9",
+                    "display_name": "Nine",
+                    "hub_url": "http://10.0.0.5:8000",
+                },
+            )
+            assert override.status_code == 200
+            assert (
+                _decode_code_hub_url(override.json()["code"]) == "http://10.0.0.5:8000"
+            )
+
+
+@pytest.mark.asyncio
+async def test_admin_settings_exposes_public_url_for_invite_prefill():
+    async with _temp_db() as db:
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            settings = await client.get("/api/relay/v1/admin/settings")
+        assert settings.status_code == 200
+        body = settings.json()
+        # Dashboard reads this to prefill the invite Hub URL input.
+        assert "public_url" in body
+        assert body["public_url"]["env_var"] == "MEM_MESH_PUBLIC_URL"
 
 
 @pytest.mark.asyncio

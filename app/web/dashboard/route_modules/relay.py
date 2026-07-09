@@ -391,13 +391,28 @@ async def list_relay_invites(
 @router.post("/admin/invites", response_model=RelayInviteCreateResponse)
 async def create_relay_invite(
     payload: RelayInviteCreateRequest,
+    request: Request,
     _: None = Depends(_require_admin_access),
     service: RelayService = Depends(get_relay_service),
 ) -> RelayInviteCreateResponse:
-    """Issue a one-time pairing invite code (shown once — copy it immediately)."""
+    """Issue a one-time pairing invite code (shown once — copy it immediately).
+
+    The code embeds a hub URL so the redeeming node auto-fills its Team Hub URL
+    from the code alone. Precedence: the per-invite ``hub_url`` (admin can edit
+    it in the form), else the effective ``public_url`` setting, else the request
+    origin.
+    """
 
     try:
-        invite, code = await service.create_invite(payload)
+        settings = get_settings()
+        effective = await service.get_effective_config(settings)
+        default_hub = str(effective["values"].get("public_url") or "").strip()
+        hub_url = (
+            (payload.hub_url or "").strip()
+            or default_hub
+            or str(request.base_url).rstrip("/")
+        )
+        invite, code = await service.create_invite(payload, hub_url=hub_url)
         return RelayInviteCreateResponse(invite=invite, code=code)
     except Exception as exc:
         logger.exception("Relay invite creation failed")

@@ -405,6 +405,9 @@ class RelaySettingsResponse(BaseModel):
     llm_model: RelaySettingValue
     llm_base_url: RelaySettingValue
     prompt_version: RelaySettingValue
+    # This hub's own public URL (IP/domain), used as the default for pairing
+    # invite codes so redeeming nodes auto-fill their Team Hub URL.
+    public_url: RelaySettingValue
     identities: List[RelayIdentitySummary] = Field(default_factory=list)
     category_policies: List[RelayCategoryPolicy] = Field(default_factory=list)
 
@@ -516,6 +519,9 @@ class RelayInviteSummary(BaseModel):
 class RelayInviteCreateRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=200)
     display_name: str = Field(min_length=1, max_length=200)
+    # This hub's URL (IP or domain) to embed in the code. Blank → the route
+    # falls back to the public_url setting, else the request origin.
+    hub_url: Optional[str] = Field(default=None, max_length=500)
     # Optional: pin the node id at invite time. Blank → the redeeming node
     # proposes its own id (still subject to the registry uniqueness check).
     source_node_id: Optional[str] = Field(default=None, max_length=200)

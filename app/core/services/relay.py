@@ -7,6 +7,7 @@ post-processing work. LLM and embedding calls happen only in worker methods.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -268,6 +269,22 @@ def _json_loads(value: Optional[str], default: Any) -> Any:
         return default
 
 
+def _embed_hub_url_in_code(base: str, hub_url: str) -> str:
+    """Suffix a pairing code with its hub URL so a node can self-configure from
+    the code alone.
+
+    Format: ``<secret>.<b64url(hub_url)>``. The whole string is the opaque
+    credential the hub hash-stores and compares; only the redeeming client
+    decodes the suffix to auto-fill its Team Hub URL. An empty ``hub_url``
+    yields a legacy bare code (older codes have no ``.`` suffix — still valid).
+    """
+    url = (hub_url or "").strip().rstrip("/")
+    if not url:
+        return base
+    suffix = base64.urlsafe_b64encode(url.encode("utf-8")).decode("ascii").rstrip("=")
+    return f"{base}.{suffix}"
+
+
 class RelayService:
     """SQLite-backed relay ingest and worker service."""
 
@@ -282,9 +299,13 @@ class RelayService:
         "llm_base_url": "relay.llm_base_url",
         "prompt_version": "relay.prompt_version",
         "blocked_categories": "relay.blocked_categories",
+        "public_url": "relay.public_url",
     }
     SETTING_FIELDS = {
         "hub_url": ("relay_hub_url", "MEM_MESH_RELAY_HUB_URL"),
+        # This hub's own public URL (IP or domain), embedded into pairing codes
+        # so a redeeming node auto-fills its Team Hub URL. Shared global setting.
+        "public_url": ("public_url", "MEM_MESH_PUBLIC_URL"),
         "source_node_id": ("relay_source_node_id", "MEM_MESH_RELAY_SOURCE_NODE_ID"),
         "hub_token": ("relay_hub_token", "MEM_MESH_RELAY_HUB_TOKEN"),
         "llm_provider": ("relay_llm_provider", "MEM_MESH_RELAY_LLM_PROVIDER"),
@@ -1224,6 +1245,11 @@ class RelayService:
                 label="Prompt version",
                 settings=settings,
             ),
+            public_url=await self._db_backed_setting(
+                key="public_url",
+                label="Hub public URL",
+                settings=settings,
+            ),
             identities=await self.list_identities(),
             category_policies=await self.list_category_policies(),
         )
@@ -1623,13 +1649,16 @@ class RelayService:
     # ------------------------------------------------------------------
 
     async def create_invite(
-        self, request: RelayInviteCreateRequest
+        self, request: RelayInviteCreateRequest, hub_url: str = ""
     ) -> tuple[RelayInviteSummary, str]:
         """Issue a one-time pairing invite. Returns (summary, code).
 
-        Only the code hash is stored; the code itself is shown once.
+        Only the code hash is stored; the code itself is shown once. When
+        ``hub_url`` is given it is embedded into the shown code so the redeeming
+        node can auto-fill its Team Hub URL from the code alone (the hub still
+        hash-stores and compares the whole opaque code).
         """
-        code = secrets.token_urlsafe(24)
+        code = _embed_hub_url_in_code(secrets.token_urlsafe(24), hub_url)
         code_hash = self._hash_token(code)
         now = _utc_now()
         expires_at = datetime.fromtimestamp(
