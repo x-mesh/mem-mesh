@@ -595,6 +595,11 @@ class ProjectsPage extends HTMLElement {
           <input type="checkbox" class="maintenance-force-cb">
           <span>Force re-run (re-enrich / re-propose even if already done)</span>
         </label>
+        <label class="maintenance-force">
+          <input type="checkbox" class="auto-enrich-cb" disabled>
+          <span><strong>Continuous auto-enrich</strong> — keep new & backlog memories enriched automatically (worker sweeps every 12h)</span>
+        </label>
+        <div class="auto-enrich-hint maintenance-modal-note" style="display:none"></div>
         <div class="maintenance-modal-actions">
           <button class="maintenance-cancel secondary-button">Cancel</button>
           <button class="maintenance-run primary-button">Queue jobs</button>
@@ -624,7 +629,44 @@ class ProjectsPage extends HTMLElement {
       }
     });
 
+    overlay.querySelector('.auto-enrich-cb').addEventListener('change', async (e) => {
+      const api = window.app?.apiClient;
+      const enabled = e.target.checked;
+      try {
+        const r = await api.put(
+          `/maintenance/auto-enrich/${encodeURIComponent(projectId)}`,
+          { enabled },
+        );
+        showToast(r.enabled ? 'Auto-enrich on' : 'Auto-enrich off', 'success');
+      } catch (err) {
+        e.target.checked = !enabled;  // revert on failure
+        showToast(err?.data?.detail || 'Auto-enrich toggle failed', 'error');
+      }
+    });
+
     document.body.appendChild(overlay);
+    this._loadAutoEnrich(projectId, overlay);
+  }
+
+  async _loadAutoEnrich(projectId, overlay) {
+    const api = window.app?.apiClient;
+    const cb = overlay.querySelector('.auto-enrich-cb');
+    const hint = overlay.querySelector('.auto-enrich-hint');
+    if (!api || !cb) return;
+    try {
+      const s = await api.get(
+        `/maintenance/auto-enrich/${encodeURIComponent(projectId)}`,
+      );
+      cb.checked = !!s.enabled;
+      // Worker LLM is the hard prerequisite — gate the toggle on it.
+      if (s.llm_configured) {
+        cb.disabled = false;
+      } else {
+        cb.disabled = true;
+        hint.style.display = '';
+        hint.textContent = 'Worker LLM 미설정 — Settings → Worker LLM 설정 후 사용 가능합니다.';
+      }
+    } catch (_) { /* leave disabled */ }
   }
 
   async runProjectMaintenance(projectId, operations, force) {

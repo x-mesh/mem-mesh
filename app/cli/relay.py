@@ -446,6 +446,17 @@ async def _build_relay_worker(
         hook_retention_days,
     )
 
+    try:
+        auto_enrich_sweep_interval_hours = int(
+            _os.getenv("MEM_MESH_AUTO_ENRICH_INTERVAL_HOURS", "12")
+        )
+    except ValueError:
+        auto_enrich_sweep_interval_hours = 12
+    try:
+        auto_enrich_batch_cap = int(_os.getenv("MEM_MESH_AUTO_ENRICH_BATCH_CAP", "200"))
+    except ValueError:
+        auto_enrich_batch_cap = 200
+
     return RelayWorker(
         service=service,
         worker_id=worker_id,
@@ -468,6 +479,8 @@ async def _build_relay_worker(
         overview_interval_hours=overview_interval_hours,
         hook_service=hook_service,
         hook_retention_days=hook_retention_days,
+        auto_enrich_sweep_interval_hours=auto_enrich_sweep_interval_hours,
+        auto_enrich_batch_cap=auto_enrich_batch_cap,
     )
 
 

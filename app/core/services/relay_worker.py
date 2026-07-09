@@ -924,6 +924,8 @@ class RelayWorker:
         hook_service: Optional[Any] = None,
         hook_retention_days: int = 14,
         hook_prune_interval_hours: int = 24,
+        auto_enrich_sweep_interval_hours: int = 12,
+        auto_enrich_batch_cap: int = 200,
     ):
         if lease_seconds < 1:
             raise ValueError("lease_seconds must be at least 1")
@@ -960,6 +962,14 @@ class RelayWorker:
         self.hook_retention_days = hook_retention_days
         self.hook_prune_interval_s = max(1, hook_prune_interval_hours) * 3600
         self._last_prune_monotonic: Optional[float] = None
+        # Continuous auto-enrich sweep: enqueues backlog for opt-in projects on a
+        # throttled cadence (idempotent + batch-capped). Uses maintenance_service
+        # + chat_settings, already wired for the maintenance drain.
+        self.auto_enrich_sweep_interval_s = (
+            max(1, auto_enrich_sweep_interval_hours) * 3600
+        )
+        self.auto_enrich_batch_cap = max(1, auto_enrich_batch_cap)
+        self._last_auto_enrich_sweep_monotonic: Optional[float] = None
 
     async def run_once(self) -> Dict[str, int]:
         stats = {
@@ -1094,6 +1104,43 @@ class RelayWorker:
                         )
                 except Exception as exc:  # noqa: BLE001 — prune must not stop worker
                     logger.warning("hook_events prune failed: %s", exc)
+
+        # Continuous auto-enrich sweep (throttled). For each opt-in project with a
+        # configured Worker LLM, enqueue up to batch_cap backlog jobs. Idempotent
+        # (enqueue_project skips done/queued), so repeated sweeps add only new work.
+        if self.maintenance_service is not None and self.chat_settings is not None:
+            now = time.monotonic()
+            due = (
+                self._last_auto_enrich_sweep_monotonic is None
+                or (now - self._last_auto_enrich_sweep_monotonic)
+                >= self.auto_enrich_sweep_interval_s
+            )
+            if due:
+                try:
+                    swept = 0
+                    for (
+                        sub
+                    ) in await self.maintenance_service.list_auto_enrich_enabled():
+                        if not await self.maintenance_service.auto_enrich_active(
+                            sub.project_id, self.chat_settings
+                        ):
+                            continue
+                        res = await self.maintenance_service.enqueue_project(
+                            project_id=sub.project_id,
+                            operations=sub.operations,
+                            force=False,
+                            limit=self.auto_enrich_batch_cap,
+                        )
+                        await self.maintenance_service.mark_auto_enrich_swept(
+                            sub.project_id
+                        )
+                        swept += sum(res.get("enqueued", {}).values())
+                    self._last_auto_enrich_sweep_monotonic = now
+                    if swept:
+                        stats["auto_enrich_enqueued"] = swept
+                        logger.info("auto-enrich sweep queued %d jobs", swept)
+                except Exception as exc:  # noqa: BLE001 — sweep must not stop worker
+                    logger.warning("auto-enrich sweep failed: %s", exc)
 
         return stats
 

@@ -40,6 +40,76 @@ class ProjectMaintenanceResponse(BaseModel):
     reconcile: Optional[dict] = None
 
 
+class AutoEnrichRequest(BaseModel):
+    enabled: bool
+    operations: Optional[List[str]] = None
+
+
+class AutoEnrichResponse(BaseModel):
+    project_id: str
+    enabled: bool = False
+    operations: List[str] = Field(default_factory=lambda: ["enrich"])
+    # Whether a Worker LLM is configured — the hard prerequisite for auto-enrich
+    # to actually run (UI shows a "configure Worker LLM" hint when False).
+    llm_configured: bool = False
+    last_sweep_at: Optional[str] = None
+
+
+async def _auto_enrich_response(
+    service: MaintenanceService, project_id: str
+) -> AutoEnrichResponse:
+    from app.core.config import get_settings
+    from app.core.services.llm_resolver import resolve_service_llm
+
+    sub = await service.get_auto_enrich(project_id)
+    llm = await resolve_service_llm(service.db, get_settings(), "relay")
+    return AutoEnrichResponse(
+        project_id=project_id,
+        enabled=bool(sub and sub.enabled),
+        operations=(sub.operations if sub else ["enrich"]),
+        llm_configured=bool(llm.get("api_key")),
+        last_sweep_at=(sub.last_sweep_at if sub else None),
+    )
+
+
+@router.get("/auto-enrich/{project_id}", response_model=AutoEnrichResponse)
+async def get_auto_enrich(
+    project_id: str,
+    service: MaintenanceService = Depends(get_maintenance_service),
+) -> AutoEnrichResponse:
+    """Current per-project auto-enrich opt-in + whether a Worker LLM is wired."""
+    try:
+        return await _auto_enrich_response(service, project_id)
+    except Exception as exc:
+        logger.exception("auto-enrich status failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.put("/auto-enrich/{project_id}", response_model=AutoEnrichResponse)
+async def set_auto_enrich(
+    project_id: str,
+    payload: AutoEnrichRequest,
+    service: MaintenanceService = Depends(get_maintenance_service),
+) -> AutoEnrichResponse:
+    """Enable/disable continuous auto-enrich for a project."""
+    ops = payload.operations
+    if ops is not None:
+        unknown = set(ops) - set(MAINTENANCE_OPERATIONS)
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown operation(s): {', '.join(sorted(unknown))}",
+            )
+    try:
+        await service.set_auto_enrich(
+            project_id, enabled=payload.enabled, operations=ops
+        )
+        return await _auto_enrich_response(service, project_id)
+    except Exception as exc:
+        logger.exception("auto-enrich update failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.post("/projects/{project_id}", response_model=ProjectMaintenanceResponse)
 async def run_project_maintenance(
     project_id: str,

@@ -29,6 +29,7 @@ import json
 import logging
 import uuid
 import weakref
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
@@ -40,12 +41,35 @@ MAINTENANCE_OPERATIONS = ("enrich", "improve")
 _ACTIVE_STATUSES = ("pending", "processing")
 
 
+@dataclass
+class AutoEnrichSubscription:
+    """Per-project opt-in for continuous auto-enrich."""
+
+    project_id: str
+    enabled: bool = False
+    operations: List[str] = field(default_factory=lambda: ["enrich"])
+    last_sweep_at: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def _epoch_now() -> float:
     return datetime.now(timezone.utc).timestamp()
+
+
+def _json_loads_list(value: Any) -> List[str]:
+    """Parse a JSON array of strings, tolerant of null/garbage."""
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    return [str(x) for x in parsed] if isinstance(parsed, list) else []
 
 
 class MaintenanceService:
@@ -124,9 +148,115 @@ class MaintenanceService:
                 ON refine_proposal(memory_id)
                 WHERE status = 'pending'
                 """)
+            # Per-project opt-in for continuous auto-enrich (default: no row =
+            # disabled). The periodic worker sweep and the write-time hook both
+            # gate on enabled here AND a configured Worker LLM.
+            await self.db.execute("""
+                CREATE TABLE IF NOT EXISTS auto_enrich_subscription (
+                    project_id TEXT PRIMARY KEY,
+                    enabled INTEGER NOT NULL DEFAULT 0,
+                    operations TEXT NOT NULL DEFAULT '["enrich"]',
+                    last_sweep_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """)
         MaintenanceService._schema_ready.add(self.db)
 
     # ── enqueue ─────────────────────────────────────────────────────────────
+
+    # ── auto-enrich subscription (per-project opt-in) ────────────────────────
+
+    def _auto_enrich_from_row(self, row: Any) -> AutoEnrichSubscription:
+        ops = _json_loads_list(row["operations"])
+        return AutoEnrichSubscription(
+            project_id=str(row["project_id"]),
+            enabled=bool(row["enabled"]),
+            operations=ops or ["enrich"],
+            last_sweep_at=row["last_sweep_at"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    async def get_auto_enrich(
+        self, project_id: str
+    ) -> Optional[AutoEnrichSubscription]:
+        """Return the subscription, or None when the project never opted in."""
+        await self.ensure_schema()
+        row = await self.db.fetchone(
+            "SELECT * FROM auto_enrich_subscription WHERE project_id = ?",
+            (project_id,),
+        )
+        return self._auto_enrich_from_row(row) if row else None
+
+    async def list_auto_enrich_enabled(self) -> List[AutoEnrichSubscription]:
+        """All projects with auto-enrich currently enabled (for the sweep)."""
+        await self.ensure_schema()
+        rows = await self.db.fetchall(
+            "SELECT * FROM auto_enrich_subscription WHERE enabled = 1 "
+            "ORDER BY project_id"
+        )
+        return [self._auto_enrich_from_row(r) for r in rows]
+
+    async def set_auto_enrich(
+        self,
+        project_id: str,
+        *,
+        enabled: bool,
+        operations: Optional[List[str]] = None,
+    ) -> AutoEnrichSubscription:
+        """Enable/disable continuous auto-enrich for a project (upsert)."""
+        await self.ensure_schema()
+        ops = [op for op in (operations or ["enrich"]) if op in MAINTENANCE_OPERATIONS]
+        if not ops:
+            ops = ["enrich"]
+        now = _utc_now()
+        existing = await self.db.fetchone(
+            "SELECT created_at FROM auto_enrich_subscription WHERE project_id = ?",
+            (project_id,),
+        )
+        created_at = existing["created_at"] if existing else now
+        await self.db.execute(
+            """
+            INSERT INTO auto_enrich_subscription (
+                project_id, enabled, operations, last_sweep_at, created_at,
+                updated_at
+            ) VALUES (?, ?, ?, NULL, ?, ?)
+            ON CONFLICT(project_id) DO UPDATE SET
+                enabled = excluded.enabled,
+                operations = excluded.operations,
+                updated_at = excluded.updated_at
+            """,
+            (project_id, 1 if enabled else 0, json.dumps(ops), created_at, now),
+        )
+        row = await self.db.fetchone(
+            "SELECT * FROM auto_enrich_subscription WHERE project_id = ?",
+            (project_id,),
+        )
+        return self._auto_enrich_from_row(row)
+
+    async def mark_auto_enrich_swept(self, project_id: str) -> None:
+        """Stamp the last sweep time (best-effort; visibility only)."""
+        await self.db.execute(
+            "UPDATE auto_enrich_subscription SET last_sweep_at = ?, "
+            "updated_at = ? WHERE project_id = ?",
+            (_utc_now(), _utc_now(), project_id),
+        )
+
+    async def auto_enrich_active(self, project_id: str, settings: Any) -> bool:
+        """True when the project opted in AND a Worker LLM (relay) is configured.
+
+        Gate shared by the write-time hook and the periodic sweep. Mirrors the
+        worker's ``_probe_active`` check (relay LLM api_key present) — without an
+        LLM the queue would only pile up undrained, so we don't enqueue at all.
+        """
+        sub = await self.get_auto_enrich(project_id)
+        if not sub or not sub.enabled:
+            return False
+        from .llm_resolver import resolve_service_llm
+
+        llm = await resolve_service_llm(self.db, settings, "relay")
+        return bool(llm.get("api_key"))
 
     async def enqueue_project(
         self,
@@ -134,12 +264,16 @@ class MaintenanceService:
         project_id: str,
         operations: List[str],
         force: bool = False,
+        limit: Optional[int] = None,
     ) -> dict:
         """Queue enrich/improve jobs for every canonical memory in a project.
 
         ``force`` re-enqueues even memories that already have enrichment (enrich)
-        or a pending proposal (improve). Returns per-operation queued counts and
-        a ``skipped`` breakdown (already-done / already-queued).
+        or a pending proposal (improve). ``limit`` caps the number of *newly
+        enqueued* jobs per operation (the periodic sweep's batch cap) — the
+        remainder is picked up on the next call, which is safe because the enqueue
+        is idempotent. Returns per-operation queued counts and a ``skipped``
+        breakdown (already-done / already-queued).
         """
         await self.ensure_schema()
         ops = [op for op in operations if op in MAINTENANCE_OPERATIONS]
@@ -170,6 +304,9 @@ class MaintenanceService:
             skipped_done = 0
             now = _utc_now()
             for memory_id, content_hash in memories:
+                if limit is not None and enqueued >= limit:
+                    # Batch cap reached — leave the rest for the next sweep.
+                    break
                 if memory_id in skip_ids:
                     skipped_done += 1
                     continue

@@ -297,9 +297,40 @@ class MemoryService:
                 memory.id, memory.content_hash, project_id, quality_hint_kind
             )
 
+        # Continuous auto-enrich (opt-in per project + Worker LLM). Best-effort,
+        # outside the save transaction. The batch/migration path passes
+        # skip_quality_gate, so it never triggers write-time auto-enrich.
+        if not skip_quality_gate:
+            await self._auto_enrich_new_memory(memory, project_id)
+
         # Continuous relay sharing (best-effort, outside the save transaction).
         await self._relay_auto_share(memory, event_type="create")
         return response
+
+    async def _auto_enrich_new_memory(
+        self, memory: Any, project_id: Optional[str]
+    ) -> None:
+        """Enqueue an enrich job for a new memory when the project opted into
+        continuous auto-enrich AND a Worker LLM is configured. Best-effort:
+        never blocks the save; gated so an unconfigured LLM can't pile up an
+        undrained queue."""
+        if not project_id:
+            return
+        from ..config import get_settings
+        from .maintenance import MaintenanceService
+
+        try:
+            svc = MaintenanceService(self.db)
+            if not await svc.auto_enrich_active(project_id, get_settings()):
+                return
+            await svc.enqueue_memory(
+                memory_id=memory.id,
+                operation="enrich",
+                project_id=project_id,
+                content_hash=memory.content_hash,
+            )
+        except Exception as e:  # noqa: BLE001 - non-blocking
+            logger.warning("Auto-enrich enqueue failed (non-blocking): %s", e)
 
     async def _route_derivable_to_improve(
         self,
