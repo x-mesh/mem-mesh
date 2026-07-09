@@ -482,15 +482,53 @@ class ProjectsPage extends HTMLElement {
     try {
       const result = await api.shareRelayProject(projectId, { event_type: 'update' });
       const queued = result?.queued_count ?? 0;
-      const skipped = (result?.skipped || []).length;
-      const msg = skipped > 0
-        ? `${queued} memories queued, ${skipped} skipped (secret/type gate)`
-        : `${queued} memories queued for relay`;
-      showToast(msg, skipped > 0 ? 'warning' : 'success');
+      const skipped = result?.skipped || [];
+      if (skipped.length > 0) {
+        // Show exactly which memories were skipped and why, instead of a
+        // count-only toast — so "some didn't share" is never a mystery.
+        this._showShareResult(projectId, queued, skipped);
+      } else {
+        showToast(`${queued} memories queued for relay`, 'success');
+      }
     } catch (error) {
       // FastAPI returns {detail}; APIError surfaces it on .data.detail / .message.
       showToast(error?.data?.detail || error?.message || 'Failed to share project', 'error');
     }
+  }
+
+  _showShareResult(projectId, queued, skipped) {
+    const existing = document.querySelector('.maintenance-modal-overlay');
+    if (existing) existing.remove();
+
+    const rows = skipped.map((s) =>
+      `<li><code>${this._escapeHtml(String(s.memory_id || ''))}</code> — `
+      + `${this._escapeHtml(String(s.reason || ''))}</li>`
+    ).join('');
+
+    const overlay = document.createElement('div');
+    overlay.className = 'maintenance-modal-overlay';
+    overlay.innerHTML = `
+      <div class="maintenance-modal" role="dialog" aria-modal="true">
+        <div class="maintenance-modal-header">
+          <h3>Share result — ${this._escapeHtml(projectId)}</h3>
+          <button class="maintenance-modal-close" aria-label="Close">&times;</button>
+        </div>
+        <p class="maintenance-modal-sub"><strong>${queued}</strong> queued,
+          <strong>${skipped.length}</strong> skipped (not shared).</p>
+        <div class="maintenance-modal-note">These memories were held back by the
+          secret / type gate — fix the flagged content or category to share them:</div>
+        <ul style="max-height:240px;overflow:auto;margin:8px 0;padding-left:18px;
+          font-size:0.85em;line-height:1.5;word-break:break-all;">${rows}</ul>
+        <div class="maintenance-modal-actions">
+          <button class="maintenance-cancel secondary-button">Close</button>
+        </div>
+      </div>`;
+
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('.maintenance-modal-close').addEventListener('click', close);
+    overlay.querySelector('.maintenance-cancel').addEventListener('click', close);
+    document.body.appendChild(overlay);
   }
 
   /**
