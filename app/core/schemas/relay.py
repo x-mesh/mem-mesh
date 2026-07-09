@@ -422,6 +422,9 @@ class RelaySettingsUpdateRequest(BaseModel):
     llm_model: Optional[str] = Field(default=None, max_length=200)
     llm_base_url: Optional[str] = Field(default=None, max_length=500)
     prompt_version: Optional[str] = Field(default=None, max_length=100)
+    # This hub's public URL (IP/domain) — remembered as the default embedded in
+    # pairing invite codes.
+    public_url: Optional[str] = Field(default=None, max_length=500)
     # Explicit set of categories to opt OUT of sharing (replaces the stored
     # set wholesale). None = leave unchanged; [] = clear (share everything
     # not denylisted).

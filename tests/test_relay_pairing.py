@@ -271,6 +271,36 @@ async def test_admin_invite_route_embeds_hub_url_in_code():
 
 
 @pytest.mark.asyncio
+async def test_invite_hub_url_is_remembered_as_default():
+    async with _temp_db() as db:
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # Issue with an explicit hub URL...
+            first = await client.post(
+                "/api/relay/v1/admin/invites",
+                json={
+                    "user_id": "u",
+                    "display_name": "D",
+                    "hub_url": "https://team.hub",
+                },
+            )
+            assert first.status_code == 200
+            assert _decode_code_hub_url(first.json()["code"]) == "https://team.hub"
+
+            # ...it is remembered: settings now expose it (form prefill)...
+            settings = await client.get("/api/relay/v1/admin/settings")
+            assert settings.json()["public_url"]["value"] == "https://team.hub"
+
+            # ...and a later invite with no hub_url reuses the remembered URL.
+            second = await client.post(
+                "/api/relay/v1/admin/invites",
+                json={"user_id": "u2", "display_name": "D2"},
+            )
+            assert _decode_code_hub_url(second.json()["code"]) == "https://team.hub"
+
+
+@pytest.mark.asyncio
 async def test_admin_settings_exposes_public_url_for_invite_prefill():
     async with _temp_db() as db:
         app = _app(db)

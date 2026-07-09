@@ -1268,6 +1268,7 @@ class RelayService:
             "llm_model",
             "llm_base_url",
             "prompt_version",
+            "public_url",
         ):
             value = getattr(request, key)
             if value is None:

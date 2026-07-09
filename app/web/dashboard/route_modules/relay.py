@@ -407,12 +407,14 @@ async def create_relay_invite(
         settings = get_settings()
         effective = await service.get_effective_config(settings)
         default_hub = str(effective["values"].get("public_url") or "").strip()
-        hub_url = (
-            (payload.hub_url or "").strip()
-            or default_hub
-            or str(request.base_url).rstrip("/")
-        )
+        explicit_hub = (payload.hub_url or "").strip()
+        hub_url = explicit_hub or default_hub or str(request.base_url).rstrip("/")
         invite, code = await service.create_invite(payload, hub_url=hub_url)
+        # Remember the admin's entered hub URL as the default for next time.
+        if explicit_hub and explicit_hub != default_hub:
+            await service.update_admin_settings(
+                RelaySettingsUpdateRequest(public_url=explicit_hub)
+            )
         return RelayInviteCreateResponse(invite=invite, code=code)
     except Exception as exc:
         logger.exception("Relay invite creation failed")
