@@ -155,6 +155,20 @@ PUBLIC_PATHS = [
     "/logout",
 ]
 
+# Non-admin relay endpoints carry their own auth and MUST bypass the OAuth
+# web_auth gate, or a personal node can never reach the hub when auth is enabled:
+#   * /pair       — the one-time invite code IS the credential (no bearer yet).
+#   * /health     — unauthenticated reachability probe (post-pair Check Hub).
+#   * /auth/check, /ingest, /search — self-authenticate a *relay identity* token
+#     via service.authorize()/_extract_bearer_token (a relay token is neither an
+#     OAuth token nor the static hook token, so the OAuth validator would reject
+#     it). The routes' own 401s remain the real gate.
+# The /admin/* relay routes are deliberately NOT exempt: they use
+# _require_admin_access, which *trusts* the OAuth/session layer when web_auth is
+# on — so they must stay gated here.
+RELAY_API_PREFIX = "/api/relay/v1/"
+RELAY_ADMIN_PREFIX = "/api/relay/v1/admin/"
+
 
 class BearerTokenMiddleware(BaseHTTPMiddleware):
     """Middleware to validate Bearer tokens on protected routes."""
@@ -254,6 +268,14 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         for public_path in PUBLIC_PATHS:
             if path.startswith(public_path):
                 return False
+
+        # Non-admin relay endpoints self-authenticate (relay identity token or
+        # the invite code); only /admin/* leans on OAuth/session, so keep that
+        # gated and exempt the rest.
+        if path.startswith(RELAY_API_PREFIX) and not path.startswith(
+            RELAY_ADMIN_PREFIX
+        ):
+            return False
 
         # OAuth paths are always exempt (needed for auth flow)
         for oauth_path in OAUTH_PATHS:

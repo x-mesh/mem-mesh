@@ -320,7 +320,11 @@ class DashboardPage extends HTMLElement {
       const api = window.app?.apiClient;
       if (!api) return;
 
-      const searchParams = { limit: this.pageSize, recency_weight: 1.0 };
+      const searchParams = {
+        limit: this.pageSize,
+        offset: this.page * this.pageSize,
+        recency_weight: 1.0,
+      };
       if (this.filterCategory !== 'all') searchParams.category = this.filterCategory;
 
       // Server-side date filtering

@@ -1192,3 +1192,49 @@ class TestBasicAuth:
         assert middleware._is_public_path("/") is False
         assert middleware._is_public_path("/work") is False
         assert middleware._is_exempt_path("/work") is False
+
+
+class TestRelayPublicPathsBypassWebAuth:
+    """Relay public/self-authenticating endpoints must bypass OAuth web_auth so a
+    personal node can reach the hub when auth is enabled. Regression: pairing
+    redemption returned 401 'Missing or invalid Authorization header' because the
+    public /api/relay/v1/pair was swept up by the blanket /api/* web_auth gate."""
+
+    def _mw(self):
+        from unittest.mock import MagicMock
+
+        from app.web.oauth.middleware import BearerTokenMiddleware
+
+        return BearerTokenMiddleware(app=MagicMock())
+
+    def test_public_relay_paths_exempt_but_admin_and_data_gated(self, monkeypatch):
+        import app.core.runtime_config as rc
+
+        # auth fully on (the okrd-mem-mesh configuration).
+        monkeypatch.setattr(rc, "effective_bool", lambda key: True)
+        monkeypatch.setattr(rc, "effective_tribool", lambda key: True)
+        mw = self._mw()
+
+        # Non-admin relay endpoints (public /pair, /health + relay-token-authed
+        # /auth/check, /ingest, /search) self-authenticate → bypass web_auth.
+        for path in (
+            "/api/relay/v1/pair",
+            "/api/relay/v1/health",
+            "/api/relay/v1/auth/check",
+            "/api/relay/v1/ingest",
+            "/api/relay/v1/search",
+        ):
+            assert mw._requires_auth(path) is False
+
+        # /admin/* relay routes trust OAuth/session (via _require_admin_access or
+        # direct reliance) — the exemption must not open them.
+        for path in (
+            "/api/relay/v1/admin/settings",
+            "/api/relay/v1/admin/overview",
+            "/api/relay/v1/admin/invites",
+            "/api/relay/v1/admin/pair",
+        ):
+            assert mw._requires_auth(path) is True
+
+        # And a normal /api route is still gated.
+        assert mw._requires_auth("/api/memories") is True
