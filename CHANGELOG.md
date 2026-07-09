@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.31.0] - 2026-07-09
+
+**relay outbox 쓰기가 SQLite 락 경합으로 조용히 유실되던 문제 수정.** WHY: 메인 프로세스와 relay worker가 동시에 쓰기를 시도하면 기존 `BEGIN`(deferred)이 첫 쓰기 문장에서야 write lock으로 업그레이드됐고, 그 순간 다른 프로세스가 락을 쥐고 있으면 `busy_timeout`이 적용되지 않는 즉시 `SQLITE_BUSY`로 실패했다. 프로젝트 공유 중 이 경합에 걸린 메모리 하나가 전체 공유 요청을 중단시키는 것도 문제였다.
+
+### Fixed
+- **SQLite busy lock 경합** — 트랜잭션 시작을 `BEGIN`(deferred) → `BEGIN IMMEDIATE`로 바꿔 락을 선점하고, `BEGIN`/`COMMIT`에 지수 백오프 재시도(최대 6회)를 추가. `app/core/database/connection.py`
+- **relay 공유 중 idempotency 충돌로 전체 실패** — outbox 키가 같은 pending(미전송) row에 새 payload가 들어오면 에러 대신 그 자리에서 supersede(덮어쓰기)한다. `processing`/전송완료 row는 기존대로 충돌 처리하되, 해당 메모리만 skip하고 나머지 공유는 계속 진행. `app/core/services/relay.py`
+
+### Changed
+- **프로젝트 공유 결과 UI** — "N개 스킵" 카운트만 보여주던 토스트를 모달로 교체, 스킵된 메모리 id와 사유를 목록으로 노출. `app/web/static/js/pages/projects.js`
+- **`test_reads_run_in_parallel` 타이밍 임계값 완화** (`0.6 → 0.75`) — 공유 CI 러너에서 스케줄링 지연으로 flaky 실패(develop CI 1회, 2026-07-09) 재발 방지. `tests/test_read_pool.py`
+
 ## [1.30.0] - 2026-07-09
 
 **페어링 코드 자기완결화 + auth-on 허브에서 relay 동작 복구 + 지속 auto-enrich.** WHY: v1.29.0 페어링을 실사용하며 3가지가 연달아 막혔다 — (1) 초대 코드로 상환할 때 hub URL을 매번 수동 입력해야 했고 노드/초대 어느 쪽도 `source_node_id`가 없으면 하드 에러였다, (2) `auth_enabled`가 켜진 허브(okrd)에서는 공개여야 할 `/relay/v1/pair`가 OAuth 미들웨어의 `/api/*` 일괄 게이트에 걸려 401이었다(ingest/search도 동일), (3) enrich는 수동 스냅샷뿐이라 신규 메모리가 자동으로 보강되지 않았다. 더해 홈 대시보드 "Load more"가 offset 누락으로 같은 페이지만 재요청했다.
