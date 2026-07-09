@@ -1492,7 +1492,7 @@ export class RelayPage extends HTMLElement {
               <input id="invite-display-name" type="text" autocomplete="off" required>
             </label>
             <label class="relay-field">
-              <span>Source Node ID <small class="relay-field-hint">optional — blank lets the node choose</small></span>
+              <span>Source Node ID <small class="relay-field-hint">optional — blank auto-generates a unique id on redeem</small></span>
               <input id="invite-source-node" type="text" autocomplete="off">
             </label>
             <label class="relay-field">

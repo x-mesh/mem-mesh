@@ -1744,18 +1744,20 @@ class RelayService:
             source_node_id = str(
                 row["source_node_id"] or request.source_node_id or ""
             ).strip()
-            if not source_node_id:
-                raise RelayInviteInvalid(
-                    "invite has no pinned source node id — provide source_node_id"
+            if source_node_id:
+                taken = await self.db.fetchone(
+                    "SELECT token_hash FROM relay_identity WHERE source_node_id = ?",
+                    (source_node_id,),
                 )
-            taken = await self.db.fetchone(
-                "SELECT token_hash FROM relay_identity WHERE source_node_id = ?",
-                (source_node_id,),
-            )
-            if taken:
-                raise RelayInviteInvalid(
-                    f"source node id '{source_node_id}' is already registered"
-                )
+                if taken:
+                    raise RelayInviteInvalid(
+                        f"source node id '{source_node_id}' is already registered"
+                    )
+            else:
+                # Neither the invite nor the redeeming node supplied an id — mint a
+                # unique one so the invite code alone fully self-configures the node
+                # (hub URL from the code, token minted here, id generated here).
+                source_node_id = await self._generate_unique_source_node_id()
 
             display_name = str(request.display_name or "").strip() or str(
                 row["display_name"]
@@ -1787,6 +1789,20 @@ class RelayService:
             display_name=display_name,
             scopes=list(scopes),
         )
+
+    async def _generate_unique_source_node_id(self) -> str:
+        """Mint a short, unique node id for invites that pin none and whose
+        redeeming node proposes none — so the code alone self-configures."""
+        for _ in range(10):
+            candidate = f"node-{secrets.token_hex(4)}"
+            taken = await self.db.fetchone(
+                "SELECT token_hash FROM relay_identity WHERE source_node_id = ?",
+                (candidate,),
+            )
+            if not taken:
+                return candidate
+        # Astronomically unlikely after 10 tries; fall back to a full uuid.
+        return f"node-{uuid.uuid4().hex}"
 
     async def _invite_by_hash(self, code_hash: str) -> Optional[RelayInviteSummary]:
         row = await self.db.fetchone(

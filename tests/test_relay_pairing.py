@@ -157,15 +157,26 @@ async def test_redeem_invite_rejects_taken_source_node_id():
 
 
 @pytest.mark.asyncio
-async def test_redeem_invite_uses_node_proposed_id_when_not_pinned():
+async def test_redeem_invite_mints_id_when_neither_pins_nor_proposes():
     async with _temp_db() as db:
         service = RelayService(db)
         await service.ensure_schema()
         _, code = await service.create_invite(_invite_request(source_node_id=None))
 
-        with pytest.raises(RelayInviteInvalid):
-            # No pinned id and no proposal → rejected.
-            await service.redeem_invite(RelayPairRequest(code=code))
+        # No pinned id and no proposal → the server mints a unique one so the
+        # invite code alone fully self-configures the node.
+        result = await service.redeem_invite(RelayPairRequest(code=code))
+        assert result.source_node_id.startswith("node-")
+        identity = await service.authorize(result.token, require_scope="write")
+        assert identity["source_node_id"] == result.source_node_id
+
+
+@pytest.mark.asyncio
+async def test_redeem_invite_uses_node_proposed_id_when_not_pinned():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        _, code = await service.create_invite(_invite_request(source_node_id=None))
 
         result = await service.redeem_invite(
             RelayPairRequest(code=code, source_node_id="laptop-7")

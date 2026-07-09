@@ -141,11 +141,15 @@ async def test_weekly_review_incomplete_pin_with_tags_does_not_crash():
             "updated_at) VALUES ('s1', 'mem-mesh', '2026-07-01', '2026-07-01', "
             "'2026-07-01')"
         )
+        # created_at must fall inside weekly_review's rolling window (now - days),
+        # so use a current timestamp rather than a fixed date that ages out.
+        recent = datetime.now(timezone.utc).isoformat()
         await db.execute(
             "INSERT INTO pins (id, session_id, project_id, content, status, "
             "tags, created_at, updated_at) VALUES "
             "('p1', 's1', 'mem-mesh', 'open work', 'open', '[\"alpha\", \"beta\"]', "
-            "'2026-07-02', '2026-07-02')"
+            "?, ?)",
+            (recent, recent),
         )
 
         report = await _handlers(db).weekly_review("mem-mesh")
