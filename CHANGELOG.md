@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.30.0] - 2026-07-09
+
+**페어링 코드 자기완결화 + auth-on 허브에서 relay 동작 복구 + 지속 auto-enrich.** WHY: v1.29.0 페어링을 실사용하며 3가지가 연달아 막혔다 — (1) 초대 코드로 상환할 때 hub URL을 매번 수동 입력해야 했고 노드/초대 어느 쪽도 `source_node_id`가 없으면 하드 에러였다, (2) `auth_enabled`가 켜진 허브(okrd)에서는 공개여야 할 `/relay/v1/pair`가 OAuth 미들웨어의 `/api/*` 일괄 게이트에 걸려 401이었다(ingest/search도 동일), (3) enrich는 수동 스냅샷뿐이라 신규 메모리가 자동으로 보강되지 않았다. 더해 홈 대시보드 "Load more"가 offset 누락으로 같은 페이지만 재요청했다.
+
+### Added
+- **페어링 코드 자기완결** — 초대 코드에 hub URL을 임베드(`<secret>.<b64url(hub_url)>`)해 노드가 코드만으로 Team Hub URL을 자동 채운다. 발급 폼의 Hub URL 입력은 `MEM_MESH_PUBLIC_URL`을 기본값으로 보여주고 마지막 값을 기억한다. `source_node_id`가 pin도 제안도 없으면 상환 시 서버가 유니크 id(`node-<hex>`)를 자동 생성 → 코드 하나로 url·token·id 전부 자기구성. `app/core/services/relay.py`, `app/web/dashboard/route_modules/relay.py`, `app/core/schemas/relay.py`, `app/web/static/js/pages/relay.js`
+- **지속 auto-enrich (per-project opt-in, 기본 OFF)** — 켜면 신규 메모리는 생성 즉시 enrich 큐에 적재(write-time 훅)되고, worker가 12h 주기로 백로그를 batch cap(기본 200) 이내로 sweep한다(idempotent). Worker LLM 설정 시에만 동작(미설정이면 적재 차단). Projects 유지보수 모달 토글 + `GET/PUT /api/maintenance/auto-enrich/{project}`. env: `MEM_MESH_AUTO_ENRICH_INTERVAL_HOURS`/`_BATCH_CAP`. `app/core/services/maintenance.py`, `app/core/services/relay_worker.py`, `app/core/services/memory.py`, `app/cli/relay.py`, `app/web/dashboard/route_modules/maintenance.py`, `app/web/static/js/pages/projects.js`
+
+### Fixed
+- **auth-on 허브에서 relay 접근 차단** — OAuth `BearerTokenMiddleware`가 `/api/*` 전체를 web_auth로 막아, 자체 인증을 가진 relay 엔드포인트(공개 `/pair`·`/health`, relay-토큰 `/auth/check`·`/ingest`·`/search`)가 401이었다. `/api/relay/v1/` 중 `/admin/`이 아닌 경로를 OAuth 예외 처리(각자의 초대코드/relay토큰 게이트에 위임). `/admin/*`는 `_require_admin_access`가 OAuth를 신뢰하므로 게이트 유지. `app/web/oauth/middleware.py`
+- **홈 대시보드 Load more 미동작** — `dashboard.js`의 `loadData()`가 `offset`을 안 보내 매번 첫 페이지만 재요청 → `mergeLiveMemories` dedupe로 목록이 안 늘었다. `offset = page * pageSize` 추가. `app/web/static/js/pages/dashboard.js`
+- **weekly_review 테스트 날짜 time-bomb** — 하드코딩 `2026-07-02`가 7일 rolling window 밖으로 밀려 CI가 red. 상대 시각으로 교체. `tests/test_weekly_review_injection.py`
+
 ## [1.29.0] - 2026-07-09
 
 **Hub 브릿지(개인 노드 ↔ 팀 허브) 사용성·복원력 개선.** WHY: (1) 신규 팀원 연결이 "허브 admin이 identity 수동 등록 → 1회 표시 토큰을 대역외 복사 → 노드에 붙여넣기 → Check Hub" 4단계 수동 절차였고, (2) 허브가 다운되면 `scope=all/hub` 검색이 **매 요청마다** federated timeout(~3s)을 그대로 지불했으며, (3) 카테고리 필터가 허브에 전달되지 않아 클라이언트에서 버려져 결과 수가 조용히 줄었고, (4) outbox 백오프에 jitter가 없고(PRD FR-23 위반) 재시도 3회가 짧아 허브 재시작만으로 dead-letter가 발생했다.
