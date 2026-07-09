@@ -19,6 +19,7 @@ except ImportError:
 import asyncio
 import contextvars
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -341,11 +342,40 @@ class DatabaseConnection:
         async with self._lock:
             token = _in_transaction.set(True)
             try:
-                self.connection.execute("BEGIN")
+                # BEGIN IMMEDIATE grabs the write lock up front so busy_timeout
+                # actually applies to it. A plain deferred BEGIN upgrades to a
+                # write only on the first write statement; if another *process*
+                # (e.g. the relay worker) holds the write lock, that upgrade can
+                # fail instantly with SQLITE_BUSY ("database is locked") that
+                # busy_timeout cannot retry — the exact silent-drop cause for
+                # relay writes. The bounded retry covers residual contention.
+                self._execute_with_busy_retry("BEGIN IMMEDIATE")
                 yield
-                self.connection.execute("COMMIT")
+                self._execute_with_busy_retry("COMMIT")
             except Exception:
-                self.connection.execute("ROLLBACK")
+                try:
+                    self.connection.execute("ROLLBACK")
+                except Exception:  # noqa: BLE001 — rollback best-effort
+                    pass
                 raise
             finally:
                 _in_transaction.reset(token)
+
+    def _execute_with_busy_retry(
+        self, sql: str, *, attempts: int = 6, base_sleep: float = 0.05
+    ) -> None:
+        """Run a lock-sensitive statement (BEGIN IMMEDIATE / COMMIT), retrying on
+        'database is locked' with exponential backoff beyond busy_timeout.
+
+        Only for statements with no result to read and safe to re-issue before
+        they take effect (BEGIN before the body runs; COMMIT is retried only
+        after a busy failure, before any ROLLBACK)."""
+        for i in range(attempts):
+            try:
+                self.connection.execute(sql)
+                return
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e).lower() and i < attempts - 1:
+                    time.sleep(base_sleep * (2**i))
+                    continue
+                raise

@@ -2211,7 +2211,14 @@ class RelayService:
                         force=force,
                     )
                 )
-            except (RelayTypeGateBlocked, RelaySecretBlocked) as exc:
+            except (
+                RelayTypeGateBlocked,
+                RelaySecretBlocked,
+                RelayIdempotencyConflict,
+            ) as exc:
+                # One memory's conflict (e.g. an in-flight/delivered row with a
+                # different payload) must not abort the whole project share —
+                # skip it and report, like the type/secret gates.
                 skipped.append({"memory_id": str(memory.id), "reason": str(exc)})
 
         return RelayShareProjectResponse(
@@ -2253,6 +2260,39 @@ class RelayService:
             )
             if existing:
                 if existing["payload_hash"] != request.payload_hash:
+                    # A newer payload for the same key. If the queued event was
+                    # never delivered (still pending), supersede it with the
+                    # latest payload instead of erroring — replacing an unsent
+                    # row is safe and avoids a dead-end 409 on re-share after an
+                    # edit or enrichment. Only pending is superseded: a row being
+                    # delivered ('processing') or already sent/dead stays a real
+                    # conflict.
+                    if str(existing["status"]) == "pending":
+                        await self.db.execute(
+                            """
+                            UPDATE relay_outbox
+                            SET payload_hash = ?,
+                                payload_json = ?,
+                                target_hub = ?,
+                                status = 'pending',
+                                attempts = 0,
+                                next_attempt_at = ?,
+                                locked_by = NULL,
+                                locked_at = NULL,
+                                last_error = NULL,
+                                updated_at = ?
+                            WHERE id = ?
+                            """,
+                            (
+                                request.payload_hash,
+                                payload_json,
+                                target_hub,
+                                _epoch_now(),
+                                now,
+                                existing["id"],
+                            ),
+                        )
+                        return existing["id"]
                     raise RelayIdempotencyConflict(
                         "outbox idempotency key reused with a different payload hash"
                     )
