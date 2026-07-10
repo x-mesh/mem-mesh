@@ -510,3 +510,40 @@ async def test_search_response_formats(tool_handlers):
         query="response format", limit=5, response_format="standard"
     )
     assert "results" in result_standard
+
+
+# --- WS2 (R7 후반부): session_resume team_hub 주입 -----------------------------
+
+
+@pytest.mark.asyncio
+async def test_session_resume_injects_team_hub_when_cached(tool_handlers, monkeypatch):
+    import app.core.services.federated_search as fs
+
+    async def _fake_digest(db, project_id, settings=None):
+        return {
+            "summary": "Team shipped federation exposure.",
+            "source_count": 3,
+            "generated_at": "2026-07-10T00:00:00Z",
+        }
+
+    monkeypatch.setattr(fs, "read_cached_team_digest", _fake_digest)
+    await tool_handlers.pin_add(content="wire the hub exposure", project_id="th-proj")
+    resp = await tool_handlers.session_resume(project_id="th-proj", expand="smart")
+    assert resp["team_hub"] == {
+        "summary": "Team shipped federation exposure.",
+        "source_count": 3,
+        "generated_at": "2026-07-10T00:00:00Z",
+    }
+
+
+@pytest.mark.asyncio
+async def test_session_resume_team_hub_none_when_no_cache(tool_handlers, monkeypatch):
+    import app.core.services.federated_search as fs
+
+    async def _none(db, project_id, settings=None):
+        return None
+
+    monkeypatch.setattr(fs, "read_cached_team_digest", _none)
+    await tool_handlers.pin_add(content="no hub context", project_id="th-proj2")
+    resp = await tool_handlers.session_resume(project_id="th-proj2", expand="smart")
+    assert resp["team_hub"] is None

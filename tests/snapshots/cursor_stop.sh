@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 26
+# mem-mesh-hooks prompt-version: 27
 # Cursor Stop hook → mem-mesh /api/hooks/claude/stop
 #
 # Thin forwarder: the server keyword-matches the finished turn, redacts secrets,

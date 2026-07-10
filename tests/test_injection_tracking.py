@@ -674,3 +674,114 @@ async def test_judge_injected_swallows_errors_and_leaves_rows_unjudged():
         db.execute = real_execute
         rows = await db.fetchall("SELECT utilized FROM injected_memories")
         assert rows[0]["utilized"] is None
+
+
+# ─────────────── WS2 (R8): SessionStart "### Team Hub" section ───────────────
+
+
+@pytest.mark.asyncio
+async def test_session_start_injects_team_hub_section(monkeypatch):
+    """A cached team digest renders a '### Team Hub' section in additionalContext."""
+    import app.core.services.federated_search as fs_mod
+
+    async with _temp_db() as db:
+        hook_service = HookService(db)
+
+        class _Ctx:
+            pins_count = 0
+            open_pins = 0
+            completed_pins = 0
+            pins = []
+
+        class _Session:
+            async def resume_last_session(self, **k):
+                return _Ctx()
+
+            async def get_or_create_active_session(self, **k):
+                return None
+
+        # search_service.db truthy so the team-hub read runs.
+        monkeypatch.setattr(
+            hooks_mod,
+            "get_services",
+            lambda: {
+                "search_service": SimpleNamespace(db=object()),
+                "embedding_service": SimpleNamespace(is_ready=False),
+            },
+        )
+
+        async def _digest(db_, project_id, settings=None):
+            return {
+                "summary": "Team shipped federation exposure.",
+                "source_count": 4,
+                "generated_at": "2026-07-10T00:00:00Z",
+            }
+
+        monkeypatch.setattr(fs_mod, "read_cached_team_digest", _digest)
+
+        app, get_hook_service, _, get_session_service = _app()
+        app.dependency_overrides[get_hook_service] = lambda: hook_service
+        app.dependency_overrides[get_session_service] = lambda: _Session()
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            r = await client.post(
+                "/api/hooks/claude/session-start",
+                json={"session_id": "sess-th", "cwd": "/tmp/mem-mesh"},
+            )
+
+        assert r.status_code == 200
+        ctx = r.json()["hookSpecificOutput"]["additionalContext"]
+        assert "### Team Hub" in ctx
+        assert "Team shipped federation exposure." in ctx
+        assert "4 team memories" in ctx
+
+
+@pytest.mark.asyncio
+async def test_session_start_omits_team_hub_when_no_digest(monkeypatch):
+    import app.core.services.federated_search as fs_mod
+
+    async with _temp_db() as db:
+        hook_service = HookService(db)
+
+        class _Ctx:
+            pins_count = 0
+            open_pins = 0
+            completed_pins = 0
+            pins = []
+
+        class _Session:
+            async def resume_last_session(self, **k):
+                return _Ctx()
+
+            async def get_or_create_active_session(self, **k):
+                return None
+
+        monkeypatch.setattr(
+            hooks_mod,
+            "get_services",
+            lambda: {
+                "search_service": SimpleNamespace(db=object()),
+                "embedding_service": SimpleNamespace(is_ready=False),
+            },
+        )
+
+        async def _none(db_, project_id, settings=None):
+            return None
+
+        monkeypatch.setattr(fs_mod, "read_cached_team_digest", _none)
+
+        app, get_hook_service, _, get_session_service = _app()
+        app.dependency_overrides[get_hook_service] = lambda: hook_service
+        app.dependency_overrides[get_session_service] = lambda: _Session()
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            r = await client.post(
+                "/api/hooks/claude/session-start",
+                json={"session_id": "sess-th2", "cwd": "/tmp/mem-mesh"},
+            )
+
+        assert r.status_code == 200
+        ctx = r.json()["hookSpecificOutput"]["additionalContext"]
+        assert "### Team Hub" not in ctx

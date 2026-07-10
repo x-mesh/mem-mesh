@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 26
+# mem-mesh-hooks prompt-version: 27
 # Claude Code SessionStart hook → mem-mesh /api/hooks/claude/session-start
 #
 # Thin forwarder: POST the raw hook event; the server resumes context, detects

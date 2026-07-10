@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 26
+# mem-mesh-hooks prompt-version: 27
 # Agent response hook: save response to mem-mesh.
 # Used by Kiro and other command-hook clients that provide the final response
 # through an environment variable or stdin JSON.

@@ -1991,3 +1991,122 @@ async def test_vector_search_with_empty_index_falls_back_to_text():
 
         assert results.metadata["search_mode"] == "text"
         assert results.results, "text fallback should find the ingested memory"
+
+
+# --- WS2 (R6): RelayHTTPClient.fetch_project_digest ---------------------------
+
+
+class _FakeDigestResp:
+    def __init__(self, status_code, payload=None, text=""):
+        self.status_code = status_code
+        self._payload = payload or {}
+        self.text = text
+
+    def json(self):
+        return self._payload
+
+
+class _FakeDigestClient:
+    """Records the GET URL/headers and returns a canned response (or raises)."""
+
+    def __init__(self, resp=None, raise_exc=None):
+        self._resp = resp
+        self._raise = raise_exc
+        self.calls = []
+
+    async def get(self, url, *, headers, timeout):
+        self.calls.append({"url": url, "headers": headers, "timeout": timeout})
+        if self._raise is not None:
+            raise self._raise
+        return self._resp
+
+
+def _digest_payload():
+    return {
+        "team_project_id": "team-proj",
+        "narrative": "Team shipped federation exposure this week.",
+        "source_memory_ids": ["m1", "m2", "m3"],
+        "model": "claude",
+        "model_version": "opus",
+        "prompt_version": "relay-v1",
+        "generated_at": "2026-07-10T00:00:00Z",
+    }
+
+
+def test_digest_url_normalization():
+    for base in (
+        "https://hub.example.com",
+        "https://hub.example.com/",
+        "https://hub.example.com/api/relay/v1",
+        "https://hub.example.com/api/relay/v1/search",
+        "https://hub.example.com/api/relay/v1/ingest",
+    ):
+        assert (
+            RelayHTTPClient._digest_url(base, "team-proj")
+            == "https://hub.example.com/api/relay/v1/projects/team-proj/digest"
+        )
+
+
+@pytest.mark.asyncio
+async def test_fetch_project_digest_success_parses_response():
+    from app.core.schemas.relay import RelayProjectDigestResponse
+
+    client = RelayHTTPClient(
+        http_client=_FakeDigestClient(_FakeDigestResp(200, _digest_payload()))
+    )
+    out = await client.fetch_project_digest(
+        target_hub="https://hub.example.com",
+        bearer_token="tok",
+        team_project_id="team-proj",
+    )
+    assert isinstance(out, RelayProjectDigestResponse)
+    assert out.narrative.startswith("Team shipped")
+    assert len(out.source_memory_ids) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 403])
+async def test_fetch_project_digest_unauthorized(status):
+    from app.core.services.relay import RelayUnauthorized
+
+    client = RelayHTTPClient(
+        http_client=_FakeDigestClient(_FakeDigestResp(status, text="nope"))
+    )
+    with pytest.raises(RelayUnauthorized):
+        await client.fetch_project_digest(
+            target_hub="https://hub.example.com",
+            bearer_token="bad",
+            team_project_id="team-proj",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [404, 500])
+async def test_fetch_project_digest_other_errors_raise_runtime(status):
+    """라우트404(구버전 hub)·디제스트404·5xx 모두 RuntimeError로 수렴(호출측 단일 처리)."""
+    client = RelayHTTPClient(
+        http_client=_FakeDigestClient(_FakeDigestResp(status, text="err"))
+    )
+    with pytest.raises(RuntimeError):
+        await client.fetch_project_digest(
+            target_hub="https://hub.example.com",
+            bearer_token="tok",
+            team_project_id="team-proj",
+        )
+
+
+@pytest.mark.asyncio
+async def test_fetch_project_digest_timeout_propagates():
+    """timeout은 호출측(worker)이 broad-except로 삼키도록 그대로 전파."""
+
+    class _Timeout(Exception):
+        pass
+
+    client = RelayHTTPClient(http_client=_FakeDigestClient(raise_exc=_Timeout()))
+    with pytest.raises(_Timeout):
+        await client.fetch_project_digest(
+            target_hub="https://hub.example.com",
+            bearer_token="tok",
+            team_project_id="team-proj",
+            timeout=3.0,
+        )

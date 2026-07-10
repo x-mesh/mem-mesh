@@ -559,3 +559,152 @@ async def test_worker_prune_failure_does_not_stop_cycle():
     )
     stats = await worker.run_once()  # must not raise
     assert "hook_events_pruned" not in stats
+
+
+# --- WS2 (R5): session_digest prefetch worker step ----------------------------
+
+import json as _json  # noqa: E402
+from types import SimpleNamespace as _NS  # noqa: E402
+
+from app.core.schemas.relay import RelayProjectDigestResponse  # noqa: E402
+from app.core.services.federated_search import (  # noqa: E402
+    session_digest_config_key,
+)
+
+
+class _DictDB:
+    def __init__(self):
+        self.store = {}
+
+    async def get_app_config(self, key):
+        return self.store.get(key)
+
+    async def set_app_config(self, key, value):
+        self.store[key] = value
+
+
+class _DigestWorkerSvc:
+    """Minimal RelayService surface the session_digest step touches."""
+
+    def __init__(self, db, hub=("https://hub.example.com", "tok"), subs=()):
+        self.db = db
+        self._hub = hub
+        self._subs = list(subs)
+
+    async def get_effective_config(self, settings):
+        url, tok = self._hub
+        return {"values": {"hub_url": url, "hub_token": tok}}
+
+    async def list_auto_share_subscriptions(self):
+        return self._subs
+
+
+class _CountingDigestSender:
+    def __init__(self, digest=None, raise_exc=None):
+        self._digest = digest
+        self._raise = raise_exc
+        self.calls = 0
+
+    async def fetch_project_digest(self, *, target_hub, bearer_token, team_project_id):
+        self.calls += 1
+        if self._raise is not None:
+            raise self._raise
+        return self._digest
+
+
+def _digest_response():
+    return RelayProjectDigestResponse(
+        team_project_id="team-proj",
+        narrative="Team shipped federation exposure.",
+        source_memory_ids=["a", "b"],
+        model="m",
+        model_version="v",
+        prompt_version="relay-v1",
+        generated_at="2026-07-10T00:00:00Z",
+    )
+
+
+def _sub(project_id, enabled=True):
+    return _NS(project_id=project_id, enabled=enabled)
+
+
+def _digest_settings(enabled=True, refresh=15):
+    return _NS(
+        relay_federated_session_digest_enabled=enabled,
+        relay_federated_session_digest_refresh_minutes=refresh,
+    )
+
+
+def _digest_worker(service, sender, settings):
+    return RelayWorker(
+        service=service,
+        worker_id="w",
+        session_digest_settings=settings,
+        session_digest_sender=sender,
+    )
+
+
+@pytest.mark.asyncio
+async def test_session_digest_success_records_app_config():
+    db = _DictDB()
+    svc = _DigestWorkerSvc(db, subs=[_sub("team-proj")])
+    sender = _CountingDigestSender(_digest_response())
+    stats = await _digest_worker(svc, sender, _digest_settings()).run_once()
+
+    assert stats.get("session_digests_cached") == 1
+    payload = _json.loads(db.store[session_digest_config_key("team-proj")])
+    assert payload["summary"].startswith("Team shipped")
+    assert payload["source_count"] == 2
+    assert payload["generated_at"] == "2026-07-10T00:00:00Z"
+    assert "fetched_at" in payload
+
+
+@pytest.mark.asyncio
+async def test_session_digest_skips_disabled_subscription():
+    db = _DictDB()
+    svc = _DigestWorkerSvc(db, subs=[_sub("team-proj", enabled=False)])
+    sender = _CountingDigestSender(_digest_response())
+    await _digest_worker(svc, sender, _digest_settings()).run_once()
+    assert sender.calls == 0
+    assert db.store == {}
+
+
+@pytest.mark.asyncio
+async def test_session_digest_skips_when_hub_unconfigured():
+    db = _DictDB()
+    svc = _DigestWorkerSvc(db, hub=("", ""), subs=[_sub("team-proj")])
+    sender = _CountingDigestSender(_digest_response())
+    await _digest_worker(svc, sender, _digest_settings()).run_once()
+    assert sender.calls == 0
+    assert db.store == {}
+
+
+@pytest.mark.asyncio
+async def test_session_digest_disabled_by_settings_is_noop():
+    db = _DictDB()
+    svc = _DigestWorkerSvc(db, subs=[_sub("team-proj")])
+    sender = _CountingDigestSender(_digest_response())
+    await _digest_worker(svc, sender, _digest_settings(enabled=False)).run_once()
+    assert sender.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_session_digest_throttles_within_refresh_window():
+    db = _DictDB()
+    svc = _DigestWorkerSvc(db, subs=[_sub("team-proj")])
+    sender = _CountingDigestSender(_digest_response())
+    worker = _digest_worker(svc, sender, _digest_settings(refresh=15))
+    await worker.run_once()
+    await worker.run_once()  # within refresh window → throttled
+    assert sender.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_session_digest_fetch_failure_never_stops_worker():
+    db = _DictDB()
+    svc = _DigestWorkerSvc(db, subs=[_sub("team-proj")])
+    sender = _CountingDigestSender(raise_exc=RuntimeError("hub down"))
+    stats = await _digest_worker(svc, sender, _digest_settings()).run_once()
+    assert sender.calls == 1
+    assert "session_digests_cached" not in stats  # nothing written
+    assert db.store == {}

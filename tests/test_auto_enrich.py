@@ -205,7 +205,7 @@ async def test_write_time_hook_noop_when_disabled_or_no_llm(monkeypatch):
 # ── t5: worker periodic sweep ────────────────────────────────────────────────
 
 
-def _worker(db, *, batch_cap=2):
+def _worker(db, *, batch_cap=2, backfill=False):
     from app.core.services.relay import RelayService
     from app.core.services.relay_worker import RelayWorker
 
@@ -217,6 +217,7 @@ def _worker(db, *, batch_cap=2):
         maintenance_service=MaintenanceService(db),
         chat_settings=object(),
         auto_enrich_batch_cap=batch_cap,
+        enrich_backfill_enabled=backfill,
     )
 
 
@@ -258,3 +259,66 @@ async def test_worker_sweep_noop_without_llm(monkeypatch):
         assert "auto_enrich_enqueued" not in s
         n = await db.fetchone("SELECT COUNT(*) AS n FROM maintenance_queue")
         assert n["n"] == 0
+
+
+# ── enrich backfill (convergent, confidence IS NULL target) ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_enqueue_backfill_targets_null_confidence_and_converges():
+    from app.core.services.enrich_store import EnrichmentStore
+
+    async with _temp_db() as db:
+        svc = MaintenanceService(db)
+        store = EnrichmentStore(db)
+        await _add_memory(db, "m1")
+        await _add_memory(db, "m2")
+        await store.upsert(memory_id="m1", title="T")  # confidence NULL (pre-field)
+        await store.upsert(memory_id="m2", title="T", confidence=0.8)  # has field
+
+        res = await svc.enqueue_backfill(limit=100)
+        assert res["enqueued"] == 1  # only m1 targeted
+        row = await db.fetchone(
+            "SELECT memory_id FROM maintenance_queue WHERE operation = 'enrich'"
+        )
+        assert row["memory_id"] == "m1"
+
+        # Simulate the re-enrich completing → confidence set → converges to 0.
+        await store.upsert(memory_id="m1", title="T", confidence=0.5)
+        assert await svc.enqueue_backfill(limit=100) == {"enqueued": 0, "scanned": 0}
+
+
+@pytest.mark.asyncio
+async def test_worker_backfill_sweep_enqueues_when_enabled(monkeypatch):
+    from app.core.services.enrich_store import EnrichmentStore
+
+    async with _temp_db() as db:
+        await _add_memory(db, "m1")
+        await EnrichmentStore(db).upsert(memory_id="m1", title="T")  # NULL confidence
+        _patch_relay_llm(monkeypatch, api_key="sk-1")
+
+        s = await _worker(db, backfill=True).run_once()
+        assert s.get("enrich_backfill_enqueued") == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_backfill_noop_when_disabled_or_no_llm(monkeypatch):
+    from app.core.services.enrich_store import EnrichmentStore
+
+    async with _temp_db() as db:
+        await _add_memory(db, "m1")
+        await EnrichmentStore(db).upsert(memory_id="m1", title="T")
+
+        # disabled
+        _patch_relay_llm(monkeypatch, api_key="sk-1")
+        assert (
+            "enrich_backfill_enqueued"
+            not in await _worker(db, backfill=False).run_once()
+        )
+
+        # enabled but no LLM
+        _patch_relay_llm(monkeypatch, api_key=None)
+        assert (
+            "enrich_backfill_enqueued"
+            not in await _worker(db, backfill=True).run_once()
+        )

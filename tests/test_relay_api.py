@@ -1040,3 +1040,39 @@ async def test_relay_share_project_endpoint_enqueues_shareable_project_memories(
         assert data["skipped"][0]["memory_id"] == "memory-2"
         outbox_count = await db.fetchone("SELECT COUNT(*) AS count FROM relay_outbox")
         assert outbox_count["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_settings_federated_tuning_roundtrip():
+    """WS3 (R4): federated timeout/weight are DB-backed via GET/PUT settings."""
+    async with _temp_db() as db:
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r1 = await client.get("/api/relay/v1/admin/settings")
+            assert r1.status_code == 200
+            d1 = r1.json()
+            assert "federated_timeout" in d1
+            assert "federated_hub_weight" in d1
+            assert d1["federated_timeout"]["source"] in ("default", "env")
+
+            r2 = await client.put(
+                "/api/relay/v1/admin/settings",
+                json={"federated_timeout": 4.0, "federated_hub_weight": 1.25},
+            )
+            assert r2.status_code == 200
+            d2 = r2.json()
+            assert d2["federated_timeout"]["value"] == "4.0"
+            assert d2["federated_timeout"]["source"] == "db"
+            assert d2["federated_hub_weight"]["value"] == "1.25"
+            assert d2["federated_hub_weight"]["source"] == "db"
+
+            r3 = await client.get("/api/relay/v1/admin/settings")
+            assert r3.json()["federated_hub_weight"]["value"] == "1.25"
+
+            # Out-of-range weight is rejected by the request schema (ge/le).
+            r4 = await client.put(
+                "/api/relay/v1/admin/settings",
+                json={"federated_hub_weight": 5.0},
+            )
+            assert r4.status_code == 422

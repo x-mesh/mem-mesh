@@ -487,3 +487,209 @@ async def test_send_search_raises_relay_unauthorized_on_401():
             bearer_token="bad",
             payload=RelaySearchRequest(query="q", limit=1),
         )
+
+
+# --- WS1 (R1): MCP 압축응답 federation 메타 보존 -------------------------------
+
+
+def _hub_search_result(memory_id: str) -> SearchResult:
+    """origin='hub' + enrichment(title/abstract)을 가진 federated 결과."""
+    return SearchResult(
+        id=memory_id,
+        content=f"hub content {memory_id}",
+        similarity_score=0.8,
+        created_at="2026-07-01T01:00:00Z",
+        project_id="team-proj",
+        category="decision",
+        source="relay",
+        origin="hub",
+        title=f"Title {memory_id}",
+        abstract=f"Abstract {memory_id}",
+    )
+
+
+def _compress_handlers():
+    from app.mcp_common.tools import MCPToolHandlers
+
+    return MCPToolHandlers(_StubStorage(), enable_compression=False)
+
+
+@pytest.mark.parametrize("fmt", ["minimal", "compact", "standard"])
+def test_compress_envelope_always_has_hub_status_key(fmt):
+    """R1.1: hub_status는 3포맷 top-level에 항상 존재(None이어도 키 유지)."""
+    handlers = _compress_handlers()
+    # 로컬 전용(hub_status=None)
+    resp_local = SearchResponse(results=[_local_result("local-1")], hub_status=None)
+    out = handlers._compress_search_response(resp_local, fmt)
+    assert "hub_status" in out
+    assert out["hub_status"] is None
+    # 융합(hub_status='ok')
+    resp_fused = SearchResponse(
+        results=[_local_result("local-1"), _hub_search_result("hub-1")],
+        hub_status=HUB_OK,
+    )
+    out2 = handlers._compress_search_response(resp_fused, fmt)
+    assert out2["hub_status"] == HUB_OK
+
+
+def test_compress_standard_marks_hub_origin_only():
+    """R1.2/R1.3: standard에서 origin='hub'는 hub 결과만, 로컬엔 origin 키 없음."""
+    handlers = _compress_handlers()
+    resp = SearchResponse(
+        results=[_local_result("local-1"), _hub_search_result("hub-1")],
+        hub_status=HUB_OK,
+    )
+    out = handlers._compress_search_response(resp, "standard")
+    by_id = {r["id"]: r for r in out["results"]}
+    assert "origin" not in by_id["local-1"]  # N3: 로컬 origin 미반복
+    assert by_id["hub-1"]["origin"] == "hub"
+    assert by_id["hub-1"]["title"] == "Title hub-1"
+    assert by_id["hub-1"]["abstract"] == "Abstract hub-1"
+
+
+def test_compress_compact_marks_hub_origin_only():
+    handlers = _compress_handlers()
+    resp = SearchResponse(
+        results=[_local_result("local-1"), _hub_search_result("hub-1")],
+        hub_status=HUB_OK,
+    )
+    out = handlers._compress_search_response(resp, "compact")
+    by_id = {r["id"][:8]: r for r in out["results"]}
+    assert "origin" not in by_id["local-1"[:8]]
+    assert by_id["hub-1"[:8]]["origin"] == "hub"
+
+
+def test_compress_minimal_keeps_id_score_only_plus_envelope_hub_status():
+    """R1.2: minimal per-result은 origin 제외({id,score}), envelope엔 hub_status."""
+    handlers = _compress_handlers()
+    resp = SearchResponse(
+        results=[_local_result("local-1"), _hub_search_result("hub-1")],
+        hub_status=HUB_OK,
+    )
+    out = handlers._compress_search_response(resp, "minimal")
+    for item in out["results"]:
+        assert set(item.keys()) == {"id", "score"}
+    assert out["hub_status"] == HUB_OK
+
+
+def test_compress_local_only_has_no_origin_anywhere():
+    handlers = _compress_handlers()
+    resp = SearchResponse(results=[_local_result("a"), _local_result("b")])
+    for fmt in ("compact", "standard"):
+        out = handlers._compress_search_response(resp, fmt)
+        assert all("origin" not in r for r in out["results"])
+        assert out["hub_status"] is None
+
+
+# --- WS2 (R7 전반부): read_cached_team_digest 로컬 read 헬퍼 --------------------
+
+import json as _json  # noqa: E402
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz  # noqa: E402
+from types import SimpleNamespace as _NS  # noqa: E402
+
+from app.core.services.federated_search import (  # noqa: E402
+    read_cached_team_digest,
+    session_digest_config_key,
+)
+
+
+class _FakeDigestDB:
+    def __init__(self, config=None, raise_on_get=False):
+        self._config = config or {}
+        self._raise = raise_on_get
+
+    async def get_app_config(self, key):
+        if self._raise:
+            raise RuntimeError("db boom")
+        return self._config.get(key)
+
+
+def _digest_settings(enabled=True, max_age=60):
+    return _NS(
+        relay_federated_session_digest_enabled=enabled,
+        relay_federated_session_digest_max_age_minutes=max_age,
+    )
+
+
+def _cached(project_id, *, age_minutes=1, summary="Team shipped X.", count=3):
+    fetched = _dt.now(_tz.utc) - _td(minutes=age_minutes)
+    payload = {
+        "summary": summary,
+        "source_count": count,
+        "generated_at": "2026-07-10T00:00:00Z",
+        "fetched_at": fetched.isoformat(),
+    }
+    return {session_digest_config_key(project_id): _json.dumps(payload)}
+
+
+def _patch_relay(monkeypatch, *, enabled):
+    """Stub federated_search.RelayService so the auto-share gate is controllable."""
+    import app.core.services.federated_search as fs
+
+    class _Sub:
+        def __init__(self):
+            self.enabled = enabled
+
+    class _Relay:
+        def __init__(self, db):
+            pass
+
+        async def get_project_auto_share(self, project_id):
+            return None if enabled is None else _Sub()
+
+    monkeypatch.setattr(fs, "RelayService", _Relay)
+
+
+@pytest.mark.asyncio
+async def test_read_digest_cache_hit(monkeypatch):
+    _patch_relay(monkeypatch, enabled=True)
+    db = _FakeDigestDB(_cached("proj", age_minutes=1))
+    out = await read_cached_team_digest(db, "proj", _digest_settings())
+    assert out == {
+        "summary": "Team shipped X.",
+        "source_count": 3,
+        "generated_at": "2026-07-10T00:00:00Z",
+    }
+
+
+@pytest.mark.asyncio
+async def test_read_digest_stale_beyond_max_age(monkeypatch):
+    _patch_relay(monkeypatch, enabled=True)
+    db = _FakeDigestDB(_cached("proj", age_minutes=120))
+    out = await read_cached_team_digest(db, "proj", _digest_settings(max_age=60))
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_read_digest_absent(monkeypatch):
+    _patch_relay(monkeypatch, enabled=True)
+    db = _FakeDigestDB({})  # no cached row
+    out = await read_cached_team_digest(db, "proj", _digest_settings())
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_read_digest_auto_share_gate_blocks(monkeypatch):
+    _patch_relay(monkeypatch, enabled=False)  # subscription disabled
+    db = _FakeDigestDB(_cached("proj"))
+    out = await read_cached_team_digest(db, "proj", _digest_settings())
+    assert out is None
+    # And when there is no subscription at all:
+    _patch_relay(monkeypatch, enabled=None)
+    assert await read_cached_team_digest(db, "proj", _digest_settings()) is None
+
+
+@pytest.mark.asyncio
+async def test_read_digest_global_disabled(monkeypatch):
+    _patch_relay(monkeypatch, enabled=True)
+    db = _FakeDigestDB(_cached("proj"))
+    out = await read_cached_team_digest(db, "proj", _digest_settings(enabled=False))
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_read_digest_swallows_exceptions(monkeypatch):
+    _patch_relay(monkeypatch, enabled=True)
+    db = _FakeDigestDB(raise_on_get=True)
+    out = await read_cached_team_digest(db, "proj", _digest_settings())
+    assert out is None

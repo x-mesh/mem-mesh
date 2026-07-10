@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 26
+# mem-mesh-hooks prompt-version: 27
 # TaskCompleted hook → mem-mesh /api/hooks/claude/task-completed
 #
 # Thin forwarder: the server builds the task summary and saves it. Auth = shared

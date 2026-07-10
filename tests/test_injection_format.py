@@ -349,10 +349,10 @@ def test_no_mid_sentence_cut_with_emoji():
 
 @pytest.mark.asyncio
 async def test_fetch_enrichment_map_single_in_query():
-    """title/abstract are fetched with exactly one IN query for N ids."""
+    """title/abstract/tags are fetched with exactly one IN query for N ids."""
     async with _temp_db() as db:
         store = EnrichmentStore(db)
-        await store.upsert(memory_id="a", title="Ta", abstract="Aa")
+        await store.upsert(memory_id="a", title="Ta", abstract="Aa", tags=["x", "y"])
         await store.upsert(memory_id="b", title="Tb", abstract="Ab")
 
         calls = {"n": 0}
@@ -366,8 +366,11 @@ async def test_fetch_enrichment_map_single_in_query():
         emap = await fetch_enrichment_map(db, ["a", "b", "missing"])
 
         assert calls["n"] == 1  # single batch IN query, not per-id
-        assert emap["a"] == {"title": "Ta", "abstract": "Aa"}
+        assert emap["a"]["title"] == "Ta"
+        assert emap["a"]["abstract"] == "Aa"
+        assert emap["a"]["tags"] == ["x", "y"]  # enrichment topic tags flow through
         assert emap["b"]["title"] == "Tb"
+        assert emap["b"]["tags"] == []  # no tags upserted → empty list
         assert "missing" not in emap
 
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 26
+# mem-mesh-hooks prompt-version: 27
 # Cursor SessionStart hook → mem-mesh /api/hooks/claude/session-start
 #
 # Thin forwarder: POST the Cursor hook event (camelCase fields normalized to
