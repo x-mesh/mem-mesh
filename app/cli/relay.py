@@ -457,6 +457,27 @@ async def _build_relay_worker(
     except ValueError:
         auto_enrich_batch_cap = 200
 
+    enrich_backfill_enabled = _os.getenv(
+        "MEM_MESH_ENRICH_BACKFILL", ""
+    ).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    try:
+        enrich_backfill_cap = int(_os.getenv("MEM_MESH_ENRICH_BACKFILL_CAP", "200"))
+    except ValueError:
+        enrich_backfill_cap = 200
+
+    abstract_reembed_enabled = _os.getenv(
+        "MEM_MESH_ABSTRACT_REEMBED", ""
+    ).strip().lower() in ("1", "true", "yes", "on")
+    try:
+        abstract_reembed_cap = int(_os.getenv("MEM_MESH_ABSTRACT_REEMBED_CAP", "100"))
+    except ValueError:
+        abstract_reembed_cap = 100
+
     return RelayWorker(
         service=service,
         worker_id=worker_id,
@@ -481,6 +502,17 @@ async def _build_relay_worker(
         hook_retention_days=hook_retention_days,
         auto_enrich_sweep_interval_hours=auto_enrich_sweep_interval_hours,
         auto_enrich_batch_cap=auto_enrich_batch_cap,
+        enrich_backfill_enabled=enrich_backfill_enabled,
+        enrich_backfill_cap=enrich_backfill_cap,
+        abstract_reembed_enabled=abstract_reembed_enabled,
+        abstract_reembed_cap=abstract_reembed_cap,
+        # Session digest prefetch: gated + throttled by the federated settings
+        # (relay_federated_session_digest_*). Uses the outbox HTTP sender to
+        # reach the hub. Enabled by default; a CPU-only node still pays only a
+        # ≤3s bounded call per refresh interval per subscribed project.
+        session_digest_settings=settings,
+        session_digest_sender=outbox_sender
+        or build_http_outbox_sender(timeout=settings.relay_http_timeout),
     )
 
 

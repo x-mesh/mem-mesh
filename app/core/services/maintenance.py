@@ -243,20 +243,114 @@ class MaintenanceService:
             (_utc_now(), _utc_now(), project_id),
         )
 
-    async def auto_enrich_active(self, project_id: str, settings: Any) -> bool:
-        """True when the project opted in AND a Worker LLM (relay) is configured.
+    async def worker_llm_ok(self, settings: Any) -> bool:
+        """True when a Worker LLM (relay) is configured (api_key present).
 
-        Gate shared by the write-time hook and the periodic sweep. Mirrors the
-        worker's ``_probe_active`` check (relay LLM api_key present) — without an
-        LLM the queue would only pile up undrained, so we don't enqueue at all.
+        Mirrors the worker's ``_probe_active`` gate — without an LLM an enrich
+        job would only pile up undrained, so callers don't enqueue at all.
         """
-        sub = await self.get_auto_enrich(project_id)
-        if not sub or not sub.enabled:
-            return False
         from .llm_resolver import resolve_service_llm
 
         llm = await resolve_service_llm(self.db, settings, "relay")
         return bool(llm.get("api_key"))
+
+    async def auto_enrich_active(self, project_id: str, settings: Any) -> bool:
+        """True when the project opted in AND a Worker LLM is configured. Gate
+        shared by the write-time hook and the periodic sweep."""
+        sub = await self.get_auto_enrich(project_id)
+        if not sub or not sub.enabled:
+            return False
+        return await self.worker_llm_ok(settings)
+
+    async def enqueue_backfill(
+        self, *, project_id: Optional[str] = None, limit: int = 200
+    ) -> dict:
+        """Enqueue enrich jobs to backfill memories enriched *before*
+        problem/resolution/lesson/confidence were persisted (``confidence IS
+        NULL``). Convergent: a re-enriched memory gets a non-NULL confidence and
+        drops out of the target set, so repeated sweeps self-terminate. Skips
+        memories that already have a live (pending/processing) enrich job.
+        LLM-gating is the caller's responsibility."""
+        await self.ensure_schema()
+        from .enrich_store import EnrichmentStore
+
+        await EnrichmentStore(self.db).ensure_schema()  # ensure new columns exist
+        limit = max(1, min(int(limit or 200), 1000))
+        proj = " AND m.project_id = ?" if project_id else ""
+        params: list = [project_id] if project_id else []
+        params.append(limit)
+        rows = await self.db.fetchall(
+            f"""
+            SELECT e.memory_id AS id, m.content_hash AS content_hash,
+                   m.project_id AS project_id
+            FROM memory_enrichment e JOIN memories m ON m.id = e.memory_id
+            WHERE e.confidence IS NULL
+              AND COALESCE(m.status, 'canonical') = 'canonical'{proj}
+            LIMIT ?
+            """,
+            tuple(params),
+        )
+        now = _utc_now()
+        enqueued = 0
+        for r in rows:
+            if await self._insert_job(
+                memory_id=str(r["id"]),
+                operation="enrich",
+                project_id=r["project_id"],
+                content_hash=str(r["content_hash"]),
+                now=now,
+            ):
+                enqueued += 1
+        return {"enqueued": enqueued, "scanned": len(rows)}
+
+    async def reembed_abstracts(
+        self,
+        *,
+        embedding_service: Any,
+        project_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> dict:
+        """Compute + store abstract embeddings (in the separate abstract store)
+        for memories that have an enrichment abstract but no abstract embedding
+        yet. Convergent — stored rows drop out of the target set. E scaffolding;
+        the caller (worker) gates it off by default. Kept separate from the
+        content embedding so the two can be A/B compared without touching search.
+        """
+        await self.ensure_schema()
+        from .abstract_embedding_store import AbstractEmbeddingStore
+        from .enrich_store import EnrichmentStore
+
+        await EnrichmentStore(self.db).ensure_schema()
+        store = AbstractEmbeddingStore(self.db)
+        await store.ensure_schema()
+        limit = max(1, min(int(limit or 200), 1000))
+        proj = " AND m.project_id = ?" if project_id else ""
+        params: list = [project_id] if project_id else []
+        params.append(limit)
+        rows = await self.db.fetchall(
+            f"""
+            SELECT e.memory_id AS id, e.abstract AS abstract
+            FROM memory_enrichment e
+            JOIN memories m ON m.id = e.memory_id
+            LEFT JOIN memory_abstract_embedding a ON a.memory_id = e.memory_id
+            WHERE e.abstract IS NOT NULL AND e.abstract != ''
+              AND a.memory_id IS NULL
+              AND COALESCE(m.status, 'canonical') = 'canonical'{proj}
+            LIMIT ?
+            """,
+            tuple(params),
+        )
+        model = getattr(embedding_service, "model_name", "")
+        stored = 0
+        for r in rows:
+            try:
+                emb = await embedding_service.aembed(str(r["abstract"]))
+            except Exception as e:  # noqa: BLE001 — skip one, keep going
+                logger.warning("abstract re-embed failed for %s: %s", r["id"], e)
+                continue
+            await store.upsert(memory_id=str(r["id"]), embedding=list(emb), model=model)
+            stored += 1
+        return {"stored": stored, "scanned": len(rows)}
 
     async def enqueue_project(
         self,
@@ -540,6 +634,10 @@ class MaintenanceService:
             content=str(memory["content"] or ""), settings=settings
         )
         title = redact_secrets(str(data.get("title", "")))
+
+        def _redact_opt(v: Any) -> Optional[str]:
+            return redact_secrets(str(v)) if v else None
+
         await EnrichmentStore(self.db).upsert(
             memory_id=str(memory["id"]),
             title=title,
@@ -547,6 +645,10 @@ class MaintenanceService:
             tags=list(data.get("tags") or []),
             display_kind=str(data.get("display_kind", "")),
             model=str(data.get("model", "")),
+            problem=_redact_opt(data.get("problem")),
+            resolution=_redact_opt(data.get("resolution")),
+            lesson=_redact_opt(data.get("lesson")),
+            confidence=data.get("confidence"),
         )
         return title
 

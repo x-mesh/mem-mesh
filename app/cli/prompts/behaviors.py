@@ -19,7 +19,7 @@ from typing import List
 # compute_content_hash().
 # ---------------------------------------------------------------------------
 
-PROMPT_VERSION: int = 26
+PROMPT_VERSION: int = 27
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +124,8 @@ CORE_RULES: List[Rule] = [
         title="Use context search",
         description=(
             "When prior decisions, tasks, or design context are referenced, call "
-            "search() before writing code."
+            "search() before writing code. For past team context, consider "
+            'search(scope="all") to include the team hub.'
         ),
     ),
     Rule(
@@ -296,4 +297,4 @@ def compute_content_hash() -> str:
 # Pinned fingerprint of the definitions above. Regenerate after an intended
 # rule change with:
 #   python -c "from app.cli.prompts.behaviors import compute_content_hash as h; print(h())"
-PROMPT_CONTENT_HASH: str = "456e656b011ba47a"
+PROMPT_CONTENT_HASH: str = "ee360f9133f6feca"

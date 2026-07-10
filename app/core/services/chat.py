@@ -532,6 +532,10 @@ class ChatService:
             "tags": list(data.tags or []),
             "display_kind": data.display_kind,
             "model": getattr(enricher, "model", ""),
+            "problem": data.problem,
+            "resolution": data.resolution,
+            "lesson": data.lesson,
+            "confidence": data.confidence,
         }
 
     async def generate_project_overview(

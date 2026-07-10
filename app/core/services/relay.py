@@ -151,6 +151,44 @@ class RelayHTTPClient:
             raise RuntimeError(self._response_detail(response))
         return RelaySearchResponse(**response.json())
 
+    async def fetch_project_digest(
+        self,
+        *,
+        target_hub: str,
+        bearer_token: str,
+        team_project_id: str,
+        timeout: Optional[float] = None,
+    ) -> RelayProjectDigestResponse:
+        """Fetch a team project's aggregate digest from the hub (prefetch path).
+
+        401/403 → RelayUnauthorized; any other 4xx/5xx (including a 404 from an
+        older hub without the digest route) → RuntimeError. The caller collapses
+        every failure into a single "no digest" outcome (never-raise at the loop).
+        """
+        client = self.http_client
+        close_client = False
+        if client is None:
+            import httpx
+
+            client = httpx.AsyncClient()
+            close_client = True
+
+        try:
+            response = await client.get(
+                self._digest_url(target_hub, team_project_id),
+                headers={"Authorization": f"Bearer {bearer_token}"},
+                timeout=timeout if timeout is not None else self.timeout,
+            )
+        finally:
+            if close_client:
+                await client.aclose()
+
+        if response.status_code == 401 or response.status_code == 403:
+            raise RelayUnauthorized(self._response_detail(response))
+        if response.status_code >= 400:
+            raise RuntimeError(self._response_detail(response))
+        return RelayProjectDigestResponse(**response.json())
+
     @staticmethod
     def _search_url(target_hub: str) -> str:
         base = target_hub.rstrip("/")
@@ -161,6 +199,20 @@ class RelayHTTPClient:
                 base = base[: -len(suffix)]
                 break
         return f"{base}/api/relay/v1/search"
+
+    @staticmethod
+    def _digest_url(target_hub: str, team_project_id: str) -> str:
+        base = target_hub.rstrip("/")
+        for suffix in (
+            "/api/relay/v1/search",
+            "/api/relay/v1/health",
+            "/api/relay/v1/ingest",
+            "/api/relay/v1",
+        ):
+            if base.endswith(suffix):
+                base = base[: -len(suffix)]
+                break
+        return f"{base}/api/relay/v1/projects/{team_project_id}/digest"
 
     @staticmethod
     def _ingest_url(target_hub: str) -> str:
@@ -300,6 +352,8 @@ class RelayService:
         "prompt_version": "relay.prompt_version",
         "blocked_categories": "relay.blocked_categories",
         "public_url": "relay.public_url",
+        "federated_timeout": "relay.federated_timeout",
+        "federated_hub_weight": "relay.federated_hub_weight",
     }
     SETTING_FIELDS = {
         "hub_url": ("relay_hub_url", "MEM_MESH_RELAY_HUB_URL"),
@@ -316,6 +370,14 @@ class RelayService:
             "MEM_MESH_RELAY_LLM_BASE_URL",
         ),
         "prompt_version": ("relay_prompt_version", "MEM_MESH_RELAY_PROMPT_VERSION"),
+        "federated_timeout": (
+            "relay_federated_timeout",
+            "MEM_MESH_RELAY_FEDERATED_TIMEOUT",
+        ),
+        "federated_hub_weight": (
+            "relay_federated_hub_weight",
+            "MEM_MESH_RELAY_FEDERATED_HUB_WEIGHT",
+        ),
     }
     # Structurally excluded from sharing, no matter what — not a user policy
     # choice. 'task' is the default bucket for pin promotions / ad-hoc local
@@ -1250,6 +1312,16 @@ class RelayService:
                 label="Hub public URL",
                 settings=settings,
             ),
+            federated_timeout=await self._db_backed_setting(
+                key="federated_timeout",
+                label="Federated hub timeout (s)",
+                settings=settings,
+            ),
+            federated_hub_weight=await self._db_backed_setting(
+                key="federated_hub_weight",
+                label="Federated hub RRF weight",
+                settings=settings,
+            ),
             identities=await self.list_identities(),
             category_policies=await self.list_category_policies(),
         )
@@ -1284,6 +1356,13 @@ class RelayService:
                 self.CONFIG_KEYS["default_source_version"],
                 str(request.default_source_version),
             )
+
+        # Federated search tuning (DB-backed): stored as strings, coerced back to
+        # float by FederatedHubSearch via get_effective_config. None = unchanged.
+        for key in ("federated_timeout", "federated_hub_weight"):
+            value = getattr(request, key)
+            if value is not None:
+                await self.db.set_app_config(self.CONFIG_KEYS[key], str(float(value)))
 
         if request.blocked_categories is not None:
             cleaned_categories = sorted(
@@ -2941,7 +3020,7 @@ class RelayService:
                 WHERE c.team_project_id = ?
                   AND c.visible = 1
                 ORDER BY c.updated_at DESC
-                LIMIT 200
+                LIMIT 50
                 """,
                 (job.ref_id,),
             )
@@ -3913,7 +3992,9 @@ class RelayService:
             "source_version": row["source_version"],
             "kind": row["authoritative_kind"],
             "status": row["authoritative_status"],
-            "content": row["content"],
+            # Full content is intentionally omitted: the digest is a summary
+            # built from the enrichment fields below. Dumping every memory's raw
+            # content bloated the prompt (→ ReadTimeout / context overflow).
             "title": row["title"],
             "abstract": row["abstract"],
             "tags": enrichment_tags if enrichment_tags is not None else source_tags,

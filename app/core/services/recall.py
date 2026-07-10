@@ -466,10 +466,11 @@ async def _enrichment_table_exists(db: Any) -> bool:
 
 
 async def fetch_enrichment_map(db: Any, memory_ids: Any) -> dict:
-    """memory_id → {'title','abstract'} 를 IN 배치로 1회 조회.
+    """memory_id → {'title','abstract','tags','display_kind'} 를 IN 배치로 1회 조회.
 
     검색 경로(search.py)는 건드리지 않고, 결과 id 목록만으로 enrichment를 병합하기
     위한 단일 배치 쿼리. db/None·빈 목록·테이블 부재는 모두 빈 dict로 graceful.
+    (title/abstract만 쓰는 기존 호출부는 추가 키를 무시하므로 하위호환.)
     """
     if db is None:
         return {}
@@ -481,20 +482,197 @@ async def fetch_enrichment_map(db: Any, memory_ids: Any) -> dict:
     placeholders = ",".join("?" for _ in ids)
     try:
         rows = await db.fetchall(
-            f"SELECT memory_id, title, abstract FROM {_ENRICHMENT_TABLE} "
-            f"WHERE memory_id IN ({placeholders})",
+            f"SELECT memory_id, title, abstract, tags, display_kind "
+            f"FROM {_ENRICHMENT_TABLE} WHERE memory_id IN ({placeholders})",
             tuple(ids),
         )
     except Exception as e:  # noqa: BLE001 — best-effort, never break surfacing
         logger.debug(f"enrichment batch fetch failed: {e}")
         return {}
+
+    def _tags(raw: Any) -> list:
+        try:
+            parsed = json.loads(raw) if raw else []
+        except (TypeError, ValueError):
+            return []
+        return [str(t) for t in parsed] if isinstance(parsed, list) else []
+
     return {
         str(row["memory_id"]): {
             "title": row["title"],
             "abstract": row["abstract"],
+            "tags": _tags(row["tags"] if "tags" in row.keys() else None),
+            "display_kind": (
+                row["display_kind"] if "display_kind" in row.keys() else None
+            ),
         }
         for row in rows
     }
+
+
+async def fetch_tag_facets(
+    db: Any,
+    project_id: Optional[str] = None,
+    limit: int = 30,
+    include_source: bool = True,
+) -> List[dict]:
+    """Top topic tags with counts for facet navigation: ``[{'tag','count'}]``.
+
+    Aggregates enrichment topic tags (``memory_enrichment.tags``), optionally
+    unioned with source tags (``memories.tags``), scoped to ``project_id``.
+    UNION dedupes per (memory, tag) so a tag present in both sources counts once
+    per memory. Graceful: missing enrichment table / JSON1 issues → source-only
+    (or empty) rather than raising.
+    """
+    if db is None:
+        return []
+    limit = max(1, min(int(limit or 30), 200))
+    where = "WHERE je.value IS NOT NULL AND je.value != ''"
+    params: list = []
+    proj = "" if not project_id else " AND m.project_id = ?"
+    src_select = (
+        f"SELECT je.value AS tag, m.id AS mid "
+        f"FROM memories m, json_each(m.tags) je {where}{proj}"
+    )
+    if project_id:
+        params.append(project_id)
+
+    selects = []
+    if include_source:
+        selects.append(src_select)
+    if await _enrichment_table_exists(db):
+        enr_select = (
+            f"SELECT je.value AS tag, m.id AS mid "
+            f"FROM memory_enrichment e JOIN memories m ON m.id = e.memory_id, "
+            f"json_each(e.tags) je {where}{proj}"
+        )
+        selects.append(enr_select)
+        if project_id:
+            params.append(project_id)
+    if not selects:
+        return []
+
+    union = " UNION ".join(selects)
+    sql = (
+        f"SELECT tag, COUNT(*) AS count FROM ({union}) "
+        f"GROUP BY tag ORDER BY count DESC, tag ASC LIMIT {limit}"
+    )
+    try:
+        rows = await db.fetchall(sql, tuple(params))
+    except Exception as e:  # noqa: BLE001 — facet is best-effort, never break UI
+        logger.debug(f"tag facet fetch failed: {e}")
+        return []
+    return [{"tag": str(row["tag"]), "count": int(row["count"])} for row in rows]
+
+
+_CURATABLE_CATEGORIES = (
+    "decision",
+    "bug",
+    "incident",
+    "idea",
+    "code_snippet",
+    "task",
+)
+
+
+async def fetch_curation_candidates(
+    db: Any,
+    project_id: Optional[str] = None,
+    limit: int = 50,
+    confidence_threshold: float = 0.5,
+) -> List[dict]:
+    """Memories worth a curation look, from enrichment signals:
+    ``[{'id','category','display_kind','confidence','title','reasons'}]``.
+
+    Flags (a) a display_kind that is a real category but disagrees with the
+    stored category (likely miscategorized), and (b) low enrichment confidence
+    (vague/partial). Graceful when enrichment never ran. confidence/lesson only
+    exist for memories enriched after that field was added — older rows read
+    NULL until re-enriched.
+    """
+    if db is None or not await _enrichment_table_exists(db):
+        return []
+    limit = max(1, min(int(limit or 50), 200))
+    cats = ",".join("?" for _ in _CURATABLE_CATEGORIES)
+    proj = " AND m.project_id = ?" if project_id else ""
+    params: list = []
+    if project_id:
+        params.append(project_id)
+    params.extend(_CURATABLE_CATEGORIES)
+    params.append(confidence_threshold)
+    sql = f"""
+        SELECT m.id AS id, m.category AS category, e.display_kind AS display_kind,
+               e.confidence AS confidence, e.title AS title
+        FROM memory_enrichment e JOIN memories m ON m.id = e.memory_id
+        WHERE COALESCE(m.status, 'canonical') = 'canonical'{proj}
+          AND (
+            (e.display_kind IN ({cats}) AND e.display_kind != m.category)
+            OR (e.confidence IS NOT NULL AND e.confidence < ?)
+          )
+        ORDER BY (e.confidence IS NULL), e.confidence ASC, m.id
+        LIMIT {limit}
+    """
+    try:
+        rows = await db.fetchall(sql, tuple(params))
+    except Exception as e:  # noqa: BLE001 — best-effort
+        logger.debug(f"curation candidates fetch failed: {e}")
+        return []
+    out = []
+    for r in rows:
+        dk = r["display_kind"]
+        conf = r["confidence"]
+        reasons = []
+        if dk and dk in _CURATABLE_CATEGORIES and dk != r["category"]:
+            reasons.append("miscategorized")
+        if conf is not None and conf < confidence_threshold:
+            reasons.append("low_confidence")
+        out.append(
+            {
+                "id": str(r["id"]),
+                "category": r["category"],
+                "display_kind": dk,
+                "confidence": conf,
+                "title": r["title"],
+                "reasons": reasons,
+            }
+        )
+    return out
+
+
+async def fetch_lessons(
+    db: Any, project_id: Optional[str] = None, limit: int = 50
+) -> List[dict]:
+    """Reusable takeaways captured by enrichment: ``[{'id','category','title',
+    'lesson'}]``. lesson is only populated for memories enriched after the field
+    was added; older rows are absent until re-enriched. Graceful when no table."""
+    if db is None or not await _enrichment_table_exists(db):
+        return []
+    limit = max(1, min(int(limit or 50), 200))
+    proj = " AND m.project_id = ?" if project_id else ""
+    params: list = [project_id] if project_id else []
+    sql = f"""
+        SELECT m.id AS id, m.category AS category, e.title AS title,
+               e.lesson AS lesson
+        FROM memory_enrichment e JOIN memories m ON m.id = e.memory_id
+        WHERE COALESCE(m.status, 'canonical') = 'canonical'{proj}
+          AND e.lesson IS NOT NULL AND e.lesson != ''
+        ORDER BY m.updated_at DESC, m.id
+        LIMIT {limit}
+    """
+    try:
+        rows = await db.fetchall(sql, tuple(params))
+    except Exception as e:  # noqa: BLE001 — best-effort
+        logger.debug(f"lessons fetch failed: {e}")
+        return []
+    return [
+        {
+            "id": str(r["id"]),
+            "category": r["category"],
+            "title": r["title"],
+            "lesson": r["lesson"],
+        }
+        for r in rows
+    ]
 
 
 async def attach_enrichment(db: Any, memories: List[dict]) -> List[dict]:

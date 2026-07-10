@@ -8,9 +8,11 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from ..schemas.relay import RelayDigestData, RelayEnrichmentData
+from .federated_search import session_digest_config_key
 from .relay import RelayHTTPClient, RelayService
 
 logger = logging.getLogger(__name__)
@@ -926,6 +928,14 @@ class RelayWorker:
         hook_prune_interval_hours: int = 24,
         auto_enrich_sweep_interval_hours: int = 12,
         auto_enrich_batch_cap: int = 200,
+        enrich_backfill_enabled: bool = False,
+        enrich_backfill_interval_minutes: float = 2.0,
+        enrich_backfill_cap: int = 200,
+        abstract_reembed_enabled: bool = False,
+        abstract_reembed_interval_minutes: float = 2.0,
+        abstract_reembed_cap: int = 100,
+        session_digest_settings: Optional[Any] = None,
+        session_digest_sender: Optional[Any] = None,
     ):
         if lease_seconds < 1:
             raise ValueError("lease_seconds must be at least 1")
@@ -970,6 +980,33 @@ class RelayWorker:
         )
         self.auto_enrich_batch_cap = max(1, auto_enrich_batch_cap)
         self._last_auto_enrich_sweep_monotonic: Optional[float] = None
+        # One-off convergent backfill: re-enrich memories enriched before
+        # problem/resolution/lesson/confidence were persisted. Self-terminates as
+        # rows fill (confidence goes non-NULL). Off by default; drain speed is set
+        # by worker concurrency, not this cadence.
+        self.enrich_backfill_enabled = enrich_backfill_enabled
+        self.enrich_backfill_interval_s = max(
+            30.0, enrich_backfill_interval_minutes * 60
+        )
+        self.enrich_backfill_cap = max(1, enrich_backfill_cap)
+        self._last_backfill_monotonic: Optional[float] = None
+        # E scaffolding: compute abstract embeddings into the separate store for
+        # later A/B vs content embeddings. Off by default; needs an embedding
+        # service. Convergent (stored rows drop out); memory-safe via the
+        # process-shared model cache.
+        self.abstract_reembed_enabled = abstract_reembed_enabled
+        self.abstract_reembed_interval_s = max(
+            30.0, abstract_reembed_interval_minutes * 60
+        )
+        self.abstract_reembed_cap = max(1, abstract_reembed_cap)
+        self._last_abstract_reembed_monotonic: Optional[float] = None
+        # Session digest prefetch (WS2): fetch each auto-share subscribed team
+        # hub's digest into app_config so the session-start path can inject team
+        # context with zero network calls. Gated + throttled by the passed-in
+        # federated settings; off when settings are absent.
+        self.session_digest_settings = session_digest_settings
+        self.session_digest_sender = session_digest_sender
+        self._last_session_digest_monotonic: Optional[float] = None
 
     async def run_once(self) -> Dict[str, int]:
         stats = {
@@ -1142,7 +1179,155 @@ class RelayWorker:
                 except Exception as exc:  # noqa: BLE001 — sweep must not stop worker
                     logger.warning("auto-enrich sweep failed: %s", exc)
 
+        # Convergent enrich backfill (opt-in). Tops up the queue with memories
+        # missing the newer enrichment fields; _insert_job skips live jobs so the
+        # queue can't balloon past the outstanding set, and re-enriched rows drop
+        # out. Off unless enabled; LLM-gated.
+        if (
+            self.enrich_backfill_enabled
+            and self.maintenance_service is not None
+            and self.chat_settings is not None
+        ):
+            now = time.monotonic()
+            due = (
+                self._last_backfill_monotonic is None
+                or (now - self._last_backfill_monotonic)
+                >= self.enrich_backfill_interval_s
+            )
+            if due:
+                try:
+                    if await self.maintenance_service.worker_llm_ok(self.chat_settings):
+                        res = await self.maintenance_service.enqueue_backfill(
+                            limit=self.enrich_backfill_cap
+                        )
+                        self._last_backfill_monotonic = now
+                        if res.get("enqueued"):
+                            stats["enrich_backfill_enqueued"] = res["enqueued"]
+                            logger.info(
+                                "enrich backfill queued %d jobs (scanned %d)",
+                                res["enqueued"],
+                                res.get("scanned", 0),
+                            )
+                except Exception as exc:  # noqa: BLE001 — must not stop worker
+                    logger.warning("enrich backfill sweep failed: %s", exc)
+
+        # Abstract re-embed (E scaffolding, opt-in). Computes abstract embeddings
+        # into the separate store; convergent + capped. Needs an embedding
+        # service and is off by default.
+        if (
+            self.abstract_reembed_enabled
+            and self.maintenance_service is not None
+            and self.embedding_service is not None
+        ):
+            now = time.monotonic()
+            due = (
+                self._last_abstract_reembed_monotonic is None
+                or (now - self._last_abstract_reembed_monotonic)
+                >= self.abstract_reembed_interval_s
+            )
+            if due:
+                try:
+                    res = await self.maintenance_service.reembed_abstracts(
+                        embedding_service=self.embedding_service,
+                        limit=self.abstract_reembed_cap,
+                    )
+                    self._last_abstract_reembed_monotonic = now
+                    if res.get("stored"):
+                        stats["abstract_reembed"] = res["stored"]
+                        logger.info(
+                            "abstract re-embed stored %d (scanned %d)",
+                            res["stored"],
+                            res.get("scanned", 0),
+                        )
+                except Exception as exc:  # noqa: BLE001 — must not stop worker
+                    logger.warning("abstract re-embed sweep failed: %s", exc)
+
+        # Session digest prefetch (WS2 R5, opt-in via settings). Refreshes cached
+        # team hub digests for auto-share subscribed projects on a throttled
+        # cadence. Never-raise: a hub/route/timeout failure skips at most one
+        # project and never stops the worker loop.
+        sd_settings = self.session_digest_settings
+        if sd_settings is not None and getattr(
+            sd_settings, "relay_federated_session_digest_enabled", False
+        ):
+            refresh_s = max(
+                1.0,
+                float(
+                    getattr(
+                        sd_settings,
+                        "relay_federated_session_digest_refresh_minutes",
+                        15,
+                    )
+                )
+                * 60,
+            )
+            now = time.monotonic()
+            due = (
+                self._last_session_digest_monotonic is None
+                or (now - self._last_session_digest_monotonic) >= refresh_s
+            )
+            if due:
+                try:
+                    written = await self._prefetch_session_digests(sd_settings)
+                    self._last_session_digest_monotonic = now
+                    if written:
+                        stats["session_digests_cached"] = written
+                        logger.info("session digests cached: %d projects", written)
+                except Exception as exc:  # noqa: BLE001 — must not stop worker
+                    logger.warning("session digest prefetch failed: %s", exc)
+
         return stats
+
+    async def _prefetch_session_digests(self, settings: Any) -> int:
+        """Fetch + cache team hub digests for enabled auto-share subscriptions.
+
+        Uses the effective hub url/token (skips entirely when unconfigured),
+        iterates enabled subscriptions, fetches each digest with a ≤3s bound, and
+        writes {summary, source_count, generated_at, fetched_at} to app_config.
+        A per-project failure is swallowed so one bad project can't starve the
+        rest. Returns the number of digests written this cycle.
+        """
+        config = await self.service.get_effective_config(settings)
+        values = config.get("values", {})
+        hub_url = str(values.get("hub_url") or "").strip()
+        hub_token = str(values.get("hub_token") or "").strip()
+        if not hub_url or not hub_token:
+            return 0
+
+        sender = self.session_digest_sender or build_http_outbox_sender()
+        subs = await self.service.list_auto_share_subscriptions()
+        written = 0
+        for sub in subs:
+            if not getattr(sub, "enabled", False):
+                continue
+            project_id = sub.project_id
+            try:
+                digest = await asyncio.wait_for(
+                    sender.fetch_project_digest(
+                        target_hub=hub_url,
+                        bearer_token=hub_token,
+                        team_project_id=project_id,
+                    ),
+                    timeout=3.0,
+                )
+            except Exception as exc:  # noqa: BLE001 — skip this project, keep going
+                logger.debug("session digest fetch skipped for %s: %s", project_id, exc)
+                continue
+
+            payload = {
+                "summary": (digest.narrative or "").strip()[:200],
+                "source_count": len(digest.source_memory_ids or []),
+                "generated_at": digest.generated_at,
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+            }
+            try:
+                await self.service.db.set_app_config(
+                    session_digest_config_key(project_id), json.dumps(payload)
+                )
+                written += 1
+            except Exception as exc:  # noqa: BLE001 — a store failure skips one project
+                logger.debug("session digest store skipped for %s: %s", project_id, exc)
+        return written
 
     async def run_forever(self, *, interval_seconds: float = 1.0) -> None:
         while True:

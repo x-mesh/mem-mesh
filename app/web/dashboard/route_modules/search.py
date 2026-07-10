@@ -12,13 +12,78 @@ from pydantic import BaseModel, Field
 
 from app.core.schemas.requests import normalize_project_id
 from app.core.schemas.responses import SearchResponse
+from app.core.services.recall import (
+    fetch_curation_candidates,
+    fetch_lessons,
+    fetch_tag_facets,
+)
 from app.core.services.unified_search import UnifiedSearchService
 
-from ...common.dependencies import get_search_service
+from ...common.dependencies import get_database, get_search_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Search"])
+
+
+class TagFacet(BaseModel):
+    tag: str
+    count: int
+
+
+class TagFacetsResponse(BaseModel):
+    facets: List[TagFacet] = Field(default_factory=list)
+
+
+@router.get("/memories/tags", response_model=TagFacetsResponse)
+async def memory_tag_facets(
+    project_id: Optional[str] = None,
+    limit: int = 30,
+    db=Depends(get_database),
+) -> TagFacetsResponse:
+    """Top topic tags (enrichment + source) with counts, for facet navigation."""
+    pid = normalize_project_id(project_id, strict=False) if project_id else None
+    try:
+        facets = await fetch_tag_facets(db, project_id=pid, limit=limit)
+    except Exception as exc:
+        logger.error(f"tag facets failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+    return TagFacetsResponse(facets=[TagFacet(**f) for f in facets])
+
+
+@router.get("/memories/curation-candidates")
+async def memory_curation_candidates(
+    project_id: Optional[str] = None,
+    limit: int = 50,
+    db=Depends(get_database),
+) -> dict:
+    """Memories flagged by enrichment for a curation look (miscategorized
+    display_kind and/or low confidence)."""
+    pid = normalize_project_id(project_id, strict=False) if project_id else None
+    try:
+        return {
+            "candidates": await fetch_curation_candidates(
+                db, project_id=pid, limit=limit
+            )
+        }
+    except Exception as exc:
+        logger.error(f"curation candidates failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/memories/lessons")
+async def memory_lessons(
+    project_id: Optional[str] = None,
+    limit: int = 50,
+    db=Depends(get_database),
+) -> dict:
+    """Reusable takeaways (enrichment 'lesson' field) rolled up — 'what we learned'."""
+    pid = normalize_project_id(project_id, strict=False) if project_id else None
+    try:
+        return {"lessons": await fetch_lessons(db, project_id=pid, limit=limit)}
+    except Exception as exc:
+        logger.error(f"lessons failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 class SearchRequest(BaseModel):
@@ -40,6 +105,7 @@ class SearchRequest(BaseModel):
     date_from: Optional[str] = None
     date_to: Optional[str] = None
     temporal_mode: str = "boost"
+    scope: str = "local"
 
 
 # Canonical memory categories (mirrors SearchParams.validate_category). Used to
@@ -74,6 +140,7 @@ async def _do_search(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     temporal_mode: str = "boost",
+    scope: str = "local",
 ) -> SearchResponse:
     """Shared search logic for GET and POST endpoints."""
     # Single chokepoint for both GET (query param) and POST (body) search, so a
@@ -90,7 +157,11 @@ async def _do_search(
             if c in _VALID_CATEGORIES and c not in deduped:
                 deduped.append(c)
         categories = deduped[: len(_VALID_CATEGORIES)] or None
-    try:
+    # Unknown scope degrades to local (mirrors MCP tools.py:239-240 contract).
+    if scope not in ("local", "hub", "all"):
+        scope = "local"
+
+    async def _local_search() -> SearchResponse:
         return await service.search(
             query=query,
             project_id=project_id,
@@ -109,6 +180,42 @@ async def _do_search(
             date_to=date_to,
             temporal_mode=temporal_mode,
         )
+
+    try:
+        if scope == "local":
+            return await _local_search()
+
+        db = getattr(service, "db", None)
+        if db is None:
+            # No local DB handle → federation unavailable; never answer a
+            # hub-only request with local results.
+            if scope == "hub":
+                return SearchResponse(results=[], total=0, hub_status="skipped")
+            result = await _local_search()
+            result.hub_status = "skipped"
+            return result
+
+        # Load more: paginating a federated result set does not re-query the hub
+        # (hub search has no stable offset) — continue locally only, no dup rows.
+        if offset > 0:
+            return await _local_search()
+
+        from app.core.config import get_settings
+        from app.core.services.federated_search import FederatedHubSearch
+
+        # Merge single + multi category so hub results honor the same filter the
+        # local query does (D8: unmerged → unfiltered hub rows leak in).
+        merged_categories = categories or ([category] if category else None)
+        federated = FederatedHubSearch(db, get_settings())
+        return await federated.search(
+            scope=scope,
+            query=query,
+            limit=limit,
+            local_search=_local_search,
+            categories=merged_categories,
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Search memories error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -132,6 +239,7 @@ async def search_memories(
     date_from: str = None,
     date_to: str = None,
     temporal_mode: str = "boost",
+    scope: str = "local",
     service: UnifiedSearchService = Depends(get_search_service),
 ) -> SearchResponse:
     """
@@ -161,6 +269,7 @@ async def search_memories(
         date_from=date_from,
         date_to=date_to,
         temporal_mode=temporal_mode,
+        scope=scope,
     )
 
 
@@ -193,6 +302,7 @@ async def search_memories_post(
         date_from=body.date_from,
         date_to=body.date_to,
         temporal_mode=body.temporal_mode,
+        scope=body.scope,
     )
 
 

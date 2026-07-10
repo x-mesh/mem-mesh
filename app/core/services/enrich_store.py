@@ -25,6 +25,17 @@ class EnrichmentStore:
     def __init__(self, db: Any):
         self.db = db
 
+    # Columns added after the original title/abstract/tags/display_kind schema.
+    # The LLM already produces these (RelayEnrichmentData) but they used to be
+    # dropped — persisting them enables curation (confidence / display_kind) and
+    # a lessons rollup. Existing rows keep NULL until the memory is re-enriched.
+    _ADDED_COLUMNS = (
+        ("problem", "TEXT"),
+        ("resolution", "TEXT"),
+        ("lesson", "TEXT"),
+        ("confidence", "REAL"),
+    )
+
     async def ensure_schema(self) -> None:
         if self.db in EnrichmentStore._schema_ready:
             return
@@ -37,9 +48,21 @@ class EnrichmentStore:
                     tags TEXT,
                     display_kind TEXT,
                     model TEXT,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    problem TEXT,
+                    resolution TEXT,
+                    lesson TEXT,
+                    confidence REAL
                 )
                 """)
+            # Migrate tables that predate the added columns (lazy, no bump).
+            rows = await self.db.fetchall("PRAGMA table_info(memory_enrichment)")
+            existing = {str(r["name"]) for r in rows}
+            for col, decl in EnrichmentStore._ADDED_COLUMNS:
+                if col not in existing:
+                    await self.db.execute(
+                        f"ALTER TABLE memory_enrichment ADD COLUMN {col} {decl}"
+                    )
         EnrichmentStore._schema_ready.add(self.db)
 
     async def upsert(
@@ -51,6 +74,10 @@ class EnrichmentStore:
         tags: Optional[List[str]] = None,
         display_kind: str = "",
         model: str = "",
+        problem: Optional[str] = None,
+        resolution: Optional[str] = None,
+        lesson: Optional[str] = None,
+        confidence: Optional[float] = None,
     ) -> dict:
         await self.ensure_schema()
         now = _utc_now()
@@ -61,8 +88,9 @@ class EnrichmentStore:
             await self.db.execute(
                 """
                 INSERT INTO memory_enrichment
-                    (memory_id, title, abstract, tags, display_kind, model, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (memory_id, title, abstract, tags, display_kind, model,
+                     created_at, problem, resolution, lesson, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     memory_id,
@@ -72,6 +100,10 @@ class EnrichmentStore:
                     display_kind,
                     model,
                     now,
+                    problem,
+                    resolution,
+                    lesson,
+                    confidence,
                 ),
             )
         return await self.get(memory_id)

@@ -440,9 +440,15 @@ class Settings(BaseSettings):
         ),
     )
     relay_llm_timeout: float = Field(
-        default=30.0,
+        default=180.0,
         ge=1.0,
-        description="Timeout for relay LLM API calls in seconds",
+        description=(
+            "Timeout for relay LLM API calls in seconds. Digest (aggregate) "
+            "generation sends a multi-memory prompt, so the old 30s default "
+            "frequently ReadTimeout'd; 180s gives real completions headroom "
+            "(paired with the digest now sending enrichment summaries, not full "
+            "content). Env: MEM_MESH_RELAY_LLM_TIMEOUT."
+        ),
     )
     relay_http_timeout: float = Field(
         default=10.0,
@@ -484,6 +490,30 @@ class Settings(BaseSettings):
         description=(
             "Seconds the federated circuit breaker stays open after tripping; "
             "after the cooldown one probe request is allowed through"
+        ),
+    )
+    relay_federated_session_digest_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable the relay worker session_digest prefetch: periodically fetch "
+            "each auto-share subscribed team hub digest into app_config so the "
+            "session-start path can inject it with zero network calls"
+        ),
+    )
+    relay_federated_session_digest_refresh_minutes: int = Field(
+        default=15,
+        ge=1,
+        description=(
+            "How often the relay worker refreshes cached team hub digests "
+            "(monotonic throttle); shorter means fresher at more hub load"
+        ),
+    )
+    relay_federated_session_digest_max_age_minutes: int = Field(
+        default=60,
+        ge=1,
+        description=(
+            "Max age of a cached team hub digest still injected at session start; "
+            "beyond this the read helper returns None (section omitted)"
         ),
     )
     relay_prompt_version: str = Field(

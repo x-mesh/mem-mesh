@@ -350,6 +350,28 @@ _DEFAULT_EMBED_TIMEOUT_S = 120.0
 class EmbeddingService:
     """임베딩 생성 서비스"""
 
+    # Process-shared model cache: one loaded SentenceTransformer per model_name.
+    # Without this, every EmbeddingService instance loads its own ~2GB copy — so
+    # N concurrent worker instances (MEM_MESH_WORKER_CONCURRENCY) or repeated
+    # pytest constructions multiply memory (the observed ~60GB blowup). Sharing
+    # for inference is safe: the worker's concurrent instances run on a single
+    # asyncio thread (encode is serialized), and forward passes never mutate the
+    # shared model's parameters.
+    _MODEL_CACHE: dict = {}
+    _MODEL_CACHE_LOCK = threading.Lock()
+
+    @classmethod
+    def _get_or_load_model(cls, model_name: str) -> "SentenceTransformer":
+        cached = cls._MODEL_CACHE.get(model_name)
+        if cached is not None:
+            return cached
+        with cls._MODEL_CACHE_LOCK:
+            cached = cls._MODEL_CACHE.get(model_name)
+            if cached is None:
+                cached = SentenceTransformer(model_name)
+                cls._MODEL_CACHE[model_name] = cached
+            return cached
+
     def __init__(
         self,
         model_name: Optional[str] = None,
@@ -460,7 +482,9 @@ class EmbeddingService:
         self._download_progress = 0.0
 
         try:
-            self.model = SentenceTransformer(self.model_name)
+            # Reuse a process-shared copy when one is already loaded for this
+            # model — avoids N-instances × ~2GB memory multiplication.
+            self.model = EmbeddingService._get_or_load_model(self.model_name)
             self._download_progress = 0.9
 
             # Auto-detect model dimension

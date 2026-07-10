@@ -276,36 +276,77 @@ class MCPToolHandlers:
                 filtered=enable_noise_filter,
             )
 
+            # enrich 활용: 결과 id 배치 조회로 로컬 enrichment(title/abstract/tags)를
+            # 병합. 검색 경로는 enrichment를 안 붙이므로 여기서 한 번 JOIN한다.
+            enrichment_map: Dict[str, Any] = {}
+            try:
+                _edb = getattr(self._storage, "db", None)
+                if _edb is not None and result.results:
+                    from ..core.services.recall import fetch_enrichment_map
+
+                    enrichment_map = await fetch_enrichment_map(
+                        _edb, [r.id for r in result.results]
+                    )
+            except Exception as e:  # noqa: BLE001 — enrichment merge is best-effort
+                logger.debug("enrichment attach skipped", error=str(e))
+                enrichment_map = {}
+
             # 응답 압축 (활성화된 경우)
             if (
                 self._enable_compression
                 and self._optimizer
                 and response_format != "full"
             ):
-                return self._compress_search_response(result, response_format)
+                return self._compress_search_response(
+                    result, response_format, enrichment_map
+                )
 
-            return result.model_dump()
+            dumped = result.model_dump()
+            if enrichment_map:
+                for r in dumped.get("results", []):
+                    enr = enrichment_map.get(str(r.get("id")))
+                    if not enr:
+                        continue
+                    if not r.get("title") and enr.get("title"):
+                        r["title"] = enr["title"]
+                    if not r.get("abstract") and enr.get("abstract"):
+                        r["abstract"] = enr["abstract"]
+                    if enr.get("tags") and not r.get("enrichment_tags"):
+                        r["enrichment_tags"] = enr["tags"]
+            return dumped
         except Exception as e:
             logger.error("Error in search", error=str(e))
             raise
 
     def _compress_search_response(
-        self, result: "SearchResponse", format: str = "standard"
+        self,
+        result: "SearchResponse",
+        format: str = "standard",
+        enrichment_map: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """검색 결과 압축"""
-        results_list = [
-            {
-                "id": r.id,
-                "content": r.content,
-                "category": r.category,
-                "similarity_score": r.similarity_score,
-                "created_at": r.created_at,
-                "project_id": r.project_id,
-                "tags": r.tags,
-                "anchors": r.anchors,
-            }
-            for r in result.results
-        ]
+        """검색 결과 압축. enrichment_map(id→title/abstract/tags)이 있으면 compact
+        요약을 원문 절단 대신 enriched abstract로 치환하고 topic tags를 실어,
+        같은 토큰으로 정보 밀도를 높인다(원문은 context()/get() 드릴다운)."""
+        emap = enrichment_map or {}
+        results_list = []
+        for r in result.results:
+            enr = emap.get(str(r.id)) or {}
+            results_list.append(
+                {
+                    "id": r.id,
+                    "content": r.content,
+                    "category": r.category,
+                    "similarity_score": r.similarity_score,
+                    "created_at": r.created_at,
+                    "project_id": r.project_id,
+                    "tags": r.tags,
+                    "anchors": r.anchors,
+                    "title": (r.title or enr.get("title")),
+                    "abstract": (r.abstract or enr.get("abstract")),
+                    "enrichment_tags": enr.get("tags") or [],
+                    "origin": getattr(r, "origin", "local"),
+                }
+            )
 
         if format == "minimal":
             # 극도 압축: ID와 점수만
@@ -314,29 +355,62 @@ class MCPToolHandlers:
                 for r in results_list
             ]
         elif format == "compact":
-            # 압축: ID, 카테고리, 요약
-            compressed_results = [
-                {
+            # 압축: enriched abstract 우선(없으면 원문 절단), title + topic tags.
+            compressed_results = []
+            for r in results_list:
+                item: Dict[str, Any] = {
                     "id": r["id"][:8],
                     "category": r["category"],
-                    "summary": (
-                        r["content"][:80] + "..."
-                        if len(r["content"]) > 80
-                        else r["content"]
-                    ),
                     "score": round(r["similarity_score"], 2),
                 }
-                for r in results_list
-            ]
-        else:  # standard
-            # 표준: 전체 내용 포함하되 구조화
-            compressed_results = results_list
+                if r["title"]:
+                    item["title"] = r["title"]
+                content = r["content"] or ""
+                item["summary"] = r["abstract"] or (
+                    content[:80] + "..." if len(content) > 80 else content
+                )
+                topic_tags = r["enrichment_tags"] or r["tags"]
+                if topic_tags:
+                    item["tags"] = topic_tags
+                if r["origin"] == "hub":
+                    item["origin"] = "hub"
+                compressed_results.append(item)
+        else:  # standard — abstract-first (progressive disclosure)
+            # enriched 결과는 title+abstract로 요약하고 raw content는 생략한다
+            # (원문은 context()/get(<id>) 드릴다운). enrichment가 아직 없는
+            # 메모리는 full content를 유지해 커버리지 공백 동안 회귀가 없다.
+            compressed_results = []
+            for r in results_list:
+                item: Dict[str, Any] = {
+                    "id": r["id"],  # full id — get()/context() 드릴다운용
+                    "category": r["category"],
+                    "similarity_score": r["similarity_score"],
+                    "created_at": r["created_at"],
+                    "project_id": r["project_id"],
+                    "anchors": r["anchors"],
+                }
+                topic_tags = r["enrichment_tags"] or r["tags"]
+                if topic_tags:
+                    item["tags"] = topic_tags
+                if r["origin"] == "hub":
+                    item["origin"] = "hub"
+                if r["abstract"]:
+                    if r["title"]:
+                        item["title"] = r["title"]
+                    item["abstract"] = r["abstract"]
+                    # raw content 생략 — 필요하면 context()/get()으로 드릴다운
+                else:
+                    item["content"] = r["content"]
+                compressed_results.append(item)
 
         return {
             "results": compressed_results,
             "total": len(compressed_results),
             "format": format,
             "compressed": True,
+            # federation 메타: 모든 포맷 top-level에 항상 포함(None이어도 키 유지).
+            # scope=local이면 None, federated면 'ok'/'unavailable'/'skipped'.
+            "hub_status": getattr(result, "hub_status", None),
         }
 
     async def context(
@@ -1028,6 +1102,22 @@ class MCPToolHandlers:
                     )
             except Exception as e:  # noqa: BLE001
                 logger.debug("relevant-memory surfacing skipped", error=str(e))
+
+            # Team hub digest 주입 (best-effort, 로컬 read only — 네트워크 0회).
+            # worker가 prefetch한 캐시를 read_cached_team_digest로 읽어 붙인다.
+            # auto-share 미구독/캐시 없음/만료/미지원이면 None으로 남는다.
+            try:
+                db = getattr(self._storage, "db", None)
+                if db is not None:
+                    from ..core.services.federated_search import (
+                        read_cached_team_digest,
+                    )
+
+                    session_context.team_hub = await read_cached_team_digest(
+                        db, project_id
+                    )
+            except Exception as e:  # noqa: BLE001 — session start must never fail
+                logger.debug("team-hub digest injection skipped", error=str(e))
 
             # 세션 컨텍스트와 토큰 정보를 함께 반환
             response = session_context.model_dump()

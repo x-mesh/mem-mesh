@@ -14,8 +14,10 @@ noise filter, rerank) stays local-only and free of relay/httpx imports.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
 
 from ..schemas.relay import RelaySearchRequest, RelaySearchResult
@@ -126,13 +128,36 @@ class FederatedHubSearch:
             self._relay_service = RelayService(self.db)
         return self._relay_service
 
-    async def _hub_config(self) -> dict[str, str]:
+    @staticmethod
+    def _coerce_float(raw: Any, default: float) -> float:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return default
+        return value
+
+    async def _hub_config(self) -> dict[str, Any]:
         config = await self._relay().get_effective_config(self.settings)
         values = config.get("values", {})
+        # DB > env > default: the effective-config values already resolve DB
+        # overrides; fall back to the settings attribute when unset/unparseable.
+        timeout = self._coerce_float(
+            values.get("federated_timeout"),
+            getattr(self.settings, "relay_federated_timeout", 2.5),
+        )
+        hub_weight = self._coerce_float(
+            values.get("federated_hub_weight"),
+            getattr(self.settings, "relay_federated_hub_weight", 0.75),
+        )
+        # Remember the effective hub weight so the scope=all fuse (which runs
+        # after this config load) uses the DB-backed value without re-reading.
+        self._hub_weight_effective = hub_weight
         return {
             "hub_url": str(values.get("hub_url") or "").strip(),
             "hub_token": str(values.get("hub_token") or "").strip(),
             "source_node_id": str(values.get("source_node_id") or "").strip(),
+            "timeout": timeout,
+            "hub_weight": hub_weight,
         }
 
     def _breaker_params(self) -> tuple[int, float]:
@@ -182,7 +207,9 @@ class FederatedHubSearch:
             exclude_source_node=cfg["source_node_id"] or None,
             kinds=sorted(category_set) or None,
         )
-        timeout = getattr(self.settings, "relay_federated_timeout", 2.5)
+        timeout = cfg.get(
+            "timeout", getattr(self.settings, "relay_federated_timeout", 2.5)
+        )
         try:
             response = await asyncio.wait_for(
                 self.http_client.send_search(
@@ -275,7 +302,13 @@ class FederatedHubSearch:
             local_response.hub_status = hub_status
             return local_response
 
-        hub_weight = getattr(self.settings, "relay_federated_hub_weight", 0.75)
+        # Set by _hub_config() during fetch_hub_results (DB-backed); fall back to
+        # the settings default if the hub was skipped before config load.
+        hub_weight = getattr(
+            self,
+            "_hub_weight_effective",
+            getattr(self.settings, "relay_federated_hub_weight", 0.75),
+        )
         fused = fuse_relay_results_rrf(
             [r.model_dump() for r in local_response.results],
             [r.model_dump() for r in hub_results],
@@ -293,3 +326,80 @@ class FederatedHubSearch:
         local_response.total = len(results)
         local_response.hub_status = hub_status
         return local_response
+
+
+# --- WS2: session digest cache (worker prefetch → session-start read) ---------
+
+# app_config key namespace shared by the relay worker (writer, t4) and the
+# session-start read helper (reader, t5). One row per subscribed team project.
+_SESSION_DIGEST_KEY_PREFIX = "relay.session_digest."
+
+
+def session_digest_config_key(project_id: str) -> str:
+    """app_config key holding the cached team hub digest for ``project_id``."""
+    return f"{_SESSION_DIGEST_KEY_PREFIX}{project_id}"
+
+
+def _parse_iso_utc(value: str) -> Optional[datetime]:
+    """Best-effort parse of an ISO-8601 UTC timestamp (with or without 'Z')."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+async def read_cached_team_digest(
+    db: Any, project_id: str, settings: Any = None
+) -> Optional[dict]:
+    """Read the cached team hub digest for a project — local read only (N1).
+
+    Returns ``{summary, source_count, generated_at}`` when a fresh cached digest
+    exists AND the project's auto-share subscription is enabled; otherwise None.
+    Makes ZERO network calls and swallows every error into None (N2), so the
+    session-start path can call it best-effort without ever failing a session.
+    """
+    try:
+        if settings is None:
+            from ..config import get_settings
+
+            settings = get_settings()
+        if not getattr(settings, "relay_federated_session_digest_enabled", True):
+            return None
+
+        # Gate on the auto-share subscription: only surface team context the user
+        # opted this project into (RelayService.get_project_auto_share precedent).
+        sub = await RelayService(db).get_project_auto_share(project_id)
+        if sub is None or not getattr(sub, "enabled", False):
+            return None
+
+        raw = await db.get_app_config(session_digest_config_key(project_id))
+        if not raw:
+            return None
+        payload = json.loads(raw)
+
+        fetched_at = _parse_iso_utc(payload.get("fetched_at", ""))
+        if fetched_at is None:
+            return None
+        max_age_minutes = getattr(
+            settings, "relay_federated_session_digest_max_age_minutes", 60
+        )
+        age_seconds = (datetime.now(timezone.utc) - fetched_at).total_seconds()
+        if age_seconds > max_age_minutes * 60:
+            return None
+
+        summary = payload.get("summary")
+        if not summary:
+            return None
+        return {
+            "summary": summary,
+            "source_count": payload.get("source_count", 0),
+            "generated_at": payload.get("generated_at"),
+        }
+    except Exception as exc:  # noqa: BLE001 — session-start read must never raise
+        logger.debug("read_cached_team_digest skipped", extra={"error": str(exc)})
+        return None

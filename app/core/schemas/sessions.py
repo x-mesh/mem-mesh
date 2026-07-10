@@ -80,6 +80,14 @@ class SessionContext(BaseModel):
             "올리지 않아 recall 지표를 부풀리지 않는다. 비면 미지원/비활성."
         ),
     )
+    team_hub: Optional[dict] = Field(
+        default=None,
+        description=(
+            "캐시된 팀 hub digest 요약 {summary, source_count, generated_at}. "
+            "worker가 prefetch한 로컬 캐시를 read-only로 읽어 주입한다(네트워크 "
+            "호출 없음). auto-share 미구독/캐시 없음/만료 시 None."
+        ),
+    )
 
 
 class SessionResumeParams(BaseModel):

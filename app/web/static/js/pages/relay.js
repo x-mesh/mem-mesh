@@ -370,6 +370,10 @@ export class RelayPage extends HTMLElement {
       event.preventDefault();
       this.saveSharingPolicy();
     });
+    this.querySelector('#relay-federated-form')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.saveFederatedSettings();
+    });
     this.querySelector('#relay-worker-form')?.addEventListener('submit', (event) => {
       event.preventDefault();
       this.saveWorkerSettings();
@@ -560,6 +564,30 @@ export class RelayPage extends HTMLElement {
       showToast('Personal relay settings saved.', 'success');
     } catch (error) {
       showToast(`Relay settings failed: ${this.errorMessage(error)}`, 'error');
+    } finally {
+      submit.disabled = false;
+    }
+  }
+
+  async saveFederatedSettings() {
+    if (!this.api) return;
+    const submit = this.querySelector('#relay-federated-submit');
+    const timeoutRaw = this.querySelector('#relay-setting-federated-timeout')?.value.trim();
+    const weightRaw = this.querySelector('#relay-setting-federated-weight')?.value.trim();
+    const payload = {};
+    if (timeoutRaw) payload.federated_timeout = Number(timeoutRaw);
+    if (weightRaw) payload.federated_hub_weight = Number(weightRaw);
+    if (payload.federated_timeout === undefined && payload.federated_hub_weight === undefined) {
+      showToast('Enter a timeout or weight to save.', 'error');
+      return;
+    }
+    submit.disabled = true;
+    try {
+      this.settings = await this.api.updateRelaySettings(payload);
+      this.renderSettings();
+      showToast('Federated search tuning saved.', 'success');
+    } catch (error) {
+      showToast(`Federated tuning failed: ${this.errorMessage(error)}`, 'error');
     } finally {
       submit.disabled = false;
     }
@@ -1376,6 +1404,44 @@ export class RelayPage extends HTMLElement {
             ${this.renderSettingRow(data.hub_token)}
           </div>
         </section>
+
+        <form class="relay-panel" id="relay-federated-form">
+          <div class="relay-panel-header">
+            <h2>Federated Search</h2>
+            <span class="relay-panel-meta">scope=all tuning</span>
+          </div>
+          <div class="relay-form-grid">
+            <label class="relay-field">
+              <span>Hub timeout (s)</span>
+              <input
+                id="relay-setting-federated-timeout"
+                type="number"
+                step="0.1"
+                min="0.5"
+                max="60"
+                value="${this.escapeHtml(data.federated_timeout?.value || '')}"
+                placeholder="2.5"
+              >
+              ${this.renderSettingHint(data.federated_timeout)}
+            </label>
+            <label class="relay-field">
+              <span>Hub RRF weight</span>
+              <input
+                id="relay-setting-federated-weight"
+                type="number"
+                step="0.05"
+                min="0"
+                max="2"
+                value="${this.escapeHtml(data.federated_hub_weight?.value || '')}"
+                placeholder="0.75"
+              >
+              ${this.renderSettingHint(data.federated_hub_weight)}
+            </label>
+          </div>
+          <div class="relay-actions">
+            <button class="primary-button" id="relay-federated-submit" type="submit">Save Federated Tuning</button>
+          </div>
+        </form>
 
         <form class="relay-panel relay-field-wide" id="relay-sharing-form">
           <div class="relay-panel-header">

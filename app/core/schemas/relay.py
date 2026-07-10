@@ -408,6 +408,9 @@ class RelaySettingsResponse(BaseModel):
     # This hub's own public URL (IP/domain), used as the default for pairing
     # invite codes so redeeming nodes auto-fill their Team Hub URL.
     public_url: RelaySettingValue
+    # Federated search tuning (DB-backed): hub call timeout + hub RRF weight.
+    federated_timeout: RelaySettingValue
+    federated_hub_weight: RelaySettingValue
     identities: List[RelayIdentitySummary] = Field(default_factory=list)
     category_policies: List[RelayCategoryPolicy] = Field(default_factory=list)
 
@@ -425,6 +428,10 @@ class RelaySettingsUpdateRequest(BaseModel):
     # This hub's public URL (IP/domain) — remembered as the default embedded in
     # pairing invite codes.
     public_url: Optional[str] = Field(default=None, max_length=500)
+    # Federated search tuning (DB-backed override of the env/default). None =
+    # leave unchanged. timeout in seconds (>=0.5); hub RRF weight in [0, 2].
+    federated_timeout: Optional[float] = Field(default=None, ge=0.5, le=60.0)
+    federated_hub_weight: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     # Explicit set of categories to opt OUT of sharing (replaces the stored
     # set wholesale). None = leave unchanged; [] = clear (share everything
     # not denylisted).

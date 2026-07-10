@@ -24,6 +24,11 @@ class SearchPage extends HTMLElement {
     this.totalResults = 0;
     this.hasMore = false;
     this.isInitialized = false;
+    // Federated search scope: 'local' (default) or 'all' (local + team hub).
+    this.searchScope = 'local';
+    // hub_status from the last federated response ('ok'|'unavailable'|'skipped'
+    // |null) — drives the "hub unavailable" banner.
+    this.hubStatus = null;
   }
   
   connectedCallback() {
@@ -202,6 +207,15 @@ class SearchPage extends HTMLElement {
         this.performSearch();
       }
       
+      // Scope toggle (local ↔ all): flip and re-run the search.
+      if (target.closest('[data-action="toggle-scope"]')) {
+        this.searchScope = this.searchScope === 'all' ? 'local' : 'all';
+        const toggle = target.closest('[data-action="toggle-scope"]');
+        toggle.setAttribute('aria-pressed', this.searchScope === 'all' ? 'true' : 'false');
+        toggle.classList.toggle('active', this.searchScope === 'all');
+        this.performSearch();
+      }
+
       // Retry button
       if (target.closest('[data-action="retry"]')) {
         this.performSearch();
@@ -320,16 +334,18 @@ class SearchPage extends HTMLElement {
         date_from: this.dateFrom || undefined,
         date_to: this.dateTo || undefined,
         limit: this.pageSize,
-        search_mode: this.searchMode
+        search_mode: this.searchMode,
+        scope: this.searchScope
       };
       if (this.recencyWeight > 0) params.recency_weight = this.recencyWeight;
-      
+
       const response = await window.app.apiClient.searchMemories(this.searchQuery, params);
-      
+
       this.searchResults = response.results || [];
       this.totalResults = response.total || this.searchResults.length;
       this.hasMore = this.searchResults.length >= this.pageSize;
-      
+      this.hubStatus = response.hub_status || null;
+
     } catch {
       this.searchResults = [];
       this.showError('Search failed.');
@@ -360,7 +376,10 @@ class SearchPage extends HTMLElement {
         date_to: this.dateTo || undefined,
         limit: this.pageSize,
         offset: offset,
-        search_mode: this.searchMode
+        search_mode: this.searchMode,
+        // Backend does not re-query the hub for offset>0 (hub search has no
+        // stable offset) — this paginates the local set only, no dup rows.
+        scope: this.searchScope
       };
       if (this.recencyWeight > 0) loadMoreParams.recency_weight = this.recencyWeight;
       
@@ -443,17 +462,31 @@ class SearchPage extends HTMLElement {
     }
     
     this.updateResultsCount(this.totalResults);
-    
+
     if (this.searchResults.length === 0) {
       this.showNoResults();
       return;
     }
-    
+
     if (resultsContainer) {
-      resultsContainer.innerHTML = this.searchResults.map(memory => this.renderResultCard(memory)).join('');
+      resultsContainer.innerHTML =
+        this.renderHubBanner() +
+        this.searchResults.map(memory => this.renderResultCard(memory)).join('');
     }
-    
+
     this.updateLoadMoreButton();
+  }
+
+  renderHubBanner() {
+    // Only surface when a scope=all/hub search reached out but the hub was down
+    // (timeout/error) and results degraded to local-only.
+    if (this.hubStatus !== 'unavailable') return '';
+    return `
+      <div class="chroma-hub-banner" role="status">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>팀 hub에 연결할 수 없어 로컬 결과만 표시합니다.</span>
+      </div>
+    `;
   }
   
   appendResults(newResults) {
@@ -571,6 +604,7 @@ class SearchPage extends HTMLElement {
               ${icon}
               <span>${memory.category || 'memory'}</span>
             </span>
+            ${memory.origin === 'hub' ? '<span class="chroma-result-origin chroma-origin-hub" title="From your team hub">Hub</span>' : ''}
             ${memory.project_id ? `<span class="chroma-result-project">${memory.project_id}</span>` : ''}
           </div>
           ${score !== null ? `
@@ -772,7 +806,25 @@ class SearchPage extends HTMLElement {
             </div>
             <p class="chroma-mode-description">${this.getModeDescription()}</p>
           </div>
-          
+
+          <div class="chroma-filter-section">
+            <h3>Search Scope</h3>
+            <div class="chroma-scope-chips">
+              <button
+                class="chroma-mode-option chroma-scope-toggle ${this.searchScope === 'all' ? 'active' : ''}"
+                data-action="toggle-scope"
+                role="switch"
+                aria-pressed="${this.searchScope === 'all' ? 'true' : 'false'}"
+                title="팀 hub 결과를 함께 검색 (scope=all)"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                Include team hub
+                <span class="mode-hint">로컬+hub</span>
+              </button>
+            </div>
+            <p class="chroma-mode-description">기본은 로컬만 검색합니다. 켜면 팀 hub 결과를 통합 랭킹에 포함합니다.</p>
+          </div>
+
           <div class="chroma-filter-section">
             <h3>최신 우선도</h3>
             <div class="chroma-recency-slider">

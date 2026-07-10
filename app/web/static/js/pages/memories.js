@@ -94,6 +94,10 @@ class MemoriesPage extends HTMLElement {
     this.recencyWeight = 0;
     this.timeRange = null; // today, this_week, this_month
     this._prevSortBy = 'created_at'; // remember sort before search auto-switch
+    // Federated scope: 'local' (default) or 'all' (local + team hub). hubStatus
+    // holds the last response's hub_status for the "hub unavailable" banner.
+    this.searchScope = 'local';
+    this.hubStatus = null;
     this.viewParams = {};
     this._searchTimer = null;
     this._paletteEl = null;
@@ -133,6 +137,7 @@ class MemoriesPage extends HTMLElement {
     this.loadProjectsForFilter();
     this.loadStats();
     this.loadActivePins();
+    this.loadTagFacets();
   }
 
   disconnectedCallback() {
@@ -228,6 +233,9 @@ class MemoriesPage extends HTMLElement {
         <select class="mem-source-select">
           <option value="">All Sources</option>
         </select>
+        <button class="mem-scope-toggle${this.searchScope === 'all' ? ' active' : ''}" data-action="toggle-scope" role="switch" aria-pressed="${this.searchScope === 'all' ? 'true' : 'false'}" title="Include team hub results (scope=all)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        </button>
         <button class="mem-fav-toggle${this._showFavoritesOnly ? ' active' : ''}" title="Favorites only">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="${this._showFavoritesOnly ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
         </button>
@@ -238,6 +246,7 @@ class MemoriesPage extends HTMLElement {
       <div class="mem-stats-bar"></div>
       <div class="mem-batch-bar" style="display:none"></div>
       <div class="mem-chips"></div>
+      <div class="mem-facets"></div>
       <div class="mem-suggestions"></div>
       <div class="mem-content-area">
         <div class="mem-list"></div>
@@ -281,6 +290,17 @@ class MemoriesPage extends HTMLElement {
 
   /* ── Build single row (dashboard pattern) ───────────────── */
 
+  renderHubBanner() {
+    // Shown only when a scope=all search reached the hub but it was down and
+    // results degraded to local-only.
+    if (this.hubStatus !== 'unavailable') return '';
+    return `
+      <div class="mem-hub-banner" role="status">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>팀 hub에 연결할 수 없어 로컬 결과만 표시합니다.</span>
+      </div>`;
+  }
+
   buildRow(mem) {
     const icon = CAT_ICONS[mem.category] || DEFAULT_ICON;
     const content = truncate(mem.content);
@@ -306,6 +326,7 @@ class MemoriesPage extends HTMLElement {
         </button>
         <span class="recent-item-icon">${icon}</span>
         <span class="recent-item-badge mem-clickable-filter" data-filter-type="category" data-filter-value="${esc(mem.category)}">${esc(mem.category)}</span>
+        ${mem.origin === 'hub' ? '<span class="recent-item-origin mem-origin-hub" title="From your team hub">Hub</span>' : ''}
         ${mem.project_id ? `<span class="recent-item-project mem-clickable-filter" data-filter-type="project_id" data-filter-value="${esc(mem.project_id)}">${esc(mem.project_id)}</span>` : ''}
         ${clientBadge}
         <span class="recent-item-content">${contentHtml}</span>
@@ -356,7 +377,7 @@ class MemoriesPage extends HTMLElement {
     }
 
     if (this.page === 0 || this._showFavoritesOnly) {
-      container.innerHTML = displayMems.map(m => this.buildRow(m)).join('');
+      container.innerHTML = this.renderHubBanner() + displayMems.map(m => this.buildRow(m)).join('');
     } else {
       // append new rows for load-more
       const frag = document.createRange().createContextualFragment(
@@ -404,6 +425,34 @@ class MemoriesPage extends HTMLElement {
       <span class="mem-suggest-label">Did you mean:</span>
       ${suggestions.map(s => `<button class="mem-suggest-item" data-query="${esc(s)}">${esc(s)}</button>`).join('')}
     `;
+  }
+
+  /* ── Tag facets (topic navigation) ──────────────────────── */
+
+  async loadTagFacets() {
+    const api = window.app?.apiClient;
+    if (!api) return;
+    try {
+      const params = { limit: 20 };
+      if (this.viewParams.project_id) params.project_id = this.viewParams.project_id;
+      const data = await api.get('/memories/tags', params);
+      this.renderTagFacets(data?.facets || []);
+    } catch { /* facets are best-effort */ }
+  }
+
+  renderTagFacets(facets) {
+    const container = this.querySelector('.mem-facets');
+    if (!container) return;
+    // Hide facets that are already the active filter to avoid redundancy.
+    const active = this.viewParams.tag;
+    const chips = facets.filter(f => f.tag && f.tag !== active);
+    if (!chips.length) { container.innerHTML = ''; return; }
+    // Reuse the existing tag click handler (data-filter-type="tag").
+    container.innerHTML = chips.map(f =>
+      `<span class="mem-tag mem-clickable-filter" data-filter-type="tag"`
+      + ` data-filter-value="${esc(f.tag)}" title="${f.count} memories">`
+      + `#${esc(f.tag)} <small class="mem-facet-count">${f.count}</small></span>`
+    ).join('');
   }
 
   /* ── Filter chips ───────────────────────────────────────── */
@@ -498,6 +547,7 @@ class MemoriesPage extends HTMLElement {
     this.renderChips();
     this.renderStatsBar();
     this.loadMemories();
+    this.loadTagFacets();  // reflect current project scope + hide active tag
   }
 
   async loadMemories() {
@@ -526,12 +576,15 @@ class MemoriesPage extends HTMLElement {
       if (this.viewParams.project_id) params.project_id = this.viewParams.project_id;
       if (this.viewParams.source) params.source = this.viewParams.source;
       if (this.viewParams.tag) params.tag = this.viewParams.tag;
+      // Federated scope only matters with a query; browsing stays local.
+      if (this.searchScope === 'all' && this.searchQuery) params.scope = 'all';
 
       const query = this.searchQuery || '';
       const api = window.app?.apiClient;
       if (!api) return;
 
       const result = await api.searchMemories(query, params);
+      this.hubStatus = (result && result.hub_status) || null;
       if (result && result.results) {
         if (this.page === 0) {
           this.memories = result.results;
@@ -603,6 +656,16 @@ class MemoriesPage extends HTMLElement {
       if (starBtn) {
         e.stopPropagation();
         this.toggleFavorite(starBtn.dataset.id);
+        return;
+      }
+
+      // Federated scope toggle (local ↔ all)
+      if (target.closest('[data-action="toggle-scope"]')) {
+        this.searchScope = this.searchScope === 'all' ? 'local' : 'all';
+        const btn = target.closest('[data-action="toggle-scope"]');
+        btn.classList.toggle('active', this.searchScope === 'all');
+        btn.setAttribute('aria-pressed', this.searchScope === 'all' ? 'true' : 'false');
+        this.resetAndLoad();
         return;
       }
 
@@ -2154,6 +2217,15 @@ style.textContent = `
   .mem-clickable-filter:hover { opacity: 0.8; text-decoration: underline; }
 
   /* ── Filter Chips ───────────────────────── */
+  .mem-facets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-bottom: 0.5rem;
+    align-items: center;
+  }
+  .mem-facets .mem-tag { cursor: pointer; }
+  .mem-facet-count { opacity: 0.6; font-weight: 600; }
   .mem-chips {
     display: flex;
     flex-wrap: wrap;
@@ -2878,6 +2950,46 @@ style.textContent = `
   }
   .mem-fav-toggle:hover { color: #f59e0b; border-color: #f59e0b; }
   .mem-fav-toggle.active { color: #f59e0b; border-color: #f59e0b; background: rgba(245, 158, 11, 0.08); }
+
+  /* ── WS3: Federated scope toggle + hub badge/banner ──── */
+  .mem-scope-toggle {
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm, 6px);
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.375rem;
+    display: flex;
+    align-items: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .mem-scope-toggle:hover { color: #6366f1; border-color: #6366f1; }
+  .mem-scope-toggle.active { color: #6366f1; border-color: #6366f1; background: rgba(99, 102, 241, 0.08); }
+  .recent-item-origin.mem-origin-hub {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #6366f1;
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 4px;
+    padding: 0.05rem 0.3rem;
+    flex-shrink: 0;
+  }
+  .mem-hub-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.82rem;
+    color: #b45309;
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: var(--border-radius-sm, 6px);
+  }
+  .mem-hub-banner svg { flex-shrink: 0; }
 
   /* ── P2: Export btn ───────────────────── */
   .mem-export-btn {

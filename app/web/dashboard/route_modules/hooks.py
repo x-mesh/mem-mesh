@@ -537,6 +537,24 @@ async def session_start(
             'expand="smart")` immediately** to restore mem-mesh context.\n'
         )
 
+    # Team hub digest (best-effort, local read only — no network at session
+    # start). worker prefetches the cached digest; here we just read it and, if
+    # fresh + auto-share subscribed, render a "### Team Hub" section between
+    # Relevant Memories and Rules. Absent/expired/unsubscribed → section omitted.
+    team_hub_block = ""
+    try:
+        from app.core.services.federated_search import read_cached_team_digest
+
+        db = getattr(get_services().get("search_service"), "db", None)
+        if db is not None:
+            digest = await read_cached_team_digest(db, project_id)
+            if digest and digest.get("summary"):
+                count = digest.get("source_count") or 0
+                suffix = f" (based on {count} team memories)" if count else ""
+                team_hub_block = "\n\n### Team Hub\n" f"- {digest['summary']}{suffix}"
+    except Exception as e:  # noqa: BLE001 — session start must never fail
+        logger.debug(f"team-hub digest injection skipped: {e}")
+
     rules_text = ""
     try:
         from app.cli.prompts.renderers import render_rules_text
@@ -556,6 +574,7 @@ async def session_start(
             if memory_lines
             else ""
         )
+        + team_hub_block
         + (f"\n\n### Rules\n{rules_text}" if rules_text else "")
     )
 
