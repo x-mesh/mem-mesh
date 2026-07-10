@@ -28,6 +28,8 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Search memories using hybrid search (vector + FTS5). "
         'Use query="" for recent memories sorted by date. '
         "Supports project_id, category, time_range, date_from/date_to, and recency_weight filters. "
+        "Use anchored_path to scope results to memories git-anchored to a file or "
+        "directory prefix (repo-relative, e.g. 'app/core/'); forces local scope. "
         'Example: {"query": "auth decision", "project_id": "my-app", "limit": 5}'
     ),
     "add": (
@@ -38,7 +40,9 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "so memories are tagged with their source. "
         "For code/commit-related memories in a git repo, pass anchors: run "
         "`git rev-parse HEAD` for commit_hash and include the relevant relative "
-        "file_paths. Omit anchors if not a git repository."
+        "file_paths. Optionally add anchors.file_hashes ({relative_path: "
+        "'algo:hexdigest'}) so staleness can later be verified per file. "
+        "Omit anchors if not a git repository."
     ),
     "pin_add": (
         "Track a short-term work item in the current session. "
@@ -58,8 +62,9 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     # ===== T2: Frequently used (1-2 sentences) =====
     "context": (
-        "Retrieve a memory and its related neighbors by memory_id. "
-        "Use after search to explore connections between memories."
+        "Retrieve a memory and its related neighbors by memory_id, or several "
+        "memories at once via ids=[...] (max 10; per-id not_found instead of "
+        "failing the batch). Use after search to drill into filtered results."
     ),
     "update": "Update content, category, or tags of an existing memory by memory_id.",
     "batch_operations": (
@@ -110,8 +115,10 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Report a local verification of a memory's git anchors (fresh|stale). The server has no git "
         "access, so YOU verify: read the memory's anchors from any search/get result, then confirm "
         "each file_paths entry still exists AND the commit is reachable (`git cat-file -e "
-        "<commit_hash>`). Report status='fresh' when everything holds; report status='stale' when "
-        "files are gone or the commit is unreachable. A 'stale' memory is excluded from future "
-        "auto-injection; 'fresh' clears the aged-anchor warning. Skip memories without anchors."
+        "<commit_hash>`). When anchors.file_hashes is present, prefer re-hashing those files: "
+        "matching hashes mean 'fresh' even if the commit is old. Report status='fresh' when "
+        "everything holds; report status='stale' when files are gone or the commit is unreachable. "
+        "A 'stale' memory is excluded from future auto-injection; 'fresh' clears the aged-anchor "
+        "warning. Skip memories without anchors."
     ),
 }

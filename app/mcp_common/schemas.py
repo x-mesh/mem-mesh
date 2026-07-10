@@ -49,6 +49,20 @@ ANCHORS_SCHEMA = {
             "description": "Git branch name (optional)",
             "minLength": 1,
         },
+        "file_hashes": {
+            "type": "object",
+            "description": (
+                "Per-file content hashes as {relative_path: 'algo:hexdigest'} "
+                "(e.g. {'app/core/x.py': 'xxh64:1a2b3c...'}). Lets the client "
+                "verify staleness per file: unchanged file content means the "
+                "memory stays fresh even when commit_hash is old."
+            ),
+            "additionalProperties": {
+                "type": "string",
+                "pattern": "^[a-z0-9_]+:[0-9a-fA-F]{8,128}$",
+            },
+            "maxProperties": 20,
+        },
     },
     "additionalProperties": False,
 }
@@ -183,6 +197,15 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "default": "local",
                         "enum": ["local", "hub", "all"],
                     },
+                    "anchored_path": {
+                        "type": "string",
+                        "description": (
+                            "Only memories git-anchored to this repo-relative "
+                            "file/directory prefix (e.g. 'app/core/'). "
+                            "Directory-boundary match; forces scope=local."
+                        ),
+                        "maxLength": 500,
+                    },
                 },
                 "required": ["query"],
                 "additionalProperties": False,
@@ -219,8 +242,27 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "default": "standard",
                         "enum": ["compact", "standard", "full"],
                     },
+                    "ids": {
+                        "type": "array",
+                        "description": (
+                            "Batch mode: fetch up to 10 memories in one call "
+                            "(full 36-char UUIDs). Missing ids are returned in "
+                            "not_found instead of failing the batch. Provide "
+                            "either memory_id or ids."
+                        ),
+                        "items": {
+                            "type": "string",
+                            "pattern": "^[a-zA-Z0-9_-]+$",
+                            "maxLength": 100,
+                        },
+                        "minItems": 1,
+                        "maxItems": 10,
+                    },
                 },
-                "required": ["memory_id"],
+                "anyOf": [
+                    {"required": ["memory_id"]},
+                    {"required": ["ids"]},
+                ],
                 "additionalProperties": False,
             },
         },
@@ -724,6 +766,14 @@ def get_batch_tool_schemas() -> List[Dict[str, Any]]:
                                     "default": 5,
                                     "minimum": 1,
                                     "maximum": 20,
+                                },
+                                "anchored_path": {
+                                    "type": "string",
+                                    "description": (
+                                        "anchors.file_paths prefix filter "
+                                        "(for 'search' operations)"
+                                    ),
+                                    "maxLength": 500,
                                 },
                                 "importance": {
                                     "type": "integer",

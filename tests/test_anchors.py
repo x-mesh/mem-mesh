@@ -121,6 +121,72 @@ class TestAnchorsValidation:
         assert AddParams(content=LONG).anchors is None
 
 
+class TestAnchorsFileHashes:
+    """anchors.file_hashes — 파일별 content hash 검증 (per-file staleness용)"""
+
+    def test_valid_file_hashes_accepted(self):
+        anchors = {
+            "commit_hash": "a1b2c3d",
+            "file_hashes": {
+                "app/core/x.py": "xxh64:1a2b3c4d5e6f7a8b",
+                "tests/test_x.py": "sha256:" + "a" * 64,
+            },
+        }
+        assert validate_anchors(anchors) == anchors
+
+    def test_file_hashes_alone_accepted(self):
+        anchors = {"file_hashes": {"app/x.py": "xxh64:" + "f" * 16}}
+        assert validate_anchors(anchors) == anchors
+
+    def test_backslash_paths_normalized_on_write(self):
+        """Windows 클라이언트의 백슬래시 경로는 쓰기 시점에 정규화된다
+        (anchored_path SQL 필터가 매치하려면 canonical 구분자 필요)"""
+        cleaned = validate_anchors(
+            {
+                "file_paths": ["app\\core\\x.py"],
+                "file_hashes": {"app\\core\\x.py": "xxh64:" + "a" * 16},
+            }
+        )
+        assert cleaned == {
+            "file_paths": ["app/core/x.py"],
+            "file_hashes": {"app/core/x.py": "xxh64:" + "a" * 16},
+        }
+
+    @pytest.mark.parametrize(
+        "bad_hashes",
+        [
+            {"app/x.py": "no-algo-prefix"},  # 알고리즘 prefix 없음
+            {"app/x.py": "xxh64:zzzz"},  # hex 아님
+            {"app/x.py": "xxh64:ab"},  # digest 너무 짧음 (<8)
+            {"app/x.py": "sha256:aabbccdd\n"},  # shasum 출력 개행 미제거
+            {"app/x.py": "sha256:aabbccdd\nextra"},  # 개행 뒤 잔여물
+            {"/abs/x.py": "xxh64:" + "a" * 16},  # 절대 경로 키
+            {"../x.py": "xxh64:" + "a" * 16},  # traversal 키
+            {"": "xxh64:" + "a" * 16},  # 빈 키
+            {"app/x.py": 123},  # 값이 문자열 아님
+            "not-a-dict",  # dict 아님
+            {f"p{i}.py": "xxh64:" + "a" * 16 for i in range(21)},  # >20 entries
+        ],
+    )
+    def test_invalid_file_hashes_rejected(self, bad_hashes):
+        with pytest.raises(ValueError):
+            validate_anchors({"file_hashes": bad_hashes})
+
+    @pytest.mark.asyncio
+    async def test_file_hashes_roundtrip(self, memory_service):
+        anchors = {
+            "commit_hash": "a1b2c3d",
+            "file_paths": ["app/core/x.py"],
+            "file_hashes": {"app/core/x.py": "xxh64:1a2b3c4d5e6f7a8b"},
+        }
+        resp = await memory_service.create(
+            content=LONG, category="decision", source="test", anchors=anchors
+        )
+        saved = await memory_service.get(resp.id)
+        assert saved is not None
+        assert saved.get_anchors() == anchors
+
+
 class TestAnchorsRoundtrip:
     """create() → get() 왕복 및 기존 동작 무변화"""
 

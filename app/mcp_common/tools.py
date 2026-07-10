@@ -8,6 +8,7 @@ FastMCP와 Pure MCP 모두에서 사용할 수 있습니다.
 import os
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
+from ..core.errors import ContextNotFoundError, ValidationError
 from ..core.schemas.requests import AddParams, SearchParams, StatsParams, UpdateParams
 from ..core.storage.base import StorageBackend
 from ..core.utils.logger import get_logger
@@ -19,6 +20,10 @@ if TYPE_CHECKING:
     from ..web.websocket.realtime import RealtimeNotifier
 
 logger = get_logger("mcp-tools")
+
+# Batch drill-down cap: keeps a single context(ids=[...]) call inside a sane
+# token/latency budget (10 full memories ≈ the practical injection ceiling).
+_CONTEXT_BATCH_MAX_IDS = 10
 
 
 class MCPToolHandlers:
@@ -154,6 +159,7 @@ class MCPToolHandlers:
         date_to: Optional[str] = None,
         temporal_mode: str = "boost",
         scope: str = "local",
+        anchored_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search memories using hybrid search (vector + metadata)
 
@@ -171,6 +177,9 @@ class MCPToolHandlers:
             temporal_mode: Temporal mode (filter/boost/decay)
             scope: Search scope — local (default) / hub (team hub only) /
                 all (local + hub fused via weighted RRF)
+            anchored_path: Only memories git-anchored to this repo-relative
+                file/directory prefix (forces scope=local — hub rows carry
+                foreign-repo anchors the filter can't judge)
 
         Returns:
             dict: 검색 결과 (압축 가능)
@@ -220,6 +229,7 @@ class MCPToolHandlers:
                     date_from=date_from,
                     date_to=date_to,
                     temporal_mode=temporal_mode,
+                    anchored_path=anchored_path,
                 )
                 local_result = await self._storage.search_memories(params)
 
@@ -237,6 +247,12 @@ class MCPToolHandlers:
                 return local_result
 
             if scope not in ("local", "hub", "all"):
+                scope = "local"
+            if anchored_path and scope != "local":
+                # Hub rows carry anchors from other repos — the path filter
+                # can't be applied to them, so an anchored search is local-only
+                # rather than leaking unfiltered hub rows past the filter.
+                logger.info("anchored_path forces scope=local", requested_scope=scope)
                 scope = "local"
             if scope == "local":
                 result = await _local_search()
@@ -415,29 +431,40 @@ class MCPToolHandlers:
 
     async def context(
         self,
-        memory_id: str,
+        memory_id: Optional[str] = None,
         depth: int = 2,
         project_id: Optional[str] = None,
         response_format: str = "standard",
+        ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Get context around a specific memory
+        """Get context around a specific memory, or several memories at once
 
         Args:
-            memory_id: Memory ID to get context for
+            memory_id: Memory ID to get context for (single-ID mode)
             depth: Search depth (1-5)
             project_id: Project filter
             response_format: Response format (compact/standard/full)
+            ids: Batch mode — fetch up to 10 memories in one call. A missing
+                id lands in ``not_found`` instead of failing the whole batch.
 
         Returns:
-            dict: 컨텍스트 정보 (압축 가능)
+            dict: 컨텍스트 정보 (압축 가능); batch mode returns
+                {"memories": [...], "not_found": [...], "batch": True}
         """
         logger.info(
             "Tool context called",
             memory_id=memory_id,
+            ids_count=len(ids) if ids else 0,
             depth=depth,
             project_id=project_id,
             format=response_format,
         )
+
+        if ids is not None:
+            return await self._context_batch(ids, depth, project_id, response_format)
+
+        if not memory_id:
+            raise ValidationError("context requires either memory_id or ids")
 
         try:
             result = await self._storage.get_context(memory_id, depth, project_id)
@@ -455,6 +482,58 @@ class MCPToolHandlers:
         except Exception as e:
             logger.error("Error in context", error=str(e))
             raise
+
+    async def _context_batch(
+        self,
+        ids: List[str],
+        depth: int,
+        project_id: Optional[str],
+        response_format: str,
+    ) -> Dict[str, Any]:
+        """Batch drill-down: one call for several full memories.
+
+        Runs the same single-ID flow per id so every storage backend works
+        unchanged. Only a genuinely missing id lands in ``not_found``
+        (all-or-nothing would waste the ids that DID resolve); any other
+        failure — DB down, API unreachable — re-raises, matching single-ID
+        semantics: an infra outage must not masquerade as "memory not found",
+        or the agent would wrongly mark those memories stale/gone.
+        """
+        # The Pure-MCP path does no schema validation, so a string here would
+        # otherwise be iterated character by character (8 bogus lookups).
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            raise ValidationError("context ids must be a list of memory id strings")
+        if not ids:
+            raise ValidationError("context ids must be a non-empty list")
+        if len(ids) > _CONTEXT_BATCH_MAX_IDS:
+            raise ValidationError(
+                f"context ids cannot exceed {_CONTEXT_BATCH_MAX_IDS} entries"
+            )
+
+        memories: List[Dict[str, Any]] = []
+        not_found: List[str] = []
+        for mid in ids:
+            try:
+                result = await self._storage.get_context(mid, depth, project_id)
+            except ContextNotFoundError:
+                not_found.append(mid)
+                continue
+            if (
+                self._enable_compression
+                and self._optimizer
+                and response_format == "compact"
+            ):
+                memories.append(self._compress_context_response(result))
+            else:
+                memories.append(result.model_dump())
+
+        logger.info(
+            "Context batch retrieved",
+            requested=len(ids),
+            found=len(memories),
+            not_found=len(not_found),
+        )
+        return {"memories": memories, "not_found": not_found, "batch": True}
 
     def _compress_context_response(self, result: "ContextResponse") -> Dict[str, Any]:
         """컨텍스트 응답 압축"""

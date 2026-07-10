@@ -7,6 +7,7 @@ from typing import Optional
 from ..config import get_settings
 from ..database.base import Database
 from ..embeddings.service import EmbeddingService
+from ..errors import ContextNotFoundError
 from ..schemas.requests import AddParams, SearchParams, StatsParams, UpdateParams
 from ..schemas.responses import (
     AddResponse,
@@ -271,6 +272,7 @@ class DirectStorageBackend(StorageBackend):
                 date_from=params.date_from,
                 date_to=params.date_to,
                 temporal_mode=params.temporal_mode,
+                anchored_path=params.anchored_path,
             )
 
             logger.info(
@@ -301,6 +303,7 @@ class DirectStorageBackend(StorageBackend):
                 category=params.category,
                 limit=params.limit,
                 recency_weight=params.recency_weight,
+                anchored_path=params.anchored_path,
             )
 
             logger.info(
@@ -347,6 +350,10 @@ class DirectStorageBackend(StorageBackend):
             )
             return result
 
+        except ContextNotFoundError:
+            # Keep not-found typed: batch drill-down (context ids=[...]) must
+            # distinguish a missing memory from an infrastructure failure.
+            raise
         except ValueError as e:
             logger.warning(f"Invalid parameters for get_context: {e}")
             raise

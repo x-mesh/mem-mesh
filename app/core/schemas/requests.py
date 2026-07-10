@@ -14,8 +14,15 @@ _COMMIT_HASH_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
 
 # Anchor keys the server accepts; anything else is rejected so a typo can't be
 # silently swallowed and lost.
-_ANCHOR_KEYS = {"commit_hash", "file_paths", "branch"}
+_ANCHOR_KEYS = {"commit_hash", "file_paths", "branch", "file_hashes"}
 _MAX_ANCHOR_FILE_PATHS = 20
+
+# File content hash: algorithm prefix + hex digest (e.g. "xxh64:a1b2...",
+# "sha256:..."). The prefix keeps algorithms migratable side by side.
+# \Z (not $): $ would accept a trailing newline — exactly what an agent
+# produces by capturing `shasum` output unstripped — and the corrupt digest
+# would then never string-equal a clean re-hash, wrongly reporting stale.
+_FILE_HASH_RE = re.compile(r"^[a-z0-9_]+:[0-9a-fA-F]{8,128}\Z")
 
 
 def validate_anchors(v: Optional[dict]) -> Optional[dict]:
@@ -27,9 +34,15 @@ def validate_anchors(v: Optional[dict]) -> Optional[dict]:
     lifetime judgement only (never embedded or searched).
 
     Shape: ``{commit_hash: str(7-64 hex), file_paths: list[str] (relative, no
-    ``..``, <=20), branch: str}``. Every field is optional; an all-empty payload
-    normalizes to ``None``. Raises ``ValueError`` (→ HTTP 422 via Pydantic) on a
-    bad hash, an absolute/traversal path, an over-long list, or an unknown key.
+    ``..``, <=20), branch: str, file_hashes: dict[rel_path, "algo:hex"] (<=20)}``.
+    Every field is optional; an all-empty payload normalizes to ``None``. Raises
+    ``ValueError`` (→ HTTP 422 via Pydantic) on a bad hash, an absolute/traversal
+    path, an over-long list, or an unknown key.
+
+    ``file_hashes`` lets the client verify staleness per file: if the anchored
+    file's current content hash still matches, the memory is fresh even when
+    ``commit_hash`` is old (unrelated commits don't invalidate it). The server
+    only stores and returns these values — hashing happens client-side.
     """
     if v is None:
         return None
@@ -69,7 +82,9 @@ def validate_anchors(v: Optional[dict]) -> Optional[dict]:
             # Reject ``..`` traversal in any segment (both separators).
             if ".." in re.split(r"[\\/]+", path):
                 raise ValueError(f"anchors.file_paths must not contain '..': {path!r}")
-            validated_paths.append(path)
+            # Canonical separators on write: a Windows client's backslash path
+            # would otherwise be invisible to the anchored_path SQL filter.
+            validated_paths.append(path.replace("\\", "/"))
         cleaned["file_paths"] = validated_paths
 
     branch = v.get("branch")
@@ -78,7 +93,57 @@ def validate_anchors(v: Optional[dict]) -> Optional[dict]:
             raise ValueError("anchors.branch must be a non-empty string")
         cleaned["branch"] = branch
 
+    file_hashes = v.get("file_hashes")
+    if file_hashes is not None:
+        if not isinstance(file_hashes, dict):
+            raise ValueError(
+                "anchors.file_hashes must be an object of {relative_path: 'algo:hex'}"
+            )
+        if len(file_hashes) > _MAX_ANCHOR_FILE_PATHS:
+            raise ValueError(
+                f"anchors.file_hashes cannot exceed {_MAX_ANCHOR_FILE_PATHS} entries"
+            )
+        validated_hashes: Dict[str, str] = {}
+        for path, digest in file_hashes.items():
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("anchors.file_hashes keys must be non-empty strings")
+            if path.startswith("/") or (len(path) >= 2 and path[1] == ":"):
+                raise ValueError(f"anchors.file_hashes keys must be relative: {path!r}")
+            if ".." in re.split(r"[\\/]+", path):
+                raise ValueError(
+                    f"anchors.file_hashes keys must not contain '..': {path!r}"
+                )
+            if not isinstance(digest, str) or not _FILE_HASH_RE.match(digest):
+                raise ValueError(
+                    "anchors.file_hashes values must be 'algo:hexdigest' "
+                    f"(e.g. 'xxh64:1a2b...'): {digest!r}"
+                )
+            validated_hashes[path.replace("\\", "/")] = digest
+        cleaned["file_hashes"] = validated_hashes
+
     return cleaned or None
+
+
+def normalize_anchored_path(v: Optional[str]) -> Optional[str]:
+    """Validate/normalize a search ``anchored_path`` prefix.
+
+    Same rules as ``anchors.file_paths`` entries (relative, no ``..``), shared
+    by every transport (Pydantic SearchParams AND the REST route, which calls
+    UnifiedSearchService directly and would otherwise skip validation).
+    Normalizes to forward slashes with the trailing ``/`` stripped so the SQL
+    prefix clause can rely on one canonical form. Raises ``ValueError`` on an
+    absolute or traversal path; empty input normalizes to ``None``.
+    """
+    if v is None:
+        return None
+    normalized = v.replace("\\", "/").strip().rstrip("/")
+    if not normalized:
+        return None
+    if normalized.startswith("/") or (len(normalized) >= 2 and normalized[1] == ":"):
+        raise ValueError(f"anchored_path must be relative: {v!r}")
+    if ".." in normalized.split("/"):
+        raise ValueError(f"anchored_path must not contain '..': {v!r}")
+    return normalized
 
 
 def normalize_project_id(v: Optional[str], *, strict: bool = True) -> Optional[str]:
@@ -244,6 +309,19 @@ class SearchParams(BaseModel):
         default="boost",
         description="시간 모드: filter (범위 내만), boost (가중치), decay (시간 감쇠)",
     )
+    anchored_path: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description=(
+            "anchors.file_paths 프리픽스 필터: repo-root 상대 경로 "
+            "(예: 'app/core/'). 해당 파일/디렉토리에 앵커된 메모리만 반환"
+        ),
+    )
+
+    @field_validator("anchored_path")
+    @classmethod
+    def validate_anchored_path(cls, v: Optional[str]) -> Optional[str]:
+        return normalize_anchored_path(v)
 
     @field_validator("search_mode")
     @classmethod

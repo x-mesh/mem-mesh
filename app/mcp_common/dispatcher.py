@@ -122,18 +122,20 @@ class MCPDispatcher:
             date_to=args.get("date_to"),
             temporal_mode=args.get("temporal_mode", "boost"),
             scope=args.get("scope", "local"),
+            anchored_path=args.get("anchored_path"),
         )
         return format_tool_response(result)
 
     async def _dispatch_context(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        if "memory_id" not in args:
-            return format_tool_error("Missing required argument: memory_id")
+        if "memory_id" not in args and "ids" not in args:
+            return format_tool_error("Missing required argument: memory_id (or ids)")
 
         result = await self._tool_handlers.context(
-            memory_id=args["memory_id"],
+            memory_id=args.get("memory_id"),
             depth=args.get("depth", 2),
             project_id=args.get("project_id"),
             response_format=args.get("response_format", "standard"),
+            ids=args.get("ids"),
         )
         return format_tool_response(result)
 
@@ -388,6 +390,7 @@ class MCPDispatcher:
                             "project_id": op.get("project_id"),
                             "category": op.get("category"),
                             "limit": op.get("limit", 5),
+                            "anchored_path": op.get("anchored_path"),
                         }
                     )
                     if not search_result.get("isError"):

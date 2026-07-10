@@ -6,6 +6,7 @@ from typing import Optional
 
 import httpx
 
+from ..errors import ContextNotFoundError
 from ..schemas.requests import AddParams, SearchParams, StatsParams, UpdateParams
 from ..schemas.responses import (
     AddResponse,
@@ -165,6 +166,8 @@ class APIStorageBackend(StorageBackend):
                 query_params["limit"] = params.limit
             if params.recency_weight != 0.0:  # Only when not default value
                 query_params["recency_weight"] = params.recency_weight
+            if params.anchored_path:
+                query_params["anchored_path"] = params.anchored_path
 
             response_data = await self._make_request_with_retry(
                 method="GET", url="/api/memories/search", params=query_params
@@ -227,6 +230,14 @@ class APIStorageBackend(StorageBackend):
 
         except ValueError as e:
             logger.warning(f"Invalid parameters for get_context: {e}")
+            raise
+        except RuntimeError as e:
+            # _make_request_with_retry flattens a 404 into RuntimeError
+            # ("Resource not found: ..."); re-type it so batch drill-down can
+            # tell a missing memory apart from an infrastructure failure.
+            if "Resource not found" in str(e):
+                raise ContextNotFoundError(memory_id) from e
+            logger.error(f"Failed to get context via API: {e}")
             raise
         except Exception as e:
             logger.error(f"Failed to get context via API: {e}")

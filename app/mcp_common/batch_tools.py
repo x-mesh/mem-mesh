@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ..core.database.base import Database
 from ..core.embeddings.service import EmbeddingService
+from ..core.schemas.requests import normalize_anchored_path
 from ..core.services.cache_manager import get_cache_manager
 from ..core.services.memory import MemoryService
 from ..core.services.search import SearchService
@@ -174,6 +175,7 @@ class BatchOperationHandler:
         project_id: Optional[str] = None,
         category: Optional[str] = None,
         limit: int = 5,
+        anchored_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Batch search multiple queries with cached results
@@ -183,10 +185,14 @@ class BatchOperationHandler:
             project_id: Project ID filter
             category: Category filter
             limit: Number of results per query
+            anchored_path: anchors.file_paths prefix filter (repo-relative)
 
         Returns:
             Dictionary with search results for each query
         """
+        # This path calls SearchService directly (no SearchParams model), so
+        # normalize/validate the prefix here to keep parity with the MCP path.
+        anchored_path = normalize_anchored_path(anchored_path)
         start_time = datetime.now()
         results = {}
         cache_hits = 0
@@ -220,10 +226,17 @@ class BatchOperationHandler:
         # Perform search for each query
         for query in queries:
             try:
-                # Check cached search results
-                cached_result = await self.cache_manager.get_cached_search(
-                    query=query, project_id=project_id, category=category, limit=limit
-                )
+                # Check cached search results. anchored_path is not part of the
+                # cache key — anchored searches must bypass the cache entirely
+                # (same contract as SearchService/UnifiedSearchService).
+                cached_result = None
+                if not anchored_path:
+                    cached_result = await self.cache_manager.get_cached_search(
+                        query=query,
+                        project_id=project_id,
+                        category=category,
+                        limit=limit,
+                    )
 
                 if cached_result:
                     # cached_result may be a Pydantic model or dict
@@ -244,6 +257,7 @@ class BatchOperationHandler:
                         project_id=project_id,
                         category=category,
                         limit=limit,
+                        anchored_path=anchored_path,
                     )
 
                     results[query] = {
@@ -362,6 +376,7 @@ class BatchOperationHandler:
                 project_id=search_operations[0].get("project_id"),
                 category=search_operations[0].get("category"),
                 limit=search_operations[0].get("limit", 5),
+                anchored_path=search_operations[0].get("anchored_path"),
             )
 
             # Map results to original indices

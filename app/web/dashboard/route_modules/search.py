@@ -10,7 +10,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.core.schemas.requests import normalize_project_id
+from app.core.schemas.requests import normalize_anchored_path, normalize_project_id
 from app.core.schemas.responses import SearchResponse
 from app.core.services.recall import (
     fetch_curation_candidates,
@@ -106,6 +106,7 @@ class SearchRequest(BaseModel):
     date_to: Optional[str] = None
     temporal_mode: str = "boost"
     scope: str = "local"
+    anchored_path: Optional[str] = Field(default=None, max_length=500)
 
 
 # Canonical memory categories (mirrors SearchParams.validate_category). Used to
@@ -141,6 +142,7 @@ async def _do_search(
     date_to: Optional[str] = None,
     temporal_mode: str = "boost",
     scope: str = "local",
+    anchored_path: Optional[str] = None,
 ) -> SearchResponse:
     """Shared search logic for GET and POST endpoints."""
     # Single chokepoint for both GET (query param) and POST (body) search, so a
@@ -159,6 +161,17 @@ async def _do_search(
         categories = deduped[: len(_VALID_CATEGORIES)] or None
     # Unknown scope degrades to local (mirrors MCP tools.py:239-240 contract).
     if scope not in ("local", "hub", "all"):
+        scope = "local"
+    # Validate/normalize the anchored-path prefix (this path bypasses the
+    # Pydantic SearchParams model); bad input → 422, not a silent no-op.
+    if anchored_path:
+        try:
+            anchored_path = normalize_anchored_path(anchored_path)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    # Anchored search is local-only (hub rows carry foreign-repo anchors the
+    # filter can't judge) — mirrors the MCP tools.py contract.
+    if anchored_path:
         scope = "local"
 
     async def _local_search() -> SearchResponse:
@@ -179,6 +192,7 @@ async def _do_search(
             date_from=date_from,
             date_to=date_to,
             temporal_mode=temporal_mode,
+            anchored_path=anchored_path,
         )
 
     try:
@@ -240,6 +254,7 @@ async def search_memories(
     date_to: str = None,
     temporal_mode: str = "boost",
     scope: str = "local",
+    anchored_path: Optional[str] = Query(None, max_length=500),
     service: UnifiedSearchService = Depends(get_search_service),
 ) -> SearchResponse:
     """
@@ -270,6 +285,7 @@ async def search_memories(
         date_to=date_to,
         temporal_mode=temporal_mode,
         scope=scope,
+        anchored_path=anchored_path,
     )
 
 
@@ -303,6 +319,7 @@ async def search_memories_post(
         date_to=body.date_to,
         temporal_mode=body.temporal_mode,
         scope=body.scope,
+        anchored_path=body.anchored_path,
     )
 
 

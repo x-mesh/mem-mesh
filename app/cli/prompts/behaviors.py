@@ -19,7 +19,7 @@ from typing import List
 # compute_content_hash().
 # ---------------------------------------------------------------------------
 
-PROMPT_VERSION: int = 27
+PROMPT_VERSION: int = 28
 
 
 # ---------------------------------------------------------------------------
@@ -143,9 +143,13 @@ CORE_RULES: List[Rule] = [
             "When saving a memory whose validity depends on the code state "
             "(decision, bug, code_snippet about specific files), run "
             "`git rev-parse HEAD` and pass anchors={commit_hash, file_paths, "
-            "branch} to add() or pin_promote(). The server has no git access — "
-            "the client is the only party that can anchor a memory. Skip when "
-            "not in a git repository or the memory is code-independent."
+            "branch} to add() or pin_promote(). Optionally include "
+            "anchors.file_hashes ({relative_path: 'algo:hexdigest', e.g. "
+            "'sha256:...' from `shasum -a 256`}) so staleness can later be "
+            "verified per file instead of per commit. The server has no git "
+            "access — the client is the only party that can anchor a memory. "
+            "Skip when not in a git repository or the memory is "
+            "code-independent."
         ),
     ),
     Rule(
@@ -153,9 +157,11 @@ CORE_RULES: List[Rule] = [
         title="Report anchor staleness you can verify",
         description=(
             "When an injected memory line carries an unverified-anchor warning "
-            "(aged anchor), verify it locally when convenient: check the "
-            "anchored file_paths still exist and the commit is reachable "
-            "(`git cat-file -e <commit_hash>`), then call "
+            "(aged anchor), verify it locally when convenient: if "
+            "anchors.file_hashes is present, re-hash those files — matching "
+            "hashes mean fresh even when the commit is old; otherwise check "
+            "the anchored file_paths still exist and the commit is reachable "
+            "(`git cat-file -e <commit_hash>`). Then call "
             'report_anchor_status(memory_id, "fresh"|"stale"). A stale verdict '
             "removes the memory from future auto-injection; fresh clears the "
             "warning. Only do this for memories relevant to the current work — "
@@ -297,4 +303,4 @@ def compute_content_hash() -> str:
 # Pinned fingerprint of the definitions above. Regenerate after an intended
 # rule change with:
 #   python -c "from app.cli.prompts.behaviors import compute_content_hash as h; print(h())"
-PROMPT_CONTENT_HASH: str = "ee360f9133f6feca"
+PROMPT_CONTENT_HASH: str = "32565250757a13e7"

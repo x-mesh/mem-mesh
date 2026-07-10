@@ -50,6 +50,7 @@ __all__ = [
     "EMBEDDING_TABLE_SECONDARY",
     "EMBEDDING_TABLE_SLOTS",
     "category_filter_clause",
+    "anchored_path_filter_clause",
 ]
 
 
@@ -67,6 +68,34 @@ def category_filter_clause(cat, column: str = "category"):
         placeholders = ",".join("?" * len(cats))
         return f"{column} IN ({placeholders})", list(cats)
     return f"{column} = ?", [cat]
+
+
+def anchored_path_filter_clause(prefix, column: str = "anchors"):
+    """SQL condition + params matching memories whose ``anchors.file_paths``
+    contains ``prefix`` exactly or any path under it (directory boundary):
+    'app/core' matches 'app/core/x.py' but NOT 'app/core_utils/x.py'.
+
+    Uses ``json_each`` on the anchors JSON TEXT column. Guarded with
+    ``json_valid`` because ``json_each`` aborts the whole query on corrupt
+    JSON (legacy rows may hold malformed values). Stored values get their
+    backslashes normalized in SQL (legacy rows from Windows clients predate
+    write-side normalization), and the prefix match uses ``substr`` — not
+    LIKE — so matching stays case-sensitive, in parity with the Python
+    mirror ``_matches_anchored_path``.
+    Returns (condition_without_AND, params_list). Empty ('', []) when no filter.
+    """
+    if not prefix:
+        return "", []
+    normalized = str(prefix).replace("\\", "/").strip().rstrip("/")
+    if not normalized:
+        return "", []
+    value_expr = "REPLACE(json_each.value, '\\', '/')"
+    condition = (
+        f"({column} IS NOT NULL AND json_valid({column}) AND EXISTS ("
+        f"SELECT 1 FROM json_each({column}, '$.file_paths') "
+        f"WHERE {value_expr} = ? OR substr({value_expr}, 1, ?) = ?))"
+    )
+    return condition, [normalized, len(normalized) + 1, normalized + "/"]
 
 
 class Database:
@@ -262,9 +291,19 @@ class Database:
 
                     has_filters = bool(
                         filters
-                        and (filters.get("project_id") or filters.get("category"))
+                        and (
+                            filters.get("project_id")
+                            or filters.get("category")
+                            or filters.get("anchored_path")
+                        )
                     )
-                    inner_limit = limit * 5 if has_filters else limit
+                    # anchored_path is highly selective (anchored memories are a
+                    # small fraction of rows) — widen the KNN candidate pool
+                    # further so the post-JOIN filter doesn't starve the top-K.
+                    if filters and filters.get("anchored_path"):
+                        inner_limit = limit * 20
+                    else:
+                        inner_limit = limit * 5 if has_filters else limit
 
                     # Table name is from a fixed slot allowlist (active_embedding_table),
                     # never user input — safe to interpolate.
@@ -293,6 +332,13 @@ class Database:
                         if filters.get("category"):
                             _cond, _cp = category_filter_clause(
                                 filters["category"], column="m.category"
+                            )
+                            if _cond:
+                                filter_conditions.append(_cond)
+                                params.extend(_cp)
+                        if filters.get("anchored_path"):
+                            _cond, _cp = anchored_path_filter_clause(
+                                filters["anchored_path"], column="m.anchors"
                             )
                             if _cond:
                                 filter_conditions.append(_cond)
@@ -339,6 +385,11 @@ class Database:
                 params.append(filters["project_id"])
             if filters.get("category"):
                 _cond, _cp = category_filter_clause(filters["category"])
+                if _cond:
+                    base_query += " AND " + _cond
+                    params.extend(_cp)
+            if filters.get("anchored_path"):
+                _cond, _cp = anchored_path_filter_clause(filters["anchored_path"])
                 if _cond:
                     base_query += " AND " + _cond
                     params.extend(_cp)
@@ -404,6 +455,11 @@ class Database:
                     _tc, _tp = await self._tag_filter_sql(filters["tag"])
                     base_query += _tc
                     params.extend(_tp)
+                if filters.get("anchored_path"):
+                    _cond, _cp = anchored_path_filter_clause(filters["anchored_path"])
+                    if _cond:
+                        base_query += " AND " + _cond
+                        params.extend(_cp)
 
             valid_sort_columns = [
                 "created_at",
@@ -462,6 +518,11 @@ class Database:
                     _tc, _tp = await self._tag_filter_sql(filters["tag"])
                     base_query += _tc
                     params.extend(_tp)
+                if filters.get("anchored_path"):
+                    _cond, _cp = anchored_path_filter_clause(filters["anchored_path"])
+                    if _cond:
+                        base_query += " AND " + _cond
+                        params.extend(_cp)
 
             result = await self.fetchone(base_query, tuple(params))
             return result["count"] if result else 0

@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 27
+# mem-mesh-hooks prompt-version: 28
 # Claude Code UserPromptSubmit hook → mem-mesh /api/hooks/claude/user-prompt-submit
 #
 # Thin forwarder: the server does keyword-matched memory search + save/pin

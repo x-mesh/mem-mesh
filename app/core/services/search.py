@@ -10,7 +10,11 @@ from datetime import datetime
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, List, Optional
 
-from ..database.base import Database, category_filter_clause
+from ..database.base import (
+    Database,
+    anchored_path_filter_clause,
+    category_filter_clause,
+)
 from ..embeddings.service import EmbeddingService
 from ..schemas.responses import SearchResponse, SearchResult
 
@@ -104,6 +108,7 @@ class SearchService:
         sort_direction: str = "desc",
         recency_weight: float = 0.0,
         search_mode: str = "hybrid",
+        anchored_path: Optional[str] = None,
     ) -> SearchResponse:
         """
         하이브리드 검색 수행
@@ -120,6 +125,7 @@ class SearchService:
             sort_direction: 정렬 방향 (asc, desc)
             recency_weight: 최신성 가중치 (0.0 ~ 1.0)
             search_mode: 검색 모드 (hybrid, exact, semantic, fuzzy)
+            anchored_path: anchors.file_paths 프리픽스 필터 (repo 상대 경로)
 
         Returns:
             SearchResponse: 검색 결과
@@ -150,8 +156,10 @@ class SearchService:
         cache_cat = ",".join(sorted(categories)) if categories else category
 
         try:
-            # Check cache first (only when offset=0)
-            if offset == 0:  # Cache first page only
+            # Check cache first (only when offset=0). anchored_path is not part
+            # of the cache key, so anchored searches bypass the cache entirely
+            # (both read and write) to avoid serving unfiltered entries.
+            if offset == 0 and not anchored_path:  # Cache first page only
                 cached_results = await self.cache_manager.get_cached_search(
                     query=query, project_id=project_id, category=cache_cat, limit=limit
                 )
@@ -182,6 +190,8 @@ class SearchService:
                 filters["source"] = source
             if tag:
                 filters["tag"] = tag
+            if anchored_path:
+                filters["anchored_path"] = anchored_path
 
             # Return recent memories for empty query
             if not query.strip():
@@ -271,8 +281,9 @@ class SearchService:
                     query, filters, limit, recency_weight
                 )
 
-            # Save results to cache (only when offset=0)
-            if offset == 0 and result and query.strip():  # Do not cache empty queries
+            # Save results to cache (only when offset=0; anchored searches
+            # bypass the cache — see the cache-check comment above)
+            if offset == 0 and result and query.strip() and not anchored_path:
                 await self.cache_manager.cache_search_results(
                     query=query,
                     results=result,
@@ -506,6 +517,11 @@ class SearchService:
                     if _cond:
                         base_query += " AND " + _cond
                         params.extend(_cp)
+                if filters.get("anchored_path"):
+                    _cond, _cp = anchored_path_filter_clause(filters["anchored_path"])
+                    if _cond:
+                        base_query += " AND " + _cond
+                        params.extend(_cp)
 
             base_query += " ORDER BY created_at DESC LIMIT ?"
             params.append(limit)
@@ -612,6 +628,11 @@ class SearchService:
                     params.append(filters["project_id"])
                 if filters.get("category"):
                     _cond, _cp = category_filter_clause(filters["category"])
+                    if _cond:
+                        base_query += " AND " + _cond
+                        params.extend(_cp)
+                if filters.get("anchored_path"):
+                    _cond, _cp = anchored_path_filter_clause(filters["anchored_path"])
                     if _cond:
                         base_query += " AND " + _cond
                         params.extend(_cp)
@@ -792,6 +813,11 @@ class SearchService:
                     params.append(filters["project_id"])
                 if filters.get("category"):
                     _cond, _cp = category_filter_clause(filters["category"])
+                    if _cond:
+                        base_query += " AND " + _cond
+                        params.extend(_cp)
+                if filters.get("anchored_path"):
+                    _cond, _cp = anchored_path_filter_clause(filters["anchored_path"])
                     if _cond:
                         base_query += " AND " + _cond
                         params.extend(_cp)

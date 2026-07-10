@@ -23,7 +23,11 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 if TYPE_CHECKING:
     from .search_quality import SearchIntent
 
-from ..database.base import Database, category_filter_clause
+from ..database.base import (
+    Database,
+    anchored_path_filter_clause,
+    category_filter_clause,
+)
 from ..embeddings.service import EmbeddingService
 from ..schemas.responses import SearchResponse, SearchResult
 from .cache_manager import get_cache_manager
@@ -42,6 +46,27 @@ logger = logging.getLogger(__name__)
 # Matched with .search (not .fullmatch) — tools print ids embedded in prose
 # ("mem-mesh f9732f1e" or a full sentence around it), not as a bare query.
 _MEMORY_ID_QUERY_RE = re.compile(r"(?<![\w-])[0-9a-fA-F]{8}[0-9a-fA-F-]{0,28}(?![\w-])")
+
+
+def _matches_anchored_path(anchors: Optional[Dict[str, Any]], prefix: str) -> bool:
+    """Python-side mirror of ``anchored_path_filter_clause`` for result paths
+    that bypass the SQL filters (e.g. the memory-id shortcut): True when any
+    ``anchors.file_paths`` entry equals ``prefix`` or lives under ``prefix/``."""
+    if not anchors:
+        return False
+    file_paths = anchors.get("file_paths")
+    if not isinstance(file_paths, list):
+        return False
+    normalized = prefix.replace("\\", "/").rstrip("/")
+    if not normalized:
+        return False
+    for path in file_paths:
+        if not isinstance(path, str):
+            continue
+        candidate = path.replace("\\", "/")
+        if candidate == normalized or candidate.startswith(normalized + "/"):
+            return True
+    return False
 
 
 class UnifiedSearchService:
@@ -238,6 +263,7 @@ class UnifiedSearchService:
         date_to: Optional[str] = None,
         temporal_mode: str = "boost",
         record_access: bool = True,
+        anchored_path: Optional[str] = None,
     ) -> SearchResponse:
         """
         통합 검색 수행
@@ -259,6 +285,7 @@ class UnifiedSearchService:
             date_from: 시작 날짜 (YYYY-MM-DD)
             date_to: 종료 날짜 (YYYY-MM-DD)
             temporal_mode: 시간 모드 (filter/boost/decay)
+            anchored_path: anchors.file_paths 프리픽스 필터 (repo 상대 경로)
 
         Returns:
             SearchResponse: 검색 결과
@@ -283,7 +310,19 @@ class UnifiedSearchService:
                     id_match.group(0), project_id=project_id, limit=limit
                 )
                 if id_response is not None:
-                    return id_response
+                    # The id shortcut bypasses the filters dict — apply the
+                    # anchored-path scope here so it can't leak past the filter.
+                    if anchored_path:
+                        id_response.results = [
+                            r
+                            for r in id_response.results
+                            if _matches_anchored_path(r.anchors, anchored_path)
+                        ]
+                        id_response.total = len(id_response.results)
+                        if not id_response.results:
+                            id_response = None
+                    if id_response is not None:
+                        return id_response
 
         # 1. Intent analysis (when quality feature is enabled)
         intent = None
@@ -312,8 +351,10 @@ class UnifiedSearchService:
         # single category would produce, so fold the list into a stable key.
         cache_cat = ",".join(sorted(categories)) if categories else category
 
-        # 3. Check cache (only when offset=0)
-        if offset == 0 and query:
+        # 3. Check cache (only when offset=0). anchored_path is not part of the
+        # cache key — a filtered query must never read (or seed) the unfiltered
+        # entry, so the cache is bypassed entirely for anchored searches.
+        if offset == 0 and query and not anchored_path:
             cached_results = await self.cache_manager.get_cached_search(
                 query=expanded_query,
                 project_id=project_id,
@@ -344,6 +385,8 @@ class UnifiedSearchService:
             filters["source"] = source
         if tag:
             filters["tag"] = tag
+        if anchored_path:
+            filters["anchored_path"] = anchored_path
 
         # Check if query is empty (to decide whether to skip post-processing)
         is_empty_query = not query.strip()
@@ -435,8 +478,9 @@ class UnifiedSearchService:
         if self.reranker and result.results:
             result = self._apply_reranking(result, original_query, limit)
 
-        # 9. Save to cache (only when offset=0)
-        if offset == 0 and query and result.results:
+        # 9. Save to cache (only when offset=0; anchored searches bypass the
+        # cache — see the cache-check comment above)
+        if offset == 0 and query and result.results and not anchored_path:
             await self.cache_manager.cache_search_results(
                 query=expanded_query,
                 results=result,
@@ -960,6 +1004,13 @@ class UnifiedSearchService:
                 if _cond:
                     sql += " AND " + _cond
                     params.extend(_cp)
+            if filters.get("anchored_path"):
+                _cond, _cp = anchored_path_filter_clause(
+                    filters["anchored_path"], column="m.anchors"
+                )
+                if _cond:
+                    sql += " AND " + _cond
+                    params.extend(_cp)
 
         sql += " ORDER BY fts.rank LIMIT ?"
         params.append(limit)
@@ -1074,6 +1125,11 @@ class UnifiedSearchService:
                 params.append(filters["project_id"])
             if filters.get("category"):
                 _cond, _cp = category_filter_clause(filters["category"])
+                if _cond:
+                    base_query += " AND " + _cond
+                    params.extend(_cp)
+            if filters.get("anchored_path"):
+                _cond, _cp = anchored_path_filter_clause(filters["anchored_path"])
                 if _cond:
                     base_query += " AND " + _cond
                     params.extend(_cp)

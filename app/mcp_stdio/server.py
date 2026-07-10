@@ -136,6 +136,7 @@ async def search(
     date_to: Optional[str] = None,
     temporal_mode: str = "boost",
     scope: str = "local",
+    anchored_path: Optional[str] = None,
 ) -> dict:
     """Internal handler for search tool."""
     return await _get_handlers().search(
@@ -150,18 +151,22 @@ async def search(
         date_to=date_to,
         temporal_mode=temporal_mode,
         scope=scope,
+        anchored_path=anchored_path,
     )
 
 
 @mcp.tool(description=TOOL_DESCRIPTIONS["context"])
 async def context(
-    memory_id: str,
+    memory_id: Optional[str] = None,
     depth: int = 2,
     project_id: Optional[str] = None,
     response_format: str = "standard",
+    ids: Optional[list[str]] = None,
 ) -> dict:
     """Internal handler for context tool."""
-    return await _get_handlers().context(memory_id, depth, project_id, response_format)
+    return await _get_handlers().context(
+        memory_id, depth, project_id, response_format, ids=ids
+    )
 
 
 @mcp.tool(description=TOOL_DESCRIPTIONS["update"])
