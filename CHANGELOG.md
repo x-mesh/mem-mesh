@@ -5,15 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.32.0] - 2026-07-11
 
-**Federated Hub Search 노출 계층 완성 (hub-exposure).** WHY: Phase 1이 만든 federation 결과가 MCP 압축 응답·대시보드·세션 시작 경로에서 실제로 보이지 않았다. 개인 노드가 팀 hub 콘텐츠를 클라이언트에 노출하는 3개 워크스트림을 완성한다. 세션 시작 경로에는 네트워크 호출을 추가하지 않고(worker prefetch → 로컬 read only), hub 실패는 항상 조용히 degrade한다.
+**Federated Hub Search 노출 계층 완성 + anchors 기반 코드 스코프 검색 3종.** WHY(hub-exposure): Phase 1이 만든 federation 결과가 MCP 압축 응답·대시보드·세션 시작 경로에서 실제로 보이지 않았다. 개인 노드가 팀 hub 콘텐츠를 클라이언트에 노출하는 3개 워크스트림을 완성한다. 세션 시작 경로에는 네트워크 호출을 추가하지 않고(worker prefetch → 로컬 read only), hub 실패는 항상 조용히 degrade한다. WHY(anchors): mgrep·claude-mem 벤치마킹에서 도출한 도입 후보 8건을 4모델 적대 패널로 검증해 승인된 3건만 구현 — 코드 작업 중 "이 파일에 관련된 기억"만 정확히 좁히고(anchored_path), 무관한 커밋 누적이 아닌 파일 내용 기준으로 anchor 신선도를 판정하며(file_hashes), 검색 인덱스에서 선별한 여러 메모리를 한 호출로 드릴다운(context ids)한다.
 
 ### Added
 - **WS1 — MCP 압축 응답 federation 메타 보존** — `_compress_search_response`가 3포맷(minimal/compact/standard) top-level에 `hub_status`를 항상 싣고, hub 결과에만 per-result `origin="hub"`를 붙인다. `app/mcp_common/tools.py`
 - **WS2 — 세션 시작 팀 hub digest 주입** — relay worker `session_digest` 태스크가 auto-share 구독 프로젝트의 hub digest를 `app_config`에 prefetch(throttle, never-raise)하고, `session_resume`/SessionStart 훅이 로컬 캐시를 읽어 `team_hub`/"### Team Hub" 섹션으로 노출(만료·미구독 시 생략). 설정 3키(`relay_federated_session_digest_*`), `RelayHTTPClient.fetch_project_digest`, `read_cached_team_digest` 추가. `app/core/services/{relay,relay_worker,federated_search}.py`, `app/core/config.py`, `app/web/dashboard/route_modules/hooks.py`
 - **WS3 — 대시보드 scope 검색 + 설정 승격** — 검색/메모리 페이지에 `scope` 토글(local/all), hub 결과 배지, hub 다운 시 배너. `GET/POST /api/memories/search`에 `scope` 파라미터(offset>0은 hub 미재조회). `relay_federated_timeout`/`hub_weight`를 DB-backed 설정으로 승격. `app/web/dashboard/route_modules/search.py`, `app/web/static/js/pages/{search,memories}.js`, `app/core/services/relay.py`
 - **에이전트 안내** — hooks sync 프롬프트에 `search(scope="all")` 팀 맥락 안내 1줄 추가(prompt version 26 → 27). `app/cli/prompts/behaviors.py`
+- **`anchored_path` 스코프 검색** — `search(anchored_path="app/core/")`로 해당 파일/디렉토리에 git-anchor된 메모리만 반환. `anchored_path_filter_clause`(json_each + `json_valid` 가드 + `substr` 기반 대소문자 구분 프리픽스, 디렉토리 경계 보장)를 vector/FTS/recent/count/fuzzy 전 쿼리 경로와 레거시 SearchService·batch_operations까지 적용. anchored 검색은 캐시 키에 없으므로 캐시를 완전 우회(오염 방지)하고, hub 결과에는 필터를 적용할 수 없어 scope=local을 강제. 저장 시 경로 구분자를 정규화하고 레거시 백슬래시 행은 SQL `REPLACE`로 방어. 전 트랜스포트(MCP 3종·REST·storage 2종) 배선. `app/core/database/base.py`, `app/core/services/{unified_search,search}.py`, `app/mcp_common/{tools,dispatcher,schemas,batch_tools}.py`, `app/web/dashboard/route_modules/search.py`
+- **`anchors.file_hashes` 파일별 content hash** — anchors에 `{상대경로: "algo:hexdigest"}`(≤20)를 선택 저장. 클라이언트가 파일을 재해시해 내용이 그대로면 커밋이 오래돼도 fresh 판정 → `report_anchor_status` 오탐(무관한 커밋 누적으로 인한 stale 의심) 감소. 해시 알고리즘 prefix로 점진 마이그레이션 지원, `\Z` 정규식으로 트레일링 개행 거부(shasum 출력 미스트립 → 영구 stale 오판 차단). `app/core/schemas/requests.py`, `app/mcp_common/schemas.py`
+- **`context(ids=[...])` 배치 드릴다운** — 검색 인덱스(response_format 압축)에서 고른 최대 10개 메모리를 한 호출로 풀 콘텐츠 조회. 없는 id는 `not_found`로 분리 반환하되, 인프라 장애(DB/API 다운)는 not_found로 위장하지 않고 에러로 전파 — 이를 위해 storage 백엔드가 `ContextNotFoundError`를 typed로 유지(direct 재전파, API 404 매핑). 단건 `memory_id` 호출은 완전 호환. `app/mcp_common/{tools,dispatcher,schemas}.py`, `app/core/storage/{direct,api}.py`
+
+### Changed
+- **hooks 프롬프트 version 27 → 28** — anchor 수집 규칙에 file_hashes 첨부 안내, anchor 검증 규칙에 "file_hashes 있으면 재해시 우선" 워크플로 추가. 각 프로젝트에서 `mem-mesh hooks sync-project` 재실행 필요. `app/cli/prompts/behaviors.py`
 
 ## [1.31.0] - 2026-07-09
 
