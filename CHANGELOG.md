@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**Federated Hub Search 노출 계층 완성 (hub-exposure).** WHY: Phase 1이 만든 federation 결과가 MCP 압축 응답·대시보드·세션 시작 경로에서 실제로 보이지 않았다. 개인 노드가 팀 hub 콘텐츠를 클라이언트에 노출하는 3개 워크스트림을 완성한다. 세션 시작 경로에는 네트워크 호출을 추가하지 않고(worker prefetch → 로컬 read only), hub 실패는 항상 조용히 degrade한다.
+
+### Added
+- **WS1 — MCP 압축 응답 federation 메타 보존** — `_compress_search_response`가 3포맷(minimal/compact/standard) top-level에 `hub_status`를 항상 싣고, hub 결과에만 per-result `origin="hub"`를 붙인다. `app/mcp_common/tools.py`
+- **WS2 — 세션 시작 팀 hub digest 주입** — relay worker `session_digest` 태스크가 auto-share 구독 프로젝트의 hub digest를 `app_config`에 prefetch(throttle, never-raise)하고, `session_resume`/SessionStart 훅이 로컬 캐시를 읽어 `team_hub`/"### Team Hub" 섹션으로 노출(만료·미구독 시 생략). 설정 3키(`relay_federated_session_digest_*`), `RelayHTTPClient.fetch_project_digest`, `read_cached_team_digest` 추가. `app/core/services/{relay,relay_worker,federated_search}.py`, `app/core/config.py`, `app/web/dashboard/route_modules/hooks.py`
+- **WS3 — 대시보드 scope 검색 + 설정 승격** — 검색/메모리 페이지에 `scope` 토글(local/all), hub 결과 배지, hub 다운 시 배너. `GET/POST /api/memories/search`에 `scope` 파라미터(offset>0은 hub 미재조회). `relay_federated_timeout`/`hub_weight`를 DB-backed 설정으로 승격. `app/web/dashboard/route_modules/search.py`, `app/web/static/js/pages/{search,memories}.js`, `app/core/services/relay.py`
+- **에이전트 안내** — hooks sync 프롬프트에 `search(scope="all")` 팀 맥락 안내 1줄 추가(prompt version 26 → 27). `app/cli/prompts/behaviors.py`
+
 ## [1.31.0] - 2026-07-09
 
 **relay outbox 쓰기가 SQLite 락 경합으로 조용히 유실되던 문제 수정.** WHY: 메인 프로세스와 relay worker가 동시에 쓰기를 시도하면 기존 `BEGIN`(deferred)이 첫 쓰기 문장에서야 write lock으로 업그레이드됐고, 그 순간 다른 프로세스가 락을 쥐고 있으면 `busy_timeout`이 적용되지 않는 즉시 `SQLITE_BUSY`로 실패했다. 프로젝트 공유 중 이 경합에 걸린 메모리 하나가 전체 공유 요청을 중단시키는 것도 문제였다.

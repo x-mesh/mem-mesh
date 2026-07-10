@@ -348,6 +348,28 @@ class Database:
 
         return await self.fetchall(base_query, tuple(params))
 
+    async def _table_exists(self, name: str) -> bool:
+        row = await self.fetchone(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        )
+        return row is not None
+
+    async def _tag_filter_sql(self, tag: str) -> Tuple[str, list]:
+        """AND-clause matching ``tag`` in source tags (memories.tags) OR the
+        enrichment topic tags (memory_enrichment.tags), so a faceted enrichment
+        tag filters correctly. The enrichment leg is added only when its (lazy)
+        table exists."""
+        like = f'%"{tag}"%'
+        if await self._table_exists("memory_enrichment"):
+            return (
+                " AND (JSON_EXTRACT(tags, '$') LIKE ? OR EXISTS ("
+                "SELECT 1 FROM memory_enrichment e "
+                "WHERE e.memory_id = memories.id "
+                "AND JSON_EXTRACT(e.tags, '$') LIKE ?))",
+                [like, like],
+            )
+        return (" AND JSON_EXTRACT(tags, '$') LIKE ?", [like])
+
     async def get_recent_memories(
         self,
         limit: int,
@@ -379,8 +401,9 @@ class Database:
                     base_query += " AND source = ?"
                     params.append(filters["source"])
                 if filters.get("tag"):
-                    base_query += " AND JSON_EXTRACT(tags, '$') LIKE ?"
-                    params.append(f'%"{filters["tag"]}"%')
+                    _tc, _tp = await self._tag_filter_sql(filters["tag"])
+                    base_query += _tc
+                    params.extend(_tp)
 
             valid_sort_columns = [
                 "created_at",
@@ -436,8 +459,9 @@ class Database:
                     base_query += " AND source = ?"
                     params.append(filters["source"])
                 if filters.get("tag"):
-                    base_query += " AND JSON_EXTRACT(tags, '$') LIKE ?"
-                    params.append(f'%"{filters["tag"]}"%')
+                    _tc, _tp = await self._tag_filter_sql(filters["tag"])
+                    base_query += _tc
+                    params.extend(_tp)
 
             result = await self.fetchone(base_query, tuple(params))
             return result["count"] if result else 0
