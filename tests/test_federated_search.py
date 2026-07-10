@@ -584,7 +584,9 @@ def test_compress_local_only_has_no_origin_anywhere():
 # --- WS2 (R7 전반부): read_cached_team_digest 로컬 read 헬퍼 --------------------
 
 import json as _json  # noqa: E402
-from datetime import datetime as _dt, timedelta as _td, timezone as _tz  # noqa: E402
+from datetime import datetime as _dt  # noqa: E402
+from datetime import timedelta as _td  # noqa: E402
+from datetime import timezone as _tz  # noqa: E402
 from types import SimpleNamespace as _NS  # noqa: E402
 
 from app.core.services.federated_search import (  # noqa: E402
