@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.33.1] - 2026-07-11
+
+**CI Docker publish를 막던 버전 의존적 테스트 수정.** WHY: v1.33.0의 FastMCP 등록 테스트가 `mcp.get_tools()`라는 레지스트리 조회 API에 의존했는데, 이 API는 fastmcp 버전마다 달라 CI 러너에서 `AttributeError`로 실패했다(로컬 2.14.3에는 존재). 그 결과 PyPI publish는 성공했으나 Docker 이미지 publish가 테스트 게이트에서 막혔다.
+
+### Fixed
+- **`test_fastmcp_registers_star_tools` 버전 의존성 제거** — 라이브러리 내부 레지스트리 API 대신, 버전에 흔들리지 않는 표면(`@mcp.tool()`이 함수를 `FunctionTool`로 바꿔친다는 사실)으로 검증한다. 데코레이터가 빠지면 여전히 실패하므로 검증력은 유지된다(맨 함수는 `inspect.isfunction`으로 걸러짐). `tests/test_starred_mcp.py`
+
 ## [1.33.0] - 2026-07-11
 
 **메모리 별표(star) + enrich가 웹에서 "안 된 것처럼" 보이던 버그 수정.** WHY(star): 중요하다고 판단한 메모리를 표시해두고 나중에 골라볼 방법이 없었다. 프론트엔드에는 이미 별표 UI가 있었지만 `localStorage` 전용이라 (1) 기기·브라우저를 바꾸면 소실되고, (2) 서버와 MCP 에이전트는 별표의 존재조차 몰랐으며, (3) 필터가 클라이언트 사이드라 페이지 2부터 결과가 새어나갔다. 그래서 이번 작업은 신규 UI 개발이 아니라 **기존 클라이언트 전용 UI를 서버 상태로 승격**하는 것이다. WHY(enrichment): 사용자가 "auto-enrich를 켰는데 안 된다"고 신고했으나, 실제로는 파이프라인이 정상 작동 중이었고(2만 건 이상 enrich 완료) 대시보드가 그 결과를 표시하지 않았을 뿐이었다. 검색 서비스는 enrichment를 붙이지 않고 노출 계층이 병합하는 구조인데, 그 병합 코드가 MCP 핸들러에만 있고 REST 라우트에 없었다.
