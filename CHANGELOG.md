@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.33.0] - 2026-07-11
+
+**메모리 별표(star) + enrich가 웹에서 "안 된 것처럼" 보이던 버그 수정.** WHY(star): 중요하다고 판단한 메모리를 표시해두고 나중에 골라볼 방법이 없었다. 프론트엔드에는 이미 별표 UI가 있었지만 `localStorage` 전용이라 (1) 기기·브라우저를 바꾸면 소실되고, (2) 서버와 MCP 에이전트는 별표의 존재조차 몰랐으며, (3) 필터가 클라이언트 사이드라 페이지 2부터 결과가 새어나갔다. 그래서 이번 작업은 신규 UI 개발이 아니라 **기존 클라이언트 전용 UI를 서버 상태로 승격**하는 것이다. WHY(enrichment): 사용자가 "auto-enrich를 켰는데 안 된다"고 신고했으나, 실제로는 파이프라인이 정상 작동 중이었고(2만 건 이상 enrich 완료) 대시보드가 그 결과를 표시하지 않았을 뿐이었다. 검색 서비스는 enrichment를 붙이지 않고 노출 계층이 병합하는 구조인데, 그 병합 코드가 MCP 핸들러에만 있고 REST 라우트에 없었다.
+
+### Added
+- **메모리 별표 (durable marker)** — `memories.is_starred` 컬럼(schema v15, 부분 인덱스). 라이프사이클이 없는 순수 표시·필터용 플래그로, **검색 랭킹이나 세션 자동 주입에는 일절 개입하지 않는다**(잘못 눌러도 검색 품질이 오염되지 않도록 격리). Pin의 importance와는 별개 축. `app/core/database/{schema_migrator,initializer,models}.py`
+- **별표 토글 (웹 + 에이전트)** — REST `POST`/`DELETE /api/memories/{id}/star`(멱등, 없는 id는 404), MCP 도구 `star`/`unstar`를 4개 트랜스포트(FastMCP stdio / Pure stdio / HTTP·SSE / dispatcher) 전부에 노출. 별표는 콘텐츠 변경이 아니므로 `updated_at`을 갱신하지 않는다(별 클릭만으로 최신순 정렬이 흔들리지 않게). `app/core/services/memory.py`, `app/web/dashboard/route_modules/memories.py`, `app/mcp_common/*`, `app/mcp_stdio/server.py`
+- **`starred_only` 검색 필터** — 전 검색 모드(hybrid/exact/semantic/fuzzy/recent/id-prefix) + 전 트랜스포트(MCP·REST·batch)에서 동작. 캐시 키에 없는 필터이므로 **캐시를 완전 우회**한다(우회하지 않으면 필터/무필터 결과가 교차 오염 — anchored_path에서 실증된 버그 부류). 별표는 로컬 판단이라 hub 결과에 적용할 수 없으므로 `scope=local`을 강제. `app/core/database/base.py`, `app/core/services/{unified_search,search}.py`
+- **대시보드 별표 UI 서버화** — 행별 별 토글이 API를 호출해 서버 상태를 반영(낙관적 DOM 갱신 + 실패 시 롤백·토스트). "별표만" 필터가 `starred_only` 쿼리로 서버 필터링되어 페이지네이션과 무관하게 정확하다. 기존 `localStorage` 즐겨찾기는 첫 로드 시 1회 서버로 마이그레이션 후 키 삭제(멱등, 부분 실패 시 남은 것만 재시도). 아이콘은 기존 인라인 SVG 유지(이모지 미사용). `app/web/static/js/pages/memories.js`
+
+### Fixed
+- **enrich된 메모리가 대시보드에서 enrich 안 된 것처럼 보임** — 검색 서비스는 enrichment를 붙이지 않으므로 결과를 내보내는 **모든 노출 계층**이 병합해야 하는데, 그 코드가 MCP 핸들러에만 있었다. 그 결과 에이전트(MCP)에게는 title/abstract가 보이고 사용자(웹)에게는 안 보였다. `attach_enrichment_to_results()` 공용 헬퍼로 통일하고(구현이 갈라진 것이 근본 원인), REST `_do_search`의 반환 경로 4개를 모두 거치도록 감쌌다. 두 노출 경로가 다시 갈라지지 않도록 **같은 헬퍼를 쓰는지 강제하는 회귀 테스트**를 추가했다. `app/core/services/recall.py`, `app/web/dashboard/route_modules/search.py`, `app/mcp_common/tools.py`
+
+### Changed
+- **`SearchResult.title`/`abstract` 의미 정정** — "hub 결과 전용"으로 문서화돼 있어 로컬 enrichment도 같은 필드를 쓴다는 사실을 알기 어려웠고, 이것이 위 버그의 인지적 원인이었다. 설명을 정정하고 원본 `tags`를 파괴하지 않도록 `enrichment_tags` 필드를 분리했다. `app/core/schemas/responses.py`
+- **대시보드 행 표시** — enrich된 메모리는 raw 콘텐츠 조각 대신 LLM이 작성한 제목을 보여준다(원문은 클릭 시 peek 패널에서 그대로 확인). 태그도 enrichment 토픽 태그를 우선한다. `app/web/static/js/pages/memories.js`
+
 ## [1.32.0] - 2026-07-11
 
 **Federated Hub Search 노출 계층 완성 + anchors 기반 코드 스코프 검색 3종.** WHY(hub-exposure): Phase 1이 만든 federation 결과가 MCP 압축 응답·대시보드·세션 시작 경로에서 실제로 보이지 않았다. 개인 노드가 팀 hub 콘텐츠를 클라이언트에 노출하는 3개 워크스트림을 완성한다. 세션 시작 경로에는 네트워크 호출을 추가하지 않고(worker prefetch → 로컬 read only), hub 실패는 항상 조용히 degrade한다. WHY(anchors): mgrep·claude-mem 벤치마킹에서 도출한 도입 후보 8건을 4모델 적대 패널로 검증해 승인된 3건만 구현 — 코드 작업 중 "이 파일에 관련된 기억"만 정확히 좁히고(anchored_path), 무관한 커밋 누적이 아닌 파일 내용 기준으로 anchor 신선도를 판정하며(file_hashes), 검색 인덱스에서 선별한 여러 메모리를 한 호출로 드릴다운(context ids)한다.
