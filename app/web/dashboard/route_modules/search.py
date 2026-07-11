@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from app.core.schemas.requests import normalize_anchored_path, normalize_project_id
 from app.core.schemas.responses import SearchResponse
 from app.core.services.recall import (
+    attach_enrichment_to_results,
     fetch_curation_candidates,
     fetch_lessons,
     fetch_tag_facets,
@@ -202,7 +203,7 @@ async def _do_search(
             starred_only=starred_only,
         )
 
-    try:
+    async def _search() -> SearchResponse:
         if scope == "local":
             return await _local_search()
 
@@ -235,6 +236,16 @@ async def _do_search(
             local_search=_local_search,
             categories=merged_categories,
         )
+
+    try:
+        response = await _search()
+        # The search services never attach enrichment — every surfacing layer must
+        # do it. Skipping this here is exactly why enriched memories looked
+        # un-enriched in the dashboard while the MCP path showed them fine.
+        await attach_enrichment_to_results(
+            getattr(service, "db", None), response.results
+        )
+        return response
     except HTTPException:
         raise
     except Exception as e:

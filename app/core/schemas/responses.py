@@ -74,11 +74,18 @@ class SearchResult(BaseModel):
         default="local",
         description="결과 출처: 'local'(내 노드) 또는 'hub'(팀 hub, federated)",
     )
+    # Enrichment (LLM으로 뽑은 제목/요약/토픽 태그). 원래 hub 결과 전용이었으나
+    # 로컬 enrichment도 같은 필드로 실린다 — 병합은 검색 서비스가 아니라 노출
+    # 계층(MCP 핸들러 / REST 라우트)에서 fetch_enrichment_map으로 붙인다.
     title: Optional[str] = Field(
-        default=None, description="hub enrichment 제목 (hub 결과에만)"
+        default=None, description="enrichment 제목 (로컬 enrichment 또는 hub 결과)"
     )
     abstract: Optional[str] = Field(
-        default=None, description="hub enrichment 요약 (hub 결과에만)"
+        default=None, description="enrichment 요약 (로컬 enrichment 또는 hub 결과)"
+    )
+    enrichment_tags: Optional[List[str]] = Field(
+        default=None,
+        description="enrichment 토픽 태그 — 원본 tags와 별개로 유지",
     )
 
     model_config = {

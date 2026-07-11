@@ -510,6 +510,39 @@ async def fetch_enrichment_map(db: Any, memory_ids: Any) -> dict:
     }
 
 
+async def attach_enrichment_to_results(db: Any, results: Any) -> dict:
+    """SearchResult 목록에 로컬 enrichment(title/abstract/tags)를 얹는다.
+
+    검색 서비스(UnifiedSearch/Search)는 enrichment를 붙이지 않으므로, 결과를
+    사용자에게 내보내는 **모든 노출 계층**이 이걸 호출해야 한다. 이 병합이 MCP
+    핸들러에만 있고 대시보드 REST 라우트에 없어서, 웹에서는 enrich된 메모리가
+    "enrich 안 된 것처럼" 보이는 버그가 있었다 — 그래서 단일 헬퍼로 통일한다.
+
+    이미 값이 있는 필드(hub 결과의 title/abstract)는 덮어쓰지 않는다.
+    Best-effort: 실패해도 검색 결과 자체는 그대로 반환된다.
+    반환값은 fetch_enrichment_map 결과(호출부가 추가 가공에 쓸 수 있게).
+    """
+    if db is None or not results:
+        return {}
+    try:
+        emap = await fetch_enrichment_map(db, [r.id for r in results])
+    except Exception as e:  # noqa: BLE001 — never break search on enrichment
+        logger.debug(f"enrichment attach skipped: {e}")
+        return {}
+
+    for r in results:
+        enr = emap.get(str(r.id))
+        if not enr:
+            continue
+        if not getattr(r, "title", None) and enr.get("title"):
+            r.title = enr["title"]
+        if not getattr(r, "abstract", None) and enr.get("abstract"):
+            r.abstract = enr["abstract"]
+        if enr.get("tags") and not getattr(r, "enrichment_tags", None):
+            r.enrichment_tags = enr["tags"]
+    return emap
+
+
 async def fetch_tag_facets(
     db: Any,
     project_id: Optional[str] = None,

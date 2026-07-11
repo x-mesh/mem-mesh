@@ -302,20 +302,14 @@ class MCPToolHandlers:
                 filtered=enable_noise_filter,
             )
 
-            # enrich 활용: 결과 id 배치 조회로 로컬 enrichment(title/abstract/tags)를
-            # 병합. 검색 경로는 enrichment를 안 붙이므로 여기서 한 번 JOIN한다.
-            enrichment_map: Dict[str, Any] = {}
-            try:
-                _edb = getattr(self._storage, "db", None)
-                if _edb is not None and result.results:
-                    from ..core.services.recall import fetch_enrichment_map
+            # 검색 서비스는 enrichment를 안 붙인다 — 노출 계층이 붙여야 한다.
+            # 대시보드 REST 라우트와 같은 헬퍼를 쓴다(구현이 갈라져 있어서 웹에서만
+            # enrich가 안 보이는 버그가 났다).
+            from ..core.services.recall import attach_enrichment_to_results
 
-                    enrichment_map = await fetch_enrichment_map(
-                        _edb, [r.id for r in result.results]
-                    )
-            except Exception as e:  # noqa: BLE001 — enrichment merge is best-effort
-                logger.debug("enrichment attach skipped", error=str(e))
-                enrichment_map = {}
+            enrichment_map: Dict[str, Any] = await attach_enrichment_to_results(
+                getattr(self._storage, "db", None), result.results
+            )
 
             # 응답 압축 (활성화된 경우)
             if (
@@ -327,19 +321,7 @@ class MCPToolHandlers:
                     result, response_format, enrichment_map
                 )
 
-            dumped = result.model_dump()
-            if enrichment_map:
-                for r in dumped.get("results", []):
-                    enr = enrichment_map.get(str(r.get("id")))
-                    if not enr:
-                        continue
-                    if not r.get("title") and enr.get("title"):
-                        r["title"] = enr["title"]
-                    if not r.get("abstract") and enr.get("abstract"):
-                        r["abstract"] = enr["abstract"]
-                    if enr.get("tags") and not r.get("enrichment_tags"):
-                        r["enrichment_tags"] = enr["tags"]
-            return dumped
+            return result.model_dump()
         except Exception as e:
             logger.error("Error in search", error=str(e))
             raise

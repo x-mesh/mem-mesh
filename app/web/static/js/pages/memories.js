@@ -352,12 +352,16 @@ class MemoriesPage extends HTMLElement {
 
   buildRow(mem) {
     const icon = CAT_ICONS[mem.category] || DEFAULT_ICON;
-    const content = truncate(mem.content);
     const time = relTime(mem.created_at);
     const source = mem.source && mem.source !== 'unknown' ? mem.source : '';
-    const tags = (mem.tags || []).slice(0, 3);
+    // Enrichment topic tags are the curated ones — prefer them over raw tags.
+    const tags = (mem.enrichment_tags?.length ? mem.enrichment_tags : (mem.tags || [])).slice(0, 3);
     const score = mem.similarity_score ? `<span class="mem-score">${(mem.similarity_score * 100).toFixed(0)}%</span>` : '';
+    // An enriched memory has an LLM-written title: show that instead of a raw
+    // content slice. The full content is one click away in the peek panel.
+    const content = truncate(mem.title || mem.content);
     const contentHtml = this.searchQuery ? highlight(content, this.searchQuery) : esc(content);
+    const enrichedClass = mem.title ? ' mem-enriched' : '';
     const isSelected = this._selected.has(mem.id);
     const isFav = this._favorites.has(mem.id);
     const srcBadge = source ? `<span class="mem-source-badge mem-clickable-filter" data-filter-type="source" data-filter-value="${esc(source)}">${esc(source)}</span>` : '';
@@ -378,7 +382,7 @@ class MemoriesPage extends HTMLElement {
         ${mem.origin === 'hub' ? '<span class="recent-item-origin mem-origin-hub" title="From your team hub">Hub</span>' : ''}
         ${mem.project_id ? `<span class="recent-item-project mem-clickable-filter" data-filter-type="project_id" data-filter-value="${esc(mem.project_id)}">${esc(mem.project_id)}</span>` : ''}
         ${clientBadge}
-        <span class="recent-item-content">${contentHtml}</span>
+        <span class="recent-item-content${enrichedClass}" title="${esc(mem.abstract || mem.content).slice(0, 300)}">${contentHtml}</span>
         ${tags.length ? `<span class="mem-tags">${tags.map(t => `<span class="mem-tag mem-clickable-filter" data-filter-type="tag" data-filter-value="${esc(t)}">#${esc(t)}</span>`).join('')}</span>` : ''}
         ${srcBadge}
         ${score}
@@ -2383,6 +2387,9 @@ style.textContent = `
   .mem-list .recent-item-badge { flex-shrink: 0; font-size: 0.6875rem; padding: 1px 6px; border-radius: var(--border-radius-sm, 4px); background: var(--bg-secondary); color: var(--text-secondary); font-weight: 500; }
   .mem-list .recent-item-project { flex-shrink: 0; font-size: 0.6875rem; padding: 1px 6px; border-radius: var(--border-radius-sm, 4px); background: var(--bg-tertiary, var(--bg-secondary)); color: var(--text-primary); font-weight: 500; border: 1px solid var(--border-color); }
   .mem-list .recent-item-content { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+  /* Enriched rows show an LLM-written title, not a raw content slice — weight it
+     slightly so a scan tells curated summaries from raw text. */
+  .mem-list .recent-item-content.mem-enriched { font-weight: 500; }
   .mem-list .recent-item-time { flex-shrink: 0; font-size: 0.6875rem; color: var(--text-muted); white-space: nowrap; }
 
   /* Tags inline */
