@@ -127,15 +127,21 @@ class TestStarDispatcher:
 class TestStarFastMCP:
     """사이트 5: FastMCP — dispatcher가 커버하지 않는 별도 등록면.
 
-    @mcp.tool()은 함수를 FunctionTool로 감싸므로 모듈 속성이 아니라 FastMCP 레지스트리
-    를 조회해야 실제 노출 여부를 알 수 있다.
+    ``@mcp.tool()``은 함수를 FunctionTool로 감싸므로 모듈 속성은 더 이상 호출 가능한
+    함수가 아니다. 레지스트리 조회 API(get_tools 등)는 fastmcp 버전마다 다르므로
+    (CI에서 AttributeError로 실측), 버전에 따라 흔들리지 않는 표면 — 데코레이트된
+    객체가 광고하는 이름 — 으로 검증한다.
     """
 
-    @pytest.mark.asyncio
-    async def test_fastmcp_registers_star_tools(self):
+    @pytest.mark.parametrize("name", ["star", "unstar"])
+    def test_fastmcp_registers_star_tools(self, name):
+        import inspect
+
         from app.mcp_stdio import server
 
-        tools = await server.mcp.get_tools()
-        names = set(tools) if isinstance(tools, dict) else {t.name for t in tools}
-        assert "star" in names, "FastMCP star tool missing"
-        assert "unstar" in names, "FastMCP unstar tool missing"
+        tool = getattr(server, name, None)
+        assert tool is not None, f"FastMCP {name} tool missing"
+        # 데코레이터가 함수를 FunctionTool로 바꿔친다 — 여기 남아 있는 게 맨 함수라면
+        # @mcp.tool()이 빠진 것이고, 그 도구는 FastMCP에 등록되지 않는다.
+        assert not inspect.isfunction(tool), f"{name} is missing @mcp.tool()"
+        assert getattr(tool, "name", None) == name
