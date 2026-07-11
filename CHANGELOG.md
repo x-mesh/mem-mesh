@@ -5,12 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.33.1] - 2026-07-11
+## [1.33.2] - 2026-07-11
 
-**CI Docker publish를 막던 버전 의존적 테스트 수정.** WHY: v1.33.0의 FastMCP 등록 테스트가 `mcp.get_tools()`라는 레지스트리 조회 API에 의존했는데, 이 API는 fastmcp 버전마다 달라 CI 러너에서 `AttributeError`로 실패했다(로컬 2.14.3에는 존재). 그 결과 PyPI publish는 성공했으나 Docker 이미지 publish가 테스트 게이트에서 막혔다.
+**FastMCP 등록 테스트를 라이브러리 런타임 동작에서 완전히 분리.** WHY: v1.33.1의 수정도 여전히 fastmcp의 런타임 동작에 기댔다 — `@mcp.tool()`이 함수를 `FunctionTool`로 감싼다고 가정했는데, CI(Python 3.11)가 설치한 fastmcp는 **원본 함수를 그대로 반환**해서 이번엔 정반대 이유로 실패했다(로컬은 Python 3.13, 다른 버전이 resolve됨). 라이브러리의 동작을 검증 대상으로 삼은 것 자체가 잘못이었다.
 
 ### Fixed
-- **`test_fastmcp_registers_star_tools` 버전 의존성 제거** — 라이브러리 내부 레지스트리 API 대신, 버전에 흔들리지 않는 표면(`@mcp.tool()`이 함수를 `FunctionTool`로 바꿔친다는 사실)으로 검증한다. 데코레이터가 빠지면 여전히 실패하므로 검증력은 유지된다(맨 함수는 `inspect.isfunction`으로 걸러짐). `tests/test_starred_mcp.py`
+- **FastMCP 도구 등록 검사를 AST 소스 검사로 전환** — fastmcp를 런타임으로 건드리지 않고, `app/mcp_stdio/server.py`에 `@mcp.tool()`이 달린 `star`/`unstar` 함수가 정의돼 있는지 AST로 확인한다. 여기서 잡으려던 실수(스키마엔 추가하고 FastMCP 등록만 누락)는 소스 검사로 충분히 잡히고, 라이브러리 버전·파이썬 버전에 흔들리지 않는다. 검사 자체가 무력화되지 않았는지 확인하는 메타 테스트(기존 도구 add/search/context가 검출되는지)도 함께 추가했다. `tests/test_starred_mcp.py`
+
+## [1.33.1] - 2026-07-11
+
+**CI Docker publish를 막던 버전 의존적 테스트 수정 (불완전 — 1.33.2에서 마무리).** WHY: v1.33.0의 FastMCP 등록 테스트가 `mcp.get_tools()`라는 레지스트리 조회 API에 의존했는데, 이 API는 fastmcp 버전마다 달라 CI 러너에서 `AttributeError`로 실패했다. 그 결과 PyPI publish는 성공했으나 Docker 이미지 publish가 테스트 게이트에서 막혔다.
+
+### Fixed
+- **`test_fastmcp_registers_star_tools` 레지스트리 API 의존 제거** — 다만 이 수정도 `@mcp.tool()`의 반환 타입에 의존해 CI에서 재차 실패했다. 완전한 해결은 1.33.2 참조. `tests/test_starred_mcp.py`
 
 ## [1.33.0] - 2026-07-11
 
