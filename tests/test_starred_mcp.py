@@ -127,21 +127,39 @@ class TestStarDispatcher:
 class TestStarFastMCP:
     """사이트 5: FastMCP — dispatcher가 커버하지 않는 별도 등록면.
 
-    ``@mcp.tool()``은 함수를 FunctionTool로 감싸므로 모듈 속성은 더 이상 호출 가능한
-    함수가 아니다. 레지스트리 조회 API(get_tools 등)는 fastmcp 버전마다 다르므로
-    (CI에서 AttributeError로 실측), 버전에 따라 흔들리지 않는 표면 — 데코레이트된
-    객체가 광고하는 이름 — 으로 검증한다.
+    fastmcp의 **런타임 동작에 의존하지 않는다**: 레지스트리 조회 API(get_tools)는
+    버전마다 있고 없고, ``@mcp.tool()``이 반환하는 것도 버전에 따라 FunctionTool
+    이기도 원본 함수이기도 하다(둘 다 CI에서 실측). 그래서 라이브러리가 아니라
+    **우리 소스**를 본다 — mcp_stdio/server.py에 ``@mcp.tool()``이 달린 star/unstar
+    함수가 정의돼 있는가. 여기서 잡으려는 실수(스키마엔 추가하고 FastMCP 등록만
+    빠뜨림)는 소스 검사로 충분히 잡힌다.
     """
 
-    @pytest.mark.parametrize("name", ["star", "unstar"])
-    def test_fastmcp_registers_star_tools(self, name):
+    @staticmethod
+    def _mcp_tool_decorated_names() -> set:
+        import ast
         import inspect
 
         from app.mcp_stdio import server
 
-        tool = getattr(server, name, None)
-        assert tool is not None, f"FastMCP {name} tool missing"
-        # 데코레이터가 함수를 FunctionTool로 바꿔친다 — 여기 남아 있는 게 맨 함수라면
-        # @mcp.tool()이 빠진 것이고, 그 도구는 FastMCP에 등록되지 않는다.
-        assert not inspect.isfunction(tool), f"{name} is missing @mcp.tool()"
-        assert getattr(tool, "name", None) == name
+        tree = ast.parse(inspect.getsource(server))
+        names = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for deco in node.decorator_list:
+                func = deco.func if isinstance(deco, ast.Call) else deco
+                # @mcp.tool(...) / @mcp.tool
+                if isinstance(func, ast.Attribute) and func.attr == "tool":
+                    names.add(node.name)
+        return names
+
+    @pytest.mark.parametrize("name", ["star", "unstar"])
+    def test_fastmcp_registers_star_tools(self, name):
+        decorated = self._mcp_tool_decorated_names()
+        assert name in decorated, f"mcp_stdio/server.py: {name} is missing @mcp.tool()"
+
+    def test_ast_check_actually_sees_existing_tools(self):
+        """검사 자체가 무력화되지 않았는지(항상 빈 집합 반환 등) 확인"""
+        decorated = self._mcp_tool_decorated_names()
+        assert {"add", "search", "context"} <= decorated
