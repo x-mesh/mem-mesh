@@ -928,6 +928,7 @@ class RelayWorker:
         hook_prune_interval_hours: int = 24,
         auto_enrich_sweep_interval_hours: int = 12,
         auto_enrich_batch_cap: int = 200,
+        auto_enrich_max_projects_per_sweep: int = 20,
         enrich_backfill_enabled: bool = False,
         enrich_backfill_interval_minutes: float = 2.0,
         enrich_backfill_cap: int = 200,
@@ -979,6 +980,12 @@ class RelayWorker:
             max(1, auto_enrich_sweep_interval_hours) * 3600
         )
         self.auto_enrich_batch_cap = max(1, auto_enrich_batch_cap)
+        # Ceiling on projects visited per sweep. Only bites in scope="all", where
+        # every project is in range: batch_cap is per project, so without this a
+        # 168-project node could enqueue 168 × cap jobs in one pass.
+        self.auto_enrich_max_projects_per_sweep = max(
+            1, auto_enrich_max_projects_per_sweep
+        )
         self._last_auto_enrich_sweep_monotonic: Optional[float] = None
         # One-off convergent backfill: re-enrich memories enriched before
         # problem/resolution/lesson/confidence were persisted. Self-terminates as
@@ -1155,9 +1162,13 @@ class RelayWorker:
             if due:
                 try:
                     swept = 0
-                    for (
-                        sub
-                    ) in await self.maintenance_service.list_auto_enrich_enabled():
+                    # scope="all" can put every project in range; take a bounded
+                    # round-robin window so one sweep can't enqueue an unbounded
+                    # pile of LLM work (the next sweep resumes after it).
+                    targets = await self.maintenance_service.next_auto_enrich_targets(
+                        limit=self.auto_enrich_max_projects_per_sweep
+                    )
+                    for sub in targets:
                         if not await self.maintenance_service.auto_enrich_active(
                             sub.project_id, self.chat_settings
                         ):

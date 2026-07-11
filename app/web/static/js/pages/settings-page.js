@@ -189,6 +189,14 @@ export class SettingsPage extends HTMLElement {
             </div>
           </div>
           <p class="env-foot" id="worker-hub-note"></p>
+          <div class="chat-field">
+            <span>Auto-enrich scope</span>
+            <select id="auto-enrich-scope">
+              <option value="subscribed">Only projects I switch on</option>
+              <option value="all">All projects</option>
+            </select>
+          </div>
+          <p class="env-foot" id="auto-enrich-scope-note"></p>
           <div class="chat-actions">
             <button class="settings-btn-primary" id="worker-save-btn">Save Worker Settings</button>
             <span id="worker-meta" class="env-foot"></span>
@@ -773,6 +781,18 @@ export class SettingsPage extends HTMLElement {
                 ? '<span class="env-src env-src-db">Hub token configured</span> outbox is ready. Manage it on the <a href="/relay" data-route="/relay">Relay page</a>.'
                 : '<span class="env-state off">No hub token</span> outbox waits until you set one on the <a href="/relay" data-route="/relay">Relay page</a>.';
         }
+
+        const scopeSel = this.querySelector('#auto-enrich-scope');
+        const scope = data.auto_enrich_scope || 'subscribed';
+        if (scopeSel) scopeSel.value = scope;
+        // Spell out what the per-project toggle means in this mode — it flips
+        // from opt-in to opt-out, which is easy to get backwards.
+        const scopeNote = this.querySelector('#auto-enrich-scope-note');
+        if (scopeNote) {
+            scopeNote.innerHTML = scope === 'all'
+                ? 'Every new memory is AI-enriched (title, abstract, tags). The per-project toggle on the <a href="/projects" data-route="/projects">Projects page</a> becomes an <strong>opt-out</strong>: switch a project off to exclude it.'
+                : 'Only projects you switch on are enriched. Use the per-project toggle on the <a href="/projects" data-route="/projects">Projects page</a> to <strong>opt in</strong>.';
+        }
     }
 
     async saveWorkerConfig() {
@@ -780,6 +800,7 @@ export class SettingsPage extends HTMLElement {
             worker_tasks: this.workerTasks.filter(
                 (task) => this.querySelector(`#worker-task-${task}`)?.checked,
             ),
+            auto_enrich_scope: this.querySelector('#auto-enrich-scope')?.value || 'subscribed',
         };
         const btn = this.querySelector('#worker-save-btn');
         if (btn) btn.disabled = true;

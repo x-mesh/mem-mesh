@@ -456,6 +456,12 @@ async def _build_relay_worker(
         auto_enrich_batch_cap = int(_os.getenv("MEM_MESH_AUTO_ENRICH_BATCH_CAP", "200"))
     except ValueError:
         auto_enrich_batch_cap = 200
+    try:
+        auto_enrich_max_projects_per_sweep = int(
+            _os.getenv("MEM_MESH_AUTO_ENRICH_MAX_PROJECTS", "20")
+        )
+    except ValueError:
+        auto_enrich_max_projects_per_sweep = 20
 
     enrich_backfill_enabled = _os.getenv(
         "MEM_MESH_ENRICH_BACKFILL", ""
@@ -502,6 +508,7 @@ async def _build_relay_worker(
         hook_retention_days=hook_retention_days,
         auto_enrich_sweep_interval_hours=auto_enrich_sweep_interval_hours,
         auto_enrich_batch_cap=auto_enrich_batch_cap,
+        auto_enrich_max_projects_per_sweep=auto_enrich_max_projects_per_sweep,
         enrich_backfill_enabled=enrich_backfill_enabled,
         enrich_backfill_cap=enrich_backfill_cap,
         abstract_reembed_enabled=abstract_reembed_enabled,

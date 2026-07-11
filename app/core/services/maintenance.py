@@ -40,6 +40,22 @@ logger = logging.getLogger(__name__)
 MAINTENANCE_OPERATIONS = ("enrich", "improve")
 _ACTIVE_STATUSES = ("pending", "processing")
 
+# Which projects continuous auto-enrich applies to.
+#   "subscribed" (default, historical): only projects explicitly switched on.
+#       No row = off. Per-project toggle is an opt-IN.
+#   "all": every project, unless a project is explicitly switched off.
+#       Per-project toggle becomes an opt-OUT.
+# Kept as a global setting because "should new memories be enriched at all" is a
+# cost decision about the whole node, not about one project.
+AUTO_ENRICH_SCOPES = ("subscribed", "all")
+AUTO_ENRICH_SCOPE_KEY = "auto_enrich.scope"
+_DEFAULT_AUTO_ENRICH_SCOPE = "subscribed"
+
+# Round-robin cursor for the "all"-scope sweep: with many projects one sweep
+# can't (and shouldn't) drain every backlog, so it resumes where it left off
+# instead of always starving the tail of the project list.
+AUTO_ENRICH_CURSOR_KEY = "auto_enrich.sweep_cursor"
+
 
 @dataclass
 class AutoEnrichSubscription:
@@ -254,13 +270,106 @@ class MaintenanceService:
         llm = await resolve_service_llm(self.db, settings, "relay")
         return bool(llm.get("api_key"))
 
+    # ── auto-enrich scope (global: which projects the feature applies to) ────
+
+    async def get_auto_enrich_scope(self) -> str:
+        """``"subscribed"`` (default) or ``"all"``. See AUTO_ENRICH_SCOPES."""
+        raw = await self.db.get_app_config(AUTO_ENRICH_SCOPE_KEY)
+        value = (raw or "").strip().lower()
+        return value if value in AUTO_ENRICH_SCOPES else _DEFAULT_AUTO_ENRICH_SCOPE
+
+    async def set_auto_enrich_scope(self, scope: str) -> str:
+        """Persist the global scope. Raises ValueError on an unknown value."""
+        value = (scope or "").strip().lower()
+        if value not in AUTO_ENRICH_SCOPES:
+            raise ValueError(
+                f"unknown auto-enrich scope: {scope!r}. "
+                f"Expected one of {', '.join(AUTO_ENRICH_SCOPES)}"
+            )
+        await self.db.set_app_config(AUTO_ENRICH_SCOPE_KEY, value)
+        return value
+
     async def auto_enrich_active(self, project_id: str, settings: Any) -> bool:
-        """True when the project opted in AND a Worker LLM is configured. Gate
-        shared by the write-time hook and the periodic sweep."""
+        """True when this project is in scope AND a Worker LLM is configured.
+
+        Gate shared by the write-time hook and the periodic sweep.
+
+        - scope ``subscribed``: the project must be explicitly switched on.
+        - scope ``all``: every project qualifies **unless** it was explicitly
+          switched off — so the per-project toggle becomes an opt-out and a
+          deliberate exclusion is never silently overridden by the global flip.
+        """
         sub = await self.get_auto_enrich(project_id)
-        if not sub or not sub.enabled:
+        scope = await self.get_auto_enrich_scope()
+        if scope == "all":
+            if sub is not None and not sub.enabled:
+                return False  # explicit opt-out wins over the global "all"
+        elif not sub or not sub.enabled:
             return False
         return await self.worker_llm_ok(settings)
+
+    async def next_auto_enrich_targets(
+        self, *, limit: Optional[int] = None
+    ) -> List[AutoEnrichSubscription]:
+        """Projects the next sweep should visit, honouring the global scope.
+
+        ``subscribed``: the explicitly enabled rows (unchanged behaviour).
+
+        ``all``: every project that owns memories, minus the ones explicitly
+        switched off. Projects with no subscription row get a synthetic entry —
+        **no row is written**, so flipping the scope back to ``subscribed`` does
+        not leave behind a trail of implicit opt-ins.
+
+        With many projects one sweep must not visit them all (each visit can
+        enqueue up to a batch cap of LLM work), so ``limit`` takes a window and
+        **advances a round-robin cursor**: the next sweep resumes after the last
+        project visited instead of re-walking the head of the list forever and
+        starving the tail. Hence ``next_`` — this call has a cursor side effect.
+        """
+        await self.ensure_schema()
+        if await self.get_auto_enrich_scope() != "all":
+            return await self.list_auto_enrich_enabled()
+
+        rows = await self.db.fetchall("""
+            SELECT m.project_id AS project_id,
+                   s.operations AS operations,
+                   s.last_sweep_at AS last_sweep_at
+            FROM (SELECT DISTINCT project_id FROM memories
+                  WHERE project_id IS NOT NULL AND project_id != '') m
+            LEFT JOIN auto_enrich_subscription s ON s.project_id = m.project_id
+            WHERE s.project_id IS NULL OR s.enabled = 1
+            ORDER BY m.project_id
+            """)
+        targets = [
+            AutoEnrichSubscription(
+                project_id=r["project_id"],
+                enabled=True,
+                operations=(
+                    json.loads(r["operations"]) if r["operations"] else ["enrich"]
+                ),
+                last_sweep_at=r["last_sweep_at"],
+            )
+            for r in rows
+        ]
+        if not targets or not limit or limit <= 0 or limit >= len(targets):
+            return targets
+
+        # Round-robin window: resume after the last project the previous sweep
+        # visited, wrapping around the (project_id-ordered) list.
+        cursor = await self.db.get_app_config(AUTO_ENRICH_CURSOR_KEY)
+        start = 0
+        if cursor:
+            for i, t in enumerate(targets):
+                if t.project_id > cursor:
+                    start = i
+                    break
+            else:
+                start = 0  # cursor at/past the end → wrap to the front
+        window = targets[start : start + limit]
+        if len(window) < limit:
+            window += targets[: limit - len(window)]
+        await self.db.set_app_config(AUTO_ENRICH_CURSOR_KEY, window[-1].project_id)
+        return window
 
     async def enqueue_backfill(
         self, *, project_id: Optional[str] = None, limit: int = 200

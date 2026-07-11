@@ -47,12 +47,19 @@ class AutoEnrichRequest(BaseModel):
 
 class AutoEnrichResponse(BaseModel):
     project_id: str
+    # Whether auto-enrich actually applies to this project *right now* — the
+    # explicit row AND the global scope together. Under scope="all" a project
+    # with no row is enabled, so reporting the row alone would tell the UI the
+    # opposite of what the server will do.
     enabled: bool = False
     operations: List[str] = Field(default_factory=lambda: ["enrich"])
     # Whether a Worker LLM is configured — the hard prerequisite for auto-enrich
     # to actually run (UI shows a "configure Worker LLM" hint when False).
     llm_configured: bool = False
     last_sweep_at: Optional[str] = None
+    # Global scope: "subscribed" (per-project opt-in) or "all" (opt-out). Lets
+    # the UI label the toggle correctly in each mode.
+    scope: str = "subscribed"
 
 
 async def _auto_enrich_response(
@@ -62,13 +69,20 @@ async def _auto_enrich_response(
     from app.core.services.llm_resolver import resolve_service_llm
 
     sub = await service.get_auto_enrich(project_id)
+    scope = await service.get_auto_enrich_scope()
     llm = await resolve_service_llm(service.db, get_settings(), "relay")
+    if scope == "all":
+        # No row = in scope; an explicit row still wins (opt-out).
+        enabled = sub.enabled if sub is not None else True
+    else:
+        enabled = bool(sub and sub.enabled)
     return AutoEnrichResponse(
         project_id=project_id,
-        enabled=bool(sub and sub.enabled),
+        enabled=enabled,
         operations=(sub.operations if sub else ["enrich"]),
         llm_configured=bool(llm.get("api_key")),
         last_sweep_at=(sub.last_sweep_at if sub else None),
+        scope=scope,
     )
 
 

@@ -146,11 +146,15 @@ async def _resolve_hub_token_configured(db, settings) -> bool:
 
 async def _build_worker_response(db, settings) -> dict:
     """Assemble the relay worker response (shared by GET and PUT; token as bool only)."""
+    from app.core.services.maintenance import AUTO_ENRICH_SCOPES, MaintenanceService
+
     return {
         "reconcile_enabled": await _resolve_reconcile_enabled(db, settings),
         "worker_tasks": await _resolve_worker_tasks(db),
         "hub_token_configured": await _resolve_hub_token_configured(db, settings),
         "known_tasks": list(_KNOWN_TASKS),
+        "auto_enrich_scope": await MaintenanceService(db).get_auto_enrich_scope(),
+        "auto_enrich_scopes": list(AUTO_ENRICH_SCOPES),
     }
 
 
@@ -192,6 +196,19 @@ async def put_worker_settings(body: dict = Body(...), db=Depends(get_database)):
             await db.set_app_config(
                 "reconcile.enabled", "true" if "reconcile" in cleaned else "false"
             )
+
+        # Which projects continuous auto-enrich applies to. Global because
+        # "enrich every new memory or only opted-in projects" is a cost decision
+        # about the whole node; the per-project toggle stays as the exception.
+        if "auto_enrich_scope" in body:
+            from app.core.services.maintenance import MaintenanceService
+
+            try:
+                await MaintenanceService(db).set_auto_enrich_scope(
+                    body["auto_enrich_scope"]
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
 
         return await _build_worker_response(db, get_settings())
     except HTTPException:
