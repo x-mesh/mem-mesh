@@ -791,6 +791,43 @@ class MemoryService:
             "stale_checked_at": checked_at,
         }
 
+    async def set_starred(self, memory_id: str, starred: bool) -> dict:
+        """Toggle a memory's durable star (favorite) flag.
+
+        A display/filter marker only: it never affects ``similarity_score``,
+        ranking or auto-injection, and it has no lifecycle (no done/dismiss).
+        Idempotent — setting the value it already has is a success, not an error.
+
+        ``updated_at`` is deliberately NOT bumped: starring is not a content
+        change, and bumping it would silently reorder the memory in every
+        recency-sorted view just because the user clicked a star.
+
+        Args:
+            memory_id: Memory to star/unstar.
+            starred: True to star, False to unstar.
+
+        Returns:
+            dict: ``{memory_id, is_starred}``.
+
+        Raises:
+            MemoryNotFoundError: no memory with that id.
+        """
+        existing = await self.get(memory_id)
+        if existing is None:
+            raise MemoryNotFoundError(memory_id)
+
+        try:
+            await self.db.execute(
+                "UPDATE memories SET is_starred = ? WHERE id = ?",
+                (1 if starred else 0, memory_id),
+            )
+        except Exception as e:
+            logger.error("Failed to set starred for %s: %s", memory_id, e)
+            raise DatabaseError(f"Failed to set starred: {e}") from e
+
+        logger.info("Set starred: %s -> %s", memory_id, starred)
+        return {"memory_id": memory_id, "is_starred": starred}
+
     async def _relay_auto_share(self, memory: Any, *, event_type: str) -> None:
         """Forward a memory write to relay auto-share, if a subscription exists.
 

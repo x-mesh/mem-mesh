@@ -111,6 +111,15 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Call only after you have applied proposed_content to file_path. Records the terminal state "
         "transition; the server still writes no files."
     ),
+    "star": (
+        "Mark a memory as starred — a durable 'this one matters, keep it in reach' "
+        "flag the user sees and filters on in the dashboard. Display/filter only: it "
+        "never changes search ranking or auto-injection, and there is no done/dismiss "
+        "state. Idempotent. Use search(starred_only=true) to list starred memories."
+    ),
+    "unstar": (
+        "Remove a memory's star. Idempotent (unstarring an unstarred memory succeeds)."
+    ),
     "report_anchor_status": (
         "Report a local verification of a memory's git anchors (fresh|stale). The server has no git "
         "access, so YOU verify: read the memory's anchors from any search/get result, then confirm "

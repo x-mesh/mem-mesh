@@ -55,6 +55,21 @@ def _parse_tags(row) -> Optional[List[str]]:
     return None
 
 
+def _parse_starred(row) -> bool:
+    """DB Row에서 is_starred를 bool로 파싱 (컬럼이 없으면 False).
+
+    Tolerant by design: rows that predate the column, and hub/federated rows that
+    never carry it, must read as "not starred" rather than raise in the hot path.
+    """
+    try:
+        if "is_starred" not in row.keys():
+            return False
+        return bool(row["is_starred"])
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Failed to parse is_starred: {e}")
+        return False
+
+
 def _parse_anchors(row) -> Optional[dict]:
     """DB Row에서 anchors(JSON) 값을 파싱하여 dict로 변환 (없으면 None).
 
@@ -109,6 +124,7 @@ class SearchService:
         recency_weight: float = 0.0,
         search_mode: str = "hybrid",
         anchored_path: Optional[str] = None,
+        starred_only: bool = False,
     ) -> SearchResponse:
         """
         하이브리드 검색 수행
@@ -126,6 +142,7 @@ class SearchService:
             recency_weight: 최신성 가중치 (0.0 ~ 1.0)
             search_mode: 검색 모드 (hybrid, exact, semantic, fuzzy)
             anchored_path: anchors.file_paths 프리픽스 필터 (repo 상대 경로)
+            starred_only: True면 별표된 메모리만 반환
 
         Returns:
             SearchResponse: 검색 결과
@@ -159,7 +176,9 @@ class SearchService:
             # Check cache first (only when offset=0). anchored_path is not part
             # of the cache key, so anchored searches bypass the cache entirely
             # (both read and write) to avoid serving unfiltered entries.
-            if offset == 0 and not anchored_path:  # Cache first page only
+            if (
+                offset == 0 and not anchored_path and not starred_only
+            ):  # Cache first page only
                 cached_results = await self.cache_manager.get_cached_search(
                     query=query, project_id=project_id, category=cache_cat, limit=limit
                 )
@@ -192,6 +211,8 @@ class SearchService:
                 filters["tag"] = tag
             if anchored_path:
                 filters["anchored_path"] = anchored_path
+            if starred_only:
+                filters["starred_only"] = True
 
             # Return recent memories for empty query
             if not query.strip():
@@ -239,6 +260,7 @@ class SearchService:
                                 ),
                                 tags=_parse_tags(row),
                                 anchors=_parse_anchors(row),
+                                is_starred=_parse_starred(row),
                             )
                             search_results.append(search_result)
                         except Exception as e:
@@ -283,7 +305,13 @@ class SearchService:
 
             # Save results to cache (only when offset=0; anchored searches
             # bypass the cache — see the cache-check comment above)
-            if offset == 0 and result and query.strip() and not anchored_path:
+            if (
+                offset == 0
+                and result
+                and query.strip()
+                and not anchored_path
+                and not starred_only
+            ):
                 await self.cache_manager.cache_search_results(
                     query=query,
                     results=result,
@@ -471,6 +499,7 @@ class SearchService:
                         client=row["client"] if "client" in row.keys() else None,
                         tags=_parse_tags(row),
                         anchors=_parse_anchors(row),
+                        is_starred=_parse_starred(row),
                     )
                     search_results.append(search_result)
                 except Exception as e:
@@ -522,6 +551,8 @@ class SearchService:
                     if _cond:
                         base_query += " AND " + _cond
                         params.extend(_cp)
+                if filters.get("starred_only"):
+                    base_query += " AND is_starred = 1"
 
             base_query += " ORDER BY created_at DESC LIMIT ?"
             params.append(limit)
@@ -585,6 +616,7 @@ class SearchService:
                         client=row["client"] if "client" in row.keys() else None,
                         tags=_parse_tags(row),
                         anchors=_parse_anchors(row),
+                        is_starred=_parse_starred(row),
                     )
                     search_results.append(search_result)
                 except Exception as e:
@@ -636,6 +668,8 @@ class SearchService:
                     if _cond:
                         base_query += " AND " + _cond
                         params.extend(_cp)
+                if filters.get("starred_only"):
+                    base_query += " AND is_starred = 1"
 
             base_query += " ORDER BY created_at DESC LIMIT ?"
             params.append(limit)
@@ -678,6 +712,7 @@ class SearchService:
                         client=row["client"] if "client" in row.keys() else None,
                         tags=_parse_tags(row),
                         anchors=_parse_anchors(row),
+                        is_starred=_parse_starred(row),
                     )
                     search_results.append(search_result)
                 except Exception as e:
@@ -771,6 +806,7 @@ class SearchService:
                         client=row["client"] if "client" in row.keys() else None,
                         tags=_parse_tags(row),
                         anchors=_parse_anchors(row),
+                        is_starred=_parse_starred(row),
                     )
                     search_results.append(search_result)
                 except Exception as e:
@@ -821,6 +857,8 @@ class SearchService:
                     if _cond:
                         base_query += " AND " + _cond
                         params.extend(_cp)
+                if filters.get("starred_only"):
+                    base_query += " AND is_starred = 1"
 
             # Fetch a modest candidate pool for fuzzy matching. SequenceMatcher
             # scoring is O(rows × words), so limit*3 (not *10) cuts cost ~80% with
@@ -893,6 +931,7 @@ class SearchService:
                     client=row["client"] if "client" in row.keys() else None,
                     tags=_parse_tags(row),
                     anchors=_parse_anchors(row),
+                    is_starred=_parse_starred(row),
                 )
                 search_results.append(search_result)
 

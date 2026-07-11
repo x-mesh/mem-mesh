@@ -99,6 +99,7 @@ async def get_memory(
             "category": memory.category,
             "tags": memory.tags,
             "anchors": memory.get_anchors(),
+            "is_starred": memory.is_starred,
             "source": memory.source,
             "client": memory.client,
             "created_at": memory.created_at,
@@ -171,6 +172,34 @@ async def update_memory(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Update memory error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/memories/{memory_id}/star")
+async def star_memory(
+    memory_id: str, service: MemoryService = Depends(get_memory_service)
+):
+    """Star a memory (durable display/filter marker; idempotent)."""
+    try:
+        return await service.set_starred(memory_id, True)
+    except MemoryNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Star memory error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/memories/{memory_id}/star")
+async def unstar_memory(
+    memory_id: str, service: MemoryService = Depends(get_memory_service)
+):
+    """Remove a memory's star (idempotent)."""
+    try:
+        return await service.set_starred(memory_id, False)
+    except MemoryNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unstar memory error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

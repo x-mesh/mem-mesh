@@ -317,6 +317,10 @@ class SearchParams(BaseModel):
             "(예: 'app/core/'). 해당 파일/디렉토리에 앵커된 메모리만 반환"
         ),
     )
+    starred_only: bool = Field(
+        default=False,
+        description="True면 사용자가 별표한 메모리만 반환 (표시·필터 전용 플래그)",
+    )
 
     @field_validator("anchored_path")
     @classmethod

@@ -80,6 +80,10 @@ class MCPDispatcher:
                 return await self._dispatch_doc_proposal_applied(args)
             elif tool_name == "report_anchor_status":
                 return await self._dispatch_report_anchor_status(args)
+            elif tool_name == "star":
+                return await self._dispatch_star(args, starred=True)
+            elif tool_name == "unstar":
+                return await self._dispatch_star(args, starred=False)
             else:
                 logger.warning(f"Unknown tool: {tool_name}")
                 return format_tool_error(f"Unknown tool: {tool_name}")
@@ -123,6 +127,7 @@ class MCPDispatcher:
             temporal_mode=args.get("temporal_mode", "boost"),
             scope=args.get("scope", "local"),
             anchored_path=args.get("anchored_path"),
+            starred_only=args.get("starred_only", False),
         )
         return format_tool_response(result)
 
@@ -328,6 +333,16 @@ class MCPDispatcher:
         )
         return format_tool_response(result)
 
+    async def _dispatch_star(
+        self, args: Dict[str, Any], *, starred: bool
+    ) -> Dict[str, Any]:
+        if "memory_id" not in args:
+            return format_tool_error("Missing required argument: memory_id")
+
+        handler = self._tool_handlers.star if starred else self._tool_handlers.unstar
+        result = await handler(memory_id=args["memory_id"])
+        return format_tool_response(result)
+
     async def _dispatch_batch_operations(self, args: Dict[str, Any]) -> Dict[str, Any]:
         if "operations" not in args:
             return format_tool_error("Missing required argument: operations")
@@ -391,6 +406,7 @@ class MCPDispatcher:
                             "category": op.get("category"),
                             "limit": op.get("limit", 5),
                             "anchored_path": op.get("anchored_path"),
+                            "starred_only": op.get("starred_only", False),
                         }
                     )
                     if not search_result.get("isError"):

@@ -176,6 +176,7 @@ class BatchOperationHandler:
         category: Optional[str] = None,
         limit: int = 5,
         anchored_path: Optional[str] = None,
+        starred_only: bool = False,
     ) -> Dict[str, Any]:
         """
         Batch search multiple queries with cached results
@@ -186,6 +187,7 @@ class BatchOperationHandler:
             category: Category filter
             limit: Number of results per query
             anchored_path: anchors.file_paths prefix filter (repo-relative)
+            starred_only: only memories the user starred
 
         Returns:
             Dictionary with search results for each query
@@ -230,7 +232,7 @@ class BatchOperationHandler:
                 # cache key — anchored searches must bypass the cache entirely
                 # (same contract as SearchService/UnifiedSearchService).
                 cached_result = None
-                if not anchored_path:
+                if not anchored_path and not starred_only:
                     cached_result = await self.cache_manager.get_cached_search(
                         query=query,
                         project_id=project_id,
@@ -258,6 +260,7 @@ class BatchOperationHandler:
                         category=category,
                         limit=limit,
                         anchored_path=anchored_path,
+                        starred_only=starred_only,
                     )
 
                     results[query] = {
@@ -377,6 +380,7 @@ class BatchOperationHandler:
                 category=search_operations[0].get("category"),
                 limit=search_operations[0].get("limit", 5),
                 anchored_path=search_operations[0].get("anchored_path"),
+                starred_only=search_operations[0].get("starred_only", False),
             )
 
             # Map results to original indices

@@ -137,6 +137,7 @@ async def search(
     temporal_mode: str = "boost",
     scope: str = "local",
     anchored_path: Optional[str] = None,
+    starred_only: bool = False,
 ) -> dict:
     """Internal handler for search tool."""
     return await _get_handlers().search(
@@ -152,6 +153,7 @@ async def search(
         temporal_mode=temporal_mode,
         scope=scope,
         anchored_path=anchored_path,
+        starred_only=starred_only,
     )
 
 
@@ -336,6 +338,18 @@ async def report_anchor_status(
 ) -> dict:
     """Internal handler for report_anchor_status tool."""
     return await _get_handlers().report_anchor_status(memory_id, status, detail)
+
+
+@mcp.tool(description=TOOL_DESCRIPTIONS["star"])
+async def star(memory_id: str) -> dict:
+    """Internal handler for star tool."""
+    return await _get_handlers().star(memory_id)
+
+
+@mcp.tool(description=TOOL_DESCRIPTIONS["unstar"])
+async def unstar(memory_id: str) -> dict:
+    """Internal handler for unstar tool."""
+    return await _get_handlers().unstar(memory_id)
 
 
 @mcp.tool(description=TOOL_DESCRIPTIONS["doc_proposals"])

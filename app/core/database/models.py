@@ -31,6 +31,9 @@ class Memory(BaseModel):
     # Client anchor-verification verdict (t12): None=unverified, 'fresh'|'stale'.
     stale_status: Optional[str] = Field(default=None)
     stale_checked_at: Optional[str] = Field(default=None)
+    # Durable user-set star: display/filter only. Never affects ranking or
+    # auto-injection, and has no lifecycle — it just toggles.
+    is_starred: bool = Field(default=False)
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
     updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
 

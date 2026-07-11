@@ -65,6 +65,11 @@ class SearchResult(BaseModel):
         default=None,
         description="git 앵커 (commit_hash/file_paths/branch) — 표시·수명 판단용",
     )
+    # default False, not required: hub/federated rows never carry the column.
+    is_starred: bool = Field(
+        default=False,
+        description="사용자가 표시한 별표 — 표시·필터 전용 (랭킹/주입에 영향 없음)",
+    )
     origin: str = Field(
         default="local",
         description="결과 출처: 'local'(내 노드) 또는 'hub'(팀 hub, federated)",

@@ -168,6 +168,8 @@ class APIStorageBackend(StorageBackend):
                 query_params["recency_weight"] = params.recency_weight
             if params.anchored_path:
                 query_params["anchored_path"] = params.anchored_path
+            if params.starred_only:
+                query_params["starred_only"] = True
 
             response_data = await self._make_request_with_retry(
                 method="GET", url="/api/memories/search", params=query_params

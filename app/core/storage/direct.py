@@ -273,6 +273,7 @@ class DirectStorageBackend(StorageBackend):
                 date_to=params.date_to,
                 temporal_mode=params.temporal_mode,
                 anchored_path=params.anchored_path,
+                starred_only=params.starred_only,
             )
 
             logger.info(
@@ -304,6 +305,7 @@ class DirectStorageBackend(StorageBackend):
                 limit=params.limit,
                 recency_weight=params.recency_weight,
                 anchored_path=params.anchored_path,
+                starred_only=params.starred_only,
             )
 
             logger.info(

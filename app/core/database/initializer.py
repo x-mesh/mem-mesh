@@ -76,7 +76,8 @@ class DatabaseInitializer:
                 content_bytes INTEGER,
                 anchors TEXT,
                 stale_status TEXT,
-                stale_checked_at TEXT
+                stale_checked_at TEXT,
+                is_starred INTEGER DEFAULT 0
             )
         """)
 
@@ -378,6 +379,10 @@ class DatabaseInitializer:
             # values, one dominant) so it falls back to a full SCAN + temp B-TREE
             # (~22ms on prod). This makes it a covering-index scan (~0.4ms).
             "CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source)",
+            # Partial index: starred memories are a small fraction of the table,
+            # so indexing only them keeps this tiny while serving `starred_only`.
+            "CREATE INDEX IF NOT EXISTS idx_memories_starred ON memories(is_starred) "
+            "WHERE is_starred = 1",
         ]
 
         # Work tracking indexes

@@ -189,9 +189,9 @@ async def test_add_column_if_missing():
                 os.unlink(p)
 
 
-def test_current_schema_version_is_14():
-    """CURRENT_SCHEMA_VERSION bumped to 14 for stale-anchor verification columns."""
-    assert CURRENT_SCHEMA_VERSION == 14
+def test_current_schema_version_is_15():
+    """CURRENT_SCHEMA_VERSION bumped to 15 for the memories.is_starred flag."""
+    assert CURRENT_SCHEMA_VERSION == 15
 
 
 @pytest.mark.asyncio
@@ -405,13 +405,84 @@ async def test_v14_adds_stale_columns_from_v13_state():
         cursor = await conn.execute(
             "SELECT MAX(version) AS version FROM _schema_migrations"
         )
-        assert cursor.fetchone()["version"] == CURRENT_SCHEMA_VERSION == 14
+        assert cursor.fetchone()["version"] == CURRENT_SCHEMA_VERSION
 
         # Re-applying the v14 step directly must not raise (_add_column_if_missing
         # short-circuits on the already-present columns).
         await migrator._migration_v14_stale_status(migrator)
         for col in ("stale_status", "stale_checked_at"):
             assert await migrator._column_exists("memories", col)
+
+        await conn.close()
+    finally:
+        for ext in ["", "-wal", "-shm"]:
+            p = path + ext
+            if os.path.exists(p):
+                os.unlink(p)
+
+
+@pytest.mark.asyncio
+async def test_v15_new_db_has_is_starred(temp_db_path):
+    """A freshly created DB exposes memories.is_starred defaulting to 0."""
+    db = Database(temp_db_path)
+    await db.connect()
+
+    cursor = await db.execute("PRAGMA table_info(memories)")
+    cols = {row["name"]: row for row in cursor.fetchall()}
+    assert "is_starred" in cols
+    # DEFAULT 0 is load-bearing: relay's INSERT omits this column entirely.
+    assert str(cols["is_starred"]["dflt_value"]) == "0"
+
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_v15_adds_is_starred_from_v14_state():
+    """A v14-state memories table (no is_starred) gains it at v15, existing rows
+    are backfilled to 0, and re-applying the v15 step is idempotent."""
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+
+    try:
+        conn = DatabaseConnection(path)
+        await conn.connect()
+
+        # Simulate a v14 database: memories without is_starred, one row already
+        # on disk, bookkeeping pinned at version 14.
+        conn.connection.execute(
+            "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL)"
+        )
+        conn.connection.execute(
+            "INSERT INTO memories (id, content) VALUES ('m1', 'pre-existing row')"
+        )
+        conn.connection.execute(
+            "CREATE TABLE _schema_migrations ("
+            "version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL, description TEXT)"
+        )
+        conn.connection.execute(
+            "INSERT INTO _schema_migrations (version, applied_at) "
+            "VALUES (14, '2026-01-01T00:00:00+00:00')"
+        )
+        conn.commit()
+
+        migrator = SchemaMigrator(conn)
+        await migrator.migrate()
+
+        assert await migrator._column_exists("memories", "is_starred")
+
+        # The pre-existing row must be 0, not NULL — `is_starred = 0` predicates
+        # would otherwise silently skip it.
+        cursor = await conn.execute("SELECT is_starred FROM memories WHERE id = 'm1'")
+        assert cursor.fetchone()["is_starred"] == 0
+
+        cursor = await conn.execute(
+            "SELECT MAX(version) AS version FROM _schema_migrations"
+        )
+        assert cursor.fetchone()["version"] == CURRENT_SCHEMA_VERSION
+
+        # Re-applying the v15 step directly must not raise.
+        await migrator._migration_v15_starred(migrator)
+        assert await migrator._column_exists("memories", "is_starred")
 
         await conn.close()
     finally:

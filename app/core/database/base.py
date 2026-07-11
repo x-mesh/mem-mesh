@@ -295,6 +295,7 @@ class Database:
                             filters.get("project_id")
                             or filters.get("category")
                             or filters.get("anchored_path")
+                            or filters.get("starred_only")
                         )
                     )
                     # anchored_path is highly selective (anchored memories are a
@@ -343,6 +344,8 @@ class Database:
                             if _cond:
                                 filter_conditions.append(_cond)
                                 params.extend(_cp)
+                        if filters.get("starred_only"):
+                            filter_conditions.append("m.is_starred = 1")
 
                     base_query += f" WHERE {' AND '.join(filter_conditions)}"
 
@@ -393,6 +396,8 @@ class Database:
                 if _cond:
                     base_query += " AND " + _cond
                     params.extend(_cp)
+            if filters.get("starred_only"):
+                base_query += " AND is_starred = 1"
 
         base_query += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
@@ -460,6 +465,8 @@ class Database:
                     if _cond:
                         base_query += " AND " + _cond
                         params.extend(_cp)
+                if filters.get("starred_only"):
+                    base_query += " AND is_starred = 1"
 
             valid_sort_columns = [
                 "created_at",
@@ -523,6 +530,8 @@ class Database:
                     if _cond:
                         base_query += " AND " + _cond
                         params.extend(_cp)
+                if filters.get("starred_only"):
+                    base_query += " AND is_starred = 1"
 
             result = await self.fetchone(base_query, tuple(params))
             return result["count"] if result else 0

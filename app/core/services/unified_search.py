@@ -264,6 +264,7 @@ class UnifiedSearchService:
         temporal_mode: str = "boost",
         record_access: bool = True,
         anchored_path: Optional[str] = None,
+        starred_only: bool = False,
     ) -> SearchResponse:
         """
         통합 검색 수행
@@ -286,6 +287,7 @@ class UnifiedSearchService:
             date_to: 종료 날짜 (YYYY-MM-DD)
             temporal_mode: 시간 모드 (filter/boost/decay)
             anchored_path: anchors.file_paths 프리픽스 필터 (repo 상대 경로)
+            starred_only: True면 별표된 메모리만 반환
 
         Returns:
             SearchResponse: 검색 결과
@@ -317,6 +319,13 @@ class UnifiedSearchService:
                             r
                             for r in id_response.results
                             if _matches_anchored_path(r.anchors, anchored_path)
+                        ]
+                        id_response.total = len(id_response.results)
+                        if not id_response.results:
+                            id_response = None
+                    if id_response is not None and starred_only:
+                        id_response.results = [
+                            r for r in id_response.results if r.is_starred
                         ]
                         id_response.total = len(id_response.results)
                         if not id_response.results:
@@ -354,7 +363,7 @@ class UnifiedSearchService:
         # 3. Check cache (only when offset=0). anchored_path is not part of the
         # cache key — a filtered query must never read (or seed) the unfiltered
         # entry, so the cache is bypassed entirely for anchored searches.
-        if offset == 0 and query and not anchored_path:
+        if offset == 0 and query and not anchored_path and not starred_only:
             cached_results = await self.cache_manager.get_cached_search(
                 query=expanded_query,
                 project_id=project_id,
@@ -387,6 +396,8 @@ class UnifiedSearchService:
             filters["tag"] = tag
         if anchored_path:
             filters["anchored_path"] = anchored_path
+        if starred_only:
+            filters["starred_only"] = True
 
         # Check if query is empty (to decide whether to skip post-processing)
         is_empty_query = not query.strip()
@@ -480,7 +491,13 @@ class UnifiedSearchService:
 
         # 9. Save to cache (only when offset=0; anchored searches bypass the
         # cache — see the cache-check comment above)
-        if offset == 0 and query and result.results and not anchored_path:
+        if (
+            offset == 0
+            and query
+            and result.results
+            and not anchored_path
+            and not starred_only
+        ):
             await self.cache_manager.cache_search_results(
                 query=expanded_query,
                 results=result,
@@ -668,6 +685,7 @@ class UnifiedSearchService:
                     client=row["client"] if "client" in row.keys() else None,
                     tags=self._parse_tags(row),
                     anchors=self._parse_anchors(row),
+                    is_starred=self._parse_starred(row),
                 )
             )
 
@@ -745,6 +763,7 @@ class UnifiedSearchService:
                             client=row["client"] if "client" in row.keys() else None,
                             tags=self._parse_tags(row),
                             anchors=self._parse_anchors(row),
+                            is_starred=self._parse_starred(row),
                         )
                     )
 
@@ -926,7 +945,7 @@ class UnifiedSearchService:
         explicit id hunt should find deprecated/superseded memories too."""
         sql = (
             "SELECT id, content, created_at, project_id, category, source, "
-            "client, tags, anchors FROM memories WHERE id LIKE ?"
+            "client, tags, anchors, is_starred FROM memories WHERE id LIKE ?"
         )
         params: list = [query.lower() + "%"]
         if project_id:
@@ -953,6 +972,7 @@ class UnifiedSearchService:
                 client=row["client"] if "client" in row.keys() else None,
                 tags=self._parse_tags(row),
                 anchors=self._parse_anchors(row),
+                is_starred=self._parse_starred(row),
             )
             for row in rows
         ]
@@ -985,7 +1005,7 @@ class UnifiedSearchService:
 
         # Execute FTS query
         sql = """
-            SELECT m.id, m.content, m.created_at, m.project_id, m.category, m.source, m.client, m.tags, m.anchors
+            SELECT m.id, m.content, m.created_at, m.project_id, m.category, m.source, m.client, m.tags, m.anchors, m.is_starred
             FROM memories_fts fts
             JOIN memories m ON fts.id = m.id
             WHERE fts.memories_fts MATCH ?
@@ -1011,6 +1031,8 @@ class UnifiedSearchService:
                 if _cond:
                     sql += " AND " + _cond
                     params.extend(_cp)
+            if filters.get("starred_only"):
+                sql += " AND m.is_starred = 1"
 
         sql += " ORDER BY fts.rank LIMIT ?"
         params.append(limit)
@@ -1035,6 +1057,7 @@ class UnifiedSearchService:
                         client=row["client"] if "client" in row.keys() else None,
                         tags=self._parse_tags(row),
                         anchors=self._parse_anchors(row),
+                        is_starred=self._parse_starred(row),
                     )
                 )
 
@@ -1096,6 +1119,7 @@ class UnifiedSearchService:
                     client=row["client"] if "client" in row.keys() else None,
                     tags=self._parse_tags(row),
                     anchors=self._parse_anchors(row),
+                    is_starred=self._parse_starred(row),
                 )
             )
 
@@ -1133,6 +1157,8 @@ class UnifiedSearchService:
                 if _cond:
                     base_query += " AND " + _cond
                     params.extend(_cp)
+            if filters.get("starred_only"):
+                base_query += " AND is_starred = 1"
 
         # Fuzzy scoring is a Python SequenceMatcher loop, O(rows × words); it only
         # needs a modest candidate pool. limit*3 (not *10) cuts the scoring cost
@@ -1194,6 +1220,7 @@ class UnifiedSearchService:
                     client=row["client"] if "client" in row.keys() else None,
                     tags=self._parse_tags(row),
                     anchors=self._parse_anchors(row),
+                    is_starred=self._parse_starred(row),
                 )
             )
 
@@ -1249,6 +1276,7 @@ class UnifiedSearchService:
                     client=row["client"] if "client" in row.keys() else None,
                     tags=self._parse_tags(row),
                     anchors=self._parse_anchors(row),
+                    is_starred=self._parse_starred(row),
                 )
             )
 
@@ -1283,6 +1311,7 @@ class UnifiedSearchService:
                     "client": r.client,
                     "tags": r.tags or [],
                     "anchors": r.anchors,
+                    "is_starred": r.is_starred,
                 }
                 for r in result.results
             ]
@@ -1308,6 +1337,9 @@ class UnifiedSearchService:
                         client=item.get("client"),
                         tags=item.get("tags"),
                         anchors=item.get("anchors"),
+                        # dict-shaped (not a sqlite3.Row) — _parse_starred takes
+                        # a Row, so read the already-dumped field directly.
+                        is_starred=bool(item.get("is_starred", False)),
                     )
                 )
 
@@ -1385,7 +1417,7 @@ class UnifiedSearchService:
             # Step 2: Batch lookup to eliminate N+1
             placeholders = ",".join("?" for _ in candidate_ids)
             rows = await self.db.fetchall(
-                f"SELECT id, content, created_at, project_id, category, source, client, tags, anchors FROM memories WHERE id IN ({placeholders})",
+                f"SELECT id, content, created_at, project_id, category, source, client, tags, anchors, is_starred FROM memories WHERE id IN ({placeholders})",
                 tuple(candidate_ids.keys()),
             )
 
@@ -1405,6 +1437,7 @@ class UnifiedSearchService:
                         client=row["client"] if "client" in row.keys() else None,
                         tags=tags,
                         anchors=self._parse_anchors(row),
+                        is_starred=self._parse_starred(row),
                     )
                 )
 
@@ -1646,6 +1679,21 @@ class UnifiedSearchService:
             logger.debug(f"Failed to parse tags: {e}")
             return None
         return None
+
+    def _parse_starred(self, row: "sqlite3.Row") -> bool:
+        """is_starred 파싱 — 컬럼이 없는 행(레거시 SELECT, hub 결과)은 False.
+
+        Tolerant by design: several SELECTs use explicit column lists and hub
+        rows never carry the column, so a missing value must mean "not starred"
+        rather than raise in the hot path.
+        """
+        try:
+            if "is_starred" not in row.keys():
+                return False
+            return bool(row["is_starred"])
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Failed to parse is_starred: {e}")
+            return False
 
     def _parse_anchors(self, row: "sqlite3.Row") -> Optional[dict]:
         """anchors(JSON) 파싱 — {commit_hash, file_paths, branch} dict 또는 None.

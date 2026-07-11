@@ -160,6 +160,7 @@ class MCPToolHandlers:
         temporal_mode: str = "boost",
         scope: str = "local",
         anchored_path: Optional[str] = None,
+        starred_only: bool = False,
     ) -> Dict[str, Any]:
         """Search memories using hybrid search (vector + metadata)
 
@@ -180,6 +181,8 @@ class MCPToolHandlers:
             anchored_path: Only memories git-anchored to this repo-relative
                 file/directory prefix (forces scope=local — hub rows carry
                 foreign-repo anchors the filter can't judge)
+            starred_only: Only memories the user starred (forces scope=local —
+                stars are a local judgement, never shared to the hub)
 
         Returns:
             dict: 검색 결과 (압축 가능)
@@ -230,6 +233,7 @@ class MCPToolHandlers:
                     date_to=date_to,
                     temporal_mode=temporal_mode,
                     anchored_path=anchored_path,
+                    starred_only=starred_only,
                 )
                 local_result = await self._storage.search_memories(params)
 
@@ -253,6 +257,12 @@ class MCPToolHandlers:
                 # can't be applied to them, so an anchored search is local-only
                 # rather than leaking unfiltered hub rows past the filter.
                 logger.info("anchored_path forces scope=local", requested_scope=scope)
+                scope = "local"
+            if starred_only and scope != "local":
+                # Stars live only on this node — a hub row can never be starred,
+                # so a starred search that fanned out would just leak unfiltered
+                # hub rows past the filter.
+                logger.info("starred_only forces scope=local", requested_scope=scope)
                 scope = "local"
             if scope == "local":
                 result = await _local_search()
@@ -357,6 +367,7 @@ class MCPToolHandlers:
                     "project_id": r.project_id,
                     "tags": r.tags,
                     "anchors": r.anchors,
+                    "is_starred": getattr(r, "is_starred", False),
                     "title": (r.title or enr.get("title")),
                     "abstract": (r.abstract or enr.get("abstract")),
                     "enrichment_tags": enr.get("tags") or [],
@@ -405,6 +416,10 @@ class MCPToolHandlers:
                     "project_id": r["project_id"],
                     "anchors": r["anchors"],
                 }
+                # Only carried when true — an is_starred:false on every row would
+                # cost tokens on the overwhelmingly common unstarred case.
+                if r["is_starred"]:
+                    item["is_starred"] = True
                 topic_tags = r["enrichment_tags"] or r["tags"]
                 if topic_tags:
                     item["tags"] = topic_tags
@@ -1928,6 +1943,49 @@ class MCPToolHandlers:
             return result
         except Exception as e:
             logger.error("Error in report_anchor_status", error=str(e))
+            raise
+
+    async def star(self, memory_id: str) -> Dict[str, Any]:
+        """Star a memory (durable display/filter marker; idempotent).
+
+        Args:
+            memory_id: Memory to star (full UUID)
+
+        Returns:
+            dict: {memory_id, is_starred}
+        """
+        return await self._set_starred(memory_id, True)
+
+    async def unstar(self, memory_id: str) -> Dict[str, Any]:
+        """Remove a memory's star (idempotent).
+
+        Args:
+            memory_id: Memory to unstar (full UUID)
+
+        Returns:
+            dict: {memory_id, is_starred}
+        """
+        return await self._set_starred(memory_id, False)
+
+    async def _set_starred(self, memory_id: str, starred: bool) -> Dict[str, Any]:
+        """Shared star/unstar path.
+
+        Goes straight to the local memory service rather than through
+        StorageBackend — the same local-only pattern report_anchor_status uses,
+        because APIStorageBackend has no memory_service and adding an abstract
+        method would break both backends.
+        """
+        logger.info("Tool star called", memory_id=memory_id, starred=starred)
+
+        try:
+            memory_service = getattr(self._storage, "memory_service", None)
+            if memory_service is None:
+                raise RuntimeError("star/unstar requires a local memory service")
+            result = await memory_service.set_starred(memory_id, starred)
+            logger.info("Set starred", memory_id=memory_id, starred=starred)
+            return result
+        except Exception as e:
+            logger.error("Error in star/unstar", error=str(e))
             raise
 
     def _get_database(self) -> "Database":

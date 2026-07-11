@@ -107,6 +107,7 @@ class SearchRequest(BaseModel):
     temporal_mode: str = "boost"
     scope: str = "local"
     anchored_path: Optional[str] = Field(default=None, max_length=500)
+    starred_only: bool = False
 
 
 # Canonical memory categories (mirrors SearchParams.validate_category). Used to
@@ -143,6 +144,7 @@ async def _do_search(
     temporal_mode: str = "boost",
     scope: str = "local",
     anchored_path: Optional[str] = None,
+    starred_only: bool = False,
 ) -> SearchResponse:
     """Shared search logic for GET and POST endpoints."""
     # Single chokepoint for both GET (query param) and POST (body) search, so a
@@ -173,6 +175,10 @@ async def _do_search(
     # filter can't judge) — mirrors the MCP tools.py contract.
     if anchored_path:
         scope = "local"
+    # Stars are a local judgement — a hub row can never be starred, so a starred
+    # search must not fan out (it would only leak unfiltered hub rows).
+    if starred_only:
+        scope = "local"
 
     async def _local_search() -> SearchResponse:
         return await service.search(
@@ -193,6 +199,7 @@ async def _do_search(
             date_to=date_to,
             temporal_mode=temporal_mode,
             anchored_path=anchored_path,
+            starred_only=starred_only,
         )
 
     try:
@@ -255,6 +262,7 @@ async def search_memories(
     temporal_mode: str = "boost",
     scope: str = "local",
     anchored_path: Optional[str] = Query(None, max_length=500),
+    starred_only: bool = False,
     service: UnifiedSearchService = Depends(get_search_service),
 ) -> SearchResponse:
     """
@@ -286,6 +294,7 @@ async def search_memories(
         temporal_mode=temporal_mode,
         scope=scope,
         anchored_path=anchored_path,
+        starred_only=starred_only,
     )
 
 
@@ -320,6 +329,7 @@ async def search_memories_post(
         temporal_mode=body.temporal_mode,
         scope=body.scope,
         anchored_path=body.anchored_path,
+        starred_only=body.starred_only,
     )
 
 

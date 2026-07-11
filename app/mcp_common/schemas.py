@@ -206,6 +206,14 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         ),
                         "maxLength": 500,
                     },
+                    "starred_only": {
+                        "type": "boolean",
+                        "description": (
+                            "Only memories the user starred. Stars are a local "
+                            "judgement, so this forces scope=local."
+                        ),
+                        "default": False,
+                    },
                 },
                 "required": ["query"],
                 "additionalProperties": False,
@@ -592,7 +600,7 @@ def get_pin_tool_schemas() -> List[Dict[str, Any]]:
 
 
 def get_all_tool_schemas() -> List[Dict[str, Any]]:
-    """모든 MCP tool 스키마 반환 (memory + pin/session + batch + relations + review + doc proposal + anchor)"""
+    """모든 MCP tool 스키마 반환 (memory + pin/session + batch + relations + review + doc proposal + anchor + star)"""
     return (
         get_tool_schemas()
         + get_pin_tool_schemas()
@@ -601,6 +609,7 @@ def get_all_tool_schemas() -> List[Dict[str, Any]]:
         + get_review_tool_schemas()
         + get_doc_proposal_tool_schemas()
         + get_anchor_tool_schemas()
+        + get_star_tool_schemas()
     )
 
 
@@ -649,6 +658,37 @@ def get_anchor_tool_schemas() -> List[Dict[str, Any]]:
                 "additionalProperties": False,
             },
         },
+    ]
+
+
+def get_star_tool_schemas() -> List[Dict[str, Any]]:
+    """Star(별표) MCP tools/list 응답용 스키마 반환.
+
+    별표는 사용자·에이전트가 "이건 중요하니 손 닿는 곳에 둬라"고 표시하는 durable
+    marker다. 표시·필터 전용이라 검색 랭킹이나 자동 주입에는 전혀 개입하지 않는다.
+    """
+    star_id_property = {
+        "memory_id": {
+            "type": "string",
+            "description": (
+                "Memory ID (full 36-char UUID from add/search/get) to star/unstar"
+            ),
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "maxLength": 100,
+        },
+    }
+    return [
+        {
+            "name": name,
+            "description": TOOL_DESCRIPTIONS[name],
+            "inputSchema": {
+                "type": "object",
+                "properties": dict(star_id_property),
+                "required": ["memory_id"],
+                "additionalProperties": False,
+            },
+        }
+        for name in ("star", "unstar")
     ]
 
 
@@ -774,6 +814,14 @@ def get_batch_tool_schemas() -> List[Dict[str, Any]]:
                                         "(for 'search' operations)"
                                     ),
                                     "maxLength": 500,
+                                },
+                                "starred_only": {
+                                    "type": "boolean",
+                                    "description": (
+                                        "Only starred memories "
+                                        "(for 'search' operations)"
+                                    ),
+                                    "default": False,
                                 },
                                 "importance": {
                                     "type": "integer",

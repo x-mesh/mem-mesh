@@ -114,8 +114,9 @@ class MemoriesPage extends HTMLElement {
     this._stats = null;
     // P1: active pins
     this._activePins = [];
-    // P2: favorites (localStorage)
-    this._favorites = new Set(JSON.parse(localStorage.getItem('mem-favorites') || '[]'));
+    // P2: stars — server-backed (memories.is_starred). The Set is a render cache
+    // hydrated from each response, not the source of truth; the server is.
+    this._favorites = new Set();
     this._showFavoritesOnly = false;
     // P2: peek panel
     this._peekId = null;
@@ -133,11 +134,59 @@ class MemoriesPage extends HTMLElement {
     this.setupEventListeners();
     this.setupWebSocketListeners();
     this.connectWebSocket();
+    this.migrateLocalFavorites();
     this.loadMemories();
     this.loadProjectsForFilter();
     this.loadStats();
     this.loadActivePins();
     this.loadTagFacets();
+  }
+
+  /**
+   * One-time migration: stars used to live in localStorage. Push them to the
+   * server (which now owns them) and drop the key.
+   *
+   * Deliberately fire-and-forget — it must never block the first paint, and a
+   * failure must not break the page. Safe to run twice: the server star toggle
+   * is idempotent, and the key is only removed once every id has landed, so a
+   * partial failure just retries on the next load.
+   */
+  async migrateLocalFavorites() {
+    const KEY = 'mem-favorites';
+    let ids;
+    try {
+      ids = JSON.parse(localStorage.getItem(KEY) || '[]');
+    } catch {
+      localStorage.removeItem(KEY); // unparseable — nothing to save
+      return;
+    }
+    if (!Array.isArray(ids) || ids.length === 0) {
+      localStorage.removeItem(KEY);
+      return;
+    }
+
+    const api = window.app?.apiClient;
+    if (!api) return; // retry next load
+
+    const failed = [];
+    for (const id of ids) {
+      if (typeof id !== 'string' || !id) continue;
+      try {
+        await api.post(`/memories/${id}/star`);
+      } catch (err) {
+        // 404 = the memory is gone; nothing to migrate, so don't retry it forever.
+        const status = err?.status ?? err?.response?.status;
+        if (status !== 404) failed.push(id);
+      }
+    }
+
+    if (failed.length === 0) {
+      localStorage.removeItem(KEY);
+      this.loadMemories(); // repaint with the stars the server now knows about
+    } else {
+      // Keep only what still needs migrating, so the next load retries just those.
+      localStorage.setItem(KEY, JSON.stringify(failed));
+    }
   }
 
   disconnectedCallback() {
@@ -361,9 +410,9 @@ class MemoriesPage extends HTMLElement {
       return;
     }
 
-    const displayMems = this._showFavoritesOnly
-      ? this.memories.filter(m => this._favorites.has(m.id))
-      : this.memories;
+    // The starred filter is applied server-side (starred_only), so what came back
+    // is already scoped — filtering again here would drop rows on page 2+.
+    const displayMems = this.memories;
 
     if (displayMems.length === 0) {
       const hasFilters = this.searchQuery || Object.values(this.viewParams).some(v => v);
@@ -376,7 +425,7 @@ class MemoriesPage extends HTMLElement {
       return;
     }
 
-    if (this.page === 0 || this._showFavoritesOnly) {
+    if (this.page === 0) {
       container.innerHTML = this.renderHubBanner() + displayMems.map(m => this.buildRow(m)).join('');
     } else {
       // append new rows for load-more
@@ -578,6 +627,8 @@ class MemoriesPage extends HTMLElement {
       if (this.viewParams.tag) params.tag = this.viewParams.tag;
       // Federated scope only matters with a query; browsing stays local.
       if (this.searchScope === 'all' && this.searchQuery) params.scope = 'all';
+      // Starred filter runs server-side so it holds across pagination.
+      if (this._showFavoritesOnly) params.starred_only = true;
 
       const query = this.searchQuery || '';
       const api = window.app?.apiClient;
@@ -588,8 +639,14 @@ class MemoriesPage extends HTMLElement {
       if (result && result.results) {
         if (this.page === 0) {
           this.memories = result.results;
+          this._favorites.clear();
         } else {
           this.memories = this.memories.concat(result.results);
+        }
+        // The server owns star state — rebuild the render cache from the response.
+        for (const m of result.results) {
+          if (m.is_starred) this._favorites.add(m.id);
+          else this._favorites.delete(m.id);
         }
         this.totalMemories = result.total || result.results.length;
         this.hasMore = this.memories.length < this.totalMemories;
@@ -701,7 +758,8 @@ class MemoriesPage extends HTMLElement {
       }
       if (target.closest('.mem-peek-fav')) {
         const id = target.closest('.mem-peek-fav').dataset.id;
-        if (id) { this.toggleFavorite(id); this.renderPeekPanel(); }
+        // await so a rollback (server rejected) repaints the panel too
+        if (id) { this.toggleFavorite(id).then(() => this.renderPeekPanel()); }
         return;
       }
       if (target.closest('.mem-peek-relay')) {
@@ -1818,28 +1876,50 @@ class MemoriesPage extends HTMLElement {
     }
   }
 
-  /* ── P2: Favorites ─────────────────────────────────────── */
+  /* ── P2: Stars (server-backed) ─────────────────────────── */
 
-  toggleFavorite(memoryId) {
-    if (this._favorites.has(memoryId)) {
-      this._favorites.delete(memoryId);
-    } else {
-      this._favorites.add(memoryId);
-    }
-    localStorage.setItem('mem-favorites', JSON.stringify([...this._favorites]));
-
-    // Update star icon in DOM
+  /** Paint a star button/icon to a given state (no state mutation). */
+  _paintStar(memoryId, isFav) {
     const starBtn = this.querySelector(`.mem-star-btn[data-id="${memoryId}"]`);
-    if (starBtn) {
-      const isFav = this._favorites.has(memoryId);
-      starBtn.classList.toggle('active', isFav);
-      starBtn.title = isFav ? 'Remove from favorites' : 'Add to favorites';
-      const svg = starBtn.querySelector('svg');
-      if (svg) svg.setAttribute('fill', isFav ? 'currentColor' : 'none');
+    if (!starBtn) return;
+    starBtn.classList.toggle('active', isFav);
+    starBtn.title = isFav ? 'Remove star' : 'Add star';
+    const svg = starBtn.querySelector('svg');
+    if (svg) svg.setAttribute('fill', isFav ? 'currentColor' : 'none');
+  }
+
+  async toggleFavorite(memoryId) {
+    const api = window.app?.apiClient;
+    if (!api) return;
+
+    const wasFav = this._favorites.has(memoryId);
+    const nextFav = !wasFav;
+
+    // Optimistic: paint immediately, then reconcile with the server.
+    if (nextFav) this._favorites.add(memoryId);
+    else this._favorites.delete(memoryId);
+    this._paintStar(memoryId, nextFav);
+
+    const mem = this.memories.find(m => m.id === memoryId);
+    if (mem) mem.is_starred = nextFav;
+
+    try {
+      if (nextFav) await api.post(`/memories/${memoryId}/star`);
+      else await api.delete(`/memories/${memoryId}/star`);
+    } catch (err) {
+      // Roll back — the star never made it to the server, so the UI must not
+      // claim it did.
+      if (wasFav) this._favorites.add(memoryId);
+      else this._favorites.delete(memoryId);
+      this._paintStar(memoryId, wasFav);
+      if (mem) mem.is_starred = wasFav;
+      this.showToast('Failed to update star', 'error');
+      return;
     }
 
-    // Re-filter if showing favorites only
-    if (this._showFavoritesOnly) this.renderMemoryList();
+    // While the starred-only filter is on, an unstarred row no longer belongs in
+    // the list — refetch so the server decides membership (and the count is right).
+    if (this._showFavoritesOnly && !nextFav) this.resetAndLoad();
   }
 
   toggleFavoritesFilter() {
@@ -1847,11 +1927,13 @@ class MemoriesPage extends HTMLElement {
     const btn = this.querySelector('.mem-fav-toggle');
     if (btn) {
       btn.classList.toggle('active', this._showFavoritesOnly);
+      btn.setAttribute('aria-pressed', this._showFavoritesOnly ? 'true' : 'false');
       const svg = btn.querySelector('svg');
       if (svg) svg.setAttribute('fill', this._showFavoritesOnly ? 'currentColor' : 'none');
     }
-    this.renderMemoryList();
-    this.renderFooter();
+    // Server-side filter (starred_only) — refetch instead of filtering the loaded
+    // page, so pagination past page 1 stays correct.
+    this.resetAndLoad();
   }
 
   /* ── P2: Peek Preview Panel ──────────────────────────── */

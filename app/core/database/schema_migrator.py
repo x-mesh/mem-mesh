@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Current schema version - increment when adding new migrations
-CURRENT_SCHEMA_VERSION = 14
+CURRENT_SCHEMA_VERSION = 15
 
 
 class SchemaMigrator:
@@ -47,6 +47,7 @@ class SchemaMigrator:
             12: self._migration_v12_injection_anchors,
             13: self._migration_v13_injection_utilization,
             14: self._migration_v14_stale_status,
+            15: self._migration_v15_starred,
         }
 
     async def migrate(self) -> None:
@@ -482,3 +483,35 @@ class SchemaMigrator:
             logger.info(
                 "Added stale_status/stale_checked_at on memories via migration v14"
             )
+
+    async def _migration_v15_starred(self, migrator: "SchemaMigrator") -> None:
+        """Durable star (favorite) flag on memories.
+
+        A user-set marker meaning "this one matters, keep it in reach" — a
+        display/filter axis only. It never touches ``similarity_score``, ranking
+        or auto-injection, so mis-starring cannot pollute search. There is no
+        lifecycle (no done/dismiss state): the flag simply toggles.
+
+        ``DEFAULT 0`` (not NULL) is load-bearing: relay's memory materialization
+        INSERTs an explicit column list that omits this column, so the column
+        must supply its own value. For the same reason it is never declared
+        ``NOT NULL`` without a default.
+
+        The partial index only covers starred rows — starred memories are a
+        small fraction of the table, so it stays tiny while still serving the
+        ``starred_only`` filter.
+        """
+        if await self._table_exists("memories"):
+            await self._add_column_if_missing("memories", "is_starred", "INTEGER", "0")
+            # Rows added before the column existed can hold NULL; normalize so
+            # `is_starred = 1` / `= 0` predicates never miss them.
+            await self.connection.execute(
+                "UPDATE memories SET is_starred = 0 WHERE is_starred IS NULL"
+            )
+            # Indexes in the initializer only run on a fresh DB — an existing DB
+            # gets the index here.
+            await self.connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memories_starred "
+                "ON memories(is_starred) WHERE is_starred = 1"
+            )
+            logger.info("Added is_starred on memories via migration v15")
