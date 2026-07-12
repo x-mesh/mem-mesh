@@ -82,7 +82,7 @@ Before generating code or executing commands, you must perform a brief <Thinking
 
 ## Session Context Management
 
-> CLAUDE.md의 Checklist와 MUST/SHOULD/MAY 규칙에 대한 상세 구현 가이드.
+> 세션 흐름 **규칙**의 단일 진실 공급원은 CLAUDE.md 하단의 managed 블록(mem-mesh Hook Rules, `uvx mem-mesh hooks sync-project`로 갱신)이다. 이 문서는 그 규칙들의 **상세 구현 가이드**(API 시그니처·예시·데이터 흐름)를 담는다.
 
 ### Session Lifecycle
 
