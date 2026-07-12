@@ -717,7 +717,9 @@ class MemoryDetailPage extends HTMLElement {
     const path = `/projects/${encodeURIComponent(projectId)}/overview`;
 
     const generate = async () => {
-      content.innerHTML = '<div class="overview-loading">Summarizing recent memories…</div>';
+      // LLM summarization takes 10-30s — spin so the panel doesn't look hung.
+      content.innerHTML =
+        '<div class="overview-loading"><span class="enrichment-spinner"></span>Summarizing recent memories…</div>';
       if (refreshBtn) refreshBtn.disabled = true;
       try {
         api?.invalidateCache?.(path);

@@ -546,7 +546,7 @@ class ProjectsPage extends HTMLElement {
           <h3>📋 ${this._escapeHtml(projectId)} · Overview</h3>
           <button class="overview-modal-close" aria-label="Close">&times;</button>
         </div>
-        <div class="overview-body"><div class="overview-loading">Loading…</div></div>
+        <div class="overview-body"><div class="overview-loading"><span class="ov-spinner"></span>Loading…</div></div>
         <div class="maintenance-modal-actions">
           <button class="secondary-button overview-cancel">Close</button>
           <button class="primary-button overview-generate" hidden>Generate</button>
@@ -563,8 +563,11 @@ class ProjectsPage extends HTMLElement {
     const api = window.app?.apiClient;
 
     const runGenerate = async () => {
+      const idleLabel = genBtn.textContent;
       genBtn.disabled = true;
-      body.innerHTML = '<div class="overview-loading">Summarizing recent memories…</div>';
+      genBtn.textContent = 'Generating…';
+      // LLM summarization takes 10-30s — without a spinner the modal looks hung.
+      body.innerHTML = '<div class="overview-loading"><span class="ov-spinner"></span>Summarizing recent memories…</div>';
       try {
         api?.invalidateCache?.(`/projects/${encodeURIComponent(projectId)}/overview`);
         const res = await api.post(`/projects/${encodeURIComponent(projectId)}/overview`, {});
@@ -573,6 +576,7 @@ class ProjectsPage extends HTMLElement {
         genBtn.disabled = false;
       } catch (error) {
         body.innerHTML = `<div class="overview-empty">${this._escapeHtml(error?.data?.detail || error?.message || 'Failed')}</div>`;
+        genBtn.textContent = idleLabel;
         genBtn.disabled = false;
       }
     };
@@ -1439,6 +1443,13 @@ style.textContent = `
   .overview-modal { max-width: 640px; }
   .overview-body { max-height: 60vh; overflow: auto; }
   .overview-loading, .overview-empty { color: var(--text-secondary); font-size: 0.875rem; padding: 1rem 0; }
+  .ov-spinner {
+    width: 14px; height: 14px; border: 2px solid var(--border-color, #d1d5db);
+    border-top-color: var(--text-primary, #111827); border-radius: 50%;
+    display: inline-block; vertical-align: middle; margin-right: 8px;
+    animation: ov-spin 0.7s linear infinite;
+  }
+  @keyframes ov-spin { to { transform: rotate(360deg); } }
 
   /* Shared overview render (.ov-*) — modal + memory-detail sidebar */
   .ov-stale { font-size: 0.78rem; color: var(--warning-text, #92400e); background: var(--warning-bg, #fef3c7); border-radius: 6px; padding: 6px 10px; margin-bottom: 10px; }
