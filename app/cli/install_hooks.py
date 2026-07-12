@@ -527,17 +527,40 @@ def _render_local_template(
     return result
 
 
-def _write_script(path: Path, content: str) -> None:
-    """Write a shell script and make it executable (atomically)."""
+def _file_unchanged(path: Path, content: str) -> bool:
+    """True when ``path`` already holds exactly ``content``.
+
+    The rendered artifacts embed the prompt version (VERSION_MARKER / the
+    CLAUDE.md ``BEGIN vN`` marker), so identical content implies same version
+    AND same url/mode/profile — a strictly safer skip condition than comparing
+    version numbers alone (same version with a changed URL must still rewrite).
+    """
+    try:
+        return path.exists() and path.read_text(encoding="utf-8") == content
+    except OSError:
+        return False
+
+
+def _write_script(path: Path, content: str) -> bool:
+    """Write a shell script and make it executable (atomically).
+
+    Returns False without touching the file when it already holds exactly this
+    content and is executable — so a repeated ``mem-mesh hooks install`` /
+    ``sync-project`` of the same prompt version is a no-op instead of churning
+    every hook file on each run.
+    """
     unresolved = re.findall(r"__[A-Z0-9_]+__", content)
     if unresolved:
         tokens = ", ".join(sorted(set(unresolved)))
         raise ValueError(f"Unresolved template tokens in {path}: {tokens}")
+    if _file_unchanged(path, content) and os.access(path, os.X_OK):
+        return False
     _atomic_write_text(
         path,
         content,
         mode=stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH,
     )
+    return True
 
 
 def _is_mem_mesh_hook(hook: Dict[str, Any]) -> bool:
@@ -2307,19 +2330,38 @@ _CLAUDE_RULES_BEGIN_RE = re.compile(
 
 
 def _sync_claude_rules(project_root: Path, project_id: str) -> None:
-    """Create or refresh the managed mem-mesh block in project CLAUDE.md."""
+    """Create or refresh the managed mem-mesh block in project CLAUDE.md.
+
+    Idempotent: when the managed block already renders identically (same
+    prompt version, same project id), the file is left untouched — repeated
+    ``sync-project`` runs (setup scripts, uvx one-liners) become no-ops.
+    """
     claude_path = project_root / "CLAUDE.md"
     block = render_claude_project_rules(project_id)
+    old_version: Optional[str] = None
     if claude_path.exists():
         existing = claude_path.read_text(encoding="utf-8")
+        version_match = re.search(r"<!-- mem-mesh-hooks:BEGIN v(\d+) -->", existing)
+        old_version = version_match.group(1) if version_match else None
         if _CLAUDE_RULES_BEGIN_RE.search(existing):
             content = _CLAUDE_RULES_BEGIN_RE.sub(block, existing)
         else:
             content = existing.rstrip() + "\n\n---\n\n" + block + "\n"
+        if content == existing:
+            print(
+                f"[claude] CLAUDE.md managed rules already at v{PROMPT_VERSION}"
+                " — skipped (no changes)"
+            )
+            return
     else:
         content = "# Claude Project Rules\n\n" + block + "\n"
     claude_path.write_text(content, encoding="utf-8")
-    print("[claude] Regenerating project CLAUDE.md managed rules...")
+    transition = (
+        f"v{old_version} -> v{PROMPT_VERSION}"
+        if old_version and old_version != str(PROMPT_VERSION)
+        else f"v{PROMPT_VERSION}"
+    )
+    print(f"[claude] Regenerated project CLAUDE.md managed rules ({transition})")
     print(f"  -> {claude_path}")
 
 
@@ -2337,10 +2379,11 @@ def _sync_kiro_hooks(project_root: Path, project_id: str) -> None:
     print("[kiro] Regenerating behavioral hooks...")
     for name, hook_data in hooks.items():
         hook_file = kiro_dir / f"{name}.kiro.hook"
-        hook_file.write_text(
-            json.dumps(hook_data, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        rendered = json.dumps(hook_data, indent=2, ensure_ascii=False) + "\n"
+        if _file_unchanged(hook_file, rendered):
+            print(f"  -> {hook_file} (unchanged, skipped)")
+            continue
+        hook_file.write_text(rendered, encoding="utf-8")
         print(f"  -> {hook_file}")
 
     print("[kiro] Done. (manual-* hooks untouched)")
@@ -2509,16 +2552,21 @@ except Exception:
         "mem-mesh-subagent-stop.sh": subagent_stop_content,
     }
     for name, content in scripts.items():
-        _write_script(cursor_dir / name, content)
-        print(f"  -> {cursor_dir / name}")
+        if _write_script(cursor_dir / name, content):
+            print(f"  -> {cursor_dir / name}")
+        else:
+            print(f"  -> {cursor_dir / name} (unchanged, skipped)")
 
     template_path = project_root / ".cursor" / "hooks.mem-mesh.example.json"
     template_data = _build_cursor_hooks_settings(cursor_dir, scope="project")
-    template_path.write_text(
-        json.dumps(template_data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-        encoding="utf-8",
+    rendered_template = (
+        json.dumps(template_data, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
     )
-    print(f"  -> {template_path}")
+    if _file_unchanged(template_path, rendered_template):
+        print(f"  -> {template_path} (unchanged, skipped)")
+    else:
+        template_path.write_text(rendered_template, encoding="utf-8")
+        print(f"  -> {template_path}")
 
     settings_path = project_root / ".cursor" / "hooks.json"
     _remove_mem_mesh_hooks_from_json(settings_path)

@@ -1270,3 +1270,76 @@ def test_run_mcp_setup_honors_explicit_url_over_env(monkeypatch, capsys) -> None
     assert "https://remote.example" in out
     assert "localhost:8000" not in out
     assert result["status"] == "no_tools"
+
+
+# ── version-idempotent install/sync (같은 버전 재설치는 no-op) ──────────────
+#
+# `uvx mem-mesh hooks install` / `sync-project`를 반복 실행할 때 이미 같은 프롬프트
+# 버전(=동일 렌더 내용)이 설치돼 있으면 파일을 다시 쓰지 않는다. 렌더 산출물에
+# 버전 마커가 박혀 있으므로 내용 동일 == 버전 동일의 안전한 상위집합이다
+# (같은 버전이라도 URL/프로필이 바뀌면 내용이 달라져 다시 쓴다).
+
+
+def test_write_script_skips_identical_content(tmp_path) -> None:
+    script = tmp_path / "hook.sh"
+
+    assert install_hooks._write_script(script, "#!/bin/bash\necho hi\n") is True
+    first_mtime = script.stat().st_mtime_ns
+
+    # 동일 내용 → 미변경 (mtime 그대로)
+    assert install_hooks._write_script(script, "#!/bin/bash\necho hi\n") is False
+    assert script.stat().st_mtime_ns == first_mtime
+
+    # 내용이 바뀌면 다시 쓴다 (같은 버전이라도 URL 변경 등)
+    assert install_hooks._write_script(script, "#!/bin/bash\necho bye\n") is True
+    assert script.read_text(encoding="utf-8") == "#!/bin/bash\necho bye\n"
+
+
+def test_write_script_rewrites_when_not_executable(tmp_path) -> None:
+    """내용이 같아도 실행 비트가 빠졌으면 복구해야 한다"""
+    script = tmp_path / "hook.sh"
+    script.write_text("#!/bin/bash\necho hi\n", encoding="utf-8")
+    script.chmod(0o644)  # not executable
+
+    assert install_hooks._write_script(script, "#!/bin/bash\necho hi\n") is True
+    assert os.access(script, os.X_OK)
+
+
+def test_sync_claude_rules_is_version_idempotent(tmp_path, capsys) -> None:
+    from app.cli.install_hooks import PROMPT_VERSION, _sync_claude_rules
+
+    (tmp_path / "CLAUDE.md").write_text("# My Rules\n\ncontent\n", encoding="utf-8")
+
+    # 1회차: 블록 추가
+    _sync_claude_rules(tmp_path, "mem-mesh")
+    content_after_first = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    assert f"mem-mesh-hooks:BEGIN v{PROMPT_VERSION}" in content_after_first
+    assert "# My Rules" in content_after_first  # 기존 내용 보존
+    first_mtime = (tmp_path / "CLAUDE.md").stat().st_mtime_ns
+
+    # 2회차: 같은 버전 → 스킵, 파일 미변경
+    _sync_claude_rules(tmp_path, "mem-mesh")
+    out = capsys.readouterr().out
+    assert "skipped" in out
+    assert (tmp_path / "CLAUDE.md").stat().st_mtime_ns == first_mtime
+
+
+def test_sync_claude_rules_upgrades_old_version_block(tmp_path, capsys) -> None:
+    """구버전 블록은 교체되고 v(old) -> v(new) 전환이 보고된다"""
+    from app.cli.install_hooks import PROMPT_VERSION, _sync_claude_rules
+
+    stale_block = (
+        "# My Rules\n\n"
+        "<!-- mem-mesh-hooks:BEGIN v1 -->\nold managed rules\n"
+        "<!-- mem-mesh-hooks:END v1 -->\n"
+    )
+    (tmp_path / "CLAUDE.md").write_text(stale_block, encoding="utf-8")
+
+    _sync_claude_rules(tmp_path, "mem-mesh")
+    out = capsys.readouterr().out
+    content = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+
+    assert f"v1 -> v{PROMPT_VERSION}" in out
+    assert "old managed rules" not in content
+    assert f"mem-mesh-hooks:BEGIN v{PROMPT_VERSION}" in content
+    assert content.count("mem-mesh-hooks:BEGIN") == 1  # 블록 중복 없음
