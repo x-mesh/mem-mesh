@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.0] - 2026-07-12
+
+**auto-enrich 적용 범위를 opt-in 전용에서 전역 opt-out으로 선택 가능하게, 그리고 hook 설치를 멱등하게.** WHY(scope): auto-enrich는 프로젝트별 opt-in 구독 모델이라, 새 프로젝트는 명시적으로 켜기 전까진 enrich가 절대 돌지 않는다. 실서비스에서 168개 프로젝트 중 1개만 켜져 있어 "안 된다"는 재신고를 받았는데, 실제로는 설계상 커버리지 범위 문제였다. 전 프로젝트를 기본 대상으로 삼고 싶은 사용자를 위해 전역 스코프 스위치를 추가했다. WHY(idempotent install): `uvx mem-mesh hooks sync-project`가 매번 파일을 무조건 덮어써서, 변경이 없어도 mtime이 갱신되고 실행 권한 재설정이 반복됐다. WHY(docs): CLAUDE.md의 세션 흐름 규칙이 managed 블록(자동 갱신)과 수동 구역 양쪽에 중복 기술돼 있어, managed 블록만 최신화되고 수동 구역이 뒤처지며 서로 모순되는 문제가 실제로 발생했다(v26 시절).
+
+### Added
+- **auto-enrich 전역 스코프 설정** — `subscribed`(기본값, 프로젝트별 opt-in) / `all`(전 프로젝트 자동 적용, opt-out) 두 모드를 Settings → Worker 섹션에서 선택. `all` 모드에서도 프로젝트가 명시적으로 enrich를 꺼두면 전역 설정이 이를 덮어쓰지 않는다. 비용 폭주 방지를 위해 스윕당 방문 프로젝트 수 상한(`MEM_MESH_AUTO_ENRICH_MAX_PROJECTS`, 기본 20)과 라운드로빈 커서로 대량 프로젝트를 순회한다. `app/core/services/maintenance.py`, `app/core/services/relay_worker.py`, `app/cli/relay.py`, `app/web/dashboard/route_modules/{maintenance,settings_llm}.py`, `app/web/static/js/pages/settings-page.js`
+
+### Fixed
+- **Project Overview 생성 중 spinner 누락** — LLM 요약 생성은 10~30초가 걸리는데 정적 텍스트만 표시돼 멈춘 것처럼 보이던 문제. Projects 페이지 Overview 모달과 메모리 상세 페이지 Overview 패널 양쪽에 회전 spinner를 추가하고, 생성 버튼은 진행 중 "Generating…"으로 바뀐다. `app/web/static/js/pages/{projects,memory-detail}.js`
+
+### Changed
+- **hook/rule 설치 멱등화** — `uvx mem-mesh hooks sync-project`가 렌더링된 내용이 기존 파일과 동일하면 쓰기를 건너뛴다(mtime·실행권한 불필요한 갱신 방지). 버전 마커가 바뀔 때만 전환 메시지를 출력한다. `app/cli/install_hooks.py`
+- **CLAUDE.md 이중 진실 공급원 제거** — 세션 흐름 규칙(session_resume/pin/저장 카테고리/anchors 등)을 managed 블록(자동 갱신)으로 단일화하고, 수동 구역에서 중복 서술을 제거해 위임 선언문만 남겼다. 이 레포 고유 규칙(M1~M3, S1~S2)만 수동 구역에 유지. `CLAUDE.md`
+
 ## [1.33.2] - 2026-07-11
 
 **FastMCP 등록 테스트를 라이브러리 런타임 동작에서 완전히 분리.** WHY: v1.33.1의 수정도 여전히 fastmcp의 런타임 동작에 기댔다 — `@mcp.tool()`이 함수를 `FunctionTool`로 감싼다고 가정했는데, CI(Python 3.11)가 설치한 fastmcp는 **원본 함수를 그대로 반환**해서 이번엔 정반대 이유로 실패했다(로컬은 Python 3.13, 다른 버전이 resolve됨). 라이브러리의 동작을 검증 대상으로 삼은 것 자체가 잘못이었다.
