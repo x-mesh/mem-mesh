@@ -19,7 +19,11 @@ from app.core.errors import (
     PinNotFoundError,
 )
 from app.core.schemas.pins import PinCreate, PinUpdate
-from app.core.schemas.projects import ProjectUpdate
+from app.core.schemas.projects import (
+    ProjectRenameRequest,
+    ProjectRenameResult,
+    ProjectUpdate,
+)
 from app.core.schemas.requests import RuleUpdateParams, normalize_project_id
 from app.core.services.embedding_manager import EmbeddingManagerService
 from app.core.services.pin import PinService
@@ -603,6 +607,29 @@ async def update_work_project(
         raise
     except Exception as e:
         logger.error(f"Update work project error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/work/projects/{project_id}/rename", response_model=ProjectRenameResult)
+async def rename_work_project(
+    project_id: str,
+    request: ProjectRenameRequest,
+    service: ProjectService = Depends(get_project_service),
+) -> ProjectRenameResult:
+    """Rename a project, merging into target_id when that project already exists.
+
+    Moves project_id across every table that carries it (memories, sessions,
+    pins, stats, hook events, relay subscriptions, ...). Pass dry_run to preview
+    the row counts without writing.
+    """
+    try:
+        return await service.rename_project(
+            project_id, request.target_id, dry_run=request.dry_run
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Rename project error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

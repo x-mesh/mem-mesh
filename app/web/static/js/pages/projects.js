@@ -31,7 +31,11 @@ class ProjectsPage extends HTMLElement {
       c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
     );
   }
-  
+
+  _errText(err) {
+    return err?.data?.detail || err?.message || String(err);
+  }
+
   connectedCallback() {
     console.log('ProjectsPage connected');
     this.render();
@@ -264,6 +268,14 @@ class ProjectsPage extends HTMLElement {
    * Handle project card clicks
    */
   handleProjectClick(event) {
+    const renameBtn = event.target.closest('.rename-btn');
+    if (renameBtn) {
+      event.stopPropagation();
+      const projectId = renameBtn.getAttribute('data-project-id');
+      if (projectId) this.openRenameModal(projectId);
+      return;
+    }
+
     const maintRetryBtn = event.target.closest('.maint-retry-btn');
     if (maintRetryBtn) {
       event.stopPropagation();
@@ -534,6 +546,121 @@ class ProjectsPage extends HTMLElement {
   /**
    * Open the project overview modal (LLM summary of recent memories).
    */
+  /**
+   * Rename / merge a project. Always previews first (dry run) so the user sees
+   * exactly which tables move how many rows — a merge touches sessions, pins
+   * and stats, not just memories, and it cannot be undone.
+   */
+  async openRenameModal(projectId) {
+    const existing = document.querySelector('.rename-modal-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'maintenance-modal-overlay rename-modal-overlay';
+    overlay.innerHTML = `
+      <div class="maintenance-modal rename-modal" role="dialog" aria-modal="true">
+        <div class="maintenance-modal-header">
+          <h3>✏️ Rename · ${this._escapeHtml(projectId)}</h3>
+          <button class="rename-modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="rename-body">
+          <label class="rename-label" for="rename-target">New project id</label>
+          <input id="rename-target" class="rename-input" type="text" value="${this._escapeHtml(projectId)}"
+                 placeholder="e.g. aic" autocomplete="off" spellcheck="false" />
+          <p class="rename-hint">If that project already exists, this one is merged into it — memories, sessions, pins and stats all move.</p>
+          <div class="rename-preview"></div>
+        </div>
+        <div class="maintenance-modal-actions">
+          <button class="secondary-button rename-cancel">Cancel</button>
+          <button class="primary-button rename-preview-btn">Preview</button>
+          <button class="primary-button rename-apply" hidden>Rename</button>
+        </div>
+      </div>`;
+
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('.rename-modal-close').addEventListener('click', close);
+    overlay.querySelector('.rename-cancel').addEventListener('click', close);
+
+    const input = overlay.querySelector('.rename-input');
+    const preview = overlay.querySelector('.rename-preview');
+    const previewBtn = overlay.querySelector('.rename-preview-btn');
+    const applyBtn = overlay.querySelector('.rename-apply');
+    const api = window.app?.apiClient;
+
+    // Any edit invalidates a preview — never let Rename apply a stale target.
+    input.addEventListener('input', () => {
+      applyBtn.hidden = true;
+      previewBtn.hidden = false;
+      preview.innerHTML = '';
+    });
+
+    const runPreview = async () => {
+      const target = input.value.trim();
+      if (!target || target === projectId) {
+        preview.innerHTML = '<div class="rename-error">Enter a different project id.</div>';
+        return;
+      }
+      previewBtn.disabled = true;
+      preview.innerHTML = '<div class="overview-loading"><span class="ov-spinner"></span>Checking…</div>';
+      try {
+        const res = await api.renameProject(projectId, target, { dryRun: true });
+        const rows = (res.tables || [])
+          .map(t => `<tr><td>${this._escapeHtml(t.table)}</td><td>${t.moved}</td></tr>`)
+          .join('');
+        preview.innerHTML = `
+          <div class="rename-summary">
+            ${res.merged
+              ? `<strong>${this._escapeHtml(target)}</strong> already exists — ${projectId} will be merged into it.`
+              : `<strong>${this._escapeHtml(target)}</strong> is a new id — ${projectId} will simply be renamed.`}
+          </div>
+          ${res.total_moved
+            ? `<table class="rename-table"><thead><tr><th>Table</th><th>Rows</th></tr></thead><tbody>${rows}</tbody></table>`
+            : '<div class="rename-summary">No rows to move.</div>'}`;
+        previewBtn.hidden = true;
+        applyBtn.hidden = false;
+      } catch (err) {
+        preview.innerHTML = `<div class="rename-error">${this._escapeHtml(this._errText(err))}</div>`;
+      } finally {
+        previewBtn.disabled = false;
+      }
+    };
+
+    const runApply = async () => {
+      const target = input.value.trim();
+      applyBtn.disabled = true;
+      applyBtn.textContent = 'Renaming…';
+      try {
+        const res = await api.renameProject(projectId, target);
+        const extra = [];
+        if (res.sessions_ended) extra.push(`${res.sessions_ended} active session(s) closed`);
+        if (res.total_dropped) extra.push(`${res.total_dropped} duplicate setting row(s) dropped`);
+        showToast(
+          `${projectId} → ${target}: ${res.total_moved} rows moved` +
+          (extra.length ? ` (${extra.join(', ')})` : ''),
+          'success'
+        );
+        close();
+        await this.loadProjects();
+      } catch (err) {
+        preview.innerHTML = `<div class="rename-error">${this._escapeHtml(this._errText(err))}</div>`;
+        applyBtn.disabled = false;
+        applyBtn.textContent = 'Rename';
+      }
+    };
+
+    previewBtn.addEventListener('click', runPreview);
+    applyBtn.addEventListener('click', runApply);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !applyBtn.hidden) runApply();
+      else if (e.key === 'Enter') runPreview();
+    });
+
+    document.body.appendChild(overlay);
+    input.focus();
+    input.select();
+  }
+
   async openOverviewModal(projectId) {
     const existing = document.querySelector('.overview-modal-overlay');
     if (existing) existing.remove();
@@ -902,6 +1029,7 @@ class ProjectsPage extends HTMLElement {
         
         <div class="project-actions">
           <button class="view-btn" data-project-id="${project.id}">View Memories</button>
+          <button class="rename-btn" data-project-id="${project.id}" title="Rename this project, or merge it into an existing one">✏️ Rename</button>
           <button class="overview-btn" data-project-id="${project.id}" title="LLM summary of this project's recent memories">📋 Overview</button>
           <button class="maintenance-btn" data-project-id="${project.id}" title="Enrich / Improve / Reconcile all memories in this project">🔧 Maintenance</button>
           <button class="relay-share-btn" data-project-id="${project.id}">Share to relay</button>
@@ -1529,6 +1657,74 @@ style.textContent = `
 
   .maintenance-modal-note code {
     background: var(--bg-tertiary); padding: 0 3px; border-radius: 3px;
+  }
+
+  .rename-label {
+    display: block; font-size: 0.75rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--text-secondary); margin-bottom: 0.35rem;
+  }
+
+  .rename-input {
+    width: 100%; padding: 0.55rem 0.7rem; font-size: 0.9rem;
+    font-family: var(--font-mono, monospace);
+    color: var(--text-primary); background: var(--bg-secondary);
+    border: 1px solid var(--border-color); border-radius: 8px;
+  }
+
+  .rename-input:focus {
+    outline: none; border-color: var(--primary-color);
+  }
+
+  .rename-hint {
+    font-size: 0.75rem; color: var(--text-muted);
+    line-height: 1.5; margin: 0.5rem 0 0;
+  }
+
+  .rename-summary {
+    font-size: 0.83rem; color: var(--text-secondary);
+    line-height: 1.5; margin-top: 0.9rem;
+  }
+
+  .rename-table {
+    width: 100%; margin-top: 0.6rem; border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+
+  .rename-table th, .rename-table td {
+    text-align: left; padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .rename-table th {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--text-muted); font-weight: 600;
+  }
+
+  .rename-table td:last-child, .rename-table th:last-child {
+    text-align: right; font-variant-numeric: tabular-nums;
+  }
+
+  .rename-error {
+    margin-top: 0.9rem; font-size: 0.8rem; line-height: 1.5;
+    color: var(--error-color, #ef4444);
+  }
+
+  .rename-btn {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    padding: 0.5rem 1rem;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: var(--transition);
+  }
+
+  .rename-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
   }
 
   .relay-share-btn {

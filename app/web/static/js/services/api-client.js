@@ -214,6 +214,17 @@ export class APIClient {
   async getProjects() {
     return this.get('/projects');
   }
+
+  /**
+   * Rename a project. When targetId already exists the source project is
+   * merged into it. dryRun returns the row counts without writing anything.
+   */
+  async renameProject(projectId, targetId, { dryRun = false } = {}) {
+    return this.post(`/work/projects/${encodeURIComponent(projectId)}/rename`, {
+      target_id: targetId,
+      dry_run: dryRun,
+    });
+  }
   
   async searchMemories(query, filters = {}) {
     return this.get('/memories/search', { query, ...filters });
