@@ -153,7 +153,15 @@ connection-status {
   50% { opacity: 0.5; }
 }
 
-/* Toast Notifications */
+/* Toast Notifications
+ *
+ * The type classes paint a colored gradient, so the toast can no longer inherit
+ * the theme's foreground: --text-primary is near-black in light mode, which put
+ * black text on a blue background. Every colored toast therefore pins its own
+ * white-on-color foreground (text, dot, close button), and the gradients are
+ * dark enough to clear ~4.5:1 against white — the mid tones of green/amber
+ * (#10b981 / #f59e0b) sit around 2.5-3:1, which is why they are a step darker.
+ */
 .toast {
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
   border-radius: 8px;
@@ -161,19 +169,104 @@ connection-status {
 }
 
 .toast-success {
-  background: linear-gradient(135deg, #10b981, #059669) !important;
+  background: linear-gradient(135deg, #047857, #065f46) !important;
 }
 
 .toast-info {
-  background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
 }
 
 .toast-warning {
-  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+  background: linear-gradient(135deg, #b45309, #92400e) !important;
 }
 
 .toast-error {
-  background: linear-gradient(135deg, #ef4444, #dc2626) !important;
+  background: linear-gradient(135deg, #dc2626, #b91c1c) !important;
+}
+
+/* Doubled class: the toast util injects its own `.toast { color: … }` late in
+   the document, which would otherwise win the specificity tie and put theme
+   text back on the gradient. */
+.toast.toast-success,
+.toast.toast-info,
+.toast.toast-warning,
+.toast.toast-error {
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+/* Children carry their own theme colors, so the foreground has to follow the
+   background down the tree — not just on the toast root. */
+.toast-success .toast-title,
+.toast-info .toast-title,
+.toast-warning .toast-title,
+.toast-error .toast-title,
+.toast-success .toast-message,
+.toast-info .toast-message,
+.toast-warning .toast-message,
+.toast-error .toast-message,
+.toast-success .toast-content strong,
+.toast-info .toast-content strong,
+.toast-warning .toast-content strong,
+.toast-error .toast-content strong {
+  color: #ffffff;
+}
+
+/* Secondary text stays legible instead of dropping to the muted theme gray. */
+.toast-success .toast-title + .toast-message,
+.toast-info .toast-title + .toast-message,
+.toast-warning .toast-title + .toast-message,
+.toast-error .toast-title + .toast-message,
+.toast-success .toast-content p,
+.toast-info .toast-content p,
+.toast-warning .toast-content p,
+.toast-error .toast-content p {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+/* The accent dot is the same hue as the background it sits on — make it read. */
+.toast-success::before,
+.toast-info::before,
+.toast-warning::before,
+.toast-error::before {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.toast-success .toast-close,
+.toast-info .toast-close,
+.toast-warning .toast-close,
+.toast-error .toast-close {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.toast-success .toast-close:hover,
+.toast-info .toast-close:hover,
+.toast-warning .toast-close:hover,
+.toast-error .toast-close:hover {
+  background: rgba(255, 255, 255, 0.28);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #ffffff;
+}
+
+/* Action buttons invert: white pill, colored label would need per-type text,
+   so keep a translucent outline that works on every gradient. */
+.toast-success .toast-action,
+.toast-info .toast-action,
+.toast-warning .toast-action,
+.toast-error .toast-action {
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  color: #ffffff;
+}
+
+.toast-success .toast-action:hover,
+.toast-info .toast-action:hover,
+.toast-warning .toast-action:hover,
+.toast-error .toast-action:hover {
+  background: rgba(255, 255, 255, 0.28);
+  border-color: rgba(255, 255, 255, 0.6);
 }
 
 /* Header Actions Layout */
