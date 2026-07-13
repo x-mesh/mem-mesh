@@ -117,6 +117,7 @@ class MCPDispatcher:
         result = await self._tool_handlers.search(
             query=args["query"],
             project_id=args.get("project_id"),
+            project_ids=args.get("project_ids"),
             category=args.get("category"),
             limit=args.get("limit", 5),
             recency_weight=args.get("recency_weight", 0.0),

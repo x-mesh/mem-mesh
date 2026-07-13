@@ -149,6 +149,7 @@ class MCPToolHandlers:
         self,
         query: str,
         project_id: Optional[str] = None,
+        project_ids: Optional[List[str]] = None,
         category: Optional[str] = None,
         limit: int = 5,
         recency_weight: float = 0.0,
@@ -166,7 +167,10 @@ class MCPToolHandlers:
 
         Args:
             query: Search query (min 3 characters)
-            project_id: Project filter
+            project_id: Project filter (single)
+            project_ids: Project filter (several — replaces project_id when set).
+                One query across a coupled repo pair (frontend/backend): a plain
+                `WHERE project_id IN (...)`, no second corpus and no rank fusion.
             category: Category filter
             limit: Maximum results (1-20)
             recency_weight: Recency weight (0.0-1.0)
@@ -223,6 +227,7 @@ class MCPToolHandlers:
                 params = SearchParams(
                     query=query,
                     project_id=project_id,
+                    project_ids=project_ids,
                     category=category,
                     limit=(
                         limit * 2 if enable_noise_filter else limit

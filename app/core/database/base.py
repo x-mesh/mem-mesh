@@ -50,24 +50,34 @@ __all__ = [
     "EMBEDDING_TABLE_SECONDARY",
     "EMBEDDING_TABLE_SLOTS",
     "category_filter_clause",
+    "value_filter_clause",
     "anchored_path_filter_clause",
 ]
 
 
-def category_filter_clause(cat, column: str = "category"):
-    """SQL condition + params for a category filter that may be a single string
-    (``category = ?``) or a list/tuple/set of categories (``category IN (?, ...)``).
+def value_filter_clause(value, column: str):
+    """SQL condition + params for a filter that may be a single value
+    (``col = ?``) or a list/tuple/set (``col IN (?, ...)``).
     Returns (condition_without_AND, params_list). Empty ('', []) when no filter.
+
+    Used for ``category`` and for ``project_id`` — a cross-project search passes
+    a list of project ids so one query spans both repos of a coupled pair
+    (frontend/backend) without a second corpus or a fusion step.
     """
-    if not cat:
+    if not value:
         return "", []
-    if isinstance(cat, (list, tuple, set)):
-        cats = [c for c in cat if c]
-        if not cats:
+    if isinstance(value, (list, tuple, set)):
+        values = [v for v in value if v]
+        if not values:
             return "", []
-        placeholders = ",".join("?" * len(cats))
-        return f"{column} IN ({placeholders})", list(cats)
-    return f"{column} = ?", [cat]
+        placeholders = ",".join("?" * len(values))
+        return f"{column} IN ({placeholders})", list(values)
+    return f"{column} = ?", [value]
+
+
+def category_filter_clause(cat, column: str = "category"):
+    """Category filter — see value_filter_clause."""
+    return value_filter_clause(cat, column)
 
 
 def anchored_path_filter_clause(prefix, column: str = "anchors"):
@@ -328,8 +338,12 @@ class Database:
                     ]
                     if filters:
                         if filters.get("project_id"):
-                            filter_conditions.append("m.project_id = ?")
-                            params.append(filters["project_id"])
+                            _pcond, _pp = value_filter_clause(
+                                filters["project_id"], column="m.project_id"
+                            )
+                            if _pcond:
+                                filter_conditions.append(_pcond)
+                                params.extend(_pp)
                         if filters.get("category"):
                             _cond, _cp = category_filter_clause(
                                 filters["category"], column="m.category"
@@ -384,8 +398,12 @@ class Database:
 
         if filters:
             if filters.get("project_id"):
-                base_query += " AND project_id = ?"
-                params.append(filters["project_id"])
+                _pcond, _pp = value_filter_clause(
+                    filters["project_id"], column="project_id"
+                )
+                if _pcond:
+                    base_query += " AND " + _pcond
+                    params.extend(_pp)
             if filters.get("category"):
                 _cond, _cp = category_filter_clause(filters["category"])
                 if _cond:
@@ -446,8 +464,12 @@ class Database:
 
             if filters:
                 if filters.get("project_id"):
-                    base_query += " AND project_id = ?"
-                    params.append(filters["project_id"])
+                    _pcond, _pp = value_filter_clause(
+                        filters["project_id"], column="project_id"
+                    )
+                    if _pcond:
+                        base_query += " AND " + _pcond
+                        params.extend(_pp)
                 if filters.get("category"):
                     _cond, _cp = category_filter_clause(filters["category"])
                     if _cond:
@@ -511,8 +533,12 @@ class Database:
 
             if filters:
                 if filters.get("project_id"):
-                    base_query += " AND project_id = ?"
-                    params.append(filters["project_id"])
+                    _pcond, _pp = value_filter_clause(
+                        filters["project_id"], column="project_id"
+                    )
+                    if _pcond:
+                        base_query += " AND " + _pcond
+                        params.extend(_pp)
                 if filters.get("category"):
                     _cond, _cp = category_filter_clause(filters["category"])
                     if _cond:

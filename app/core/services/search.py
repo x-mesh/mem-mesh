@@ -14,6 +14,7 @@ from ..database.base import (
     Database,
     anchored_path_filter_clause,
     category_filter_clause,
+    value_filter_clause,
 )
 from ..embeddings.service import EmbeddingService
 from ..schemas.responses import SearchResponse, SearchResult
@@ -113,6 +114,7 @@ class SearchService:
         self,
         query: str,
         project_id: Optional[str] = None,
+        project_ids: Optional[List[str]] = None,
         category: Optional[str] = None,
         categories: Optional[List[str]] = None,
         source: Optional[str] = None,
@@ -131,7 +133,10 @@ class SearchService:
 
         Args:
             query: 검색 쿼리 (빈 문자열인 경우 모든 메모리 반환)
-            project_id: 프로젝트 필터
+            project_id: 프로젝트 필터 (단일)
+            project_ids: 프로젝트 필터 (복수 — 지정 시 project_id를 대체).
+                결합된 repo 쌍(frontend/backend)을 한 쿼리로 훑을 때 사용한다.
+                별도 코퍼스도 랭킹 융합도 없이 WHERE project_id IN (...) 하나다.
             category: 카테고리 필터
             source: 소스 필터
             tag: 태그 필터
@@ -171,6 +176,11 @@ class SearchService:
         # Multi-category filters must not collide in the cache/metric key that a
         # single category would produce, so fold the list into a stable key.
         cache_cat = ",".join(sorted(categories)) if categories else category
+        # Same for a multi-project search: the scope is what the filter, the
+        # cache key and the metric row all key on, so normalize it once here.
+        scope_ids = [p for p in (project_ids or []) if p]
+        project_scope = scope_ids or project_id
+        cache_project = ",".join(sorted(scope_ids)) if scope_ids else project_id
 
         try:
             # Check cache first (only when offset=0). anchored_path is not part
@@ -180,7 +190,10 @@ class SearchService:
                 offset == 0 and not anchored_path and not starred_only
             ):  # Cache first page only
                 cached_results = await self.cache_manager.get_cached_search(
-                    query=query, project_id=project_id, category=cache_cat, limit=limit
+                    query=query,
+                    project_id=cache_project,
+                    category=cache_cat,
+                    limit=limit,
                 )
                 if cached_results:
                     logger.info(
@@ -191,7 +204,7 @@ class SearchService:
                         query=original_query,
                         result=cached_results,
                         start_time=start_time,
-                        project_id=project_id,
+                        project_id=cache_project,
                         category=cache_cat,
                         embedding_time_ms=0,
                         search_time_ms=0,
@@ -199,8 +212,8 @@ class SearchService:
                     return cached_results
             # Build SQL filter conditions
             filters = {}
-            if project_id:
-                filters["project_id"] = project_id
+            if project_scope:
+                filters["project_id"] = project_scope
             if categories:
                 filters["category"] = list(categories)
             elif category:
@@ -278,7 +291,7 @@ class SearchService:
                     query=original_query,
                     result=result,
                     start_time=start_time,
-                    project_id=project_id,
+                    project_id=cache_project,
                     category=cache_cat,
                 )
                 return result
@@ -315,7 +328,7 @@ class SearchService:
                 await self.cache_manager.cache_search_results(
                     query=query,
                     results=result,
-                    project_id=project_id,
+                    project_id=cache_project,
                     category=cache_cat,
                     limit=limit,
                 )
@@ -328,7 +341,7 @@ class SearchService:
                 query=original_query,
                 result=result,
                 start_time=start_time,
-                project_id=project_id,
+                project_id=cache_project,
                 category=cache_cat,
             )
 
@@ -342,7 +355,7 @@ class SearchService:
                 query=original_query,
                 result=result,
                 start_time=start_time,
-                project_id=project_id,
+                project_id=cache_project,
                 category=cache_cat,
             )
             return result
@@ -539,8 +552,12 @@ class SearchService:
             # Add filter conditions
             if filters:
                 if filters.get("project_id"):
-                    base_query += " AND project_id = ?"
-                    params.append(filters["project_id"])
+                    _pcond, _pp = value_filter_clause(
+                        filters["project_id"], column="project_id"
+                    )
+                    if _pcond:
+                        base_query += " AND " + _pcond
+                        params.extend(_pp)
                 if filters.get("category"):
                     _cond, _cp = category_filter_clause(filters["category"])
                     if _cond:
@@ -656,8 +673,12 @@ class SearchService:
             # Add filter conditions
             if filters:
                 if filters.get("project_id"):
-                    base_query += " AND project_id = ?"
-                    params.append(filters["project_id"])
+                    _pcond, _pp = value_filter_clause(
+                        filters["project_id"], column="project_id"
+                    )
+                    if _pcond:
+                        base_query += " AND " + _pcond
+                        params.extend(_pp)
                 if filters.get("category"):
                     _cond, _cp = category_filter_clause(filters["category"])
                     if _cond:
@@ -845,8 +866,12 @@ class SearchService:
 
             if filters:
                 if filters.get("project_id"):
-                    base_query += " AND project_id = ?"
-                    params.append(filters["project_id"])
+                    _pcond, _pp = value_filter_clause(
+                        filters["project_id"], column="project_id"
+                    )
+                    if _pcond:
+                        base_query += " AND " + _pcond
+                        params.extend(_pp)
                 if filters.get("category"):
                     _cond, _cp = category_filter_clause(filters["category"])
                     if _cond:

@@ -285,6 +285,10 @@ class SearchParams(BaseModel):
 
     query: str = Field(min_length=0)  # Allow empty query
     project_id: Optional[str] = Field(default=None)
+    # Cross-project scope: a coupled repo pair (frontend/backend) searched in one
+    # query. Replaces project_id when set — a plain WHERE project_id IN (...),
+    # no rank fusion and no second corpus.
+    project_ids: Optional[List[str]] = Field(default=None, max_length=10)
     category: Optional[str] = Field(default=None)
     categories: Optional[List[str]] = Field(default=None)
     limit: int = Field(default=5, ge=1, le=20)

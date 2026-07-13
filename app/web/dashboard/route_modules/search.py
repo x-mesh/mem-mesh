@@ -92,6 +92,8 @@ class SearchRequest(BaseModel):
 
     query: str = ""
     project_id: Optional[str] = None
+    # Cross-project scope: search a coupled repo pair in one query.
+    project_ids: Optional[List[str]] = Field(default=None, max_length=10)
     category: Optional[str] = None
     categories: Optional[List[str]] = None
     source: Optional[str] = None
@@ -138,6 +140,7 @@ async def _do_search(
     recency_weight: float,
     search_mode: str,
     service: UnifiedSearchService,
+    project_ids: Optional[List[str]] = None,
     categories: Optional[List[str]] = None,
     time_range: Optional[str] = None,
     date_from: Optional[str] = None,
@@ -153,6 +156,18 @@ async def _do_search(
     # "my-project". strict=False: a malformed filter degrades to "unknown"
     # (empty result) rather than a 500.
     project_id = normalize_project_id(project_id, strict=False)
+    # Same normalization for a cross-project scope, deduped and capped so a
+    # crafted list can't expand the SQL IN clause / cache key. A multi-project
+    # search is local-only: the hub is a different corpus with its own ids.
+    if project_ids:
+        normalized: list[str] = []
+        for pid in project_ids[:10]:
+            canonical = normalize_project_id(pid, strict=False)
+            if canonical and canonical not in normalized:
+                normalized.append(canonical)
+        project_ids = normalized or None
+        if project_ids:
+            scope = "local"
     # Bound the user-controlled multi-category filter: dedupe (order-preserving),
     # drop unknown categories, and cap at the number of real categories so a
     # crafted `categories=...` list can't expand the SQL IN clause / cache key.
@@ -185,6 +200,7 @@ async def _do_search(
         return await service.search(
             query=query,
             project_id=project_id,
+            project_ids=project_ids,
             category=category,
             categories=categories,
             source=source,
@@ -257,6 +273,7 @@ async def _do_search(
 async def search_memories(
     query: str,
     project_id: str = None,
+    project_ids: Optional[List[str]] = Query(None),
     category: str = None,
     categories: Optional[List[str]] = Query(None),
     source: str = None,
@@ -288,6 +305,7 @@ async def search_memories(
     return await _do_search(
         query=query,
         project_id=project_id,
+        project_ids=project_ids,
         category=category,
         categories=categories,
         source=source,
@@ -323,6 +341,7 @@ async def search_memories_post(
     return await _do_search(
         query=body.query,
         project_id=body.project_id,
+        project_ids=body.project_ids,
         category=body.category,
         categories=body.categories,
         source=body.source,

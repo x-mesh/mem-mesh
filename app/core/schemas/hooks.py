@@ -15,7 +15,7 @@ versions and the server should not reject events it merely does not
 recognise yet.
 """
 
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -83,3 +83,30 @@ class PostToolUsePayload(HookEventBase):
     """
 
     tool_name: str = Field(default="", description="Name of the tool that just ran")
+
+
+class PreToolUsePayload(HookEventBase):
+    """A PreToolUse event — fired *before* a file-mutating tool runs.
+
+    Cross-project injection: when the file about to be edited is a contract
+    surface (an OpenAPI spec, a schema, .env, auth, ports), the server searches
+    the *peer* projects and injects what it finds. The hook does not tell the
+    model to search — a prose instruction is exactly what does not fire (the
+    anchors rule sits at 0% compliance on 15k memories). It searches and hands
+    over the result.
+    """
+
+    tool_name: str = Field(default="", description="Tool about to run")
+    file_path: str = Field(
+        default="", description="tool_input.file_path of the pending edit"
+    )
+    peers: List[str] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Peer project ids to search (from the client's cross-project config)",
+    )
+    globs: List[str] = Field(
+        default_factory=list,
+        max_length=30,
+        description="Path globs that mark a contract surface; server default when empty",
+    )

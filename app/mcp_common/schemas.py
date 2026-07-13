@@ -137,6 +137,23 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "pattern": "^[a-zA-Z0-9_-]+$",
                         "maxLength": 100,
                     },
+                    "project_ids": {
+                        "type": "array",
+                        "description": (
+                            "Search several projects in one query (replaces "
+                            "project_id). For coupled repos — e.g. "
+                            "['frontend','backend'] when an API contract, env "
+                            "var, auth flow or port must change on both sides. "
+                            "Plain project_id IN (...) — no rank fusion. Local "
+                            "scope only."
+                        ),
+                        "items": {
+                            "type": "string",
+                            "pattern": "^[a-zA-Z0-9_-]+$",
+                            "maxLength": 100,
+                        },
+                        "maxItems": 10,
+                    },
                     "category": {
                         "type": "string",
                         "description": "Category filter",

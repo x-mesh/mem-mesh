@@ -27,6 +27,7 @@ from ..database.base import (
     Database,
     anchored_path_filter_clause,
     category_filter_clause,
+    value_filter_clause,
 )
 from ..embeddings.service import EmbeddingService
 from ..schemas.responses import SearchResponse, SearchResult
@@ -247,6 +248,7 @@ class UnifiedSearchService:
         self,
         query: str,
         project_id: Optional[str] = None,
+        project_ids: Optional[List[str]] = None,
         category: Optional[str] = None,
         categories: Optional[List[str]] = None,
         source: Optional[str] = None,
@@ -299,6 +301,14 @@ class UnifiedSearchService:
         query = query.replace("+", " ").strip() if query else ""
         original_query = query
 
+        # Cross-project scope, normalized once and up front: the id fast path
+        # below, the SQL filters, the cache key and the metric row must all key
+        # on the SAME scope — the id shortcut widening it back to one project is
+        # exactly how a scoped search leaks a memory from outside its scope.
+        scope_ids = [p for p in (project_ids or []) if p]
+        project_scope = scope_ids or project_id
+        cache_project = ",".join(sorted(scope_ids)) if scope_ids else project_id
+
         # 0. Memory-id lookup: tools surface short hex ids embedded in prose
         # ("제안 저장 완료(mem-mesh f9732f1e)"), not as a bare query — pasting the
         # whole message must still find that memory, so search for an id-shaped
@@ -309,7 +319,7 @@ class UnifiedSearchService:
             id_match = _MEMORY_ID_QUERY_RE.search(query)
             if id_match:
                 id_response = await self._search_by_id_prefix(
-                    id_match.group(0), project_id=project_id, limit=limit
+                    id_match.group(0), project_id=project_scope, limit=limit
                 )
                 if id_response is not None:
                     # The id shortcut bypasses the filters dict — apply the
@@ -359,14 +369,13 @@ class UnifiedSearchService:
         # Multi-category filters must not collide in the cache/metric key that a
         # single category would produce, so fold the list into a stable key.
         cache_cat = ",".join(sorted(categories)) if categories else category
-
         # 3. Check cache (only when offset=0). anchored_path is not part of the
         # cache key — a filtered query must never read (or seed) the unfiltered
         # entry, so the cache is bypassed entirely for anchored searches.
         if offset == 0 and query and not anchored_path and not starred_only:
             cached_results = await self.cache_manager.get_cached_search(
                 query=expanded_query,
-                project_id=project_id,
+                project_id=cache_project,
                 category=cache_cat,
                 limit=limit,
             )
@@ -384,8 +393,8 @@ class UnifiedSearchService:
 
         # 4. Build filter conditions
         filters = {}
-        if project_id:
-            filters["project_id"] = project_id
+        if project_scope:
+            filters["project_id"] = project_scope
         if categories:
             filters["category"] = list(categories)
         elif category:
@@ -501,7 +510,7 @@ class UnifiedSearchService:
             await self.cache_manager.cache_search_results(
                 query=expanded_query,
                 results=result,
-                project_id=project_id,
+                project_id=cache_project,
                 category=cache_cat,
                 limit=limit,
             )
@@ -525,7 +534,7 @@ class UnifiedSearchService:
 
         # 11. Collect metrics
         await self._collect_metrics(
-            original_query, result, start_time, project_id, cache_cat
+            original_query, result, start_time, cache_project, cache_cat
         )
 
         # 12. Generate suggestions on empty/low-quality results
@@ -937,7 +946,7 @@ class UnifiedSearchService:
         return list(sub_tokens)
 
     async def _search_by_id_prefix(
-        self, query: str, *, project_id: Optional[str] = None, limit: int = 25
+        self, query: str, *, project_id: Any = None, limit: int = 25
     ) -> Optional[SearchResponse]:
         """Direct lookup for an id-shaped query (8+ hex chars, optional UUID
         rest). Returns None when nothing matches so the caller falls through to
@@ -948,9 +957,12 @@ class UnifiedSearchService:
             "client, tags, anchors, is_starred FROM memories WHERE id LIKE ?"
         )
         params: list = [query.lower() + "%"]
-        if project_id:
-            sql += " AND project_id = ?"
-            params.append(project_id)
+        # project_id may be a list (cross-project scope) — the shortcut must not
+        # widen the scope the caller asked for.
+        _pcond, _pp = value_filter_clause(project_id, column="project_id")
+        if _pcond:
+            sql += " AND " + _pcond
+            params.extend(_pp)
         sql += " ORDER BY created_at DESC LIMIT ?"
         params.append(max(1, min(limit, 50)))
         try:
@@ -1015,8 +1027,12 @@ class UnifiedSearchService:
 
         if filters:
             if filters.get("project_id"):
-                sql += " AND m.project_id = ?"
-                params.append(filters["project_id"])
+                _pcond, _pp = value_filter_clause(
+                    filters["project_id"], column="m.project_id"
+                )
+                if _pcond:
+                    sql += " AND " + _pcond
+                    params.extend(_pp)
             if filters.get("category"):
                 _cond, _cp = category_filter_clause(
                     filters["category"], column="m.category"
@@ -1145,8 +1161,12 @@ class UnifiedSearchService:
 
         if filters:
             if filters.get("project_id"):
-                base_query += " AND project_id = ?"
-                params.append(filters["project_id"])
+                _pcond, _pp = value_filter_clause(
+                    filters["project_id"], column="project_id"
+                )
+                if _pcond:
+                    base_query += " AND " + _pcond
+                    params.extend(_pp)
             if filters.get("category"):
                 _cond, _cp = category_filter_clause(filters["category"])
                 if _cond:
@@ -1238,8 +1258,12 @@ class UnifiedSearchService:
 
         if filters:
             if filters.get("project_id"):
-                base_query += " AND project_id = ?"
-                params.append(filters["project_id"])
+                _pcond, _pp = value_filter_clause(
+                    filters["project_id"], column="project_id"
+                )
+                if _pcond:
+                    base_query += " AND " + _pcond
+                    params.extend(_pp)
             if filters.get("category"):
                 _cond, _cp = category_filter_clause(filters["category"])
                 if _cond:

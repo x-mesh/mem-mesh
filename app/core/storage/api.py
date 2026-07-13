@@ -160,6 +160,10 @@ class APIStorageBackend(StorageBackend):
                 query_params["query"] = params.query
             if params.project_id:
                 query_params["project_id"] = params.project_id
+            if params.project_ids:
+                # httpx repeats a list value as ?project_ids=a&project_ids=b,
+                # which the FastAPI route reads back as a list.
+                query_params["project_ids"] = list(params.project_ids)
             if params.category:
                 query_params["category"] = params.category
             if params.limit != 5:  # Only when not default value

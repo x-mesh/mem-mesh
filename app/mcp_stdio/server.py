@@ -15,7 +15,7 @@ FastMCP-only (2): cache_stats, clear_cache
 """
 
 import os
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 from fastmcp import FastMCP
 
@@ -127,6 +127,7 @@ async def add(
 async def search(
     query: str,
     project_id: Optional[str] = None,
+    project_ids: Optional[List[str]] = None,
     category: Optional[str] = None,
     limit: int = 5,
     recency_weight: float = 0.0,
@@ -140,13 +141,16 @@ async def search(
     starred_only: bool = False,
 ) -> dict:
     """Internal handler for search tool."""
+    # Keyword-only: the handler's parameter order is not part of this contract,
+    # and a positional call silently shifts every argument when one is inserted.
     return await _get_handlers().search(
-        query,
-        project_id,
-        category,
-        limit,
-        recency_weight,
-        response_format,
+        query=query,
+        project_id=project_id,
+        project_ids=project_ids,
+        category=category,
+        limit=limit,
+        recency_weight=recency_weight,
+        response_format=response_format,
         time_range=time_range,
         date_from=date_from,
         date_to=date_to,

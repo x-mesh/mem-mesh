@@ -66,6 +66,7 @@ from app.cli.hooks.templates import (
     LOCAL_TASK_COMPLETED_HOOK_TEMPLATE,
     LOCAL_USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
     POST_TOOL_USE_HOOK_TEMPLATE,
+    PRE_TOOL_USE_HOOK_TEMPLATE,
     PRECOMPACT_HOOK_TEMPLATE,
     SESSION_END_HOOK_TEMPLATE,
     SESSION_START_HOOK_TEMPLATE,
@@ -105,6 +106,7 @@ HOOK_PROFILES = {
             "session-start",
             "stop-decide",
             "user-prompt-submit",
+            "pre-tool-use",
             "post-tool-use",
             "subagent-start",
             "subagent-stop",
@@ -119,6 +121,7 @@ HOOK_PROFILES = {
             "session-start",
             "stop-enhanced",
             "user-prompt-submit",
+            "pre-tool-use",
             "post-tool-use",
             "subagent-start",
             "subagent-stop",
@@ -349,6 +352,24 @@ def _build_claude_hooks_settings(
                 5,
                 mode=mode,
                 url=url,
+                token=token,
+            )
+        ]
+
+    # PreToolUse: cross-project injection before an edit to a contract surface.
+    # Always a command hook — it reads the repo-local .mem-mesh/cross-project.json
+    # (peer projects), which a server-side HTTP hook cannot see. Synchronous: the
+    # injected context must reach the model before the edit runs. No peer config
+    # → the script exits immediately, so this costs nothing for everyone else.
+    if profile != "minimal":
+        settings["hooks"]["PreToolUse"] = [
+            _claude_hook_entry(
+                "PreToolUse",
+                f"{hooks_prefix}/mem-mesh-pre-tool-use.sh",
+                8,
+                mode="api" if mode == "http" else mode,
+                url=url,
+                matcher=_WRITE_TOOL_MATCHER,
                 token=token,
             )
         ]
@@ -1179,6 +1200,7 @@ def _install_claude(
     decide_script = hooks_dir / "mem-mesh-stop-decide.sh"
     ups_script = hooks_dir / "mem-mesh-user-prompt-submit.sh"
     ptu_script = hooks_dir / "mem-mesh-post-tool-use.sh"
+    pre_script = hooks_dir / "mem-mesh-pre-tool-use.sh"
 
     # SessionStart hook (all profiles)
     if not _http:
@@ -1272,6 +1294,21 @@ def _install_claude(
                 ),
             )
         print(f"  -> {ups_script}")
+
+    # PreToolUse hook (standard/enhanced only) — cross-project injection.
+    # Written in every mode incl. http: the script reads the repo-local peer
+    # config the server cannot see, then POSTs to the server endpoint.
+    if "pre-tool-use" in profile_info["hooks"]:
+        _write_script(
+            pre_script,
+            _render_template(
+                PRE_TOOL_USE_HOOK_TEMPLATE,
+                url,
+                source_tag="claude-code-hook",
+                ide_tag="claude",
+            ),
+        )
+        print(f"  -> {pre_script}")
 
     # PostToolUse hook (standard/enhanced only) — write-signal recorder.
     # api/local modes write a command script; http mode uses the server

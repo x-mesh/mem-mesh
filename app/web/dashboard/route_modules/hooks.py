@@ -23,7 +23,8 @@ import json
 import logging
 import os
 import re
-from pathlib import Path
+from fnmatch import fnmatch
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Response
@@ -35,6 +36,7 @@ from app.core.redaction import redact_secrets
 from app.core.schemas.hooks import (
     HookEventBase,
     PostToolUsePayload,
+    PreToolUsePayload,
     SessionStartPayload,
     StopPayload,
     SubagentStopPayload,
@@ -728,6 +730,218 @@ async def user_prompt_submit(
         return _ok("user-prompt-submit: noop")
 
     return _context("UserPromptSubmit", "\n\n".join(parts))
+
+
+# ───────────────────────── PreToolUse ────────────────────────────
+
+# Contract surfaces: the files where "this has to change on both sides" actually
+# lives. The path decides, not the model — a prose rule ("search the peer project
+# when you touch a contract") is the same shape as the anchors rule, which sits at
+# 0% compliance across 15k code-tied memories. The runtime fires on the path; the
+# model's attention is never in the loop.
+#
+# Two rules, not a glob list. A glob list looked simpler and was wrong twice:
+# '**/*auth*' fired on AUTHORS, AuthorCard.tsx and oauth-modal.js (a false fire
+# inflates the very metric that decides whether this feature earns its keep), and
+# '**/api/**' silently missed a repo whose api/ sits at the root, because fnmatch
+# has no '**' and PurePath.full_match only exists on 3.13+.
+
+# A directory anywhere in the path (root included) that means "contract".
+# Exact segment match, so 'authors/' or 'apidocs/' do not qualify.
+_CONTRACT_DIRS = frozenset(
+    {
+        "auth",
+        "api",
+        "routes",
+        "schema",
+        "schemas",
+        "migrations",
+        "contracts",
+        "proto",
+        "graphql",
+        "openapi",
+        "swagger",
+    }
+)
+
+# Filename shapes that are a contract regardless of where they live. 'auth' needs
+# a boundary after it (auth.py, auth-config.ts, auth_middleware.py) — without one,
+# 'author' and 'authorize' come along for the ride.
+_CONTRACT_FILE_RE = re.compile(
+    r"""^(
+        openapi.*         | swagger.*
+      | schema(\..*|-.*|_.*)?
+      | auth(\..*|-.*|_.*)
+      | \.env(\..*)?
+      | docker-compose(\..*)?
+      | dockerfile(\..*)?
+      | .*\.(proto|graphql)
+    )$""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _is_contract_path(file_path: str, globs: Optional[list[str]] = None) -> bool:
+    """Does this path look like a cross-repo contract surface?
+
+    ``globs`` (from the client's config) replaces the built-in rules entirely and
+    is matched with fnmatch against both the full path and the bare filename.
+    """
+    if not file_path:
+        return False
+    path = PurePosixPath(file_path.replace("\\", "/"))
+
+    patterns = [g for g in (globs or []) if g]
+    if patterns:
+        lowered = str(path).lower()
+        name = path.name.lower()
+        for pattern in patterns:
+            lowered_pattern = pattern.lower()
+            # fnmatch has no '**', so '**/contracts/**' cannot match a root-level
+            # 'contracts/x.yaml' (nothing precedes the slash). Try the pattern
+            # with its '**/' prefix stripped against the path too — that is the
+            # root-level case — and against the bare filename for '**/.env*'.
+            bare = (
+                lowered_pattern[3:]
+                if lowered_pattern.startswith("**/")
+                else lowered_pattern
+            )
+            if (
+                fnmatch(lowered, lowered_pattern)
+                or fnmatch(lowered, bare)
+                or fnmatch(name, bare)
+            ):
+                return True
+        return False
+
+    if _CONTRACT_DIRS.intersection(part.lower() for part in path.parts[:-1]):
+        return True
+    return bool(_CONTRACT_FILE_RE.match(path.name))
+
+
+def _contract_query(file_path: str) -> str:
+    """Turn a path into a search query: the filename plus its parent directories.
+
+    'services/auth/openapi.yaml' → 'openapi auth services'. Crude on purpose —
+    the peer corpus is small and the semantic index does the rest.
+    """
+    path = PurePosixPath(file_path.replace("\\", "/"))
+    stem = path.stem or path.name
+    parents = [p for p in path.parts[:-1] if p not in (".", "/", "")][-3:]
+    tokens = [stem, *reversed(parents)]
+    seen: list[str] = []
+    for token in tokens:
+        cleaned = re.sub(r"[^a-zA-Z0-9가-힣]+", " ", token).strip()
+        if cleaned and cleaned not in seen:
+            seen.append(cleaned)
+    return " ".join(seen)[:200]
+
+
+@router.post("/pre-tool-use")
+async def pre_tool_use(
+    payload: PreToolUsePayload,
+    hook_service: HookService = Depends(get_hook_service),
+) -> Response:
+    """Inject peer-project memories before an edit to a contract surface.
+
+    Fires only when the client configured peer projects AND the pending file
+    matches a contract glob. Everything else is a no-op — the point is a rare,
+    high-signal injection, not a standing recall surface (a permanent one is
+    exactly what the earlier panel rejected as search pollution).
+    """
+    tool_name = (payload.tool_name or "").strip()
+    if tool_name not in WRITE_TOOLS:
+        return _ok(f"pre-tool-use: skip (non-write tool: {tool_name or 'none'})")
+
+    # strict=False: peers come from a file in the user's repo, so a malformed id
+    # is input, not a server fault. strict would raise ValueError here — outside
+    # the try below — and a hook that 500s breaks this module's contract (every
+    # handler returns 200 and degrades).
+    peers = []
+    for peer in (payload.peers or [])[:10]:
+        canonical = normalize_project_id(peer, strict=False)
+        if canonical and canonical not in peers:
+            peers.append(canonical)
+    if not peers:
+        return _ok("pre-tool-use: skip (no peer projects configured)")
+
+    file_path = (payload.file_path or "").strip()
+    if not _is_contract_path(file_path, payload.globs):
+        return _ok("pre-tool-use: skip (not a contract path)")
+
+    project_id = _project_id(payload.cwd, payload.project_id)
+    peers = [p for p in peers if p != project_id]
+    if not peers:
+        return _ok("pre-tool-use: skip (peer == current project)")
+
+    ide_session_id = payload.session_id or ""
+    client = _hook_client(payload)
+    # Recorded whether or not anything is found: the firing count is half of the
+    # kill-condition (globs that never fire mean the feature is dead weight).
+    turn_index = await _record(
+        hook_service,
+        project_id=project_id,
+        ide_session_id=ide_session_id,
+        event_name="PreToolUse",
+        client_type=client,
+    )
+
+    services = get_services()
+    search_service = services.get("search_service")
+    embedding_service = services.get("embedding_service")
+    if (
+        search_service is None
+        or embedding_service is None
+        or not embedding_service.is_ready
+    ):
+        return _ok("pre-tool-use: skip (search unavailable)")
+
+    limit = int(os.getenv("MEM_MESH_CROSS_PROJECT_LIMIT", "3"))
+    try:
+        result = await search_service.search(
+            query=_contract_query(file_path),
+            project_ids=peers,
+            limit=limit,
+            search_mode="hybrid",
+        )
+        found = getattr(result, "results", None) or []
+        if not found:
+            return _ok("pre-tool-use: noop (no peer memories)")
+
+        from app.core.services.recall import filter_injectable, render_memory_lines
+
+        db = getattr(search_service, "db", None)
+        injected = await filter_injectable(db, found[:limit])
+        if not injected:
+            return _ok("pre-tool-use: noop (all filtered)")
+
+        bullets = await render_memory_lines(db, injected)
+        header = (
+            f"## Cross-project context — editing `{file_path}` "
+            f"(peer: {', '.join(peers)})"
+        )
+        lines = [
+            header,
+            "",
+            "This file is a contract surface. What the peer project recorded:",
+            "",
+            *bullets,
+            "",
+            "If the change alters a shared contract (API shape, env var, auth "
+            "flow, port), it likely has to land on both sides.",
+        ]
+        if ide_session_id:
+            await hook_service.record_injected(
+                project_id=project_id,
+                ide_session_id=ide_session_id,
+                memory_ids=[getattr(r, "id", None) for r in injected],
+                turn_index=turn_index or 0,
+                injected_via="pre_tool_use",
+            )
+        return _context("PreToolUse", "\n".join(lines))
+    except Exception as e:  # noqa: BLE001 — a hook must never raise into the caller
+        logger.warning(f"pre-tool-use injection failed: {e}")
+        return _ok("pre-tool-use: error (degraded)")
 
 
 # ───────────────────────── PostToolUse ───────────────────────────

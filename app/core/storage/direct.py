@@ -264,6 +264,7 @@ class DirectStorageBackend(StorageBackend):
             result = await self.unified_search_service.search(
                 query=params.query,
                 project_id=params.project_id,
+                project_ids=params.project_ids,
                 category=params.category,
                 limit=params.limit,
                 recency_weight=params.recency_weight,
@@ -301,6 +302,7 @@ class DirectStorageBackend(StorageBackend):
             result = await self.search_service.search(
                 query=params.query,
                 project_id=params.project_id,
+                project_ids=params.project_ids,
                 category=params.category,
                 limit=params.limit,
                 recency_weight=params.recency_weight,
