@@ -488,9 +488,20 @@ class TestSchemaExposure:
         assert "ids" in schema["properties"]
         assert schema["properties"]["ids"]["maxItems"] == 10
         # memory_id 단독 필수가 아니라 memory_id-또는-ids
+        # (배타 제약은 tools.context()가 런타임 검증 — 스키마에 넣으면 안 된다)
         assert "required" not in schema
-        assert {"required": ["memory_id"]} in schema["anyOf"]
-        assert {"required": ["ids"]} in schema["anyOf"]
+
+    def test_no_top_level_combinators_in_any_tool_schema(self):
+        """Anthropic API는 input_schema top-level의 anyOf/oneOf/allOf를 400으로 거부한다."""
+        from app.mcp_common.schemas import get_all_tool_schemas
+
+        violations = [
+            (s["name"], key)
+            for s in get_all_tool_schemas()
+            for key in ("anyOf", "oneOf", "allOf")
+            if key in s["inputSchema"]
+        ]
+        assert violations == []
 
     def test_anchors_schema_exposes_file_hashes(self):
         from app.mcp_common.schemas import ANCHORS_SCHEMA

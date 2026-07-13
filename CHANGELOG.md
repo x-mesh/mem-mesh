@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.35.1] - 2026-07-13
+
+**Kiro IDE에서 mem-mesh MCP를 붙이면 Anthropic API가 400으로 모든 요청을 거부하던 문제를 고쳤다.**
+
+WHY: `context` 도구의 `inputSchema` **최상위**에 `anyOf: [{required:[memory_id]}, {required:[ids]}]`가 있었는데, Anthropic API는 `input_schema` top-level의 `anyOf`/`oneOf`/`allOf`를 거부한다(`tools.N.custom.input_schema: input_schema does not support oneOf, allOf, or anyOf at the top level`). Claude Code는 스키마를 sanitize해서 통과시키므로 지금까지 드러나지 않았고, 스키마를 그대로 전달하는 Kiro에서만 400이 났다. 클라이언트에 따라 발현하는 문제라 오래 숨어 있었다.
+
+### Fixed
+
+- **`context` 도구 스키마의 top-level `anyOf` 제거** — `memory_id`/`ids` 배타 제약은 `MemoryTools.context()`가 이미 `ValidationError("context requires either memory_id or ids")`로 런타임 검증하므로 스키마 쪽은 중복이었다. 제약은 핸들러에 두고 스키마에서는 description으로만 안내한다. property **내부**의 `oneOf`(`session_resume.expand`, `session_end.auto_complete_pins`)는 API가 허용하므로 그대로 둔다. FastMCP 경로(`app/mcp_stdio`)는 파이썬 시그니처에서 스키마를 생성하므로 영향이 없고, pure MCP / HTTP MCP(`schemas.py` 사용) 경로만 해당된다. (`app/mcp_common/schemas.py`, `app/mcp_common/tools.py`)
+- **회귀 테스트 추가** — `get_all_tool_schemas()`의 전 도구에 대해 top-level 조합자가 0개임을 검사한다. 새 도구가 같은 실수를 반복하면 CI에서 잡힌다. (`tests/test_anchored_search.py::TestSchemaExposure::test_no_top_level_combinators_in_any_tool_schema`)
+
 ## [1.35.0] - 2026-07-13
 
 **LLM 없는 팀 허브에서 검색이 조용히 죽어 있던 문제를 고치고, 결합된 repo 쌍(frontend/backend) 사이의 컨텍스트 공유와 프로젝트 이름 병합을 추가했다.**

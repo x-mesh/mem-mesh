@@ -244,7 +244,11 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                 "properties": {
                     "memory_id": {
                         "type": "string",
-                        "description": "Memory ID (full 36-char UUID from add/search response). Truncated/short ids are NOT accepted.",
+                        "description": (
+                            "Memory ID (full 36-char UUID from add/search response). "
+                            "Truncated/short ids are NOT accepted. Provide either "
+                            "memory_id or ids."
+                        ),
                         "pattern": "^[a-zA-Z0-9_-]+$",
                         "maxLength": 100,
                     },
@@ -284,10 +288,8 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "maxItems": 10,
                     },
                 },
-                "anyOf": [
-                    {"required": ["memory_id"]},
-                    {"required": ["ids"]},
-                ],
+                # memory_id/ids 배타 제약은 tools.context()가 검증한다.
+                # top-level anyOf/oneOf/allOf는 Anthropic API가 400으로 거부한다.
                 "additionalProperties": False,
             },
         },
