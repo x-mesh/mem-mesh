@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.35.0] - 2026-07-13
+
+**LLM 없는 팀 허브에서 검색이 조용히 죽어 있던 문제를 고치고, 결합된 repo 쌍(frontend/backend) 사이의 컨텍스트 공유와 프로젝트 이름 병합을 추가했다.**
+
+WHY(relay): 워크트리 2개(개인 노드 ↔ 팀 허브)로 relay를 e2e 검증하다 발견했다. 전파·update·federated fetch는 모두 정상인데 **허브 시맨틱 검색만 0건**이었다. 원인은 허브의 벡터(`relay_memory_vec`)를 item enrichment 워커만 기록하는데, 그 워커가 LLM 유무로 게이트돼 있던 것. LLM 없는 허브는 벡터가 하나도 없어 검색이 substring LIKE로 떨어지고, 자연어 쿼리는 항상 0건이 된다. HTTP 200 + `hub_status=ok`로 응답하므로 클라이언트는 "팀에 관련 메모리가 없다"로 오인한다. 임베딩 계산은 원래 LLM과 무관했고, 게이트만 틀렸다.
+
+WHY(cross-project): frontend/backend는 별도 repo·별도 `project_id`지만 API 계약·env·auth·port로 얽혀 "이건 둘 다 바꿔야 해"가 가끔 발생한다. 5개 모델 cross-vendor council이 자명해 보이던 설계(`project_links` 테이블 + `include_linked` 플래그 + RRF 가중 + `affects:` 태그 + 세션 자동주입)를 **이 레포의 실측으로 만장일치 기각**했다: hook 규칙이 명시적으로 요구하는 git anchors의 부착률이 code-tied 메모리 15,582건 중 **0.0%**다(자유형 태그 99.6%, 구조화 `prefix:value` 태그 2.7%). 산문 규칙과 규약 태그는 발화하지 않는다. 그래서 훅이 "검색하라"고 지시하지 않고 **직접 검색해 주입**한다.
+
+WHY(rename): `project_id`를 잘못 지정한 프로젝트(`aic-rust` vs `aic`)를 되돌릴 방법이 UI에도 API에도 없었다.
+
+### Added
+
+- **cross-project 검색** — `search(project_ids=[...])`가 여러 프로젝트를 한 쿼리로 훑는다. `WHERE project_id IN (...)` 하나이며, 별도 코퍼스도 랭킹 융합도 링크 테이블도 없다. MCP·HTTP(GET/POST) 모두 지원. (`app/core/database/base.py`의 `value_filter_clause`, `app/core/services/search.py`, `app/core/services/unified_search.py`, `app/mcp_common/schemas.py`)
+- **PreToolUse 훅** — 계약 파일(openapi/schema/migrations/.env/auth/routes/api/compose/proto/graphql)을 편집하려 하면, 훅이 peer 프로젝트를 스스로 검색해 결과를 편집 **전에** 주입한다. opt-in(`.mem-mesh/cross-project.json`의 `peers`)이며, 설정이 없으면 즉시 종료해 비용이 0이다. 발화/주입이 `hook_events`·`injected_memories`에 기록되어 kill-condition을 기계적으로 판정할 수 있다. (`app/cli/hooks/shell/pre-tool-use.sh`, `app/web/dashboard/route_modules/hooks.py`, `docs/cross-project-context.md`)
+- **프로젝트 rename/merge** — 대시보드 프로젝트 카드의 ✏️ Rename. `project_id`를 가진 18개 테이블 전체를 옮기며, 테이블 목록은 스키마에서 동적 발견한다(하드코딩하면 새 테이블이 조용히 누락돼 반쪽 병합이 된다). 실행 전 dry-run으로 이동/삭제/종료될 세션 건수를 예고하고, 그 값은 실제 apply와 일치한다. (`app/core/services/project.py`, `POST /api/work/projects/{id}/rename`)
+
+### Fixed
+
+- **relay 허브가 LLM 없이도 벡터를 인덱싱한다** — item 워커의 게이트를 임베딩 서비스 유무로 완화. LLM이 없으면 `relay:embedding-only`로 표시된 enrichment 행(벡터만, title/abstract 없음)을 쓰고, 나중에 LLM이 붙으면 `requeue_embedding_only_items()`가 되돌려 실제 enrichment로 교체한다. (`app/core/services/relay.py`, `app/core/services/relay_worker.py`, `app/cli/relay.py`)
+- **실시간 토스트의 글씨가 배경과 따로 놀던 문제** — `work.css`가 `!important`로 배경만 컬러 그라디언트로 덮고 전경색은 테마 변수(라이트 모드에서 거의 검정)를 그대로 둬서, 파란 배경 위 검정 글씨가 됐다. 이제 각 토스트가 자신의 흰색 전경을 자식 요소까지 고정하고, 흰 글씨 대비가 2.5~3:1에 불과하던 초록/주황 그라디언트를 한 단계 어둡게 했다. 라이트 모드 실측 최악 대비 4.83~5.48:1(WCAG AA). (`app/web/static/css/modules/work.css`)
+- **MCP `search`가 positional 호출로 인자가 밀리던 문제** — `app/mcp_stdio/server.py`가 핸들러를 positional로 호출해, 파라미터를 하나 끼워넣으면 그 뒤 인자가 전부 한 칸씩 밀렸다. 키워드 호출로 고정.
+
+### Changed
+
+- `category_filter_clause`를 `value_filter_clause`로 일반화해 `project_id`에도 재사용한다(스칼라면 `= ?`, 리스트면 `IN (...)`).
+- 허브도 relay worker를 돌려야 한다는 점을 `docs/RELAY_HUB_SETUP.md`에 명시했다 — item 태스크가 수신 메모리의 벡터를 만들며, LLM 없이도 동작한다.
+
 ## [1.34.0] - 2026-07-12
 
 **auto-enrich 적용 범위를 opt-in 전용에서 전역 opt-out으로 선택 가능하게, 그리고 hook 설치를 멱등하게.** WHY(scope): auto-enrich는 프로젝트별 opt-in 구독 모델이라, 새 프로젝트는 명시적으로 켜기 전까진 enrich가 절대 돌지 않는다. 실서비스에서 168개 프로젝트 중 1개만 켜져 있어 "안 된다"는 재신고를 받았는데, 실제로는 설계상 커버리지 범위 문제였다. 전 프로젝트를 기본 대상으로 삼고 싶은 사용자를 위해 전역 스코프 스위치를 추가했다. WHY(idempotent install): `uvx mem-mesh hooks sync-project`가 매번 파일을 무조건 덮어써서, 변경이 없어도 mtime이 갱신되고 실행 권한 재설정이 반복됐다. WHY(docs): CLAUDE.md의 세션 흐름 규칙이 managed 블록(자동 갱신)과 수동 구역 양쪽에 중복 기술돼 있어, managed 블록만 최신화되고 수동 구역이 뒤처지며 서로 모순되는 문제가 실제로 발생했다(v26 시절).
