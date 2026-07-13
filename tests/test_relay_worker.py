@@ -137,6 +137,10 @@ class _FakeLeaseService:
     def __init__(self):
         self.calls = []
 
+    async def requeue_embedding_only_items(self, *, limit):
+        self.calls.append(("requeue", limit))
+        return 0
+
     async def drain_next_outbox(
         self,
         *,
@@ -216,11 +220,49 @@ async def test_relay_worker_passes_configured_lease_seconds():
     assert stats["outbox_processed"] == 1
     assert stats["item_processed"] == 1
     assert stats["aggregate_processed"] == 1
-    assert service.calls == [
+    assert [call for call in service.calls if call[0] != "requeue"] == [
         ("outbox", "relay-worker", 45),
         ("item", "relay-worker", 45),
         ("aggregate", "relay-worker", 45),
     ]
+
+
+@pytest.mark.asyncio
+async def test_relay_worker_runs_item_job_without_enricher():
+    """No LLM must not disable the item job: it still embeds (that is what hub
+    search needs) and skips the enrichment requeue sweep."""
+
+    service = _FakeLeaseService()
+    worker = RelayWorker(
+        service=service,
+        worker_id="relay-worker",
+        embedding_service=object(),
+        text_enricher=None,
+        prompt_version="test-prompt-v1",
+    )
+
+    stats = await worker.run_once()
+
+    assert stats["item_processed"] == 1
+    assert ("item", "relay-worker", 300) in service.calls
+    assert not [call for call in service.calls if call[0] == "requeue"]
+
+
+@pytest.mark.asyncio
+async def test_relay_worker_requeues_embedding_only_items_when_llm_present():
+    service = _FakeLeaseService()
+    worker = RelayWorker(
+        service=service,
+        worker_id="relay-worker",
+        embedding_service=object(),
+        text_enricher=object(),
+        prompt_version="test-prompt-v1",
+    )
+
+    await worker.run_once()
+    await worker.run_once()  # throttled — must not sweep twice
+
+    assert [call for call in service.calls if call[0] == "requeue"] == [("requeue", 50)]
 
 
 @pytest.mark.asyncio

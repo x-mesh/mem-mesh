@@ -1014,6 +1014,12 @@ class RelayWorker:
         self.session_digest_settings = session_digest_settings
         self.session_digest_sender = session_digest_sender
         self._last_session_digest_monotonic: Optional[float] = None
+        # Hub ran without an LLM: those items hold an embedding-only enrichment
+        # row. Once an enricher is wired, sweep them back into the item queue so
+        # they get a title/abstract. Throttled — the item queue does the work.
+        self.embedding_only_requeue_interval_s = 300.0
+        self.embedding_only_requeue_cap = 50
+        self._last_embedding_only_requeue_monotonic: Optional[float] = None
 
     async def run_once(self) -> Dict[str, int]:
         stats = {
@@ -1044,7 +1050,12 @@ class RelayWorker:
                 else:
                     stats["outbox_failed"] += 1
 
-        if self.embedding_service is not None and self.text_enricher is not None:
+        # The item job only needs an embedding service. Without an enricher it
+        # runs embedding-only: the relay vector is written (so hub search works
+        # on an LLM-less hub) and the title/abstract are filled in later.
+        if self.embedding_service is not None:
+            if self.text_enricher is not None:
+                await self._requeue_embedding_only_if_due()
             result = await self.service.process_next_item(
                 worker_id=self.worker_id,
                 embedding_service=self.embedding_service,
@@ -1288,6 +1299,26 @@ class RelayWorker:
                     logger.warning("session digest prefetch failed: %s", exc)
 
         return stats
+
+    async def _requeue_embedding_only_if_due(self) -> None:
+        """Sweep embedding-only items back into the item queue (throttled).
+
+        Only runs when an enricher is wired: these rows exist because the hub
+        processed them with no LLM, so an LLM-less worker would just re-create
+        them. Failures never stop the worker.
+        """
+
+        now = time.monotonic()
+        last = self._last_embedding_only_requeue_monotonic
+        if last is not None and (now - last) < self.embedding_only_requeue_interval_s:
+            return
+        self._last_embedding_only_requeue_monotonic = now
+        try:
+            await self.service.requeue_embedding_only_items(
+                limit=self.embedding_only_requeue_cap
+            )
+        except Exception as exc:  # noqa: BLE001 — requeue must not stop worker
+            logger.warning("relay embedding-only requeue failed: %s", exc)
 
     async def _prefetch_session_digests(self, settings: Any) -> int:
         """Fetch + cache team hub digests for enabled auto-share subscriptions.

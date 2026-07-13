@@ -226,6 +226,20 @@ async def _reconcile_on(db, settings) -> bool:
     ).strip().lower() in ("true", "1", "yes", "on")
 
 
+async def _pending_item_jobs(db) -> bool:
+    """Whether any relay item job is waiting. Used to decide whether an
+    LLM-less worker should load the embedding model at all."""
+    try:
+        row = await db.fetchone("""
+            SELECT 1 FROM relay_queue_item
+            WHERE status IN ('pending', 'processing')
+            LIMIT 1
+            """)
+    except Exception:  # table absent on a node that never received relay events
+        return False
+    return row is not None
+
+
 async def _probe_active(
     *, db, settings, service, relay_config: dict, enabled: set[str]
 ) -> tuple[set[str], dict]:
@@ -241,11 +255,20 @@ async def _probe_active(
 
     if enabled & {"item", "aggregate"}:
         has_llm = bool((await resolve_service_llm(db, settings, "relay"))["api_key"])
-        for task in sorted(enabled & {"item", "aggregate"}):
+        if "aggregate" in enabled:
             if has_llm:
-                active.add(task)
+                active.add("aggregate")
             else:
-                waiting[task] = "no LLM (set the shared Chat LLM or relay_llm_*)"
+                waiting["aggregate"] = "no LLM (set the shared Chat LLM or relay_llm_*)"
+        if "item" in enabled:
+            # The item job embeds first and enriches second, so it is useful
+            # without an LLM: it writes the relay vector hub search needs. Skip
+            # it (and the embedding model load) only when there is nothing
+            # queued and no LLM — a personal node with an empty item queue.
+            if has_llm or await _pending_item_jobs(db):
+                active.add("item")
+            else:
+                waiting["item"] = "no LLM and no queued items"
 
     if "outbox" in enabled:
         if relay_config.get("hub_token"):
@@ -301,19 +324,24 @@ async def _build_relay_worker(
     text_enricher = None
     if active & {"item", "aggregate"}:
         relay_llm = await resolve_service_llm(db, settings, "relay")
-        logger.info(
-            "relay item/aggregate LLM: %s/%s (%s)",
-            relay_llm["provider"],
-            relay_llm["model"],
-            relay_llm["source"],
-        )
-        text_enricher = build_relay_enricher(
-            provider=relay_llm["provider"],
-            api_key=relay_llm["api_key"],
-            model=relay_llm["model"],
-            base_url=relay_llm["base_url"],
-            timeout=settings.relay_llm_timeout,
-        )
+        # "item" can be active with no LLM (embedding-only mode) — building an
+        # enricher without an api_key would make every enrich call fail.
+        if relay_llm["api_key"]:
+            logger.info(
+                "relay item/aggregate LLM: %s/%s (%s)",
+                relay_llm["provider"],
+                relay_llm["model"],
+                relay_llm["source"],
+            )
+            text_enricher = build_relay_enricher(
+                provider=relay_llm["provider"],
+                api_key=relay_llm["api_key"],
+                model=relay_llm["model"],
+                base_url=relay_llm["base_url"],
+                timeout=settings.relay_llm_timeout,
+            )
+        else:
+            logger.info("relay item: no LLM configured — embedding-only mode")
 
     embedding_service = None
     if "item" in active:
@@ -545,12 +573,18 @@ async def _refresh_worker_config(
 
     if active & {"item", "aggregate"}:
         relay_llm = await resolve_service_llm(db, settings, "relay")
-        enricher = build_relay_enricher(
-            provider=relay_llm["provider"],
-            api_key=relay_llm["api_key"],
-            model=relay_llm["model"],
-            base_url=relay_llm["base_url"],
-            timeout=settings.relay_llm_timeout,
+        # No key → no enricher; "item" then runs embedding-only. An LLM added
+        # later lands here on the next cycle and switches enrichment back on.
+        enricher = (
+            build_relay_enricher(
+                provider=relay_llm["provider"],
+                api_key=relay_llm["api_key"],
+                model=relay_llm["model"],
+                base_url=relay_llm["base_url"],
+                timeout=settings.relay_llm_timeout,
+            )
+            if relay_llm["api_key"]
+            else None
         )
         worker.text_enricher = enricher if "item" in active else None
         worker.digest_generator = enricher if "aggregate" in active else None

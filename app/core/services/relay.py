@@ -75,6 +75,10 @@ from .enrich_store import EnrichmentStore
 
 logger = logging.getLogger(__name__)
 
+# model/model_version stamped on enrichment rows written without an LLM: the
+# embedding (and therefore vector search) is there, title/abstract are not.
+EMBEDDING_ONLY_MODEL = "relay:embedding-only"
+
 
 class RelayHTTPClient:
     """Small S2S HTTP sender for relay outbox delivery."""
@@ -2766,11 +2770,17 @@ class RelayService:
         *,
         worker_id: str,
         embedding_service: Any,
-        text_enricher: Any,
+        text_enricher: Any = None,
         prompt_version: str,
         lease_seconds: int = 300,
     ) -> RelayProcessResult:
         """Process one per-item enrichment job.
+
+        ``text_enricher`` is optional: without an LLM the job still embeds the
+        content and writes the relay vector, storing an embedding-only
+        enrichment row (no title/abstract). Hub search therefore works on a hub
+        with no LLM configured; ``requeue_embedding_only_items`` re-queues those
+        rows once an LLM is available.
 
         The slow embedding/LLM section intentionally runs outside any DB
         transaction. Only claim and final writes are transactional.
@@ -2818,12 +2828,19 @@ class RelayService:
                 )
                 model = "relay:sender-provided"
                 model_version = "relay:sender-provided"
-            else:
+            elif text_enricher is not None:
                 enrichment = RelayEnrichmentData.from_result(
                     await text_enricher.enrich(content)
                 )
                 model = getattr(text_enricher, "model", "unknown")
                 model_version = getattr(text_enricher, "model_version", model)
+            else:
+                # No LLM on this hub: store the embedding without title/abstract
+                # so vector search works. requeue_embedding_only_items() brings
+                # these back once an enricher is configured.
+                enrichment = RelayEnrichmentData()
+                model = EMBEDDING_ONLY_MODEL
+                model_version = EMBEDDING_ONLY_MODEL
             now = _utc_now()
             embedding_model = getattr(embedding_service, "model_name", "unknown")
             embedding_dim = int(
@@ -2831,6 +2848,17 @@ class RelayService:
             )
 
             async with self.db.transaction():
+                if model != EMBEDDING_ONLY_MODEL:
+                    # A real enrichment supersedes the embedding-only row for
+                    # this content; leaving both would duplicate the search join.
+                    await self.db.execute(
+                        """
+                        DELETE FROM relay_item_enrichment
+                        WHERE current_memory_id = ?
+                          AND model_version = ?
+                        """,
+                        (job.ref_id, EMBEDDING_ONLY_MODEL),
+                    )
                 await self.db.execute(
                     """
                     INSERT INTO relay_item_enrichment (
@@ -2927,6 +2955,55 @@ class RelayService:
                 current_memory_id=job.ref_id,
                 error=str(exc),
             )
+
+    async def requeue_embedding_only_items(self, *, limit: int = 50) -> int:
+        """Re-queue items that were embedded without an LLM. Returns the count.
+
+        A hub that ran without an enricher holds embedding-only rows: the vector
+        is indexed but title/abstract are missing. Once an LLM is configured the
+        worker calls this so those items get a real enrichment pass. Items whose
+        content changed since (content_hash differs) are re-queued too — their
+        stale row would otherwise never be replaced.
+        """
+
+        now = _utc_now()
+        rows = await self.db.fetchall(
+            """
+            SELECT c.id AS current_memory_id, e.raw_event_id AS raw_event_id
+            FROM relay_memory_current c
+            JOIN relay_item_enrichment e
+              ON e.current_memory_id = c.id
+             AND e.model_version = ?
+            WHERE c.visible = 1
+              AND NOT EXISTS (
+                    SELECT 1 FROM relay_item_enrichment x
+                    WHERE x.current_memory_id = c.id
+                      AND x.model_version != ?
+              )
+              AND NOT EXISTS (
+                    SELECT 1 FROM relay_queue_item q
+                    WHERE q.ref_id = c.id
+                      AND q.status IN ('pending', 'processing')
+              )
+            ORDER BY c.updated_at DESC
+            LIMIT ?
+            """,
+            (EMBEDDING_ONLY_MODEL, EMBEDDING_ONLY_MODEL, max(1, limit)),
+        )
+        if not rows:
+            return 0
+
+        async with self.db.transaction():
+            for row in rows:
+                await self._enqueue_item_locked(
+                    current_memory_id=row["current_memory_id"],
+                    raw_event_id=row["raw_event_id"],
+                    now=now,
+                )
+        logger.info(
+            "Relay: re-queued %s embedding-only item(s) for enrichment", len(rows)
+        )
+        return len(rows)
 
     async def claim_aggregate(
         self, worker_id: str, *, lease_seconds: int = 300
@@ -3161,6 +3238,7 @@ class RelayService:
             FROM relay_memory_current c
             LEFT JOIN relay_item_enrichment e
               ON e.current_memory_id = c.id
+             AND e.content_hash = c.content_hash
             WHERE {' AND '.join(where)}
             ORDER BY c.updated_at DESC
             LIMIT ?

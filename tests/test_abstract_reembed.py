@@ -85,12 +85,17 @@ async def test_reembed_targets_abstract_without_embedding_and_converges():
         }
 
 
-def _worker(db, *, reembed=False):
+async def _worker(db, *, reembed=False):
     from app.core.services.relay import RelayService
     from app.core.services.relay_worker import RelayWorker
 
+    service = RelayService(db)
+    # The item job runs whenever an embedding service is wired (embedding-only
+    # mode needs no LLM), so the relay queue tables must exist — the CLI does
+    # this before building the worker.
+    await service.ensure_schema()
     return RelayWorker(
-        service=RelayService(db),
+        service=service,
         worker_id="w1",
         embedding_service=_FakeEmb(),
         maintenance_service=MaintenanceService(db),
@@ -104,7 +109,8 @@ async def test_worker_abstract_reembed_sweep_stores_when_enabled():
     async with _temp_db() as db:
         await _add_memory(db, "m1")
         await EnrichmentStore(db).upsert(memory_id="m1", abstract="s")
-        s = await _worker(db, reembed=True).run_once()
+        worker = await _worker(db, reembed=True)
+        s = await worker.run_once()
         assert s.get("abstract_reembed") == 1
 
 
@@ -113,6 +119,7 @@ async def test_worker_abstract_reembed_noop_when_disabled():
     async with _temp_db() as db:
         await _add_memory(db, "m1")
         await EnrichmentStore(db).upsert(memory_id="m1", abstract="s")
-        s = await _worker(db, reembed=False).run_once()
+        worker = await _worker(db, reembed=False)
+        s = await worker.run_once()
         assert "abstract_reembed" not in s
         assert await AbstractEmbeddingStore(db).count() == 0

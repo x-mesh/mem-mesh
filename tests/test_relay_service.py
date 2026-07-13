@@ -19,6 +19,7 @@ from app.core.database.models import Memory
 from app.core.schemas.relay import RelayIngestRequest, RelaySettingsUpdateRequest
 from app.core.services.enrich_store import EnrichmentStore
 from app.core.services.relay import (
+    EMBEDDING_ONLY_MODEL,
     RelayDeliveryConflict,
     RelayHTTPClient,
     RelayIdempotencyConflict,
@@ -1257,6 +1258,78 @@ async def test_process_next_item_failure_requeues_without_losing_job():
         assert "temporary LLM failure" in queue_row["last_error"]
         assert queue_row["next_attempt_at"] > 0
         assert enrichment_count["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_process_next_item_without_llm_writes_embedding_only_row():
+    """A hub with no enricher must still index the vector — otherwise hub search
+    silently degrades to substring matching (see relay hub e2e)."""
+
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        ingest = await service.ingest("relay-token", _request())
+
+        result = await service.process_next_item(
+            worker_id="worker-1",
+            embedding_service=_FakeEmbeddingService(),
+            text_enricher=None,
+            prompt_version="test-prompt-v1",
+        )
+
+        assert result.processed is True
+        row = await db.fetchone(
+            "SELECT model, model_version, title, abstract, embedding_json "
+            "FROM relay_item_enrichment WHERE current_memory_id = ?",
+            (ingest.current_memory_id,),
+        )
+        assert row["model"] == EMBEDDING_ONLY_MODEL
+        assert row["model_version"] == EMBEDDING_ONLY_MODEL
+        assert not row["title"]
+        assert not row["abstract"]
+        assert row["embedding_json"]
+        item_status = await db.fetchone("SELECT status FROM relay_queue_item")
+        assert item_status["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_requeue_embedding_only_items_then_enrich_replaces_row():
+    """Once an LLM appears, embedding-only items are swept back into the queue
+    and their placeholder row is replaced (not duplicated)."""
+
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        ingest = await service.ingest("relay-token", _request())
+        await service.process_next_item(
+            worker_id="worker-1",
+            embedding_service=_FakeEmbeddingService(),
+            text_enricher=None,
+            prompt_version="test-prompt-v1",
+        )
+
+        requeued = await service.requeue_embedding_only_items(limit=10)
+        assert requeued == 1
+
+        # A second sweep must not double-queue the same item.
+        assert await service.requeue_embedding_only_items(limit=10) == 0
+
+        result = await service.process_next_item(
+            worker_id="worker-1",
+            embedding_service=_FakeEmbeddingService(),
+            text_enricher=_FakeTextEnricher(),
+            prompt_version="test-prompt-v1",
+        )
+        assert result.processed is True
+
+        rows = await db.fetchall(
+            "SELECT model, title FROM relay_item_enrichment WHERE current_memory_id = ?",
+            (ingest.current_memory_id,),
+        )
+        assert len(rows) == 1
+        assert rows[0]["model"] == "fake-llm"
+        assert rows[0]["title"] == "SQLite relay queue"
+
+        # Nothing left to sweep once a real enrichment exists.
+        assert await service.requeue_embedding_only_items(limit=10) == 0
 
 
 @pytest.mark.asyncio

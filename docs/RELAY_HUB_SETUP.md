@@ -60,6 +60,12 @@ python -m app.cli.main relay worker --once     # 1회 드레인 (디버깅)
 Docker compose에는 `mem-mesh-worker` 컨테이너로 포함되어 있다. worker 없이
 공유하면 메모리가 outbox에 쌓이기만 하고 전송되지 않는다.
 
+**허브도 worker를 돌려야 한다.** 수신된 메모리의 벡터는 worker의 `item` 태스크가
+만든다 — 안 돌리면 허브 검색이 substring 매칭으로 떨어져 자연어 쿼리가 0건이 된다.
+`item`은 LLM 없이도 동작한다(embedding-only 모드: 벡터만 인덱싱, title/abstract는
+비움). 나중에 LLM을 붙이면 worker가 해당 항목들을 다시 큐에 넣어 enrichment를
+채운다. `aggregate`(프로젝트 다이제스트)는 LLM이 필수다.
+
 ## 장애·재시도 동작
 
 - **Federated 검색 서킷 브레이커** — 허브 호출이 연속
