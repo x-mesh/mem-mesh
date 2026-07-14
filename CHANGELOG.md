@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.35.2] - 2026-07-14
+
+**Codex session hook가 실제 memory context를 주입하고 trust 상태를 드러내도록 고치고, agy panel verdict 저장을 읽을 수 있는 Markdown으로 복구했다.**
+
+WHY(Codex): Codex용 compact SessionStart hook는 서버에서 context를 받아도 실제 내용을 버리고 "context가 있다"는 placeholder만 내보냈다. 그래서 hook 설치와 호출은 정상이지만 새 세션에는 과거 memory가 들어오지 않아, 사용자는 hook 자체가 동작하지 않는 것으로 보게 됐다. 또한 Codex command hook는 변경 후 `/hooks`에서 다시 승인해야 하는데 installer/status가 이 trust 상태를 보여주지 않아 미승인이 조용한 비활성화로 보였다.
+
+WHY(agy): agy panel은 최종 결과를 `{"verdicts": [...]}` fenced JSON으로 내보내지만 readability transform은 `{"findings": [...]}`만 인식했다. 실제 작업 결과인데도 한 줄짜리 JSON 원문으로 memory에 저장되고 FTS 검색성과 대시보드 가독성이 나빠졌다.
+
+### Fixed
+
+- **Codex compact SessionStart가 실제 context를 주입한다** — API/local 양쪽 hook에서 placeholder를 제거하고 서버가 반환한 `additionalContext`의 앞 2,000자를 전달한다. 출력 상한은 유지해 큰 세션 digest가 prompt를 잠식하지 않는다. (`app/cli/hooks/shell/session-start.sh`, `app/cli/hooks/shell/local-session-start.sh`)
+- **Codex hook trust 상태를 설치·진단에서 노출한다** — `hooks.json`의 mem-mesh handler와 `config.toml`의 `trusted_hash` 기록을 대응시켜 누락 수를 표시하고, hash의 최종 유효성은 Codex `/hooks`에서 확인하도록 명확히 안내한다. installer도 재시작 후 `/hooks` 검토를 출력한다. (`app/cli/codex_config.py`, `app/cli/hooks/status.py`, `app/cli/install_hooks.py`)
+- **agy/kiro panel verdict JSON을 Markdown으로 변환한다** — shell direct-save와 server-side hook-save가 `findings`뿐 아니라 `verdicts(ref/stance/reason)` envelope과 fenced 변형을 인식해 항목별 Markdown으로 저장한다. 알 수 없는 JSON은 기존처럼 그대로 둔다. (`app/cli/hooks/shell/kiro-stop.sh`, `app/web/dashboard/route_modules/hooks.py`)
+
+### Changed
+
+- Hook prompt version을 30으로 올리고 Codex context/trust, agy verdict 변환, snapshot·installer idempotency 회귀 테스트를 갱신했다. (`app/cli/prompts/behaviors.py`, `tests/test_hook_scripts.py`, `tests/test_hook_endpoints_async_save.py`, `tests/test_install_hooks_idempotency.py`, `tests/snapshots/`)
+
 ## [1.35.1] - 2026-07-13
 
 **Kiro IDE에서 mem-mesh MCP를 붙이면 Anthropic API가 400으로 모든 요청을 거부하던 문제를 고쳤다.**
