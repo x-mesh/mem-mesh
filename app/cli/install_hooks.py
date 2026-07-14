@@ -2059,6 +2059,11 @@ def _install_codex(
             " MCP config as a literal bearer header"
         )
 
+    print(
+        "  hook trust: review new or changed command hooks in Codex /hooks "
+        "after restarting Codex"
+    )
+
     print("[codex] Done.")
 
 

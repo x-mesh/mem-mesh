@@ -114,22 +114,20 @@ _CLIENT_RE = re.compile(r"[^a-z0-9_]+")
 _SOURCE_RE = re.compile(r"[^a-z0-9_.-]+")
 
 # Fence wrapper around a JSON body (```json ... ```), tolerated when detecting
-# a findings envelope below.
+# a known structured envelope below.
 _FENCE_RE = re.compile(r"^\s*```[a-zA-Z]*\s*\n(.*)\n\s*```\s*$", re.DOTALL)
 # Split point between the paired question and the assistant answer in the
 # combined "Q: …\n\nA: …" content the stop hooks save.
 _ANSWER_SPLIT = "\n\nA: "
 
 
-def _findings_to_markdown(text: str) -> Optional[str]:
-    """Render a review-findings JSON envelope as markdown, or None.
+def _structured_json_to_markdown(text: str) -> Optional[str]:
+    """Render a review findings/verdicts JSON envelope as markdown, or None.
 
     Panel/review runs (notably through the codex/claude stop hooks, which save
-    server-side) sometimes end the turn with a raw ``{"findings": [...]}``
-    object — stored verbatim it is a one-line unreadable blob. Mirrors the
-    jq transform in the kiro/agy stop-hook shell template: one bullet per
-    finding (severity/file:line/claim/evidence, evidence newlines flattened).
-    Anything that isn't a non-empty findings envelope returns None.
+    server-side) sometimes end the turn with a raw ``{"findings": [...]}`` or
+    ``{"verdicts": [...]}`` object. Mirrors the jq transform in the kiro/agy
+    stop-hook shell template. Unknown JSON shapes return None.
     """
     body = text.strip()
     fenced = _FENCE_RE.match(body)
@@ -144,34 +142,51 @@ def _findings_to_markdown(text: str) -> Optional[str]:
     if not isinstance(data, dict):
         return None
     findings = data.get("findings")
-    if not isinstance(findings, list) or not findings:
-        return None
-    lines = [f"## Review findings ({len(findings)})", ""]
-    for f in findings:
-        if not isinstance(f, dict):
-            return None
-        severity = str(f.get("severity") or "?")
-        file_ = str(f.get("file") or "?")
-        line = f.get("line")
-        loc = f"{file_}:{line}" if line is not None else file_
-        claim = str(f.get("claim") or f.get("summary") or f.get("title") or "")
-        entry = f"- [{severity}] `{loc}` — {claim}"
-        evidence = str(f.get("evidence") or "")
-        if evidence:
-            flat = re.sub(r"[\r\n]+", " ", evidence)
-            entry += f"\n  - evidence: {flat}"
-        lines.append(entry)
-    return "\n".join(lines)
+    if isinstance(findings, list) and findings:
+        lines = [f"## Review findings ({len(findings)})", ""]
+        for finding in findings:
+            if not isinstance(finding, dict):
+                return None
+            severity = str(finding.get("severity") or "?")
+            file_ = str(finding.get("file") or "?")
+            line = finding.get("line")
+            loc = f"{file_}:{line}" if line is not None else file_
+            claim = str(
+                finding.get("claim")
+                or finding.get("summary")
+                or finding.get("title")
+                or ""
+            )
+            entry = f"- [{severity}] `{loc}` — {claim}"
+            evidence = str(finding.get("evidence") or "")
+            if evidence:
+                flat = re.sub(r"[\r\n]+", " ", evidence)
+                entry += f"\n  - evidence: {flat}"
+            lines.append(entry)
+        return "\n".join(lines)
+
+    verdicts = data.get("verdicts")
+    if isinstance(verdicts, list) and verdicts:
+        lines = [f"## Panel verdicts ({len(verdicts)})", ""]
+        for verdict in verdicts:
+            if not isinstance(verdict, dict):
+                return None
+            stance = str(verdict.get("stance") or "?")
+            ref = str(verdict.get("ref") or "?")
+            reason = re.sub(r"[\r\n]+", " ", str(verdict.get("reason") or ""))
+            lines.append(f"- [{stance}] `{ref}` — {reason}")
+        return "\n".join(lines)
+    return None
 
 
 def _render_json_answer(content: str) -> str:
-    """Rewrite a findings-envelope answer inside hook-save content as markdown.
+    """Rewrite a known JSON-envelope answer inside hook-save content as markdown.
 
     The content is either the bare assistant answer or the combined
     "Q: …\\n\\nA: …" pair — try the whole text first, then just the answer
     part. Non-envelope content passes through unchanged.
     """
-    whole = _findings_to_markdown(content)
+    whole = _structured_json_to_markdown(content)
     if whole is not None:
         return whole
     # The question itself may contain a literal "\n\nA: " — try every
@@ -180,7 +195,7 @@ def _render_json_answer(content: str) -> str:
     idx = content.find(_ANSWER_SPLIT)
     while idx != -1:
         answer = content[idx + len(_ANSWER_SPLIT) :]
-        rendered = _findings_to_markdown(answer)
+        rendered = _structured_json_to_markdown(answer)
         if rendered is not None:
             return content[: idx + len(_ANSWER_SPLIT)] + rendered
         idx = content.find(_ANSWER_SPLIT, idx + 1)
@@ -386,8 +401,8 @@ async def _save_memory(
         logger.info("hook save skipped: memory service / embedding model not ready")
         return False
     try:
-        # A findings-envelope answer (panel/review JSON) is rewritten as
-        # markdown first — stored raw it is an unreadable one-line blob.
+        # A known panel/review JSON envelope is rewritten as markdown first —
+        # stored raw it is an unreadable one-line blob.
         content = _render_json_answer(content)
         # Redact secrets/PII before persisting. Hook saves capture whole
         # assistant turns, so a leaked key/token/email could otherwise land in

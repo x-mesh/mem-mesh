@@ -9,7 +9,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 # NOTE: ``_atomic_write_text`` is imported lazily inside the two writer functions
 # below, NOT at module top level. Importing ``app.cli.hooks.json_ops`` here would
@@ -26,6 +26,8 @@ _BEGIN = "# >>> mem-mesh managed MCP"
 _END = "# <<< mem-mesh managed MCP"
 _MEM_MESH_TABLE = re.compile(r"^\s*\[mcp_servers\.mem-mesh(?:\.|\])", re.MULTILINE)
 _ANY_TABLE = re.compile(r"^\s*\[")
+_HOOK_STATE_TABLE = re.compile(r'^\s*\[hooks\.state\.(?P<key>"(?:\\.|[^"\\])*")\]\s*$')
+_TRUSTED_HOOK_HASH = re.compile(r'^\s*trusted_hash\s*=\s*"sha256:[0-9a-fA-F]{64}"\s*$')
 
 
 def _toml_string(value: str) -> str:
@@ -215,3 +217,84 @@ def codex_config_has_mem_mesh(config_path: Path) -> bool:
         return False
     text = config_path.read_text(encoding="utf-8")
     return _BEGIN in text or bool(_MEM_MESH_TABLE.search(text))
+
+
+def _event_state_name(event_name: str) -> str:
+    """Convert Codex hook event names to their state-table key form."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", event_name).lower()
+
+
+def _mem_mesh_hook_state_keys(hooks_path: Path) -> Set[str]:
+    """Return Codex trust-state keys for mem-mesh handlers in hooks.json."""
+    try:
+        data = json.loads(hooks_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return set()
+
+    hooks = data.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return set()
+
+    source = str(hooks_path.expanduser().resolve())
+    keys: Set[str] = set()
+    for event_name, entries in hooks.items():
+        if not isinstance(event_name, str) or not isinstance(entries, list):
+            continue
+        state_event = _event_state_name(event_name)
+        for entry_index, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                continue
+            handlers = entry.get("hooks", [])
+            if not isinstance(handlers, list):
+                continue
+            for handler_index, handler in enumerate(handlers):
+                if not isinstance(handler, dict):
+                    continue
+                command = str(handler.get("command", ""))
+                if "mem-mesh-" not in command:
+                    continue
+                keys.add(f"{source}:{state_event}:{entry_index}:{handler_index}")
+    return keys
+
+
+def _recorded_hook_trust_keys(config_path: Path) -> Set[str]:
+    """Read hook keys with a recorded Codex trusted_hash from config.toml.
+
+    Codex owns hash calculation and validation. This parser intentionally only
+    detects whether a trust record exists; `/hooks` remains the authority for
+    deciding whether the recorded hash still matches the current definition.
+    """
+    try:
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return set()
+
+    recorded: Set[str] = set()
+    current_key: Optional[str] = None
+    for line in lines:
+        table_match = _HOOK_STATE_TABLE.match(line)
+        if table_match:
+            try:
+                current_key = str(json.loads(table_match.group("key")))
+            except (json.JSONDecodeError, TypeError):
+                current_key = None
+            continue
+        if line.lstrip().startswith("["):
+            current_key = None
+            continue
+        if current_key and _TRUSTED_HOOK_HASH.match(line):
+            recorded.add(current_key)
+    return recorded
+
+
+def codex_hook_trust_record_counts(
+    hooks_path: Path, config_path: Path
+) -> Tuple[int, int]:
+    """Return ``(mem-mesh handlers, handlers with a Codex trust record)``.
+
+    A recorded entry is not proof that its hash is current. Callers must direct
+    users to Codex `/hooks` for the authoritative review state after changes.
+    """
+    expected = _mem_mesh_hook_state_keys(hooks_path)
+    recorded = _recorded_hook_trust_keys(config_path)
+    return len(expected), len(expected & recorded)

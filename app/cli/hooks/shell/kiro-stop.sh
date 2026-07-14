@@ -84,22 +84,28 @@ if [ ${#RESPONSE} -lt 300 ] && printf '%s' "$RESPONSE" | head -c 160 | grep -qiE
 fi
 
 # Readability transform: panel/review runs on kiro/agy emit their final answer
-# as a raw findings JSON envelope, sometimes ```json-fenced. Saved verbatim it
-# is a one-line unreadable blob. Render it as markdown — one bullet per finding
-# with severity/file:line/claim/evidence — so the stored memory reads and
-# FTS-searches as prose. Non-envelope JSON and normal prose pass through as-is.
+# as a raw findings or verdicts JSON envelope, sometimes ```json-fenced. Saved
+# verbatim it is a one-line unreadable blob. Render known envelopes as markdown
+# so the stored memory reads and FTS-searches as prose. Other JSON and normal
+# prose pass through as-is.
 _MM_BODY="$(printf '%s\n' "$RESPONSE" | sed -e '1{/^[[:space:]]*```[a-zA-Z]*[[:space:]]*$/d;}' -e '${/^[[:space:]]*```[[:space:]]*$/d;}')"
-_MM_FINDINGS_MD="$(printf '%s' "$_MM_BODY" | jq -r '
-  select(type == "object" and (.findings | type == "array") and (.findings | length > 0))
-  | "## Review findings (\(.findings | length))\n\n" +
-    ([ .findings[]
-       | "- [\(.severity // "?")] `\(.file // "?")\(if .line != null then ":\(.line)" else "" end)` — \(.claim // .summary // .title // "")"
-         + (if (.evidence // "") != "" then "\n  - evidence: \(.evidence | gsub("[\\n\\r]+"; " "))" else "" end)
-     ] | join("\n"))
+_MM_STRUCTURED_MD="$(printf '%s' "$_MM_BODY" | jq -r '
+  if type == "object" and (.findings | type == "array") and (.findings | length > 0) then
+    "## Review findings (\(.findings | length))\n\n" +
+      ([ .findings[]
+         | "- [\(.severity // "?")] `\(.file // "?")\(if .line != null then ":\(.line)" else "" end)` — \(.claim // .summary // .title // "")"
+           + (if (.evidence // "") != "" then "\n  - evidence: \(.evidence | gsub("[\\n\\r]+"; " "))" else "" end)
+       ] | join("\n"))
+  elif type == "object" and (.verdicts | type == "array") and (.verdicts | length > 0) then
+    "## Panel verdicts (\(.verdicts | length))\n\n" +
+      ([ .verdicts[]
+         | "- [\(.stance // "?")] `\(.ref // "?")` — \((.reason // "") | gsub("[\\n\\r]+"; " "))"
+       ] | join("\n"))
+  else empty end
 ' 2>/dev/null || true)"
-if [ -n "$_MM_FINDINGS_MD" ]; then
-  mem_mesh_log "response" "transform" "findings-envelope -> markdown"
-  RESPONSE="$_MM_FINDINGS_MD"
+if [ -n "$_MM_STRUCTURED_MD" ]; then
+  mem_mesh_log "response" "transform" "structured-envelope -> markdown"
+  RESPONSE="$_MM_STRUCTURED_MD"
 fi
 
 PROJECT_DIR="$(mem_mesh_project_id_from_input "$RAW_INPUT")"

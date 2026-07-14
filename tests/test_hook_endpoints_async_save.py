@@ -112,7 +112,7 @@ async def test_subagent_stop_queues_save(monkeypatch):
     assert recorder.calls
 
 
-# ── findings-envelope → markdown transform (server-side hook saves) ─────────
+# ── structured JSON envelope → markdown (server-side hook saves) ────────────
 
 
 def test_findings_envelope_rendered_as_markdown():
@@ -142,11 +142,24 @@ def test_fenced_findings_envelope_rendered():
     assert "## Review findings (1)" in out
 
 
+def test_fenced_verdicts_envelope_rendered():
+    raw = (
+        '{"verdicts":[{"ref":"[codex:gpt-5.5#0]","stance":"concede",'
+        '"reason":"World-writable tempdir makes the test vacuous.\\nFix it."}]}'
+    )
+    out = hooks_mod._render_json_answer("```json\n" + raw + "\n```")
+    assert "## Panel verdicts (1)" in out
+    assert "[concede] `[codex:gpt-5.5#0]`" in out
+    assert "World-writable tempdir makes the test vacuous. Fix it." in out
+    assert '"verdicts"' not in out
+
+
 def test_non_findings_content_passes_through():
     for text in (
         "일반 산문 응답은 그대로 저장되어야 한다.",
         '{"status": "ok", "message": "not findings"}',
         '{"findings": []}',
+        '{"verdicts": []}',
         "Q: 질문\n\nA: 일반 답변",
     ):
         assert hooks_mod._render_json_answer(text) == text

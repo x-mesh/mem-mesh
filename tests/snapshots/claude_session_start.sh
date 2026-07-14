@@ -1,5 +1,5 @@
 #!/bin/bash
-# mem-mesh-hooks prompt-version: 28
+# mem-mesh-hooks prompt-version: 30
 # Claude Code SessionStart hook → mem-mesh /api/hooks/claude/session-start
 #
 # Thin forwarder: POST the raw hook event; the server resumes context, detects
@@ -170,6 +170,7 @@ command -v curl >/dev/null 2>&1 || { mem_mesh_log "session-start" "abort" "curl 
 API_URL="$(cat ~/.mem-mesh/api_url 2>/dev/null || echo https://meme.24x365.online)"
 HOOK_TOKEN="$(cat ~/.mem-mesh/hook_token 2>/dev/null || true)"
 HOOK_OUTPUT_MODE="${MEM_MESH_HOOK_OUTPUT_MODE:-full}"
+COMPACT_CONTEXT_CHARS=2000
 AUTH=()
 AUTH_STATE=absent
 if [ -n "$HOOK_TOKEN" ]; then
@@ -218,13 +219,15 @@ if printf '%s' "$RESP" | jq -e . >/dev/null 2>&1; then
       exit 0
       ;;
     compact)
-      COMPACT=$(printf '%s' "$RESP" | jq -c --arg event "SessionStart" '
+      COMPACT=$(printf '%s' "$RESP" | jq -c \
+        --arg event "SessionStart" \
+        --argjson limit "$COMPACT_CONTEXT_CHARS" '
         (.hookSpecificOutput.additionalContext // .additional_context // "") as $ctx |
         if ($ctx | length) > 0 then
           {
             hookSpecificOutput: {
               hookEventName: $event,
-              additionalContext: "mem-mesh session context available. Detailed hook output suppressed for Codex; use mem-mesh MCP tools when prior context is needed."
+              additionalContext: ($ctx | .[0:$limit])
             }
           }
         else

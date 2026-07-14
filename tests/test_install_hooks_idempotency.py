@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from app.cli import install_hooks
+from app.cli.codex_config import codex_hook_trust_record_counts
+from app.cli.hooks.status import _codex_hook_trust_status
 from app.cli.hooks.json_ops import (
     _count_mem_mesh_hook_entries,
     _is_mem_mesh_hook,
@@ -42,6 +44,15 @@ def _isolate_materialized_mem_mesh_files(monkeypatch, tmp_path):
 
 def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _command_hook(command: str) -> dict:
+    return {"hooks": [{"type": "command", "command": command}]}
+
+
+def _write_hooks(path: Path, hooks: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"hooks": hooks}), encoding="utf-8")
 
 
 def _mem_mesh_tool_names() -> list[str]:
@@ -829,7 +840,7 @@ def test_render_rejects_project_id_injection() -> None:
 
 
 def test_install_codex_api_writes_command_hooks_and_mcp_config(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, capsys
 ) -> None:
     token_file = tmp_path / ".mem-mesh" / "hook_token"
     monkeypatch.setattr(install_hooks, "HOOK_TOKEN_FILE", token_file)
@@ -917,6 +928,125 @@ def test_install_codex_api_writes_command_hooks_and_mcp_config(
     )
     assert hooks_path.read_text(encoding="utf-8") == first_hooks
     assert config_path.read_text(encoding="utf-8") == first_config
+    assert (
+        "review new or changed command hooks in Codex /hooks" in capsys.readouterr().out
+    )
+
+
+def test_codex_hook_trust_record_counts_only_recorded_mem_mesh_handlers(
+    tmp_path: Path,
+) -> None:
+    hooks_path = tmp_path / ".codex" / "hooks.json"
+    config_path = tmp_path / ".codex" / "config.toml"
+    _write_hooks(
+        hooks_path,
+        {
+            "SessionStart": [_command_hook("/hooks/mem-mesh-session-start.sh")],
+            "PostToolUse": [
+                _command_hook("/hooks/unrelated.sh"),
+                _command_hook("/hooks/mem-mesh-post-tool-use.sh"),
+            ],
+        },
+    )
+    trusted_key = f"{hooks_path.resolve()}:session_start:0:0"
+    unrelated_key = f"{hooks_path.resolve()}:post_tool_use:0:0"
+    config_path.write_text(
+        "\n".join(
+            [
+                f"[hooks.state.{json.dumps(trusted_key)}]",
+                'trusted_hash = "sha256:' + ("a" * 64) + '"',
+                "",
+                f"[hooks.state.{json.dumps(unrelated_key)}]",
+                'trusted_hash = "sha256:' + ("b" * 64) + '"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert codex_hook_trust_record_counts(hooks_path, config_path) == (2, 1)
+    assert _codex_hook_trust_status(hooks_path, config_path) == (
+        "review required (1/2 records); open Codex /hooks",
+        False,
+    )
+
+
+def test_codex_hook_trust_status_requires_hash_verification_even_with_records(
+    tmp_path: Path,
+) -> None:
+    hooks_path = tmp_path / ".codex" / "hooks.json"
+    config_path = tmp_path / ".codex" / "config.toml"
+    _write_hooks(
+        hooks_path,
+        {"SessionStart": [_command_hook("/hooks/mem-mesh-session-start.sh")]},
+    )
+    trusted_key = f"{hooks_path.resolve()}:session_start:0:0"
+    config_path.write_text(
+        f"[hooks.state.{json.dumps(trusted_key)}]\n"
+        f'trusted_hash = "sha256:{"c" * 64}"\n',
+        encoding="utf-8",
+    )
+
+    assert _codex_hook_trust_status(hooks_path, config_path) == (
+        "records found (1/1); verify current hashes with Codex /hooks",
+        True,
+    )
+
+
+def test_hooks_status_reports_codex_trust_under_codex_section(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    from app.cli.hooks import status as hook_status
+    from app.cli.hooks import sync as hook_sync
+
+    isolated_paths = (
+        "CLAUDE_HOOKS_DIR",
+        "CLAUDE_SETTINGS",
+        "KIRO_HOOKS_DIR",
+        "KIRO_SCRIPTS_DIR",
+        "KIRO_SETTINGS",
+        "KIRO_CLI_AGENT",
+        "CURSOR_HOOKS_DIR",
+        "CURSOR_SETTINGS",
+        "ANTIGRAVITY_HOOKS_DIR",
+        "ANTIGRAVITY_HOOKS_FILE",
+        "AGY_HOOKS_DIR",
+        "AGY_HOOKS_FILE",
+    )
+    for name in isolated_paths:
+        monkeypatch.setattr(hook_status, name, tmp_path / name.lower())
+
+    codex_dir = tmp_path / ".codex"
+    hooks_path = codex_dir / "hooks.json"
+    config_path = codex_dir / "config.toml"
+    hooks_dir = codex_dir / "hooks"
+    hooks_dir.mkdir(parents=True)
+    _write_hooks(
+        hooks_path,
+        {"SessionStart": [_command_hook(str(hooks_dir / "mem-mesh-session-start.sh"))]},
+    )
+    config_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(hook_status, "CODEX_HOOKS_DIR", hooks_dir)
+    monkeypatch.setattr(hook_status, "CODEX_HOOKS_FILE", hooks_path)
+    monkeypatch.setattr(hook_status, "CODEX_CONFIG", config_path)
+    monkeypatch.setattr(hook_sync, "_find_project_root", lambda: None)
+    monkeypatch.setattr(
+        hook_status,
+        "resolve_api_url",
+        lambda baked_url=None: ("http://localhost:8000", "test"),
+    )
+    monkeypatch.setattr(
+        hook_status, "check_connectivity", lambda _url: (True, "reachable")
+    )
+
+    hook_status.cmd_status()
+
+    output = capsys.readouterr().out
+    codex_section = output.split("[Codex]", 1)[1].split("[Antigravity IDE]", 1)[0]
+    antigravity_section = output.split("[Antigravity IDE]", 1)[1]
+    assert "hook trust:" in codex_section
+    assert "review required (0/1 records); open Codex /hooks" in codex_section
+    assert "hook trust:" not in antigravity_section
 
 
 def test_uvx_mem_mesh_hooks_install_codex_writes_active_hooks(

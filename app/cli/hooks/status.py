@@ -14,6 +14,7 @@ from app.cli.codex_config import (
     CODEX_HOOKS_DIR,
     CODEX_HOOKS_FILE,
     codex_config_has_mem_mesh,
+    codex_hook_trust_record_counts,
 )
 from app.cli.hooks.colors import bold, dim, err, header, info, ok, warn
 from app.cli.hooks.constants import (
@@ -76,6 +77,20 @@ def _check_script_version(path: Path) -> str:
     if version < PROMPT_VERSION:
         return f"installed (prompt-version: {version} -> outdated)"
     return f"installed (prompt-version: {version})"
+
+
+def _codex_hook_trust_status(hooks_path: Path, config_path: Path) -> Tuple[str, bool]:
+    """Summarize recorded Codex trust state without guessing hash validity."""
+    handlers, recorded = codex_hook_trust_record_counts(hooks_path, config_path)
+    if recorded < handlers:
+        return (
+            f"review required ({recorded}/{handlers} records); open Codex /hooks",
+            False,
+        )
+    return (
+        f"records found ({recorded}/{handlers}); verify current hashes with Codex /hooks",
+        True,
+    )
 
 
 def _extract_url_from_script(path: Path) -> Optional[str]:
@@ -622,6 +637,19 @@ def cmd_status() -> None:
                 print(
                     f"  hooks.json:   {ok(f'configured (mem-mesh entries: {count})')}"
                 )
+                trust_status, has_all_records = _codex_hook_trust_status(
+                    CODEX_HOOKS_FILE, CODEX_CONFIG
+                )
+                if has_all_records:
+                    summary, _, verification = trust_status.partition("; ")
+                    print(
+                        "  hook trust:   "
+                        + ok(summary)
+                        + " "
+                        + dim(f"({verification})")
+                    )
+                else:
+                    print("  hook trust:   " + warn(trust_status))
             else:
                 print(f"  hooks.json:   {err('not configured (mem-mesh entries: 0)')}")
         except (json.JSONDecodeError, OSError):

@@ -11,11 +11,12 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from app.cli.hooks.renderer import _render_template
+from app.cli.hooks.renderer import _render_local_template, _render_template
 from app.cli.hooks.templates import (
     CURSOR_SESSION_START_TEMPLATE,
     CURSOR_STOP_TEMPLATE,
     KIRO_STOP_HOOK_TEMPLATE,
+    LOCAL_SESSION_START_HOOK_TEMPLATE,
     POST_TOOL_USE_HOOK_TEMPLATE,
     PRECOMPACT_HOOK_TEMPLATE,
     SESSION_END_HOOK_TEMPLATE,
@@ -445,18 +446,15 @@ def test_cursor_session_start_uses_workspace_project_id(
 def test_codex_session_start_compact_stdout_keeps_full_payload(
     tmp_path: Path, hook_api_server
 ) -> None:
-    """Codex compact stdout suppresses noisy rules without trimming the POST body."""
+    """Codex compact stdout injects bounded real context without trimming POST."""
     state, url = hook_api_server
     long_prompt = "retain-me-" + ("x" * 2000)
-    state["response"] = {
-        "hookSpecificOutput": {
-            "additionalContext": (
-                "## mem-mesh Session Context (Auto-injected)\n"
-                '**You MUST call `session_resume(project_id="mem-mesh", expand="smart")` immediately**\n'
-                "### Rules\n" + ("very noisy rule text\n" * 100)
-            )
-        }
-    }
+    expected_context = (
+        "## mem-mesh Session Context (Auto-injected)\n"
+        '**You MUST call `session_resume(project_id="mem-mesh", expand="smart")` immediately**\n'
+        "### Rules\n" + ("very noisy rule text\n" * 100)
+    )
+    state["response"] = {"hookSpecificOutput": {"additionalContext": expected_context}}
     script = _render_and_write(
         tmp_path,
         SESSION_START_HOOK_TEMPLATE,
@@ -470,12 +468,27 @@ def test_codex_session_start_compact_stdout_keeps_full_payload(
 
     assert result.returncode == 0
     context = _extract_context(json.loads(result.stdout))
-    assert "mem-mesh session context available" in context
-    assert "MUST call" not in context
-    assert "very noisy rule text" not in context
-    assert len(context) < 240
+    assert context == expected_context[:2000]
+    assert "MUST call" in context
+    assert "very noisy rule text" in context
+    assert len(context) == 2000
     assert state["last_payload"]["prompt"] == long_prompt
     assert state["last_payload"]["client"] == "codex"
+
+
+def test_codex_local_session_start_compact_keeps_bounded_real_context(
+    tmp_path: Path,
+) -> None:
+    rendered = _render_local_template(
+        LOCAL_SESSION_START_HOOK_TEMPLATE,
+        str(tmp_path),
+        hook_output_mode="compact",
+    )
+
+    assert "COMPACT_CONTEXT_CHARS=2000" in rendered
+    assert "additionalContext: $ctx" in rendered
+    assert "'.[0:$limit]'" in rendered
+    assert "Detailed hook output suppressed for Codex" not in rendered
 
 
 # ---------------------------------------------------------------------------
@@ -705,6 +718,38 @@ def test_kiro_stop_saves_fenced_json_findings_as_markdown(
     assert "[high] `a.swift:9` — stale snapshot" in content
     # multi-line evidence is flattened to one line
     assert "evidence: guard returns early second line" in content
+
+
+def test_agy_stop_saves_fenced_json_verdicts_as_markdown(
+    tmp_path: Path, hook_api_server
+) -> None:
+    """agy panel output uses a verdicts envelope; render it instead of storing
+    the fenced one-line JSON blob that exposed this regression."""
+    state, url = hook_api_server
+    script = _render_and_write(
+        tmp_path,
+        KIRO_STOP_HOOK_TEMPLATE,
+        source_tag="agy-hook",
+        client_tag="agy",
+        ide_tag="agy",
+        project_id="test-project",
+    )
+    fenced = (
+        "```json\n"
+        '{"verdicts":[{"ref":"[claude:claude-opus-4-8#0]",'
+        '"stance":"concede","reason":"Ignoring failure causes flaky\\n'
+        'tests."}]}\n'
+        "```"
+    )
+
+    result = _run_hook(script, {}, env={"KIRO_RESULT": fenced}, api_url=url)
+
+    assert result.returncode == 0
+    content = state["last_payload"]["content"]
+    assert "## Panel verdicts (1)" in content
+    assert "[concede] `[claude:claude-opus-4-8#0]`" in content
+    assert "Ignoring failure causes flaky tests." in content
+    assert '"verdicts"' not in content
 
 
 def test_kiro_stop_non_findings_json_saved_verbatim(
