@@ -10,7 +10,6 @@ import pytest
 
 from app.cli import install_hooks
 from app.cli.codex_config import codex_hook_trust_record_counts
-from app.cli.hooks.status import _codex_hook_trust_status
 from app.cli.hooks.json_ops import (
     _count_mem_mesh_hook_entries,
     _is_mem_mesh_hook,
@@ -22,6 +21,7 @@ from app.cli.hooks.renderer import (
     _shell_safe_local_path,
     _shell_safe_url,
 )
+from app.cli.hooks.status import _codex_hook_trust_status
 from app.cli.hooks.templates import (
     LOCAL_STOP_HOOK_TEMPLATE,
     LOCAL_SUBAGENT_START_HOOK_TEMPLATE,
