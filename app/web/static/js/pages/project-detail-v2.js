@@ -69,10 +69,13 @@ class ProjectDetailPage extends HTMLElement {
     try {
       this.setLoading(true);
       
-      // Load all memories to get project info and filter by project
-      let searchResult;
-      
-      searchResult = await window.app.apiClient.searchMemories('', { limit: 1000 });
+      // Scope the request on the server. Loading a global recent slice and
+      // filtering it here made older projects look empty once the database had
+      // more than 1,000 memories.
+      const searchResult = await window.app.apiClient.searchMemories('', {
+        limit: 1000,
+        project_id: this.projectId
+      });
       
       if (searchResult && searchResult.results) {
         this.processProjectData(searchResult.results);
