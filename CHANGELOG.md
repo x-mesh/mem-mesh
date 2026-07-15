@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.35.3] - 2026-07-15
+
+**프로젝트 rename 뒤 옛 ID가 다시 생기거나 대시보드에 유령 프로젝트가 남는 경로를 막았다.**
+
+WHY: 프로젝트 상세 화면은 전체 memory 중 최근 1,000건을 먼저 받은 뒤 브라우저에서 `project_id`를 필터링했다. 오래된 프로젝트는 DB에 memory가 있어도 0건으로 표시됐다. Projects 목록은 GET 응답을 만료 없이 cache해 DB rename/merge 후에도 열린 탭에서 옛 프로젝트를 계속 보여줬다. Kiro behavioral hook도 설치 당시 `project_id`를 MCP 호출 문자열에 고정해, repo rename 뒤 hook을 다시 생성하지 않으면 옛 ID로 memory를 재생성할 수 있었다.
+
+### Fixed
+
+- **프로젝트 상세 조회를 server-side scope로 전환** — `/project/{id}`가 검색 요청에 `project_id`를 보내 해당 프로젝트 memory만 조회한다. 전역 최근 1,000건 바깥의 오래된 프로젝트가 빈 화면으로 보이지 않는다. (`app/web/static/js/pages/project-detail-v2.js`)
+- **Projects cache를 실시간 변경에 맞춰 무효화** — memory 생성·수정·삭제 WebSocket event에서 `/memories`뿐 아니라 `/projects` GET cache도 비워, MCP·hook·다른 탭이 만든 project 변화가 현재 탭에 반영된다. (`app/web/static/js/main.js`)
+- **Kiro behavioral hook의 stale project ID 방지** — MCP 호출 직전에 `MEM_MESH_PROJECT_ID` → local git config → `.mem-mesh/project-id` → workspace basename 순서로 canonical ID를 다시 확인하고, 설치 당시 값은 해석 실패 시 fallback으로만 사용한다. (`app/cli/prompts/renderers.py`)
+
+### Changed
+
+- `mem-mesh init --project-id ...`가 이미 설치된 Kiro behavioral hook 3종을 새 canonical ID로 자동 재생성한다. project에 없던 hook을 새로 설치하거나 `manual-*` hook을 수정하지 않는다. Hook prompt version을 31로 올리고 회귀 테스트를 추가했다. (`app/cli/project_identity.py`, `app/cli/prompts/behaviors.py`, `tests/test_project_identity.py`, `tests/test_kiro_prompt_project_identity.py`)
+
 ## [1.35.2] - 2026-07-14
 
 **Codex session hook가 실제 memory context를 주입하고 trust 상태를 드러내도록 고치고, agy panel verdict 저장을 읽을 수 있는 Markdown으로 복구했다.**
