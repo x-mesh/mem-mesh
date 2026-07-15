@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_DETAIL = ROOT / "app/web/static/js/pages/project-detail-v2.js"
 MAIN_JS = ROOT / "app/web/static/js/main.js"
