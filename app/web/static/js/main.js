@@ -128,7 +128,10 @@ class App {
       // events every page already listens to, regardless of which page (or
       // none) is currently mounted.
       ['memory_created', 'memory_updated', 'memory_deleted'].forEach((event) => {
-        wsClient.on(event, () => this.apiClient.invalidateCache('/memories'));
+        wsClient.on(event, () => {
+          this.apiClient.invalidateCache('/memories');
+          this.apiClient.invalidateCache('/projects');
+        });
       });
 
       // Check embedding model status — redirect to onboarding if not ready
