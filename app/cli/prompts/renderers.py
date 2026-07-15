@@ -82,16 +82,35 @@ def render_save_criteria_text() -> str:
 # ---------------------------------------------------------------------------
 
 
+def _kiro_project_id_instruction(fallback_project_id: str) -> str:
+    """Tell askAgent hooks to resolve identity at execution time.
+
+    Kiro behavioral hooks are JSON prompts, not shell hooks, so embedding the
+    install-time project id in the MCP call makes it stale after a rename.
+    """
+    return (
+        "**Project ID**: MCP 호출 직전에 현재 workspace의 canonical ID를 다시 "
+        "확인하세요. 우선순위는 `MEM_MESH_PROJECT_ID` → "
+        "`git config --local --get mem-mesh.project-id` → "
+        "`.mem-mesh/project-id` → workspace root basename입니다. 이전 대화나 "
+        f"hook 생성 시 값을 재사용하지 마세요. 확인할 수 없을 때만 "
+        f"`{fallback_project_id}`를 fallback으로 사용하세요."
+    )
+
+
 def render_kiro_auto_save(project_id: str = "mem-mesh") -> Dict[str, Any]:
     """Generate auto-save-conversations.kiro.hook content.
 
     Kiro askAgent hook that decides whether to save a conversation.
     """
-    save_format = SAVE_CRITERIA.save_format.replace("{project_id}", project_id)
+    save_format = SAVE_CRITERIA.save_format.replace(
+        "{project_id}", "<resolved-current-project-id>"
+    )
     prompt = (
         f"{SAVE_CRITERIA.idempotency}\n\n"
         f"없으면 아래 기준으로 저장 여부 판단:\n\n"
         f"{render_save_criteria_text()}\n\n"
+        f"{_kiro_project_id_instruction(project_id)}\n\n"
         f"저장 시: {save_format}\n"
         f"출력: Saved | ID: [id]\n"
         f"스킵 시: 아무것도 출력하지 마세요."
@@ -110,11 +129,14 @@ def render_kiro_auto_create_pin(project_id: str = "mem-mesh") -> Dict[str, Any]:
 
     Kiro askAgent hook that decides whether to create a pin on task start.
     """
-    pin_format = PIN_CRITERIA.pin_format.replace("{project_id}", project_id)
+    pin_format = PIN_CRITERIA.pin_format.replace(
+        "{project_id}", "<resolved-current-project-id>"
+    )
     prompt = (
         f"사용자 메시지가 구체적 작업 요청인지 판단하세요.\n\n"
         f"**Pin 생성 O**: {PIN_CRITERIA.create_when}\n"
         f"**Pin 생성 X**: {PIN_CRITERIA.skip_when}\n\n"
+        f"{_kiro_project_id_instruction(project_id)}\n\n"
         f"생성 시: {pin_format}\n"
         f"출력: Pin [id] | [설명]\n"
         f"아니면: 무시 (아무것도 출력하지 마세요)"
@@ -133,9 +155,12 @@ def render_kiro_load_context(project_id: str = "mem-mesh") -> Dict[str, Any]:
 
     Kiro askAgent hook for loading project context on demand.
     """
-    resume_call = SESSION_CONFIG.resume_call.replace("{project_id}", project_id)
+    resume_call = SESSION_CONFIG.resume_call.replace(
+        "{project_id}", "<resolved-current-project-id>"
+    )
     prompt = (
         f"{SESSION_CONFIG.resume_description}\n\n"
+        f"{_kiro_project_id_instruction(project_id)}\n\n"
         f"**실행**: {resume_call}\n\n"
         f"**수집 항목**:\n"
         f"1. 프로젝트의 최근 작업 (task, bug, decision)\n"

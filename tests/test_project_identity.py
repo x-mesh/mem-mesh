@@ -6,6 +6,11 @@ from pathlib import Path
 import pytest
 
 from app.cli.project_identity import GIT_CONFIG_KEY, cmd_init, resolved_project_identity
+from app.cli.prompts.renderers import (
+    render_kiro_auto_create_pin,
+    render_kiro_auto_save,
+    render_kiro_load_context,
+)
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 
@@ -66,6 +71,33 @@ def test_init_uses_explicit_project_id(tmp_path: Path, monkeypatch) -> None:
     assert (
         _git(["config", "--local", "--get", GIT_CONFIG_KEY], repo) == "explicit-project"
     )
+
+
+def test_init_refreshes_existing_kiro_behavior_hooks(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    hooks_dir = repo / ".kiro" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    managed_hooks = {
+        "auto-save-conversations.kiro.hook": render_kiro_auto_save,
+        "auto-create-pin-on-task.kiro.hook": render_kiro_auto_create_pin,
+        "load-project-context.kiro.hook": render_kiro_load_context,
+    }
+    for filename in managed_hooks:
+        (hooks_dir / filename).write_text("stale\n", encoding="utf-8")
+    manual = hooks_dir / "manual-review.kiro.hook"
+    manual.write_text("manual\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    assert cmd_init(project_id="renamed-project", yes=True) == 0
+
+    for filename, renderer in managed_hooks.items():
+        assert json.loads(
+            (hooks_dir / filename).read_text(encoding="utf-8")
+        ) == renderer("renamed-project")
+    assert manual.read_text(encoding="utf-8") == "manual\n"
 
 
 def test_init_outside_git_writes_project_file(tmp_path: Path, monkeypatch) -> None:

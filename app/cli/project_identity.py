@@ -211,6 +211,33 @@ def _write_project_file(project_id: str, root: Optional[Path]) -> Path:
     return path
 
 
+def _refresh_existing_kiro_hooks(root: Path, project_id: str) -> None:
+    """Refresh managed Kiro behavioral hooks after an identity change.
+
+    Only existing managed files are rewritten. ``mem-mesh init`` must not
+    install Kiro hooks into a project that never opted into them.
+    """
+    from app.cli.prompts.renderers import (
+        render_kiro_auto_create_pin,
+        render_kiro_auto_save,
+        render_kiro_load_context,
+    )
+
+    hooks_dir = root / ".kiro" / "hooks"
+    renderers = {
+        "auto-save-conversations.kiro.hook": render_kiro_auto_save,
+        "auto-create-pin-on-task.kiro.hook": render_kiro_auto_create_pin,
+        "load-project-context.kiro.hook": render_kiro_load_context,
+    }
+    for filename, renderer in renderers.items():
+        path = hooks_dir / filename
+        if not path.is_file():
+            continue
+        content = json.dumps(renderer(project_id), indent=2, ensure_ascii=False) + "\n"
+        if path.read_text(encoding="utf-8") != content:
+            path.write_text(content, encoding="utf-8")
+
+
 def store_project_identity(project_id: str) -> InitResult:
     normalized = _normalize_candidate(project_id)
     root = _git_root()
@@ -222,10 +249,12 @@ def store_project_identity(project_id: str) -> InitResult:
             text=True,
         )
         if result.returncode == 0:
+            _refresh_existing_kiro_hooks(root, normalized)
             return InitResult(normalized, f"git config {GIT_CONFIG_KEY}", "git config")
         # Fall through to a project file if local git config is unavailable.
 
     path = _write_project_file(normalized, root)
+    _refresh_existing_kiro_hooks(root or Path.cwd(), normalized)
     return InitResult(normalized, str(path), "project file")
 
 
