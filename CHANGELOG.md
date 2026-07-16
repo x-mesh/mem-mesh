@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.36.0] - 2026-07-16
+
+**relay aggregate worker의 dead letter를 대시보드에서 정리할 수 있게 하고, digest가 무한히 dead_letter로 죽던 근본 원인을 막았다.**
+
+WHY: hub의 Queue Status에서 aggregate worker에 dead_letter가 누적됐다. 조사 결과 두 문제가 겹쳐 있었다. (1) digest 생성 LLM이 `rollup`을 구조화된 dict가 아니라 narrative 문자열로 반환하면 `RelayDigestData`의 Pydantic validation이 hard-fail 했고, 8회 재시도 뒤 job이 dead_letter가 되어 그 프로젝트의 digest가 영구히 실패했다(`relay_project_digest` 테이블이 비어 있음 = 한 번도 성공 못 함). (2) 이미 쌓인 dead letter를 대시보드에서 개별/일괄로 폐기할 방법이 없어 retry 말고는 손댈 수 없었다. dead_letter 행 자체는 새 job 인큐를 막지 않으므로(coalesce·unique index가 `status='pending'` 부분 인덱스), 폐기해도 안전하다.
+
+### Added
+
+- **relay dead-letter cancel (개별 + 전체)** — `POST /relay/v1/admin/cancel-dead-letters`가 `dead_letter` 상태의 relay job을 hard delete한다. retry와 대칭이며 동일한 admin 인증 게이트를 쓰고, 진행 중인 `pending`/`processing` job은 건드리지 않는다. 대시보드 Queue Status에 "Cancel all" 및 항목별 "Cancel" 버튼을 추가했다. (`app/core/services/relay.py`, `app/web/dashboard/route_modules/relay.py`, `app/core/schemas/relay.py`, `app/web/static/js/services/api-client.js`, `app/web/static/js/pages/relay.js`, `app/web/static/css/modules/relay.css`)
+
+### Fixed
+
+- **digest `rollup` 문자열 강제 변환으로 aggregate dead_letter 방지** — `RelayDigestData.rollup`에 `mode="before"` field validator를 추가해, LLM이 문자열을 반환하면 `{"summary": <str>}`로 감싸고 `None`/빈 문자열은 `{}`로 변환한다. validation을 hard-fail시켜 job을 dead_letter로 보내는 대신 digest 생성을 계속 진행한다. (`app/core/schemas/relay.py`)
+
 ## [1.35.3] - 2026-07-15
 
 **프로젝트 rename 뒤 옛 ID가 다시 생기거나 대시보드에 유령 프로젝트가 남는 경로를 막았다.**
