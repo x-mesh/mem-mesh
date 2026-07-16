@@ -1042,6 +1042,54 @@ async def test_cancel_dead_letters_all_clears_every_queue_dead_letter():
         assert remaining["total"] == 0
 
 
+@pytest.mark.asyncio
+async def test_retry_aggregate_coalesces_duplicate_dead_letters():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        now = "2026-01-01T00:00:00+00:00"
+        # Three dead letters for the SAME project (coalesce_key) — a blind bulk
+        # requeue would violate idx_relay_aggregate_pending.
+        for i in range(3):
+            await db.execute(
+                """
+                INSERT INTO relay_queue_aggregate
+                    (id, ref_id, raw_event_id, coalesce_key, status, attempts,
+                     next_attempt_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'dead_letter', 3, 0, ?, ?)
+                """,
+                (f"agg-{i}", "project-1", f"raw-{i}", "project-1", now, now),
+            )
+        # ...plus one for a different project.
+        await db.execute(
+            """
+            INSERT INTO relay_queue_aggregate
+                (id, ref_id, raw_event_id, coalesce_key, status, attempts,
+                 next_attempt_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'dead_letter', 3, 0, ?, ?)
+            """,
+            ("agg-other", "project-2", "raw-x", "project-2", now, now),
+        )
+
+        result = await service.retry_dead_letters(queue="aggregate")
+
+        # One requeued per coalesce_key (2 keys → 2 requeued), no UNIQUE error.
+        assert result.aggregate == 2
+        pending = await db.fetchone(
+            "SELECT count(*) c FROM relay_queue_aggregate WHERE status='pending'"
+        )
+        assert pending["c"] == 2
+        # The two redundant project-1 duplicates were dropped.
+        p1 = await db.fetchone(
+            "SELECT count(*) c FROM relay_queue_aggregate WHERE coalesce_key='project-1'"
+        )
+        assert p1["c"] == 1
+        leftover_dead = await db.fetchone(
+            "SELECT count(*) c FROM relay_queue_aggregate WHERE status='dead_letter'"
+        )
+        assert leftover_dead["c"] == 0
+
+
 def test_digest_data_coerces_string_rollup_into_dict():
     # A digest generator that returns rollup as a narrative string must not
     # dead-letter the aggregate job — the string is wrapped, not rejected.

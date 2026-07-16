@@ -1223,6 +1223,68 @@ class RelayService:
             )
             return len(ids)
 
+        async def retry_aggregate() -> int:
+            # idx_relay_aggregate_pending allows only one pending row per
+            # coalesce_key, so a blind bulk requeue of same-project dead letters
+            # (e.g. 21 for one project) hits UNIQUE constraint failed. Coalesce:
+            # requeue the newest dead letter per key and drop the redundant
+            # duplicates; skip keys that already have a live pending job.
+            params: list[Any] = []
+            where = "status = 'dead_letter'"
+            if job_id:
+                where += " AND id = ?"
+                params.append(job_id)
+            rows = await self.db.fetchall(
+                f"""
+                SELECT id, coalesce_key
+                FROM relay_queue_aggregate
+                WHERE {where}
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                tuple([*params, limit]),
+            )
+            if not rows:
+                return 0
+            pending_rows = await self.db.fetchall(
+                "SELECT DISTINCT coalesce_key FROM relay_queue_aggregate "
+                "WHERE status = 'pending'"
+            )
+            claimed_keys = {str(row["coalesce_key"]) for row in pending_rows}
+            to_requeue: list[str] = []
+            to_delete: list[str] = []
+            for row in rows:
+                key = str(row["coalesce_key"])
+                if key in claimed_keys:
+                    to_delete.append(str(row["id"]))
+                else:
+                    claimed_keys.add(key)
+                    to_requeue.append(str(row["id"]))
+            if to_delete:
+                placeholders = ",".join("?" for _ in to_delete)
+                await self.db.execute(
+                    "DELETE FROM relay_queue_aggregate "
+                    f"WHERE id IN ({placeholders})",
+                    tuple(to_delete),
+                )
+            if to_requeue:
+                placeholders = ",".join("?" for _ in to_requeue)
+                await self.db.execute(
+                    f"""
+                    UPDATE relay_queue_aggregate
+                    SET status = 'pending',
+                        attempts = 0,
+                        next_attempt_at = ?,
+                        locked_by = NULL,
+                        locked_at = NULL,
+                        last_error = NULL,
+                        updated_at = ?
+                    WHERE id IN ({placeholders})
+                    """,
+                    tuple([now_epoch, now_iso, *to_requeue]),
+                )
+            return len(to_requeue)
+
         counts = {"outbox": 0, "item": 0, "aggregate": 0}
         async with self.db.transaction():
             if queue in {"all", "outbox"}:
@@ -1230,7 +1292,7 @@ class RelayService:
             if queue in {"all", "item"}:
                 counts["item"] = await retry_table("relay_queue_item")
             if queue in {"all", "aggregate"}:
-                counts["aggregate"] = await retry_table("relay_queue_aggregate")
+                counts["aggregate"] = await retry_aggregate()
 
         return RelayRetryResponse(
             retried=sum(counts.values()),
