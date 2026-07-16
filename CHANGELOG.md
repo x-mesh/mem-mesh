@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.36.1] - 2026-07-16
+
+**같은 프로젝트의 aggregate dead letter가 여럿일 때 Retry all이 UNIQUE constraint로 실패하던 버그를 고쳤다.**
+
+WHY: `idx_relay_aggregate_pending`는 `coalesce_key`당 pending 행을 하나만 허용하는 부분 unique index다. 한 프로젝트가 여러 번 dead_letter가 되면(운영 hub에서 한 프로젝트에 21건 관측) `retry_dead_letters`가 이들을 모두 한꺼번에 `pending`으로 바꾸려다 `UNIQUE constraint failed: relay_queue_aggregate.coalesce_key`로 전체 retry가 실패했다. v1.36.0의 rollup 수정으로 dead letter 발생 자체는 줄었지만, 이미 쌓인 중복을 retry로 정리할 수 없었다.
+
+### Fixed
+
+- **aggregate dead letter retry를 coalesce_key 단위로 합침** — `retry_dead_letters`가 aggregate 큐를 재요청할 때 coalesce_key마다 가장 최근 dead letter 하나만 `pending`으로 되살리고, 나머지 중복(같은 프로젝트 digest라 무의미)은 삭제한다. 이미 pending 작업이 있는 key는 건너뛴다. 같은 프로젝트 dead letter가 여러 개여도 Retry all이 UNIQUE 위반 없이 완료된다. (`app/core/services/relay.py`)
+
 ## [1.36.0] - 2026-07-16
 
 **relay aggregate worker의 dead letter를 대시보드에서 정리할 수 있게 하고, digest가 무한히 dead_letter로 죽던 근본 원인을 막았다.**
