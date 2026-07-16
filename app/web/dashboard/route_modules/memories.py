@@ -144,6 +144,7 @@ async def update_memory(
             content=params.content,
             category=params.category,
             tags=params.tags,
+            project_id=params.project_id,
         )
 
         # WebSocket real-time notification

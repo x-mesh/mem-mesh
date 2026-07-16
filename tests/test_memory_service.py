@@ -259,6 +259,34 @@ class TestMemoryService:
         assert updated_memory.get_tags() == new_tags
 
     @pytest.mark.asyncio
+    async def test_update_memory_project_id(self, memory_service):
+        """메모리 프로젝트 이동 테스트 (웹 대시보드 project 변경 회귀)"""
+        # Given - 메모리 생성
+        content = "Content for project move test — padded to exceed 100-character quality gate minimum length requirement here."
+        response = await memory_service.create(
+            content=content, project_id="proj-a", source="test"
+        )
+        memory_id = response.id
+        original_memory = await memory_service.get(memory_id)
+
+        # When - project_id만 업데이트
+        update_response = await memory_service.update(
+            memory_id=memory_id, project_id="proj-b"
+        )
+
+        # Then
+        assert update_response.status == "updated"
+        updated_memory = await memory_service.get(memory_id)
+        assert updated_memory.project_id == "proj-b"
+        assert updated_memory.content == content  # 내용은 변경되지 않음
+        assert updated_memory.content_hash == original_memory.content_hash
+
+        # project_id 생략 시 기존 값 유지
+        await memory_service.update(memory_id=memory_id, category="bug")
+        kept_memory = await memory_service.get(memory_id)
+        assert kept_memory.project_id == "proj-b"
+
+    @pytest.mark.asyncio
     async def test_update_memory_not_found(self, memory_service):
         """존재하지 않는 메모리 업데이트 테스트"""
         # Given

@@ -435,6 +435,12 @@ class UpdateParams(BaseModel):
     content: Optional[str] = Field(default=None, min_length=100, max_length=50000)
     category: Optional[str] = Field(default=None)
     tags: Optional[List[str]] = Field(default=None)
+    project_id: Optional[str] = Field(default=None, description="이동할 프로젝트 ID")
+
+    @field_validator("project_id")
+    @classmethod
+    def validate_project_id(cls, v: Optional[str]) -> Optional[str]:
+        return normalize_project_id(v)
 
     @field_validator("category")
     @classmethod

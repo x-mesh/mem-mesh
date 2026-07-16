@@ -392,6 +392,7 @@ class DirectStorageBackend(StorageBackend):
                 content=params.content,
                 category=params.category,
                 tags=params.tags,
+                project_id=params.project_id,
             )
 
             logger.info(f"Memory updated successfully: {memory_id}")

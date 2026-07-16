@@ -559,6 +559,7 @@ class MemoryService:
         content: Optional[str] = None,
         category: Optional[str] = None,
         tags: Optional[List[str]] = None,
+        project_id: Optional[str] = None,
     ) -> UpdateResponse:
         """
         메모리 업데이트 (content 변경 시 재임베딩)
@@ -568,6 +569,7 @@ class MemoryService:
             content: 새로운 내용 (선택적)
             category: 새로운 카테고리 (선택적)
             tags: 새로운 태그 목록 (선택적)
+            project_id: 이동할 프로젝트 ID (선택적, FTS는 트리거가 동기화)
 
         Returns:
             UpdateResponse: 업데이트 결과
@@ -613,7 +615,7 @@ class MemoryService:
                         """
                         UPDATE memories
                         SET content = ?, content_hash = ?, category = ?, tags = ?,
-                            embedding = ?, updated_at = ?
+                            project_id = ?, embedding = ?, updated_at = ?
                         WHERE id = ?
                         """,
                         (
@@ -625,6 +627,7 @@ class MemoryService:
                                 if tags is not None
                                 else existing_memory.tags
                             ),
+                            project_id or existing_memory.project_id,
                             embedding_bytes,
                             datetime.utcnow().isoformat() + "Z",
                             memory_id,
@@ -641,7 +644,7 @@ class MemoryService:
                     await self.db.execute(
                         """
                         UPDATE memories
-                        SET category = ?, tags = ?, updated_at = ?
+                        SET category = ?, tags = ?, project_id = ?, updated_at = ?
                         WHERE id = ?
                         """,
                         (
@@ -651,6 +654,7 @@ class MemoryService:
                                 if tags is not None
                                 else existing_memory.tags
                             ),
+                            project_id or existing_memory.project_id,
                             datetime.utcnow().isoformat() + "Z",
                             memory_id,
                         ),
