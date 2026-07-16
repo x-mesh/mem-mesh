@@ -283,6 +283,14 @@ export class APIClient {
     });
   }
 
+  async cancelRelayDeadLetters(payload = {}) {
+    return this.post('/relay/v1/admin/cancel-dead-letters', {
+      queue: payload.queue || 'all',
+      id: payload.id || null,
+      limit: payload.limit || 1000,
+    });
+  }
+
   async getRelaySettings() {
     return this.get('/relay/v1/admin/settings');
   }

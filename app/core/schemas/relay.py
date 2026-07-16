@@ -143,6 +143,19 @@ class RelayDigestData(BaseModel):
     narrative: str = ""
     source_memory_ids: List[str] = Field(default_factory=list)
 
+    @field_validator("rollup", mode="before")
+    @classmethod
+    def _coerce_rollup(cls, value: Any) -> Any:
+        # A permissive digest generator (LLM) sometimes returns rollup as a bare
+        # narrative string instead of the structured dict this field expects.
+        # Coerce it instead of hard-failing validation, which would dead-letter
+        # the whole aggregate job and stall every future digest for the project.
+        if value is None:
+            return {}
+        if isinstance(value, str):
+            return {"summary": value} if value else {}
+        return value
+
     @classmethod
     def from_result(cls, value: Any) -> "RelayDigestData":
         if isinstance(value, cls):
@@ -320,6 +333,14 @@ class RelayRetryRequest(BaseModel):
 
 class RelayRetryResponse(BaseModel):
     retried: int = 0
+    outbox: int = 0
+    item: int = 0
+    aggregate: int = 0
+    status: str = "ok"
+
+
+class RelayCancelResponse(BaseModel):
+    cancelled: int = 0
     outbox: int = 0
     item: int = 0
     aggregate: int = 0

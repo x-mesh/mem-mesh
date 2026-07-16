@@ -317,11 +317,24 @@ export class RelayPage extends HTMLElement {
         this.retryRelayDeadLetters({ queue: 'all' });
         return;
       }
+      const cancelAll = target.closest('#relay-cancel-dead-letters');
+      if (cancelAll) {
+        this.cancelRelayDeadLetters({ queue: 'all' });
+        return;
+      }
       const retryOne = target.closest('[data-retry-dead-letter]');
       if (retryOne) {
         this.retryRelayDeadLetters({
           queue: retryOne.dataset.queue,
           id: retryOne.dataset.jobId,
+        });
+        return;
+      }
+      const cancelOne = target.closest('[data-cancel-dead-letter]');
+      if (cancelOne) {
+        this.cancelRelayDeadLetters({
+          queue: cancelOne.dataset.queue,
+          id: cancelOne.dataset.jobId,
         });
       }
     });
@@ -1093,6 +1106,24 @@ export class RelayPage extends HTMLElement {
       await this.loadOverview();
     } catch (error) {
       showToast(`Relay retry failed: ${this.errorMessage(error)}`, 'error');
+    }
+  }
+
+  async cancelRelayDeadLetters({ queue = 'all', id = null } = {}) {
+    if (!this.api) return;
+    const target = id ? `this ${queue} job` : 'all dead-letter jobs';
+    if (!confirm(`Cancel ${target}? They are discarded and will not be retried.`)) return;
+
+    try {
+      const result = await this.api.cancelRelayDeadLetters({
+        queue,
+        id,
+        limit: id ? 1 : 1000,
+      });
+      showToast(`Cancelled ${Number(result.cancelled || 0).toLocaleString()} relay jobs.`, 'success');
+      await this.loadOverview();
+    } catch (error) {
+      showToast(`Relay cancel failed: ${this.errorMessage(error)}`, 'error');
     }
   }
 
@@ -1911,9 +1942,14 @@ export class RelayPage extends HTMLElement {
           <strong>Dead letters</strong>
           <span>${rows.length.toLocaleString()} shown</span>
         </div>
-        <button class="secondary-button relay-panel-button" id="relay-retry-dead-letters" type="button">
-          Retry all
-        </button>
+        <div class="relay-dead-letter-header-actions">
+          <button class="secondary-button relay-panel-button" id="relay-retry-dead-letters" type="button">
+            Retry all
+          </button>
+          <button class="secondary-button relay-panel-button" id="relay-cancel-dead-letters" type="button">
+            Cancel all
+          </button>
+        </div>
       </div>
       <div class="relay-dead-letter-items">
         ${rows.map((row) => {
@@ -1931,15 +1967,26 @@ export class RelayPage extends HTMLElement {
                 <code>${this.escapeHtml(ref)}</code>
                 <p>${this.escapeHtml(row.last_error || 'No error recorded')}</p>
               </div>
-              <button
-                class="secondary-button relay-panel-button"
-                type="button"
-                data-retry-dead-letter
-                data-queue="${this.escapeHtml(row.queue)}"
-                data-job-id="${this.escapeHtml(row.id)}"
-              >
-                Retry
-              </button>
+              <div class="relay-dead-letter-actions">
+                <button
+                  class="secondary-button relay-panel-button"
+                  type="button"
+                  data-retry-dead-letter
+                  data-queue="${this.escapeHtml(row.queue)}"
+                  data-job-id="${this.escapeHtml(row.id)}"
+                >
+                  Retry
+                </button>
+                <button
+                  class="secondary-button relay-panel-button"
+                  type="button"
+                  data-cancel-dead-letter
+                  data-queue="${this.escapeHtml(row.queue)}"
+                  data-job-id="${this.escapeHtml(row.id)}"
+                >
+                  Cancel
+                </button>
+              </div>
             </article>
           `;
         }).join('')}

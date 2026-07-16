@@ -38,6 +38,7 @@ from ..schemas.relay import (
     RelayAdminOverviewResponse,
     RelayAggregateJob,
     RelayAutoShareSubscription,
+    RelayCancelResponse,
     RelayCategoryPolicy,
     RelayDeadLetterSummary,
     RelayDigestData,
@@ -1233,6 +1234,69 @@ class RelayService:
 
         return RelayRetryResponse(
             retried=sum(counts.values()),
+            outbox=counts["outbox"],
+            item=counts["item"],
+            aggregate=counts["aggregate"],
+        )
+
+    async def cancel_dead_letters(
+        self,
+        *,
+        queue: str = "all",
+        job_id: Optional[str] = None,
+        limit: int = 1000,
+    ) -> RelayCancelResponse:
+        """Discard dead-lettered relay jobs (hard delete) so they stop showing.
+
+        Terminal counterpart to :meth:`retry_dead_letters`: instead of requeuing,
+        it removes the rows. Only ``dead_letter`` rows are touched, so an
+        in-flight ``pending``/``processing`` job is never dropped. Deleting an
+        aggregate dead letter is safe — the pending-only unique index means it
+        never blocked a fresh enqueue, and no digest row references it.
+        """
+
+        queue = queue or "all"
+        if queue not in {"all", "outbox", "item", "aggregate"}:
+            raise ValueError("queue must be one of all, outbox, item, aggregate")
+        limit = max(1, min(limit, 100000))
+
+        async def cancel_table(table_name: str) -> int:
+            params: list[Any] = []
+            where = "status = 'dead_letter'"
+            if job_id:
+                where += " AND id = ?"
+                params.append(job_id)
+            rows = await self.db.fetchall(
+                f"""
+                SELECT id
+                FROM {table_name}
+                WHERE {where}
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                tuple([*params, limit]),
+            )
+            ids = [str(row["id"]) for row in rows]
+            if not ids:
+                return 0
+            placeholders = ",".join("?" for _ in ids)
+            await self.db.execute(
+                f"DELETE FROM {table_name} WHERE id IN ({placeholders})",
+                tuple(ids),
+            )
+            return len(ids)
+
+        counts = {"outbox": 0, "item": 0, "aggregate": 0}
+        async with self.db.transaction():
+            if queue in {"all", "outbox"}:
+                counts["outbox"] = await cancel_table("relay_outbox")
+            if queue in {"all", "item"}:
+                counts["item"] = await cancel_table("relay_queue_item")
+            if queue in {"all", "aggregate"}:
+                counts["aggregate"] = await cancel_table("relay_queue_aggregate")
+
+        return RelayCancelResponse(
+            cancelled=sum(counts.values()),
             outbox=counts["outbox"],
             item=counts["item"],
             aggregate=counts["aggregate"],

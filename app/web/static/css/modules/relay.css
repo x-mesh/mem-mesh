@@ -646,6 +646,14 @@
   min-width: 0;
 }
 
+/* Beats the generic `.relay-dead-letter-header div` grid rule above so the
+   Retry all / Cancel all buttons sit in a row, not stacked. */
+.relay-dead-letter-header .relay-dead-letter-header-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
 .relay-dead-letter-header strong {
   color: var(--text-primary);
   font-size: var(--text-sm);
@@ -687,6 +695,13 @@
   gap: var(--space-2);
   color: var(--text-secondary);
   font-size: var(--text-xs);
+}
+
+.relay-dead-letter-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex-shrink: 0;
 }
 
 .relay-dead-letter-item code {
@@ -1026,6 +1041,14 @@
   .relay-dead-letter-item {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .relay-dead-letter-actions {
+    flex-direction: row;
+  }
+
+  .relay-dead-letter-actions .relay-panel-button {
+    flex: 1;
   }
 }
 

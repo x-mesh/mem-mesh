@@ -16,7 +16,11 @@ from pydantic import ValidationError
 
 from app.core.database.base import Database
 from app.core.database.models import Memory
-from app.core.schemas.relay import RelayIngestRequest, RelaySettingsUpdateRequest
+from app.core.schemas.relay import (
+    RelayDigestData,
+    RelayIngestRequest,
+    RelaySettingsUpdateRequest,
+)
 from app.core.services.enrich_store import EnrichmentStore
 from app.core.services.relay import (
     EMBEDDING_ONLY_MODEL,
@@ -963,6 +967,96 @@ async def test_retry_dead_letters_requeues_outbox_and_clears_failure_state():
         assert outbox["locked_by"] is None
         assert outbox["locked_at"] is None
         assert outbox["last_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_dead_letters_deletes_only_targeted_dead_letter():
+    async with _temp_db() as db:
+        service = RelayService(db, max_attempts=1)
+        await service.ensure_schema()
+
+        # One dead-lettered outbox job to cancel...
+        await service.enqueue_outbox(payload=_request(), target_hub="https://hub.local")
+        claimed = await service.claim_outbox("outbox-worker", lease_seconds=30)
+        assert claimed is not None
+        await service.mark_outbox_failed(claimed.id, "hub unavailable")
+        # ...and a healthy pending job that must survive.
+        pending = await service.enqueue_outbox(
+            payload=_request(memory_id="memory-2"),
+            target_hub="https://hub.local",
+        )
+
+        result = await service.cancel_dead_letters(queue="outbox", job_id=claimed.id)
+
+        assert result.cancelled == 1
+        assert result.outbox == 1
+        assert result.item == 0
+        assert result.aggregate == 0
+        gone = await db.fetchone(
+            "SELECT id FROM relay_outbox WHERE id = ?", (claimed.id,)
+        )
+        assert gone is None
+        survivor = await db.fetchone(
+            "SELECT status FROM relay_outbox WHERE id = ?", (pending,)
+        )
+        assert survivor is not None
+        assert survivor["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_cancel_dead_letters_all_clears_every_queue_dead_letter():
+    async with _temp_db() as db:
+        service = RelayService(db)
+        await service.ensure_schema()
+        now = "2026-01-01T00:00:00+00:00"
+        await db.execute(
+            """
+            INSERT INTO relay_queue_item
+                (id, ref_id, raw_event_id, status, attempts, next_attempt_at,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, 'dead_letter', 3, 0, ?, ?)
+            """,
+            ("item-dl", "current-1", "raw-1", now, now),
+        )
+        await db.execute(
+            """
+            INSERT INTO relay_queue_aggregate
+                (id, ref_id, raw_event_id, coalesce_key, status, attempts,
+                 next_attempt_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'dead_letter', 3, 0, ?, ?)
+            """,
+            ("agg-dl", "project-1", "raw-1", "project-1", now, now),
+        )
+
+        result = await service.cancel_dead_letters(queue="all")
+
+        assert result.cancelled == 2
+        assert result.item == 1
+        assert result.aggregate == 1
+        remaining = await db.fetchone("""
+            SELECT
+                (SELECT count(*) FROM relay_queue_item WHERE status='dead_letter')
+                + (SELECT count(*) FROM relay_queue_aggregate WHERE status='dead_letter')
+                AS total
+            """)
+        assert remaining["total"] == 0
+
+
+def test_digest_data_coerces_string_rollup_into_dict():
+    # A digest generator that returns rollup as a narrative string must not
+    # dead-letter the aggregate job — the string is wrapped, not rejected.
+    digest = RelayDigestData.from_result(
+        {"rollup": "No enriched items available yet.", "narrative": "n"}
+    )
+    assert digest.rollup == {"summary": "No enriched items available yet."}
+    assert digest.narrative == "n"
+
+
+def test_digest_data_coerces_none_and_empty_rollup_to_empty_dict():
+    assert RelayDigestData.from_result({"rollup": None}).rollup == {}
+    assert RelayDigestData.from_result({"rollup": ""}).rollup == {}
+    # A well-formed dict rollup is passed through untouched.
+    assert RelayDigestData.from_result({"rollup": {"k": 1}}).rollup == {"k": 1}
 
 
 @pytest.mark.asyncio

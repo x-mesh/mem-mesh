@@ -16,6 +16,7 @@ from app.core.schemas.relay import (
     RelayAutoShareListResponse,
     RelayAutoShareSubscription,
     RelayAutoShareUpdateRequest,
+    RelayCancelResponse,
     RelayHealthResponse,
     RelayHubCheckRequest,
     RelayHubCheckResponse,
@@ -280,6 +281,27 @@ async def retry_relay_admin_dead_letters(
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         logger.exception("Relay dead-letter retry failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/admin/cancel-dead-letters", response_model=RelayCancelResponse)
+async def cancel_relay_admin_dead_letters(
+    payload: RelayRetryRequest,
+    _: None = Depends(_require_admin_access),
+    service: RelayService = Depends(get_relay_service),
+) -> RelayCancelResponse:
+    """Discard dead-lettered relay jobs so they stop being retried or shown."""
+
+    try:
+        return await service.cancel_dead_letters(
+            queue=payload.queue,
+            job_id=payload.id,
+            limit=payload.limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Relay dead-letter cancel failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 

@@ -347,6 +347,39 @@ async def test_relay_admin_overview_lists_dead_letters_and_retry_endpoint_requeu
 
 
 @pytest.mark.asyncio
+async def test_relay_admin_cancel_endpoint_discards_dead_letters():
+    async with _temp_db() as db:
+        service = RelayService(db, max_attempts=1)
+        await service.ensure_schema()
+        await service.enqueue_outbox(payload=_request(), target_hub="https://hub.local")
+        claimed = await service.claim_outbox("outbox-worker", lease_seconds=30)
+        assert claimed is not None
+        await service.mark_outbox_failed(claimed.id, "hub unavailable")
+
+        app = _app(db)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            cancel = await client.post(
+                "/api/relay/v1/admin/cancel-dead-letters",
+                json={"queue": "outbox", "id": claimed.id, "limit": 1},
+            )
+            refreshed = await client.get("/api/relay/v1/admin/overview")
+
+        assert cancel.status_code == 200
+        assert cancel.json() == {
+            "cancelled": 1,
+            "outbox": 1,
+            "item": 0,
+            "aggregate": 0,
+            "status": "ok",
+        }
+        refreshed_data = refreshed.json()
+        assert refreshed.status_code == 200
+        assert refreshed_data["outbox_counts"] == []
+        assert refreshed_data["dead_letters"] == []
+
+
+@pytest.mark.asyncio
 async def test_relay_admin_materialize_endpoint_backfills_memories(monkeypatch):
     events = []
 
