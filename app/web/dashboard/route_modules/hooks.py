@@ -113,6 +113,18 @@ _DEFAULT_HOOK_SOURCE = "claude-code-http-hook"
 _CLIENT_RE = re.compile(r"[^a-z0-9_]+")
 _SOURCE_RE = re.compile(r"[^a-z0-9_.-]+")
 
+# Cross-project inbox. A pin carrying this tag was written by ANOTHER project
+# (x-kit's `/xm:toss`) to report a problem it found in this one. The tag string
+# is a cross-repo contract: the sender pins it as `INBOX_PIN_TAG` in
+# x-kit's `xm/lib/x-inbox/toss.mjs`. Changing it here without changing it there
+# silently stops delivery — the pins keep arriving but stop being recognized.
+INBOX_PIN_TAG = "inbox"
+# Bodies rendered in full before collapsing to a "+N more" line. Keeps a large
+# backlog from crowding out the rest of the injected context (which compact mode
+# truncates at COMPACT_CONTEXT_CHARS anyway).
+_INBOX_PREVIEW_LIMIT = 5
+_INBOX_CONTENT_CHARS = 160
+
 # Fence wrapper around a JSON body (```json ... ```), tolerated when detecting
 # a known structured envelope below.
 _FENCE_RE = re.compile(r"^\s*```[a-zA-Z]*\s*\n(.*)\n\s*```\s*$", re.DOTALL)
@@ -461,6 +473,7 @@ async def session_start(
     # Resume session context + correlate the IDE session id.
     summary_lines: list[str] = []
     open_pin_texts: list[str] = []
+    incoming_pins: list[dict] = []
     count_line: Optional[str] = None
     try:
         context = await session_service.resume_last_session(
@@ -489,6 +502,15 @@ async def session_start(
             for p in pins:
                 pin = p if isinstance(p, dict) else p.dict()
                 if pin.get("status") in ("open", "in_progress"):
+                    # Cross-project inbox items arrive as pins tagged INBOX_PIN_TAG
+                    # (written by x-kit's /xm:toss). They are foreign work, not this
+                    # project's own tasks: render them in their own "Incoming"
+                    # section instead of the activity list, and keep them out of
+                    # open_pin_texts so another project's bug report never steers
+                    # this project's memory surfacing query.
+                    if INBOX_PIN_TAG in (pin.get("tags") or []):
+                        incoming_pins.append(pin)
+                        continue
                     content = str(pin.get("content", "?"))[:100]
                     open_pin_texts.append(content)
                     client = pin.get("client") or ""
@@ -580,10 +602,39 @@ async def session_start(
     except Exception as e:  # noqa: BLE001
         logger.debug(f"rules text render skipped: {e}")
 
+    # Cross-project inbox (best-effort). Rendered near the FRONT of the context:
+    # compact mode truncates additionalContext at COMPACT_CONTEXT_CHARS, so a
+    # section appended at the end would be invisible to compact-mode clients.
+    # Wrapped in its own try/except for the same reason team_hub_block is — an
+    # escaping exception here would abort the whole handler and drop the entire
+    # injection, not just this section.
+    incoming_block = ""
+    try:
+        if incoming_pins:
+            shown = incoming_pins[:_INBOX_PREVIEW_LIMIT]
+            lines = []
+            for pin in shown:
+                body = " ".join(str(pin.get("content", "?")).split())[
+                    :_INBOX_CONTENT_CHARS
+                ]
+                lines.append(f"- {body}")
+            overflow = len(incoming_pins) - len(shown)
+            if overflow > 0:
+                lines.append(f"- …외 {overflow}건")
+            incoming_block = (
+                f"\n### Incoming ({len(incoming_pins)})\n"
+                "다른 프로젝트에서 보낸 리포트다. 처리하려면 `/xm:inbox`.\n"
+                + "\n".join(lines)
+                + "\n"
+            )
+    except Exception as e:  # noqa: BLE001 — session start must never fail
+        logger.debug(f"incoming inbox injection skipped: {e}")
+
     context_str = (
         "## mem-mesh Session Context (Auto-injected)\n"
         f"{continuation_block}\n"
-        f"### Recent Activity ({project_id})\n"
+        + incoming_block
+        + f"### Recent Activity ({project_id})\n"
         + "\n".join(summary_lines)
         + (
             "\n\n### Relevant Memories (auto-surfaced, read-only)\n"
