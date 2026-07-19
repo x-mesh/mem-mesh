@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.37.0] - 2026-07-19
+
+**다른 프로젝트가 보낸 리포트를 세션 시작 컨텍스트의 전용 Incoming 섹션으로 분리하고, memory를 프로젝트 간에 옮길 수 있게 했다. 대시보드의 별표 UI와 New Memory 422 오류도 함께 고쳤다.**
+
+WHY(Incoming): x-kit의 `/xm:toss`는 한 프로젝트에서 발견한 문제를 그 문제의 주인 프로젝트로 전달한다. 전달 수단은 `inbox` 태그가 붙은 pin인데, 지금까지는 이 pin이 이 프로젝트 자신의 작업과 뒤섞여 Recent Activity에 렌더링됐다. 남의 버그 리포트가 자기 작업 목록에 섞이는 것도 문제지만, 더 나쁜 건 그 내용이 `open_pin_texts`에 들어가 이 프로젝트의 memory surfacing 검색 쿼리를 통째로 끌고 갔다는 점이다 — 외부 리포트 한 건이 자기 프로젝트의 관련 memory 회수를 망칠 수 있었다.
+
+WHY(project_id): memory를 잘못된 프로젝트에 저장한 뒤 옮길 방법이 없었다. update 경로에 `project_id`가 아예 없어서 삭제 후 재생성이 유일한 방법이었다.
+
+### Added
+
+- **session-start Incoming 섹션** — `inbox` 태그가 붙은 pin을 Recent Activity에서 분리해 전용 `### Incoming (N)` 섹션으로 렌더링하고, `open_pin_texts`에서 제외해 외부 리포트가 이 프로젝트의 memory surfacing 쿼리를 오염시키지 않게 한다. 섹션은 Recent Activity **앞**에 배치했다 — compact 모드 hook가 `additionalContext`를 앞에서부터 `COMPACT_CONTEXT_CHARS`(2,000)로 자르므로 뒤에 붙이면 compact 사용자에게는 보이지 않는다. team hub 블록과 같은 이유로 자체 `try/except`로 감쌌다(여기서 새는 예외는 이 섹션이 아니라 주입 전체를 날린다). 미리보기는 본문 5건 + `…외 N건` 오버플로로 제한해 backlog가 나머지 컨텍스트를 밀어내지 않게 한다. `inbox` 태그 문자열은 x-kit `xm/lib/x-inbox/toss.mjs`와의 cross-repo 계약이다. (`app/web/dashboard/route_modules/hooks.py`, `tests/test_session_start_incoming.py`)
+- **memory update의 `project_id` 필드** — `UpdateParams`와 `MemoryService.update()`가 `project_id`를 받아 memory를 프로젝트 간에 이동시킬 수 있다. 검증·저장 계층 연동과 프로젝트 재할당·필드 보존 테스트를 포함한다. (`app/core/schemas/requests.py`, `app/core/services/memory.py`)
+
+### Fixed
+
+- **대시보드 별표 컨트롤 노출** — 목록의 별 버튼이 `opacity:0; width:0`이라 자리조차 차지하지 않고 행 hover에서만 나타났다. 아무것도 별표되지 않은 초기 상태에서는 찾을 방법이 없었고 hover 때 행이 흔들렸다. 이제 항상 0.35 투명도로 배치되고 hover/키보드 선택/활성 시 완전 불투명이 된다. 상세 페이지에는 별 버튼 자체가 없어 헤더에 낙관적 토글(실패 시 롤백 + 오류 보고)을 추가했다. CSS는 `.header-buttons` 아래로 스코프해 일반 `button:hover` 규칙이 별표된 별을 회색으로 덮어쓰지 않게 했다. (`app/web/static/js/pages/memories.js`, `app/web/static/js/pages/memory-detail.js`)
+- **New Memory 폼 검증을 `AddParams` 하한에 맞춤** — 폼은 10자 미만만 거부했지만 `AddParams.content`는 100자를 요구해, 10~99자 본문이 클라이언트 검증을 통과한 뒤 422로 돌아왔다. 하한 100자는 의도된 설계이므로(영구 memory는 충분한 내용이어야 하고 짧은 메모는 pin의 몫) 하한을 낮추는 대신 폼을 맞췄다. 오류 메시지도 읽을 수 없었다 — API 클라이언트가 `errorData.message`만 읽어 FastAPI의 `{detail: [{loc, msg}]}` 형태에서는 "HTTP 422: Unprocessable Content"만 남았다. `extractErrorMessage`가 app envelope·`HTTPException` detail 문자열·Pydantic detail 배열을 모두 해석해 이제 모든 엔드포인트의 422가 필드와 이유를 밝힌다. (`app/web/static/js/pages/create-memory.js`, `app/web/static/js/services/api-client.js`)
+
 ## [1.36.1] - 2026-07-16
 
 **같은 프로젝트의 aggregate dead letter가 여럿일 때 Retry all이 UNIQUE constraint로 실패하던 버그를 고쳤다.**
