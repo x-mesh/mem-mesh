@@ -132,6 +132,8 @@ class MemoryDetailPage extends HTMLElement {
       this.dedupeMemory();
     } else if (target.classList.contains('back-btn')) {
       this.goBack();
+    } else if (target.classList.contains('star-btn')) {
+      this.toggleStar();
     } else if (target.classList.contains('share-btn')) {
       this.shareMemory();
     } else if (target.classList.contains('export-btn')) {
@@ -972,6 +974,38 @@ class MemoryDetailPage extends HTMLElement {
     return id.startsWith('relay:') || source === 'relay' || client.startsWith('relay:');
   }
 
+  /** Toggle this memory's star. Optimistic — repaint first, roll back on failure. */
+  async toggleStar() {
+    const api = window.app?.apiClient;
+    if (!api || !this.memory) return;
+    const wasStarred = !!this.memory.is_starred;
+    const next = !wasStarred;
+
+    this.memory.is_starred = next;
+    this._paintStar(next);
+
+    try {
+      if (next) await api.post(`/memories/${this.memoryId}/star`, {});
+      else await api.delete(`/memories/${this.memoryId}/star`);
+    } catch (error) {
+      // The star never reached the server, so the UI must not claim otherwise.
+      this.memory.is_starred = wasStarred;
+      this._paintStar(wasStarred);
+      window.app?.errorHandler?.showError(
+        error?.data?.detail || error?.message || 'Failed to update star'
+      );
+    }
+  }
+
+  /** Paint the header star to a given state (no state mutation). */
+  _paintStar(isStarred) {
+    const btn = this.querySelector('.star-btn');
+    if (!btn) return;
+    btn.classList.toggle('active', isStarred);
+    btn.title = isStarred ? 'Remove star' : 'Add star';
+    btn.querySelector('svg')?.setAttribute('fill', isStarred ? 'currentColor' : 'none');
+  }
+
   async shareMemory() {
     const api = window.app?.apiClient;
     const eh = window.app?.errorHandler;
@@ -1481,6 +1515,9 @@ class MemoryDetailPage extends HTMLElement {
                 <path d="M20.49 9C19.9828 7.56678 19.1209 6.28392 17.9845 5.27493C16.8482 4.26595 15.4745 3.56905 13.9917 3.24575C12.5089 2.92246 10.9652 2.98546 9.51691 3.42597C8.06861 3.86648 6.76302 4.66921 5.64 5.76L1 10M23 14L18.36 18.24C17.237 19.3308 15.9314 20.1335 14.4831 20.574C13.0348 21.0145 11.4911 21.0775 10.0083 20.7542C8.52547 20.431 7.1518 19.7341 6.01547 18.7251C4.87913 17.7161 4.01717 16.4332 3.51 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </button>
+            <button class="star-btn${this.memory?.is_starred ? ' active' : ''}" title="${this.memory?.is_starred ? 'Remove star' : 'Add star'}">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="${this.memory?.is_starred ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            </button>
             <button class="share-btn${this._isRelayShareableKind(this.memory) ? '' : ' share-btn--off'}" title="${this._isRelayShareableKind(this.memory) ? 'Share to relay' : "'" + (this.memory?.category || '') + "' is not team-shareable"}">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
             </button>
@@ -1748,6 +1785,11 @@ style.textContent = `
   }
 
   .share-btn--off { opacity: 0.35; }
+
+  /* Scoped under .header-buttons so these outrank the generic button:hover rule,
+     which would otherwise repaint a starred star back to the muted text color. */
+  .header-buttons .star-btn.active { color: #f59e0b; border-color: #f59e0b; }
+  .header-buttons .star-btn:hover { color: #f59e0b; border-color: #f59e0b; }
 
   .edit-btn {
     background: var(--primary-color) !important;

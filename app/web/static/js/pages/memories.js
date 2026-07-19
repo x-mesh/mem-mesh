@@ -3010,16 +3010,16 @@ style.textContent = `
     display: flex;
     align-items: center;
     flex-shrink: 0;
-    opacity: 0;
-    width: 0;
-    overflow: hidden;
-    transition: opacity 0.15s, width 0.15s, color 0.15s;
+    /* Always laid out — a hover-only star is unfindable when nothing is starred
+       yet, and a zero-width one shifts the row on hover. Dimmed until hovered. */
+    opacity: 0.35;
+    width: 18px;
+    transition: opacity 0.15s, color 0.15s;
   }
   .mem-row:hover .mem-star-btn,
   .mem-row.keyboard-selected .mem-star-btn,
   .mem-star-btn.active {
     opacity: 1;
-    width: 18px;
   }
   .mem-star-btn.active { color: #f59e0b; }
   .mem-star-btn:hover { color: #f59e0b; }
