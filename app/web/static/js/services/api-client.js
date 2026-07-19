@@ -125,7 +125,7 @@ export class APIClient {
         const errorData = await response.json().catch(() => ({}));
         throw new APIError(
           response.status,
-          errorData.message || `HTTP ${response.status}: ${response.statusText}`,
+          this.extractErrorMessage(response, errorData),
           errorData
         );
       }
@@ -146,7 +146,39 @@ export class APIClient {
       throw new APIError(0, error.message || 'Network error', { originalError: error });
     }
   }
-  
+
+  /**
+   * Build a human-readable message from an error response body.
+   *
+   * Three shapes reach here: this app's envelope ({message}), FastAPI's
+   * HTTPException ({detail: "..."}), and Pydantic validation ({detail: [{loc,
+   * msg}, ...]}). Without the last case a 422 surfaces as the bare
+   * "HTTP 422: Unprocessable Content", which says nothing about which field
+   * failed or why.
+   */
+  extractErrorMessage(response, errorData) {
+    if (errorData?.message) return errorData.message;
+
+    const detail = errorData?.detail;
+    if (typeof detail === 'string' && detail) return detail;
+
+    if (Array.isArray(detail) && detail.length) {
+      const parts = detail
+        .map(item => {
+          // loc is ["body", "content"] — the leading source is noise to a user.
+          const field = Array.isArray(item?.loc)
+            ? item.loc.filter(p => p !== 'body' && p !== 'query' && p !== 'path').join('.')
+            : '';
+          const msg = item?.msg || 'invalid value';
+          return field ? `${field}: ${msg}` : msg;
+        })
+        .filter(Boolean);
+      if (parts.length) return parts.join('; ');
+    }
+
+    return `HTTP ${response.status}: ${response.statusText}`;
+  }
+
   /**
    * GET request
    */

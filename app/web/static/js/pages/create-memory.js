@@ -228,11 +228,17 @@ class CreateMemoryPage extends HTMLElement {
   validateForm() {
     const errors = [];
     
-    // Content is required and must be between 10-50000 characters
+    // Mirrors AddParams.content (app/core/schemas/requests.py): 100-50000 chars.
+    // The floor is 100, not 10 — a permanent memory must be substantive, and a
+    // shorter note belongs in a pin. Keep these in sync or the form submits
+    // 10-99 char content that the API rejects with a 422.
     if (!this.formData.content.trim()) {
       errors.push('Content is required');
-    } else if (this.formData.content.trim().length < 10) {
-      errors.push('Content must be at least 10 characters');
+    } else if (this.formData.content.trim().length < 100) {
+      errors.push(
+        'Content must be at least 100 characters — permanent memories need ' +
+        'enough context to be useful later. Use a pin for short notes.'
+      );
     } else if (this.formData.content.trim().length > 50000) {
       errors.push('Content must be less than 50,000 characters');
     }
@@ -278,14 +284,15 @@ class CreateMemoryPage extends HTMLElement {
     const charCount = this.querySelector('.char-count');
     if (charCount) {
       const count = this.formData.content.length;
-      charCount.textContent = `${count}/50,000`;
-      
-      if (count < 10) {
+
+      // Below the floor, count against 100 — the 50,000 ceiling is not the
+      // number the user is fighting, and "12/50,000" reads as plenty of room.
+      if (count < 100) {
+        charCount.textContent = `${count}/100 minimum`;
         charCount.className = 'char-count error';
-      } else if (count > 9000) {
-        charCount.className = 'char-count warning';
       } else {
-        charCount.className = 'char-count';
+        charCount.textContent = `${count}/50,000`;
+        charCount.className = count > 9000 ? 'char-count warning' : 'char-count';
       }
     }
   }
@@ -573,7 +580,7 @@ class CreateMemoryPage extends HTMLElement {
             <textarea 
               id="content" 
               name="content" 
-              placeholder="Enter your memory content here... (minimum 10 characters)"
+              placeholder="Enter your memory content here... (minimum 100 characters)"
               rows="12"
               required
             ></textarea>
