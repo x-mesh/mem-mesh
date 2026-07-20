@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.0] - 2026-07-20
+
+**두 노드를 실제로 띄우고 실데이터를 흘려 relay hub 전 구간을 검증했고, 그 과정에서 조용히 실패하던 버그 4건을 찾아 고쳤다. reconcile의 NLI pre-gate는 운영 데이터로 측정한 뒤 제거했다.**
+
+WHY: relay federation은 단위 테스트가 모두 통과하는데도 실사용에서 확인된 적이 없었다. personal 노드와 team hub를 각각 띄우고 메모리 131건을 실제로 흘려보내자 네 가지 실패가 드러났다. 공통점은 전부 **조용하다**는 것이다 — `hub_status=ok`를 반환하며 결과만 비고, 허브 연결은 정상인데 전달만 404가 나고, digest는 dead_letter로 죽는다. 어느 것도 에러로 보이지 않아 테스트로는 잡히지 않았다.
+
+### Fixed
+
+- **federated `scope=all`에서 hub 결과가 구조적으로 전멸하던 문제** — RRF는 순위만 보는데, hub weight 0.75·k=60에서 로컬 10위(0.014286)가 허브 1위(0.012295)보다 높다. 교차점이 로컬 22위라 `limit` 상한(20)으로는 도달 불가능해, hub 결과를 가져와 랭킹한 뒤 항상 잘라냈다. 양쪽이 동일 임베딩 모델을 쓰므로 코사인 점수가 직접 비교 가능하다는 점을 이용해 **점수 기반 융합**으로 교체했다. 라벨링 질의 실측에서 hub 전용 어휘는 hub가 1위로 올라오고, 로컬 전용 어휘는 로컬 100%를 유지한다. `relay_federated_hub_weight`는 순위 배수라 점수 공간으로 옮겨지지 않아 더 이상 적용되지 않으며(값을 바꿔둔 경우 시작 시 1회 경고), 로컬 선호는 `hub_penalty`로 옮겼다. (`app/core/services/relay_fusion.py`, `app/core/services/federated_search.py`)
+- **`exclude_source_node`가 KNN 결과를 자른 뒤 적용되던 문제** — `relay_memory_vec`에 노드 컬럼이 없어 최근접 `limit*3`을 먼저 뽑고 제외를 나중에 걸었다. 제외 대상 노드가 이웃을 독점하면(federated 호출자에게는 통상적인 상황) 후보가 전멸해 0건이 반환됐다. 필요한 over-fetch가 그 노드의 corpus 크기에 비례해 고정 배수로는 해결이 불가능하다. 인덱스에 `source_node_id`를 추가하고 제외를 스캔 내부로 옮겼다. 인덱스는 최초 사용 시 자동 재구축되며, 임베딩은 `relay_item_enrichment`에 보존돼 있어 **재임베딩이 발생하지 않는다**. 1024차원 실측에서 수정 전 0건/7.0ms → 수정 후 10건/2.6ms로 정확성과 속도가 함께 개선됐다. (`app/core/services/relay.py`)
+- **ingest URL만 `/api/relay/v1` prefix를 벗기지 않던 문제** — 형제 빌더 5개(health·auth_check·search·pair·digest)는 모두 벗기는데 ingest만 누락돼, hub를 `https://hub/api/relay/v1`로 설정하면 경로가 중복돼 404가 났다. 같은 설정에서 나머지 호출은 정상이라 대시보드는 "연결됨·토큰 유효"로 표시되고 전달만 실패해, 설정 오류가 배달 오류로 위장됐다. (`app/core/services/relay.py`)
+- **LLM이 반환한 digest 필드 타입 불일치로 aggregate가 dead_letter 되던 문제** — v1.36.0이 `rollup`에 대해 추가한 방어가 나머지 필드에는 없었다. 실제 모델이 `narrative`를 섹션 리스트로, `recent_activity`를 단일 dict로 반환하자 검증이 hard-fail 해 job이 실패하고, 재시도 소진 후 그 프로젝트 digest가 영구히 생성되지 않았다. LLM이 채우는 전 필드로 coercion을 확장했다. `narrative`는 섹션이 digest의 실질 내용이므로 버리지 않고 평탄화한다. (`app/core/schemas/relay.py`)
+- **대시보드 저장이 노출되지 않은 worker task를 삭제하던 문제** — 설정 페이지는 매 저장마다 전체 task 목록을 선언적으로 전송하는데, 그 목록이 렌더된 체크박스로만 구성된다. reconcile 체크박스를 감춘 뒤로는 저장 한 번에 `relay.worker_tasks`에서 reconcile이 빠지고 `reconcile.enabled`가 `false`로 덮여, 사용자가 건드린 적 없는 write-time 감지까지 함께 꺼졌다. UI가 표현할 수 없는 task는 이월하고, `reconcile.enabled`는 병합된 최종 목록에서 도출한다. (`app/web/dashboard/route_modules/settings_llm.py`)
+- **read pool 병렬성 테스트가 CI를 red로 만들던 문제** — `test_reads_run_in_parallel`이 순차/병렬 실행 시간을 비교해 25% 이상 단축을 요구했다. 공유 러너에서는 CPU 바운드 쿼리가 안정적으로 빨라지지 않아(관측: 0.336s vs 0.357s) 회귀가 아니라 경합으로 실패했고, **CI와 Docker publish의 test gate 두 곳을 동시에 막고 있었다**. 동시 읽기 수만큼의 배리어를 두어 그 수가 동시에 쿼리 안에 있을 때만 열리게 바꿨다 — 임계값이 사라져 러너 부하와 무관해졌고 실행 시간도 6분대에서 0.7초로 줄었다. (`tests/test_read_pool.py`)
+
+### Changed
+
+- **reconcile NLI pre-gate를 age filter로 교체** — 운영 노드의 `decision` 메모리 1,094건으로 측정한 결과, NLI가 정탐과 오탐의 순서를 뒤집었다. 같은 날 중복 기록(오탐)이 0.84~0.99를 받고, 실제 결정 번복(정탐)은 0.20~0.26에 머물렀다. 게이트로서 precision/recall 각 50%였고 배포된 임계값 0.7에서는 통과 건수가 0이라 **정탐을 걸러내기만 했다**. 원인은 임계값이 아니라 과제 불일치다 — XNLI는 문장 간 부정을 재지만, 번복은 보통 앞 결정의 논리를 다시 서술한 뒤 뒤집기 때문에 함의로 읽힌다. 입력을 enrichment abstract로 바꿔 512자 절단과 대화체 노이즈를 제거해도(후보 5.7배 감소, 상관 -0.02→+0.21) 순서는 뒤집힌 채였다. 실제로 분리에 성공한 신호는 작성 시점 간격이었다. cross-encoder를 걷어내며 워커당 상주 메모리 약 1.6GB가 함께 줄었다. (`app/core/services/reconcile.py`, `app/core/services/relay_worker.py`, `app/cli/relay.py`)
+- **reconcile을 대시보드에서 비노출** — 사용하지 않는 기능의 진입점을 걷어냈다. 백엔드와 `--tasks reconcile`은 그대로라 손으로 켜면 동작한다. curation 페이지는 유지했다 — Docs 탭이 doc_proposals를 제공하고 이는 에이전트 hook 규칙이 의존하며, Improve·Activity 탭도 사용 중이다. (`app/web/static/js/pages/settings-page.js`, `app/web/static/js/pages/curation.js`, `app/core/config.py`)
+- **NLI cross-encoder를 워커 인스턴스 간 공유** — `--concurrency N`이 모델을 N번 로드해 메모리를 소진했다. `EmbeddingService._MODEL_CACHE`와 동일한 클래스 캐시를 적용했다. 위 reconcile 변경으로 이 경로는 현재 미사용이나, `enable_conflict_detection`을 켠 write-time 감지에는 여전히 유효하다. (`app/core/services/conflict_detector.py`)
+
+### Added
+
+- **relay hub e2e 테스트 68건** — 두 개의 실제 DB를 잇는 전달 경로(도착·중복·재전송·수정 대체·버전 역전·장애 재시도와 백오프·409 dead-letter·토큰 실패·동시 워커), 파이프라인(retraction·시크릿 차단·다중 노드 격리·item→임베딩→벡터→검색), 그리고 다른 모든 테스트가 fake로 대체해온 `RelayHTTPClient` wire 레이어(status 매핑·에러 본문·URL 조립). 마지막 항목이 위 ingest URL 버그를 찾아냈다. (`tests/test_relay_e2e_delivery.py`, `tests/test_relay_e2e_pipeline.py`, `tests/test_relay_http_client.py`, `tests/test_relay_vector_prefilter.py`)
+- **worktree별 개발 환경 격리** — 앱 기본 DB 경로가 사용자 단위 절대 경로라 모든 worktree가 같은 DB를 공유했고, 두 노드 relay 테스트가 성립하지 않았다. `MEM_MESH_DATABASE_PATH` 설정 여부로 판단해 미설정 시 worktree 로컬 DB를 쓰고, 포트도 8010부터 빈 자리를 자동 선택한다. `make relay-worker` 타깃도 추가했다. (`Makefile`, `scripts/find_free_port.py`)
+
 ## [1.37.0] - 2026-07-19
 
 **다른 프로젝트가 보낸 리포트를 세션 시작 컨텍스트의 전용 Incoming 섹션으로 분리하고, memory를 프로젝트 간에 옮길 수 있게 했다. 대시보드의 별표 UI와 New Memory 422 오류도 함께 고쳤다.**
