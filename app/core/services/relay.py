@@ -3893,14 +3893,77 @@ class RelayService:
             await self.db.execute(f"""
                 CREATE VIRTUAL TABLE IF NOT EXISTS relay_memory_vec USING vec0(
                     current_memory_id TEXT PRIMARY KEY,
+                    source_node_id TEXT,
                     embedding FLOAT[{self.db.embedding_dim}]
                 )
             """)
         except Exception as exc:
             logger.warning("Relay sqlite-vec table setup skipped: %s", exc)
+            return
+        await self._migrate_vector_source_node_id()
+
+    async def _migrate_vector_source_node_id(self) -> None:
+        """Rebuild relay_memory_vec once, adding the source_node_id column.
+
+        vec0 has no ALTER TABLE, so an index created before that column existed
+        must be dropped and refilled. This is cheap and offline-safe: the
+        embeddings are already persisted in relay_item_enrichment, so nothing is
+        re-embedded — no model load, no GPU, no network.
+
+        Without the column, exclude_source_node could only run as a post-filter
+        on the KNN output, which silently returned zero rows whenever the
+        excluded node dominated the neighbourhood.
+        """
+        try:
+            row = await self.db.fetchone(
+                "SELECT sql FROM sqlite_master WHERE type='table' "
+                "AND name='relay_memory_vec'"
+            )
+            if not row or "source_node_id" in (row["sql"] or ""):
+                return
+
+            logger.info("Rebuilding relay_memory_vec to add source_node_id")
+            await self.db.execute("DROP TABLE relay_memory_vec")
+            await self.db.execute(f"""
+                CREATE VIRTUAL TABLE relay_memory_vec USING vec0(
+                    current_memory_id TEXT PRIMARY KEY,
+                    source_node_id TEXT,
+                    embedding FLOAT[{self.db.embedding_dim}]
+                )
+            """)
+            rows = await self.db.fetchall("""
+                SELECT c.id, c.source_node_id, e.embedding_json
+                FROM relay_memory_current c
+                JOIN relay_item_enrichment e
+                  ON e.current_memory_id = c.id
+                 AND e.content_hash = c.content_hash
+                WHERE e.embedding_json IS NOT NULL AND e.embedding_json != ''
+                """)
+            restored = 0
+            for entry in rows:
+                values = _json_loads(entry["embedding_json"], [])
+                if len(values) != self.db.embedding_dim:
+                    continue
+                await self.db.execute(
+                    "INSERT INTO relay_memory_vec "
+                    "(current_memory_id, source_node_id, embedding) VALUES (?, ?, ?)",
+                    (
+                        entry["id"],
+                        entry["source_node_id"],
+                        _json_dumps([float(v) for v in values]),
+                    ),
+                )
+                restored += 1
+            logger.info("relay_memory_vec rebuilt: %d vectors restored", restored)
+        except Exception as exc:
+            logger.warning("relay_memory_vec migration skipped: %s", exc)
 
     async def _write_relay_vector_locked(
-        self, *, current_memory_id: str, embedding_values: Sequence[float]
+        self,
+        *,
+        current_memory_id: str,
+        embedding_values: Sequence[float],
+        source_node_id: Optional[str] = None,
     ) -> None:
         if len(embedding_values) != self.db.embedding_dim:
             logger.warning(
@@ -3916,16 +3979,23 @@ class RelayService:
         if not table:
             return
         embedding_json = _json_dumps([float(value) for value in embedding_values])
+        if source_node_id is None:
+            owner = await self.db.fetchone(
+                "SELECT source_node_id FROM relay_memory_current WHERE id = ?",
+                (current_memory_id,),
+            )
+            source_node_id = owner["source_node_id"] if owner else None
         await self.db.execute(
             "DELETE FROM relay_memory_vec WHERE current_memory_id = ?",
             (current_memory_id,),
         )
         await self.db.execute(
             """
-            INSERT INTO relay_memory_vec (current_memory_id, embedding)
-            VALUES (?, ?)
+            INSERT INTO relay_memory_vec
+                (current_memory_id, source_node_id, embedding)
+            VALUES (?, ?, ?)
             """,
-            (current_memory_id, embedding_json),
+            (current_memory_id, source_node_id, embedding_json),
         )
 
     async def _write_materialized_memory_vector_locked(
@@ -4029,18 +4099,29 @@ class RelayService:
             ]
             if len(query_embedding) != self.db.embedding_dim:
                 return None
-            # Over-fetch more vec candidates when a kind filter applies, since
-            # the filter runs on the outer join and discards candidates.
+            # exclude_source_node is filtered INSIDE the KNN scan, so `k`
+            # applies to surviving rows. As a post-filter it silently returned
+            # zero whenever the excluded node owned the whole neighbourhood —
+            # and the over-fetch needed to compensate scales with that node's
+            # corpus, which is unbounded, so no fixed multiplier can fix it.
+            #
+            # The remaining outer filters (team_project_ids, kinds) live on
+            # relay_memory_current, not in the vec index, so they still need
+            # over-fetch headroom.
+            inner_where = ["embedding MATCH ?"]
+            inner_params: list[Any] = [_json_dumps(query_embedding)]
+            if exclude_source_node:
+                inner_where.append("source_node_id != ?")
+                inner_params.append(exclude_source_node)
             overfetch = limit * (6 if kinds else 3)
-            params: list[Any] = [_json_dumps(query_embedding), overfetch]
+            inner_params.append(overfetch)
+
+            params: list[Any] = list(inner_params)
             where = ["c.visible = 1"]
             if team_project_ids:
                 placeholders = ",".join("?" for _ in team_project_ids)
                 where.append(f"c.team_project_id IN ({placeholders})")
                 params.extend(team_project_ids)
-            if exclude_source_node:
-                where.append("c.source_node_id != ?")
-                params.append(exclude_source_node)
             if kinds:
                 placeholders = ",".join("?" for _ in kinds)
                 where.append(f"c.authoritative_kind IN ({placeholders})")
@@ -4057,7 +4138,7 @@ class RelayService:
                 FROM (
                     SELECT current_memory_id, distance
                     FROM relay_memory_vec
-                    WHERE embedding MATCH ?
+                    WHERE {' AND '.join(inner_where)}
                     ORDER BY distance
                     LIMIT ?
                 ) ve
