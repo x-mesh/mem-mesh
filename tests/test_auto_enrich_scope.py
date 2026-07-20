@@ -223,3 +223,42 @@ class TestWorkerSettingsApi:
     def test_put_rejects_unknown_scope(self, client):
         r = client.put("/api/settings/worker", json={"auto_enrich_scope": "nope"})
         assert r.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_saving_worker_tasks_preserves_unexposed_reconcile(
+        self, client, temp_db
+    ):
+        """A node with reconcile on must not lose it when the page saves.
+
+        The dashboard no longer renders a reconcile checkbox, so its save states
+        a task list that can never contain reconcile. Replacing the stored list
+        wholesale would silently disable both the worker task and write-time
+        detection on any node that had it enabled.
+        """
+        await temp_db.set_app_config("relay.worker_tasks", "outbox,item,reconcile")
+        await temp_db.set_app_config("reconcile.enabled", "true")
+
+        resp = client.put(
+            "/api/settings/worker", json={"worker_tasks": ["outbox", "aggregate"]}
+        )
+        assert resp.status_code == 200
+
+        stored = await temp_db.get_app_config("relay.worker_tasks")
+        tasks = stored.split(",")
+        assert "reconcile" in tasks, "an unexposed task must survive a save"
+        # What the page did submit still applies.
+        assert "aggregate" in tasks
+        assert "item" not in tasks
+        assert await temp_db.get_app_config("reconcile.enabled") == "true"
+
+    @pytest.mark.asyncio
+    async def test_node_without_reconcile_stays_without_it(self, client, temp_db):
+        """Carrying tasks over must not resurrect one that was never enabled."""
+        await temp_db.set_app_config("relay.worker_tasks", "outbox,item")
+
+        resp = client.put("/api/settings/worker", json={"worker_tasks": ["outbox"]})
+        assert resp.status_code == 200
+
+        stored = await temp_db.get_app_config("relay.worker_tasks")
+        assert stored.split(",") == ["outbox"]
+        assert await temp_db.get_app_config("reconcile.enabled") == "false"
