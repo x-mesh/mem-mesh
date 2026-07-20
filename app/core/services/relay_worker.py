@@ -1082,15 +1082,13 @@ class RelayWorker:
                 else:
                     stats["aggregate_failed"] += 1
 
-        if (
-            self.reconcile_service is not None
-            and self.reconcile_enricher is not None
-            and self.conflict_detector is not None
-        ):
+        # No longer gated on conflict_detector: reconcile dropped the NLI
+        # pre-gate, and requiring the detector here would keep loading a model
+        # nothing reads.
+        if self.reconcile_service is not None and self.reconcile_enricher is not None:
             result = await self.reconcile_service.process_next(
                 worker_id=self.worker_id,
                 enricher=self.reconcile_enricher,
-                conflict_detector=self.conflict_detector,
             )
             if result.get("job_id"):
                 if result.get("processed"):
