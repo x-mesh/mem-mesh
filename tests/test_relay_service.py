@@ -2325,3 +2325,91 @@ async def test_fetch_project_digest_timeout_propagates():
             team_project_id="team-proj",
             timeout=3.0,
         )
+
+
+class TestRelayDigestCoercion:
+    """A real LLM returns these shapes; validation must not lose the digest.
+
+    Observed live against kiro/claude-haiku-4.5 while draining the aggregate
+    queue: narrative arrived as a list of themed sections and recent_activity as
+    a single dict. Both hard-failed validation, failing the job — and after
+    max_attempts the project's digest is dead-lettered and never regenerates.
+    """
+
+    def test_narrative_as_a_list_of_sections_is_flattened(self):
+        from app.core.schemas.relay import RelayDigestData
+
+        data = RelayDigestData.from_result(
+            {
+                "narrative": [
+                    {"category": "Cache Eviction", "items": ["a", "b"]},
+                    {"category": "Embedding fixes", "items": ["c"]},
+                ]
+            }
+        )
+
+        assert isinstance(data.narrative, str)
+        # The sections are the content — they survive rather than being dropped.
+        assert "Cache Eviction" in data.narrative
+        assert "Embedding fixes" in data.narrative
+        assert "a" in data.narrative and "c" in data.narrative
+
+    def test_recent_activity_as_a_single_dict_becomes_a_list(self):
+        from app.core.schemas.relay import RelayDigestData
+
+        data = RelayDigestData.from_result(
+            {"recent_activity": {"generated_at": "2026-07-20", "node": "personal"}}
+        )
+
+        assert isinstance(data.recent_activity, list)
+        assert data.recent_activity[0]["node"] == "personal"
+
+    def test_the_exact_live_payload_validates(self):
+        """Both wrong types at once — the shape that actually failed."""
+        from app.core.schemas.relay import RelayDigestData
+
+        data = RelayDigestData.from_result(
+            {
+                "rollup": {"total": 50},
+                "contributors": ["personal-node"],
+                "recent_activity": {"generated_at": "2026-07-20T06:00:00Z"},
+                "narrative": [{"category": "Cache", "items": ["evictions (2)"]}],
+                "source_memory_ids": ["m1", "m2"],
+            }
+        )
+
+        assert data.rollup == {"total": 50}
+        assert len(data.recent_activity) == 1
+        assert "Cache" in data.narrative
+
+    def test_rollup_as_a_list_is_kept(self):
+        from app.core.schemas.relay import RelayDigestData
+
+        data = RelayDigestData.from_result({"rollup": [{"k": 1}]})
+        assert data.rollup == {"items": [{"k": 1}]}
+
+    def test_scalar_where_a_string_list_belongs(self):
+        from app.core.schemas.relay import RelayDigestData
+
+        data = RelayDigestData.from_result(
+            {"contributors": "solo-node", "source_memory_ids": "m1"}
+        )
+        assert data.contributors == ["solo-node"]
+        assert data.source_memory_ids == ["m1"]
+
+    def test_well_formed_output_is_untouched(self):
+        """Coercion must not rewrite a generator that already got it right."""
+        from app.core.schemas.relay import RelayDigestData
+
+        data = RelayDigestData.from_result(
+            {
+                "rollup": {"total": 3},
+                "contributors": ["a", "b"],
+                "recent_activity": [{"x": 1}],
+                "narrative": "plain prose",
+                "source_memory_ids": ["m1"],
+            }
+        )
+        assert data.narrative == "plain prose"
+        assert data.recent_activity == [{"x": 1}]
+        assert data.contributors == ["a", "b"]
