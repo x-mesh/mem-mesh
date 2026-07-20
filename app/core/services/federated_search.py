@@ -2,10 +2,11 @@
 
 Clients (MCP / dashboard) only ever talk to their personal mem-mesh node; this
 service is how that node reaches the team hub server-side. On ``scope="all"``
-it runs the local search and a hub query in parallel and fuses them with
-weighted RRF (local outranks hub at equal rank). The hub being slow or down
-NEVER fails the search — it degrades to local results with a ``hub_status``
-flag on the response.
+it runs the local search and a hub query in parallel and fuses them on raw
+similarity — both corpora are scored by the same embedding model, so their
+scores are directly comparable. The hub being slow or down NEVER fails the
+search — it degrades to local results with a ``hub_status`` flag on the
+response.
 
 Deliberately NOT wired into UnifiedSearchService: the core pipeline (cache,
 noise filter, rerank) stays local-only and free of relay/httpx imports.
@@ -23,7 +24,7 @@ from typing import Any, Awaitable, Callable, Optional
 from ..schemas.relay import RelaySearchRequest, RelaySearchResult
 from ..schemas.responses import SearchResponse, SearchResult
 from .relay import RelayHTTPClient, RelayService
-from .relay_fusion import fuse_relay_results_rrf
+from .relay_fusion import fuse_relay_results_by_score
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,14 @@ HUB_OK = "ok"
 HUB_UNAVAILABLE = "unavailable"
 HUB_SKIPPED = "skipped"
 
-_FUSION_INTERNAL_KEYS = ("sources", "rrf_score")
+_FUSION_INTERNAL_KEYS = ("sources", "rrf_score", "fusion_score")
+
+# Shipped default of relay_federated_hub_weight. Only a value the operator
+# actually changed is worth warning about.
+_DEFAULT_HUB_WEIGHT = 0.75
+
+# Process-wide latch so the deprecation warning fires once, not per search.
+_hub_weight_warned = False
 
 # Shared connection pool for hub calls. FederatedHubSearch instances are built
 # per-request, so a per-instance client would open a fresh TCP+TLS connection
@@ -159,6 +167,29 @@ class FederatedHubSearch:
             "timeout": timeout,
             "hub_weight": hub_weight,
         }
+
+    def _warn_hub_weight_ignored_once(self) -> None:
+        """Tell the operator their configured hub weight no longer does anything.
+
+        Score fusion replaced rank fusion, and a rank multiplier has no honest
+        translation into score space. Silently dropping a value someone set is
+        worse than the original bug was to diagnose, so say it out loud — once
+        per process, since this runs on every federated search.
+        """
+        global _hub_weight_warned
+        if _hub_weight_warned:
+            return
+        hub_weight = getattr(self, "_hub_weight_effective", _DEFAULT_HUB_WEIGHT)
+        if hub_weight == _DEFAULT_HUB_WEIGHT:
+            return
+        _hub_weight_warned = True
+        logger.warning(
+            "relay_federated_hub_weight=%.2f is ignored: federated search now "
+            "fuses on similarity score, not rank, so a rank multiplier has no "
+            "effect. To bias results toward local memories, use the "
+            "hub_penalty argument (a flat margin in score units) instead.",
+            hub_weight,
+        )
 
     def _breaker_params(self) -> tuple[int, float]:
         threshold = int(
@@ -302,18 +333,22 @@ class FederatedHubSearch:
             local_response.hub_status = hub_status
             return local_response
 
-        # Set by _hub_config() during fetch_hub_results (DB-backed); fall back to
-        # the settings default if the hub was skipped before config load.
-        hub_weight = getattr(
-            self,
-            "_hub_weight_effective",
-            getattr(self.settings, "relay_federated_hub_weight", 0.75),
-        )
-        fused = fuse_relay_results_rrf(
+        # Fuse on raw similarity, not rank. Both sides are scored by the same
+        # embedding model, so the scores are directly comparable — and rank
+        # fusion structurally truncated every hub result away (see
+        # fuse_relay_results_by_score).
+        #
+        # relay_federated_hub_weight is deliberately NOT applied here: it was a
+        # rank multiplier and does not survive the move to score space. Scores
+        # sit in a narrow band (unrelated hits still score ~0.5), so scaling a
+        # 0.561 hub hit by 0.75 yields 0.42 and loses to a 0.525 local hit that
+        # matches nothing — reinstating the very bug this replaces. Preferring
+        # local now belongs in hub_penalty, a flat margin in score units.
+        self._warn_hub_weight_ignored_once()
+        fused = fuse_relay_results_by_score(
             [r.model_dump() for r in local_response.results],
             [r.model_dump() for r in hub_results],
             limit=limit,
-            weights={"local": 1.0, "hub": hub_weight},
         )
         results = []
         for entry in fused:
