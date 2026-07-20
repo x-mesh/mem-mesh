@@ -11,7 +11,7 @@
 
 export class CurationPage extends HTMLElement {
   connectedCallback() {
-    this._activeTab = 'pending';
+    this._activeTab = 'improve';
     this._activityFilter = 'all';
     this._activityData = null;
     this._activityLoaded = false;
@@ -689,13 +689,14 @@ export class CurationPage extends HTMLElement {
     return `
       <div class="cur-page">
         <div class="cur-tabs">
-          <button class="cur-tab-btn cur-tab-active" data-tab="pending">Reconcile</button>
-          <button class="cur-tab-btn" data-tab="improve">Improve</button>
+          <button class="cur-tab-btn cur-tab-active" data-tab="improve">Improve</button>
           <button class="cur-tab-btn" data-tab="docs">Docs</button>
           <button class="cur-tab-btn" data-tab="activity">Activity</button>
         </div>
 
-        <div class="cur-tab-panel cur-tab-panel-pending" data-tab-panel="pending">
+        <!-- Reconcile panel: unreachable while the feature is unexposed.
+             Restore its tab button above to bring it back. -->
+        <div class="cur-tab-panel cur-tab-panel-pending" data-tab-panel="pending" hidden>
           <div class="cur-header">
             <h1>Reconcile Curation <span class="cur-count-badge">(<span class="cur-count">0</span>)</span></h1>
             <button class="cur-btn cur-refresh">Refresh</button>
@@ -705,7 +706,7 @@ export class CurationPage extends HTMLElement {
           <div class="cur-list"></div>
         </div>
 
-        <div class="cur-tab-panel cur-tab-panel-improve" data-tab-panel="improve" hidden>
+        <div class="cur-tab-panel cur-tab-panel-improve" data-tab-panel="improve">
           <div class="cur-header">
             <h1>Improve Proposals <span class="cur-count-badge">(<span class="cur-improve-count">0</span>)</span></h1>
             <button class="cur-btn cur-improve-refresh">Refresh</button>
@@ -735,7 +736,6 @@ export class CurationPage extends HTMLElement {
             <button class="cur-filter-btn cur-filter-active" data-filter="all">All</button>
             <button class="cur-filter-btn" data-filter="item">Enrichment</button>
             <button class="cur-filter-btn" data-filter="aggregate">Digest</button>
-            <button class="cur-filter-btn" data-filter="reconcile">Reconcile</button>
             <button class="cur-filter-btn" data-filter="maintenance">Maintenance</button>
           </div>
           <div class="cur-activity-list"></div>

@@ -159,10 +159,9 @@ export class SettingsPage extends HTMLElement {
           <span class="section-label">LLM Routing</span>
         </div>
         <div class="section-body">
-          <p class="section-desc">relay and reconcile use the shared Chat LLM above by default. Switch to a per-service dedicated LLM when needed.</p>
+          <p class="section-desc">relay uses the shared Chat LLM above by default. Switch to a per-service dedicated LLM when needed.</p>
           <p class="env-foot" id="llm-routing-chat-status"></p>
           ${this.renderLlmServiceBlock('relay', 'Relay')}
-          ${this.renderLlmServiceBlock('reconcile', 'Reconcile')}
           <div class="chat-actions">
             <button class="settings-btn-primary" id="llm-routing-save-btn">Save LLM Routing</button>
             <span id="llm-routing-meta" class="env-foot"></span>
@@ -183,7 +182,6 @@ export class SettingsPage extends HTMLElement {
               <label class="worker-task"><input type="checkbox" id="worker-task-outbox"><span class="worker-task-name">outbox</span><span class="worker-task-desc">Sync memories to the team hub (needs a hub token — set on the Relay page)</span></label>
               <label class="worker-task"><input type="checkbox" id="worker-task-item"><span class="worker-task-name">item</span><span class="worker-task-desc">AI-enrich each memory (title, abstract, tags) — needs an LLM</span></label>
               <label class="worker-task"><input type="checkbox" id="worker-task-aggregate"><span class="worker-task-name">aggregate</span><span class="worker-task-desc">Generate per-project digests — needs an LLM</span></label>
-              <label class="worker-task"><input type="checkbox" id="worker-task-reconcile"><span class="worker-task-name">reconcile</span><span class="worker-task-desc">Detect conflicting/duplicate memories for curation (also turns on write-time detection) — needs an LLM</span></label>
               <label class="worker-task"><input type="checkbox" id="worker-task-maintenance"><span class="worker-task-name">maintenance</span><span class="worker-task-desc">Run project-level batch Enrich / Improve jobs (Projects → Maintenance) — needs the Chat LLM</span></label>
               <label class="worker-task"><input type="checkbox" id="worker-task-overview"><span class="worker-task-name">overview</span><span class="worker-task-desc">Auto-refresh project Overviews on a schedule (per-project toggle on the Projects page; skips idle projects) — needs the Chat LLM</span></label>
             </div>
@@ -410,7 +408,6 @@ export class SettingsPage extends HTMLElement {
         this.querySelector('#chat-enabled')?.addEventListener('change', () => this.saveChatEnabled());
         this.querySelector('#llm-routing-save-btn')?.addEventListener('click', () => this.saveLlmRouting());
         this.querySelector('#relay-use-own')?.addEventListener('change', () => this.toggleLlmFields('relay'));
-        this.querySelector('#reconcile-use-own')?.addEventListener('change', () => this.toggleLlmFields('reconcile'));
         this.querySelector('#worker-save-btn')?.addEventListener('click', () => this.saveWorkerConfig());
         this.querySelector('#refresh-status-btn')?.addEventListener('click', () => this.loadStatus());
         this.querySelector('#change-model-btn')?.addEventListener('click', () => {
@@ -697,7 +694,7 @@ export class SettingsPage extends HTMLElement {
                 ? '<span class="env-src env-src-db">Shared Chat LLM configured</span> Services without a dedicated LLM use the Chat settings above.'
                 : '<span class="env-state off">Shared Chat LLM not configured</span> Set a key in Chat Assistant above, or configure a per-service dedicated LLM.';
         }
-        ['relay', 'reconcile'].forEach((svc) => {
+        ['relay'].forEach((svc) => {
             const s = data[svc] || {};
             const toggle = this.querySelector(`#${svc}-use-own`);
             if (toggle) toggle.checked = s.use_own === true;
@@ -728,7 +725,7 @@ export class SettingsPage extends HTMLElement {
 
     async saveLlmRouting() {
         const payload = {};
-        ['relay', 'reconcile'].forEach((svc) => {
+        ['relay'].forEach((svc) => {
             const block = { use_own: this.querySelector(`#${svc}-use-own`)?.checked ?? false };
             const provider = this.querySelector(`#${svc}-llm-provider`)?.value || '';
             if (provider) block.provider = provider;
@@ -754,7 +751,9 @@ export class SettingsPage extends HTMLElement {
     // ── Worker settings ──
 
     get workerTasks() {
-        return ['outbox', 'item', 'aggregate', 'reconcile', 'maintenance', 'overview'];
+        // reconcile is intentionally absent: the feature is not exposed while
+        // it is unused. Its backend still works if re-enabled by hand.
+        return ['outbox', 'item', 'aggregate', 'maintenance', 'overview'];
     }
 
     async loadWorkerConfig() {

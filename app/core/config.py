@@ -207,6 +207,9 @@ class Settings(BaseSettings):
         default=False,
         description="Enable conflict detection on memory add (opt-in)",
     )
+    # NLI conflict detection is no longer wired into reconcile (the pre-gate
+    # was replaced by an age filter) and is not exposed in the dashboard.
+    # These stay for the write-time detector, which is off by default.
     conflict_nli_model: str = Field(
         default="MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7",
         description="NLI cross-encoder model for contradiction detection",
@@ -576,6 +579,8 @@ class Settings(BaseSettings):
         default=False,
         description="Force relay to use relay_llm_* instead of the shared chat LLM",
     )
+    # Reconcile is unexposed: no dashboard control creates these, and the
+    # worker only runs the task when `--tasks reconcile` is passed by hand.
     reconcile_use_own_llm: bool = Field(
         default=False,
         description="Force reconcile to use reconcile_llm_* instead of the shared chat LLM",
