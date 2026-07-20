@@ -112,7 +112,10 @@ class TestModelLoadFailedFlag:
 
     def test_model_load_failed_flag(self, monkeypatch):
         """Model load failure should set _model_load_failed flag."""
-        service = ConflictDetectorService(preload=False)
+        # A model name no other test loads. The cross-encoder cache is
+        # process-shared, so using the default name would hit a warm entry left
+        # by an earlier test and never reach the patched constructor.
+        service = ConflictDetectorService(model_name="unloadable-nli", preload=False)
         assert service._model_load_failed is False
 
         # Simulate model load failure
@@ -373,3 +376,87 @@ class TestMemoryServiceWiring:
             assert service.conflict_detector is None
         finally:
             app.core.config._settings = original_settings
+
+
+class TestNliModelSharing:
+    """The NLI cross-encoder must be loaded once per process, not per instance.
+
+    `relay worker --concurrency N` builds N worker instances, each constructing
+    a ConflictDetectorService with preload=True. Loading mDeBERTa-v3-base N
+    times exhausted memory; the model is now shared via a class-level cache.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):
+        ConflictDetectorService._MODEL_CACHE.clear()
+        yield
+        ConflictDetectorService._MODEL_CACHE.clear()
+
+    def test_concurrent_instances_load_the_model_only_once(self, monkeypatch):
+        loads = []
+
+        class FakeCrossEncoder:
+            def __init__(self, model_name):
+                loads.append(model_name)
+
+        monkeypatch.setattr(
+            "app.core.services.conflict_detector.NLI_MODEL_AVAILABLE", True
+        )
+        monkeypatch.setattr(
+            "app.core.services.conflict_detector._CrossEncoder", FakeCrossEncoder
+        )
+
+        workers = [
+            ConflictDetectorService(model_name="stub-nli", preload=True)
+            for _ in range(8)
+        ]
+
+        assert len(loads) == 1, f"expected one load, got {len(loads)}"
+        # Every instance still ends up with a usable model — sharing, not skipping.
+        assert all(w._model is not None for w in workers)
+        assert len({id(w._model) for w in workers}) == 1
+
+    def test_a_different_model_name_gets_its_own_entry(self, monkeypatch):
+        loads = []
+
+        class FakeCrossEncoder:
+            def __init__(self, model_name):
+                loads.append(model_name)
+
+        monkeypatch.setattr(
+            "app.core.services.conflict_detector.NLI_MODEL_AVAILABLE", True
+        )
+        monkeypatch.setattr(
+            "app.core.services.conflict_detector._CrossEncoder", FakeCrossEncoder
+        )
+
+        a = ConflictDetectorService(model_name="nli-a", preload=True)
+        b = ConflictDetectorService(model_name="nli-b", preload=True)
+
+        assert loads == ["nli-a", "nli-b"]
+        assert a._model is not b._model
+
+    def test_a_load_failure_does_not_poison_the_shared_cache(self, monkeypatch):
+        """One instance failing must not leave a broken entry for the others."""
+        monkeypatch.setattr(
+            "app.core.services.conflict_detector.NLI_MODEL_AVAILABLE", True
+        )
+
+        def _raise(model_name):
+            raise RuntimeError("download failed")
+
+        monkeypatch.setattr("app.core.services.conflict_detector._CrossEncoder", _raise)
+        failed = ConflictDetectorService(model_name="nli-x", preload=True)
+        assert failed._model is None
+        assert failed._model_load_failed is True
+        assert "nli-x" not in ConflictDetectorService._MODEL_CACHE
+
+        class FakeCrossEncoder:
+            def __init__(self, model_name):
+                self.name = model_name
+
+        monkeypatch.setattr(
+            "app.core.services.conflict_detector._CrossEncoder", FakeCrossEncoder
+        )
+        recovered = ConflictDetectorService(model_name="nli-x", preload=True)
+        assert recovered._model is not None
