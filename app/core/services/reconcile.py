@@ -6,8 +6,19 @@ Drains the ``reconcile_queue`` populated by the write-time F1 sync gate
 1. **Claim** a pending row with a lease (mirrors the relay_queue_item pattern).
 2. **Revalidate** (C2 TOCTOU): if either memory was edited (content_hash drift)
    or deleted since enqueue, the job is stale — finish it without acting.
-3. **NLI pre-gate**: cheap contradiction check (reuses ConflictDetectorService).
-   No contradiction ⇒ likely a benign near-duplicate; finish without a relation.
+3. **Age pre-gate**: pairs written within ``min_age_gap_days`` are one piece of
+   work recorded twice, not a reversal; finish without a relation.
+
+   This replaced an NLI contradiction pre-gate, which was measured against 1094
+   real decision memories and ranked the wrong pairs. Two examples it scored
+   near zero: a retrieval recommendation reversed from "keep dense only" to
+   "adopt hybrid" (0.020), and a timeout whose diagnosis and fix were both
+   replaced (0.004). Meanwhile its top hit was a benign pair. As a gate it was
+   50% precision / 50% recall, and at its shipped 0.7 threshold it admitted
+   nothing at all — so it only ever subtracted. The reason is a task mismatch:
+   XNLI scores whether one sentence negates another, but a reversal usually
+   restates the earlier reasoning before overturning it, which reads as
+   entailment. Dropping the model also frees ~1.6GB resident per worker.
 4. **LLM judgment**: ``RelayEnricher.reconcile`` proposes supersede/merge/keep/
    conflict + rationale + merged_text.
 5. **Record a PROPOSED relation** in ``memory_relations`` (SUPERSEDES/CONFLICTS,
@@ -19,7 +30,6 @@ The LLM call is async/off the write path, so the per-add cross-encoder L1 risk
 never touches request latency.
 """
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -48,6 +58,7 @@ class ReconcileService:
         backoff_base_seconds: float = 30.0,
         backoff_max_seconds: float = 3600.0,
         lease_seconds: int = 120,
+        min_age_gap_days: float = 3.0,
     ):
         self.db = db
         self.relation_service = RelationService(db)
@@ -55,6 +66,10 @@ class ReconcileService:
         self.backoff_base_seconds = backoff_base_seconds
         self.backoff_max_seconds = backoff_max_seconds
         self.lease_seconds = lease_seconds
+        # Measured on 1094 real decision memories: at 3 days the same-day
+        # duplicate-record pairs (which dominated the candidate set) drop out
+        # while every genuine reversal found survives.
+        self.min_age_gap_days = min_age_gap_days
 
     @staticmethod
     def _now_iso() -> str:
@@ -124,10 +139,26 @@ class ReconcileService:
 
     async def _get_memory(self, memory_id: str) -> Optional[dict]:
         row = await self.db.fetchone(
-            "SELECT id, content, content_hash, status FROM memories WHERE id = ?",
+            "SELECT id, content, content_hash, status, created_at "
+            "FROM memories WHERE id = ?",
             (memory_id,),
         )
         return dict(row) if row else None
+
+    @staticmethod
+    def _age_gap_days(new: Any, old: Any) -> float:
+        """Whole days between two memories' creation, or 0 when undatable.
+
+        Undatable pairs fall to 0 so they are skipped rather than sent to the
+        LLM on a guess — the queue refills, so a missed pair is cheaper than a
+        wrong charge.
+        """
+        try:
+            a = datetime.fromisoformat(str(new["created_at"]).replace("Z", "+00:00"))
+            b = datetime.fromisoformat(str(old["created_at"]).replace("Z", "+00:00"))
+        except (KeyError, TypeError, ValueError):
+            return 0.0
+        return abs((a - b).total_seconds()) / 86400.0
 
     @staticmethod
     def _proposal(verdict: str, new_id: str, old_id: str):
@@ -142,11 +173,15 @@ class ReconcileService:
         return None  # keep_both
 
     async def process_next(
-        self, *, worker_id: str, enricher: Any, conflict_detector: Any
+        self, *, worker_id: str, enricher: Any, conflict_detector: Any = None
     ) -> dict:
         """Claim and process a single reconcile job.
 
         Returns {"job_id": <id|None>, "processed": bool, ...}.
+
+        ``conflict_detector`` is accepted and ignored: the NLI pre-gate it fed
+        was removed (see module docstring). Kept so existing callers and the
+        worker's wiring keep working until they drop it.
         """
         now = self._now_epoch()
         item = await self._claim(worker_id, now)
@@ -169,21 +204,12 @@ class ReconcileService:
                 await self._finish(item["id"], "stale")
                 return {"job_id": item["id"], "processed": True, "stale": True}
 
-            # NLI pre-gate (cheap contradiction filter). Blocking → thread.
-            candidates = [
-                {
-                    "id": old["id"],
-                    "content": old["content"],
-                    "similarity_score": item.get("similarity") or 1.0,
-                }
-            ]
-            conflicts = await asyncio.to_thread(
-                conflict_detector.detect_conflicts, new["content"], candidates
-            )
-            if not conflicts:
-                # No contradiction → benign near-duplicate; nothing to reconcile.
+            # Age pre-gate. Two memories written the same day are almost always
+            # one piece of work recorded twice, not a decision being reversed —
+            # a reversal needs time to pass before someone changes their mind.
+            if self._age_gap_days(new, old) < self.min_age_gap_days:
                 await self._finish(item["id"], "done")
-                return {"job_id": item["id"], "processed": True, "no_conflict": True}
+                return {"job_id": item["id"], "processed": True, "too_close": True}
 
             # LLM judgment (off the write path).
             payload = await enricher.reconcile(new["content"], old["content"])
@@ -203,9 +229,10 @@ class ReconcileService:
                             "verdict": verdict,
                             "rationale": str(payload.get("rationale", ""))[:500],
                             "merged_text": payload.get("merged_text"),
-                            "contradiction_score": getattr(
-                                conflicts[0], "contradiction_score", None
-                            ),
+                            # Replaces the old contradiction_score: the age gap
+                            # is what the pair now had to clear to get here, so
+                            # it is what a reviewer needs to judge the proposal.
+                            "age_gap_days": round(self._age_gap_days(new, old), 1),
                         },
                     )
                 )

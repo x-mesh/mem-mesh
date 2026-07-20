@@ -695,3 +695,31 @@ async def test_read_digest_swallows_exceptions(monkeypatch):
     db = _FakeDigestDB(raise_on_get=True)
     out = await read_cached_team_digest(db, "proj", _digest_settings())
     assert out is None
+
+
+def test_hub_weight_warning_fires_once_only_when_customised(caplog):
+    """A configured-but-ignored knob must be announced, and only once."""
+    import logging
+
+    from app.core.services import federated_search as fs
+
+    fs._hub_weight_warned = False
+    service = fs.FederatedHubSearch.__new__(fs.FederatedHubSearch)
+
+    # Default value: nothing to tell the operator.
+    service._hub_weight_effective = fs._DEFAULT_HUB_WEIGHT
+    with caplog.at_level(logging.WARNING, logger=fs.logger.name):
+        service._warn_hub_weight_ignored_once()
+    assert not caplog.records
+
+    # Customised value: warn, but only the first time.
+    service._hub_weight_effective = 0.2
+    with caplog.at_level(logging.WARNING, logger=fs.logger.name):
+        service._warn_hub_weight_ignored_once()
+        service._warn_hub_weight_ignored_once()
+    messages = [r.getMessage() for r in caplog.records]
+    assert len(messages) == 1
+    assert "is ignored" in messages[0]
+    assert "hub_penalty" in messages[0]
+
+    fs._hub_weight_warned = False

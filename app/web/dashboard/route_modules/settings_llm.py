@@ -35,6 +35,12 @@ _STR_FIELDS = {
 _KNOWN_TASKS = ("outbox", "item", "aggregate", "reconcile", "maintenance", "overview")
 _DEFAULT_TASKS = ("outbox", "item", "aggregate")
 
+# Tasks the dashboard renders a checkbox for. A save from that page states the
+# full set of these, so anything outside it must be carried over rather than
+# dropped — reconcile is unexposed but may still be enabled on an existing node,
+# and a save would otherwise silently turn it (and write-time detection) off.
+_UI_MANAGED_TASKS = ("outbox", "item", "aggregate", "maintenance", "overview")
+
 
 async def _resolve_value(db, settings, namespace: str, field: str) -> str:
     """DB app_config ``<ns>.llm_<field>`` if set, else Settings ``<ns>_llm_<field>``."""
@@ -188,13 +194,21 @@ async def put_worker_settings(body: dict = Body(...), db=Depends(get_database)):
                     status_code=400,
                     detail=f"unknown relay worker task(s): {', '.join(unknown)}",
                 )
-            if cleaned:
-                await db.set_app_config("relay.worker_tasks", ",".join(cleaned))
+            # Carry over enabled tasks the dashboard cannot express, so a save
+            # from the worker section only changes what it actually showed.
+            stored = await _resolve_worker_tasks(db)
+            carried = [
+                t for t in stored if t not in _UI_MANAGED_TASKS and t not in cleaned
+            ]
+            final = cleaned + carried
+            if final:
+                await db.set_app_config("relay.worker_tasks", ",".join(final))
             else:
                 await db.delete_app_config("relay.worker_tasks")
-            # The reconcile task drives write-time detection too (F1 gate).
+            # The reconcile task drives write-time detection too (F1 gate), so
+            # this tracks the final list, not just what the page submitted.
             await db.set_app_config(
-                "reconcile.enabled", "true" if "reconcile" in cleaned else "false"
+                "reconcile.enabled", "true" if "reconcile" in final else "false"
             )
 
         # Which projects continuous auto-enrich applies to. Global because

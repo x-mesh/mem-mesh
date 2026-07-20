@@ -134,6 +134,29 @@ class RelayEnrichmentData(BaseModel):
         raise TypeError("text enricher must return dict or RelayEnrichmentData")
 
 
+def _flatten_narrative(part: Any) -> str:
+    """Render one narrative fragment as text, whatever shape the LLM used.
+
+    Handles the section dicts seen in practice ({"category": ..., "items": [...]})
+    without hard-coding those keys, so a differently-shaped section still yields
+    readable text rather than a repr.
+    """
+    if part is None:
+        return ""
+    if isinstance(part, str):
+        return part
+    if isinstance(part, (list, tuple)):
+        return " ".join(_flatten_narrative(p) for p in part)
+    if isinstance(part, dict):
+        pieces = []
+        for key, value in part.items():
+            rendered = _flatten_narrative(value)
+            if rendered:
+                pieces.append(f"{key}: {rendered}")
+        return " · ".join(pieces)
+    return str(part)
+
+
 class RelayDigestData(BaseModel):
     """Structured project digest output."""
 
@@ -143,17 +166,64 @@ class RelayDigestData(BaseModel):
     narrative: str = ""
     source_memory_ids: List[str] = Field(default_factory=list)
 
+    # An LLM fills these fields, so their shapes are suggestions, not guarantees.
+    # Every field below has been observed arriving as the wrong type against a
+    # real model; each mismatch hard-failed validation, which fails the aggregate
+    # job, and after enough retries dead-letters it — stalling every future
+    # digest for that project. Coercing is strictly better than losing the
+    # digest over a container type.
     @field_validator("rollup", mode="before")
     @classmethod
     def _coerce_rollup(cls, value: Any) -> Any:
-        # A permissive digest generator (LLM) sometimes returns rollup as a bare
-        # narrative string instead of the structured dict this field expects.
-        # Coerce it instead of hard-failing validation, which would dead-letter
-        # the whole aggregate job and stall every future digest for the project.
+        """Observed: a bare narrative string instead of the structured dict."""
         if value is None:
             return {}
         if isinstance(value, str):
             return {"summary": value} if value else {}
+        if isinstance(value, list):
+            return {"items": value}
+        return value
+
+    @field_validator("recent_activity", mode="before")
+    @classmethod
+    def _coerce_recent_activity(cls, value: Any) -> Any:
+        """Observed: a single activity dict instead of a list of them."""
+        if value is None:
+            return []
+        if isinstance(value, dict):
+            return [value]
+        if isinstance(value, str):
+            return [value] if value else []
+        return value
+
+    @field_validator("narrative", mode="before")
+    @classmethod
+    def _coerce_narrative(cls, value: Any) -> Any:
+        """Observed: a list of themed sections instead of one prose string.
+
+        Flattened rather than dropped — the sections are the digest's actual
+        content, and a reader would rather have them run together than lose them.
+        """
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            return "\n".join(_flatten_narrative(part) for part in value).strip()
+        if isinstance(value, dict):
+            return _flatten_narrative(value)
+        return str(value)
+
+    @field_validator("contributors", "source_memory_ids", mode="before")
+    @classmethod
+    def _coerce_str_list(cls, value: Any) -> Any:
+        """Observed: a single value where a list was expected."""
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value] if value else []
+        if isinstance(value, list):
+            return [str(v) for v in value if v is not None]
         return value
 
     @classmethod

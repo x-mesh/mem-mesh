@@ -8,6 +8,7 @@ Follows the same lazy-load pattern as RerankerService.
 """
 
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -52,6 +53,34 @@ class ConflictDetectorService:
     Stage 2 (NLI) activates when model is loaded — returns precise contradiction scores.
     """
 
+    # Process-shared model cache, mirroring EmbeddingService._MODEL_CACHE and for
+    # the same reason. `mem-mesh relay worker --concurrency N` builds N worker
+    # instances, each of which constructed its own CrossEncoder with
+    # preload=True — so the NLI model (mDeBERTa-v3-base, ~550MB on disk and more
+    # once resident) was loaded N times on startup and exhausted memory.
+    #
+    # Sharing for inference is safe here for the same reason it is there: the
+    # concurrent worker instances run on one asyncio thread so predict() is
+    # serialized, and a forward pass never mutates the model's parameters.
+    _MODEL_CACHE: dict = {}
+    _MODEL_CACHE_LOCK = threading.Lock()
+
+    @classmethod
+    def _get_or_load_model(cls, model_name: str) -> "CrossEncoder":
+        cached = cls._MODEL_CACHE.get(model_name)
+        if cached is not None:
+            return cached
+        with cls._MODEL_CACHE_LOCK:
+            cached = cls._MODEL_CACHE.get(model_name)
+            if cached is None:
+                start = time.time()
+                cached = _CrossEncoder(model_name)
+                logger.info(
+                    "NLI model loaded: %s (%.1fs)", model_name, time.time() - start
+                )
+                cls._MODEL_CACHE[model_name] = cached
+            return cached
+
     def __init__(
         self,
         model_name: str = DEFAULT_NLI_MODEL,
@@ -77,7 +106,7 @@ class ConflictDetectorService:
             self._load_model()
 
     def _load_model(self) -> None:
-        """Lazy-load the NLI cross-encoder model."""
+        """Attach the process-shared NLI cross-encoder, loading it on first use."""
         if self._model is not None:
             return
 
@@ -88,11 +117,10 @@ class ConflictDetectorService:
             return
 
         try:
-            start = time.time()
-            self._model = _CrossEncoder(self.model_name)
-            elapsed = time.time() - start
-            logger.info("NLI model loaded: %s (%.1fs)", self.model_name, elapsed)
+            self._model = self._get_or_load_model(self.model_name)
         except Exception as e:
+            # Per-instance, so one instance's failure does not permanently
+            # disable detection for others sharing the cache.
             self._model_load_failed = True
             logger.error("NLI model load failed (will not retry): %s", e)
 

@@ -1,4 +1,4 @@
-.PHONY: help install test test-live test-live-api test-live-mcp test-live-realdata test-all clean run-api run-mcp run-dashboard docker-build docker-up docker-down docker-logs format lint version bump uvx-install uvx-serve uvx-hooks release release-tag docker-buildx-push
+.PHONY: help install test test-live test-live-api test-live-mcp test-live-realdata test-all clean run-api run-mcp run-dashboard relay-worker relay-worker-once docker-build docker-up docker-down docker-logs format lint version bump uvx-install uvx-serve uvx-hooks release release-tag docker-buildx-push
 
 # Default target
 .DEFAULT_GOAL := help
@@ -17,21 +17,41 @@ DOCKER_PLATFORMS := linux/amd64,linux/arm64
 UVX := uvx
 UV_PKG := mem-mesh[server]
 
-# Dev DB path: a git worktree does not inherit the gitignored .env, so `make dev`
-# there would silently fall back to the shared per-user store. When this checkout
-# has no .env, pin a project-local DB instead; checkouts WITH a .env are left
-# untouched (the app loads MEM_MESH_DATABASE_PATH from it). Override any time with
-# `MEM_MESH_DATABASE_PATH=... make dev`.
-ifeq ($(wildcard .env),)
-export MEM_MESH_DATABASE_PATH ?= $(CURDIR)/data/dev.db
-MM_DB_SOURCE := worktree fallback (no .env)
+# Dev DB path. The app's own default is a per-user absolute path
+# (XDG_DATA_HOME/mem-mesh/memories.db), so every worktree resolves to the SAME
+# database — which silently invalidates any two-node relay test. Gate on whether
+# the path is actually configured, NOT on whether a .env exists: a .env that only
+# sets HOST/PORT still leaves the DB shared. Precedence: environment/command line
+# > this checkout's .env > worktree-local fallback.
+MM_ENV_HAS_DB_PATH := $(shell test -f .env && \
+	grep -qE '^[[:space:]]*MEM_MESH_DATABASE_PATH[[:space:]]*=' .env && echo yes)
+
+ifneq ($(origin MEM_MESH_DATABASE_PATH),undefined)
+MM_DB_SOURCE := environment
 MM_DB_PATH := $(MEM_MESH_DATABASE_PATH)
-PORT ?= 8010
-PORT_ARG := --port $(PORT)
-MM_PORT_DISPLAY := $(PORT)
-else
+else ifeq ($(MM_ENV_HAS_DB_PATH),yes)
 MM_DB_SOURCE := .env
 MM_DB_PATH := (resolved by app from .env)
+else
+export MEM_MESH_DATABASE_PATH := $(CURDIR)/data/dev.db
+MM_DB_SOURCE := worktree fallback (MEM_MESH_DATABASE_PATH unset)
+MM_DB_PATH := $(MEM_MESH_DATABASE_PATH)
+endif
+
+# Dev port, decided independently of the DB above.
+ifeq ($(wildcard .env),)
+PORT ?= 8010
+# When PORT wasn't given explicitly (command line / environment), auto-pick the
+# first free port from 8010 so multiple worktrees (e.g. personal + team-hub) can
+# each run `make dev` at the same time without clashing. Explicit `PORT=... make
+# dev` always wins as-is, with no auto-increment.
+ifeq ($(origin PORT),file)
+PORT := $(shell $(PYTHON) scripts/find_free_port.py $(PORT))
+MM_PORT_NOTE := (auto-selected from 8010)
+endif
+PORT_ARG := --port $(PORT)
+MM_PORT_DISPLAY := $(PORT) $(MM_PORT_NOTE)
+else
 # Respect .env's MEM_MESH_SERVER_PORT: only force --port when PORT was set
 # explicitly (command line / environment), never from this in-Makefile default.
 PORT ?= 8000
@@ -98,6 +118,23 @@ run-api: ## Run FastAPI web server (development)
 run-mcp: ## Run MCP stdio server
 	$(PYTHON) -m app.mcp_stdio
 	@echo "✓ MCP stdio server running"
+
+# Relay worker. TASKS selects which queues to drain; omit to use the
+# relay.worker_tasks setting (dashboard-managed). On a personal node the
+# outbox task is what ships memories to the hub; the hub side drains
+# item/aggregate. INTERVAL is the idle poll in seconds.
+TASKS ?=
+INTERVAL ?= 1.0
+RELAY_TASKS_ARG := $(if $(TASKS),--tasks $(TASKS),)
+
+relay-worker: ## Run relay background worker (TASKS=outbox,item,... INTERVAL=1.0)
+	@echo "▶ relay worker tasks     : $(if $(TASKS),$(TASKS),from relay.worker_tasks setting)"
+	@echo "▶ relay worker interval  : $(INTERVAL)s"
+	$(PYTHON) -m app.cli.main relay worker $(RELAY_TASKS_ARG) --interval $(INTERVAL)
+
+relay-worker-once: ## Run relay worker for one pass and exit (TASKS=outbox,item,...)
+	@echo "▶ relay worker tasks     : $(if $(TASKS),$(TASKS),from relay.worker_tasks setting)"
+	$(PYTHON) -m app.cli.main relay worker --once $(RELAY_TASKS_ARG)
 
 run-mcp-pure: ## Run pure MCP stdio server
 	$(PYTHON) -m app.mcp_stdio_pure

@@ -357,28 +357,14 @@ async def _build_relay_worker(
         outbox_sender = build_http_outbox_sender(timeout=settings.relay_http_timeout)
         outbox_bearer_token = relay_config["hub_token"]
 
-    # F2 reconcile worker: NLI model is loaded here (write path never loads it).
+    # F2 reconcile worker. No model is loaded here any more: the NLI pre-gate
+    # was replaced by an age filter, which saves ~1.6GB resident per worker.
     reconcile_service = None
     conflict_detector = None
     reconcile_enricher = None
     if "reconcile" in active:
-        from app.core.services.conflict_detector import ConflictDetectorService
         from app.core.services.reconcile import ReconcileService
 
-        es = embedding_service or EmbeddingService(
-            model_name=settings.embedding_model,
-            preload=False,
-            defer_loading=False,
-        )
-        conflict_detector = ConflictDetectorService(
-            model_name=settings.conflict_nli_model,
-            preload=True,
-            contradiction_threshold=settings.conflict_contradiction_threshold,
-            similarity_threshold=es.scaled_threshold(
-                settings.conflict_similarity_threshold
-            ),
-            max_candidates=settings.conflict_max_candidates,
-        )
         reconcile_service = ReconcileService(
             db,
             max_attempts=max_attempts,
