@@ -224,6 +224,16 @@ class RelayHTTPClient:
         base = target_hub.rstrip("/")
         if base.endswith("/api/relay/v1/ingest"):
             return base
+        # Strip an already-present API prefix, as every sibling builder does.
+        # Without this a hub configured as ".../api/relay/v1" produced
+        # ".../api/relay/v1/api/relay/v1/ingest" — a 404 that the outbox reads
+        # as a generic failure and retries until it dead-letters. Health, auth,
+        # search and pair all worked against that same URL, so the node looked
+        # connected while delivery quietly never landed.
+        for suffix in ("/api/relay/v1/health", "/api/relay/v1/search", "/api/relay/v1"):
+            if base.endswith(suffix):
+                base = base[: -len(suffix)]
+                break
         return f"{base}/api/relay/v1/ingest"
 
     @staticmethod
