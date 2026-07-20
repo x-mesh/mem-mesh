@@ -8,11 +8,12 @@ rollback isolation hold.
 
 import asyncio
 import struct
+import threading
 
 import pytest
 
 from app.core.database.base import Database
-from app.core.database.read_pool import ReadPool, default_pool_size
+from app.core.database.read_pool import ReadPool, ReadSlot, default_pool_size
 
 # 4-float embedding so add_memory's NOT NULL embedding column is satisfied.
 EMB = struct.pack("4f", 0.1, 0.2, 0.3, 0.4)
@@ -57,29 +58,49 @@ async def test_pool_connected_with_vec(db):
     assert db._read_pool.is_vec_available
 
 
-async def test_reads_run_in_parallel(db):
+async def test_reads_run_in_parallel(db, monkeypatch):
     """Concurrent SELECTs must not serialize on a single lock.
 
-    With the old single-connection design wall-clock would be ~N×single; with
-    the pool it should be close to single. Assert a clear speedup so the test
-    fails if reads ever get re-serialized.
+    Proven by occupancy, not wall clock. A barrier sized to the number of
+    concurrent reads only releases if that many are inside their queries at the
+    same instant; if reads serialize, the first one waits alone and the barrier
+    times out. That is the property under test — "not serialized" — stated
+    directly.
+
+    The earlier version compared sequential vs parallel elapsed time and
+    required a 25% speedup. On a shared CI runner the CPU-bound query did not
+    reliably speed up (observed 0.336s vs 0.357s), so the job failed on runner
+    contention rather than on any regression.
     """
     n = min(4, db._read_pool.size)
-    loop = asyncio.get_event_loop()
+    # Pin this independently of the pool size: with n == 1 a Barrier(1) opens
+    # immediately, so a pool that shrank to a single slot — reads serialized by
+    # definition — would sail through the rendezvous below.
+    assert n >= 2, f"read pool must offer at least 2 slots, got {db._read_pool.size}"
+    barrier = threading.Barrier(n, timeout=15)
+    original = ReadSlot._run_fetchone
+    arrived = []
 
-    start = loop.time()
-    for _ in range(n):
-        await db.fetchone(SLOW)
-    sequential = loop.time() - start
+    def _rendezvous(self, query, params):
+        if query == SLOW:
+            arrived.append(threading.current_thread().name)
+            barrier.wait()  # releases only once n threads are here together
+        return original(self, query, params)
 
-    start = loop.time()
-    await asyncio.gather(*[db.fetchone(SLOW) for _ in range(n)])
-    parallel = loop.time() - start
+    monkeypatch.setattr(ReadSlot, "_run_fetchone", _rendezvous)
 
-    assert parallel < sequential * 0.75, (
-        f"reads appear serialized: sequential={sequential:.3f}s "
-        f"parallel={parallel:.3f}s (expected parallel << sequential)"
-    )
+    try:
+        await asyncio.gather(*[db.fetchone(SLOW) for _ in range(n)])
+    except threading.BrokenBarrierError:
+        pytest.fail(
+            f"reads appear serialized: only {len(arrived)}/{n} concurrent reads "
+            f"were in flight at once (threads: {sorted(set(arrived))})"
+        )
+
+    # Each read must have run on its own pinned thread, not one shared worker.
+    assert (
+        len(set(arrived)) == n
+    ), f"expected {n} distinct read threads, got {sorted(set(arrived))}"
 
 
 async def test_read_pool_blocks_writes(db):
