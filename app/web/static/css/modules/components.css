@@ -631,3 +631,43 @@ a:focus {
 [data-theme="dark"] .migration-dismiss {
   color: #fde68a;
 }
+
+/* Project Overview — inline memory citations.
+   The stored summary carries raw uuids ("... [8442c0bd-..., 08b2e434-...]");
+   the renderer swaps them for these numbered footnote links so the prose stays
+   readable and each marker still opens its memory. */
+.ov-cites {
+  white-space: nowrap;
+  margin-left: 2px;
+}
+.ov-cite {
+  display: inline-block;
+  min-width: 1.1em;
+  margin: 0 1px;
+  padding: 0 0.25em;
+  border: 1px solid var(--gray-200);
+  border-radius: 3px;
+  background: var(--gray-100);
+  color: var(--gray-600);
+  font-size: 0.72em;
+  font-weight: 600;
+  line-height: 1.45;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ov-cite:hover {
+  background: var(--info);
+  border-color: var(--info);
+  color: #fff;
+}
+[data-theme="dark"] .ov-cite {
+  border-color: var(--gray-700);
+  background: var(--gray-800);
+  color: var(--gray-300);
+}
+[data-theme="dark"] .ov-cite:hover {
+  background: var(--info);
+  border-color: var(--info);
+  color: #fff;
+}

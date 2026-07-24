@@ -681,7 +681,12 @@ class ProjectsPage extends HTMLElement {
       </div>`;
 
     const close = () => overlay.remove();
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    // Backdrop click closes; so does a source/citation link, which routes away
+    // under the modal — the global [data-route] handler navigates but never
+    // tears the overlay down, so the new page would open behind it.
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay || e.target.closest('[data-route]')) close();
+    });
     overlay.querySelector('.overview-modal-close').addEventListener('click', close);
     overlay.querySelector('.overview-cancel').addEventListener('click', close);
 
