@@ -122,6 +122,118 @@ async def test_daemon_connect_retries_db_busy(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_startup_retries_db_busy_during_ensure_schema(monkeypatch):
+    """Schema prep needs the write lock too, so contention there must not kill
+    the daemon — connect() surviving is not enough."""
+    import app.cli.relay as relay_cli
+
+    calls = {"schema": 0}
+
+    async def flaky_ensure_schema():
+        calls["schema"] += 1
+        if calls["schema"] < 3:
+            raise connection_sqlite3.OperationalError("database is locked")
+
+    backoffs = []
+
+    async def fake_backoff(**kwargs):
+        backoffs.append(kwargs["consecutive_failures"])
+
+    monkeypatch.setattr(relay_cli, "_backoff_after_db_busy", fake_backoff)
+
+    await relay_cli._retry_startup_step_while_db_busy(
+        flaky_ensure_schema, once=False, interval=1.0
+    )
+
+    assert calls["schema"] == 3
+    assert backoffs == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_startup_once_does_not_retry_db_busy(monkeypatch):
+    """--once is a one-shot run: it must surface contention instead of
+    hanging on an unbounded retry loop."""
+    import app.cli.relay as relay_cli
+
+    calls = {"schema": 0}
+
+    async def always_locked():
+        calls["schema"] += 1
+        raise connection_sqlite3.OperationalError("database is locked")
+
+    with pytest.raises(connection_sqlite3.OperationalError):
+        await relay_cli._retry_startup_step_while_db_busy(
+            always_locked, once=True, interval=1.0
+        )
+
+    assert calls["schema"] == 1
+
+
+@pytest.mark.asyncio
+async def test_startup_step_reraises_non_busy_error(monkeypatch):
+    """A real error must not be mistaken for contention and retried forever."""
+    import app.cli.relay as relay_cli
+
+    async def broken():
+        raise ValueError("schema is malformed")
+
+    with pytest.raises(ValueError):
+        await relay_cli._retry_startup_step_while_db_busy(
+            broken, once=False, interval=1.0
+        )
+
+
+@pytest.mark.asyncio
+async def test_worker_startup_survives_schema_contention(tmp_path, monkeypatch):
+    """Wiring guard: the retry must actually be applied at the call site.
+
+    The helper-level tests above still pass if someone reverts the call site to
+    a bare `await service.ensure_schema()`, so this drives the real startup
+    path and fails on that revert.
+    """
+    import app.cli.relay as relay_cli
+
+    monkeypatch.setenv("MEM_MESH_DATABASE_PATH", str(tmp_path / "relay.db"))
+
+    calls = {"schema": 0}
+
+    async def flaky_ensure_schema(self):
+        calls["schema"] += 1
+        if calls["schema"] < 3:
+            raise connection_sqlite3.OperationalError("database is locked")
+
+    class _StopAfterSchema(Exception):
+        pass
+
+    async def stop_after_schema(self, settings):
+        raise _StopAfterSchema
+
+    backoffs = []
+
+    async def fake_backoff(**kwargs):
+        backoffs.append(kwargs["consecutive_failures"])
+
+    monkeypatch.setattr(RelayService, "ensure_schema", flaky_ensure_schema)
+    monkeypatch.setattr(RelayService, "get_effective_config", stop_after_schema)
+    monkeypatch.setattr(relay_cli, "_backoff_after_db_busy", fake_backoff)
+
+    with pytest.raises(_StopAfterSchema):
+        await relay_cli._run_relay_worker_instance(
+            once=False,
+            enabled_override=None,
+            interval=0.01,
+            worker_id="test-worker",
+            max_attempts=3,
+            backoff_max=1.0,
+            lease_seconds=60,
+            concurrency=1,
+        )
+
+    assert calls["schema"] == 3
+    assert backoffs == [1, 2]
+
+
+@pytest.mark.asyncio
 async def test_relay_worker_verbose_reports_empty_outbox_queue(tmp_path, monkeypatch):
     import app.cli.relay as relay_cli
 

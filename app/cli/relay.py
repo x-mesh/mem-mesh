@@ -7,7 +7,7 @@ import random
 import sys
 import time
 import uuid
-from typing import Optional
+from typing import Awaitable, Callable, Optional, TypeVar
 
 from app.core.config import Settings
 from app.core.database.base import Database
@@ -23,6 +23,7 @@ from app.core.services.relay_worker import (
 
 logger = logging.getLogger(__name__)
 _DB_BUSY_BACKOFF_MAX_SECONDS = 30.0
+_T = TypeVar("_T")
 
 
 async def _backoff_after_db_busy(
@@ -44,16 +45,21 @@ async def _backoff_after_db_busy(
     await asyncio.sleep(delay)
 
 
-async def _connect_worker_database(
-    db: Database, *, once: bool, interval: float
-) -> None:
-    """Connect a daemon without letting startup contention terminate it."""
+async def _retry_startup_step_while_db_busy(
+    step: Callable[[], Awaitable[_T]], *, once: bool, interval: float
+) -> _T:
+    """Run one startup step, absorbing transient SQLite contention.
+
+    Startup touches the database more than once: it opens the connection and
+    then issues the relay DDL. Both need the write lock, so either can hit
+    SQLITE_BUSY while another process holds it — and a daemon must survive
+    both rather than exiting before its first cycle.
+    """
 
     consecutive_db_busy = 0
     while True:
         try:
-            await db.connect()
-            return
+            return await step()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -65,6 +71,14 @@ async def _connect_worker_database(
                 consecutive_failures=consecutive_db_busy,
                 interval=interval,
             )
+
+
+async def _connect_worker_database(
+    db: Database, *, once: bool, interval: float
+) -> None:
+    """Connect a daemon without letting startup contention terminate it."""
+
+    await _retry_startup_step_while_db_busy(db.connect, once=once, interval=interval)
 
 
 def cmd_relay_worker(
@@ -713,7 +727,12 @@ async def _run_relay_worker_instance(
             max_attempts=max_attempts,
             backoff_max_seconds=backoff_max,
         )
-        await service.ensure_schema()
+        # ensure_schema() issues the relay DDL, which needs the write lock just
+        # like connect() does. Leaving it outside the retry let startup
+        # contention kill the daemon one line after it survived connect().
+        await _retry_startup_step_while_db_busy(
+            service.ensure_schema, once=once, interval=interval
+        )
         effective = await service.get_effective_config(settings)
         relay_config = effective["values"]
         relay_sources = effective["sources"]
