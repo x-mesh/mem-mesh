@@ -97,7 +97,7 @@ async def test_no_deadlock_on_nested_transaction(db):
     assert [r["who"] for r in rows] == ["inner", "outer"]
 
 
-def test_busy_retry_recovers_from_transient_lock():
+async def test_busy_retry_recovers_from_transient_lock():
     """_execute_with_busy_retry retries a transient 'database is locked' rather
     than letting the (often best-effort) caller drop the write."""
     from app.core.database.connection import DatabaseConnection
@@ -117,11 +117,11 @@ def test_busy_retry_recovers_from_transient_lock():
 
     fake = _Flaky()
     conn.connection = fake
-    conn._execute_with_busy_retry("BEGIN IMMEDIATE", base_sleep=0.001)
+    await conn._execute_with_busy_retry("BEGIN IMMEDIATE", base_sleep=0.001)
     assert fake.calls == 3  # 2 locked + 1 success
 
 
-def test_busy_retry_reraises_after_exhaustion():
+async def test_busy_retry_reraises_after_exhaustion():
     """A persistent lock still surfaces (not silently swallowed) after retries."""
     from app.core.database.connection import DatabaseConnection
     from app.core.database.connection import sqlite3 as conn_sqlite3
@@ -134,4 +134,41 @@ def test_busy_retry_reraises_after_exhaustion():
 
     conn.connection = _AlwaysLocked()
     with pytest.raises(conn_sqlite3.OperationalError):
-        conn._execute_with_busy_retry("BEGIN IMMEDIATE", attempts=3, base_sleep=0.001)
+        await conn._execute_with_busy_retry(
+            "BEGIN IMMEDIATE", attempts=3, base_sleep=0.001
+        )
+
+
+async def test_separate_connections_share_process_writer_gate(tmp_path):
+    """concurrency=N keeps compute parallel but serializes SQLite writes."""
+    from app.core.database.connection import DatabaseConnection
+
+    path = str(tmp_path / "shared-writer.db")
+    connections = [DatabaseConnection(path, busy_timeout=10) for _ in range(4)]
+    for connection in connections:
+        await connection.connect()
+    try:
+        await connections[0].execute("CREATE TABLE t (worker INTEGER, item INTEGER)")
+
+        async def write_batch(worker: int):
+            connection = connections[worker]
+            for item in range(10):
+                # Compute/yield time stays parallel; only this short transaction
+                # enters the shared writer gate. The 10ms SQLite timeout makes
+                # any missing serialization fail reliably under this load.
+                await asyncio.sleep(0)
+                async with connection.transaction():
+                    await connection.execute(
+                        "INSERT INTO t VALUES (?, ?)", (worker, item)
+                    )
+                    await asyncio.sleep(0.001)
+
+        await asyncio.gather(*(write_batch(worker) for worker in range(4)))
+        rows = await connections[0].fetchall("SELECT worker, item FROM t")
+        assert len(rows) == 40
+        assert {(row["worker"], row["item"]) for row in rows} == {
+            (worker, item) for worker in range(4) for item in range(10)
+        }
+    finally:
+        for connection in reversed(connections):
+            await connection.close()

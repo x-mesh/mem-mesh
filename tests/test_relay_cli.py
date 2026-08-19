@@ -1,11 +1,13 @@
 """Relay CLI dispatch tests."""
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 
 from app.cli.main import main
 from app.core.database.base import Database
+from app.core.database.connection import sqlite3 as connection_sqlite3
 from app.core.services.relay import RelayService
 
 
@@ -69,6 +71,54 @@ def test_main_dispatches_relay_materialize_json(monkeypatch):
     assert exc.value.code == 0
     assert calls["json_mode"] is True
     assert calls["limit"] == 50
+
+
+@pytest.mark.asyncio
+async def test_db_busy_backoff_is_async_and_bounded(monkeypatch):
+    import app.cli.relay as relay_cli
+
+    delays = []
+
+    async def fake_sleep(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(relay_cli.random, "uniform", lambda _low, _high: 1.0)
+
+    await relay_cli._backoff_after_db_busy(
+        exc=connection_sqlite3.OperationalError("database is locked"),
+        consecutive_failures=20,
+        interval=1.0,
+    )
+
+    assert delays == [relay_cli._DB_BUSY_BACKOFF_MAX_SECONDS]
+
+
+@pytest.mark.asyncio
+async def test_daemon_connect_retries_db_busy(monkeypatch):
+    import app.cli.relay as relay_cli
+
+    class FlakyDatabase:
+        def __init__(self):
+            self.calls = 0
+
+        async def connect(self):
+            self.calls += 1
+            if self.calls < 3:
+                raise connection_sqlite3.OperationalError("database is locked")
+
+    backoffs = []
+
+    async def fake_backoff(**kwargs):
+        backoffs.append(kwargs["consecutive_failures"])
+
+    monkeypatch.setattr(relay_cli, "_backoff_after_db_busy", fake_backoff)
+    db = FlakyDatabase()
+
+    await relay_cli._connect_worker_database(db, once=False, interval=1.0)
+
+    assert db.calls == 3
+    assert backoffs == [1, 2]
 
 
 @pytest.mark.asyncio

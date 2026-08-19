@@ -1403,6 +1403,53 @@ async def test_process_next_item_failure_requeues_without_losing_job():
 
 
 @pytest.mark.asyncio
+async def test_release_worker_leases_restores_attempt_without_touching_other_worker():
+    async with _temp_db() as db:
+        service = await _service_with_identity(db)
+        await service.ingest("relay-token", _request())
+        claimed = await service.claim_queue_item("busy-worker", lease_seconds=30)
+        assert claimed is not None
+
+        await db.execute(
+            """
+            INSERT INTO relay_queue_item (
+                id, ref_id, raw_event_id, status, attempts, next_attempt_at,
+                locked_by, locked_at, last_error, created_at, updated_at
+            ) VALUES (?, ?, ?, 'processing', 1, 0, 'other-worker', 1, NULL, ?, ?)
+            """,
+            (
+                "other-job",
+                "other-ref",
+                "other-event",
+                "2026-08-19T00:00:00Z",
+                "2026-08-19T00:00:00Z",
+            ),
+        )
+
+        released = await service.release_worker_leases("busy-worker")
+
+        own = await db.fetchone(
+            "SELECT status, attempts, locked_by FROM relay_queue_item WHERE id = ?",
+            (claimed.id,),
+        )
+        other = await db.fetchone(
+            "SELECT status, attempts, locked_by FROM relay_queue_item WHERE id = ?",
+            ("other-job",),
+        )
+        assert released == 1
+        assert dict(own) == {
+            "status": "pending",
+            "attempts": 0,
+            "locked_by": None,
+        }
+        assert dict(other) == {
+            "status": "processing",
+            "attempts": 1,
+            "locked_by": "other-worker",
+        }
+
+
+@pytest.mark.asyncio
 async def test_process_next_item_without_llm_writes_embedding_only_row():
     """A hub with no enricher must still index the vector — otherwise hub search
     silently degrades to substring matching (see relay hub e2e)."""

@@ -19,7 +19,7 @@ except ImportError:
 import asyncio
 import contextvars
 import logging
-import time
+import weakref
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -57,6 +57,28 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# WAL permits concurrent readers, but only one writer. Relay concurrency creates
+# multiple Database instances in one event loop, so coordinate their short write
+# spans before they contend inside SQLite. Scope locks to the current event loop.
+_writer_locks: (
+    "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]]"
+) = weakref.WeakKeyDictionary()
+
+
+def is_sqlite_busy_error(exc: BaseException) -> bool:
+    """Return whether an exception is retryable SQLite writer contention."""
+
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    code = getattr(exc, "sqlite_errorcode", None)
+    if code is not None and (code & 0xFF) in {
+        getattr(sqlite3, "SQLITE_BUSY", 5),
+        getattr(sqlite3, "SQLITE_LOCKED", 6),
+    }:
+        return True
+    message = str(exc).lower()
+    return "locked" in message or "busy" in message
+
 
 class DatabaseConnection:
     """SQLite database connection management.
@@ -82,6 +104,18 @@ class DatabaseConnection:
         self.connection: Optional[sqlite3.Connection] = None
         self._lock = asyncio.Lock()
         self._vec_loaded = False
+        self._writer_lock_key = self._canonical_writer_lock_key(db_path)
+
+    @staticmethod
+    def _canonical_writer_lock_key(db_path: str) -> str:
+        if db_path in (":memory:", "") or db_path.startswith("file:"):
+            return db_path
+        return str(Path(db_path).expanduser().resolve())
+
+    def _writer_lock(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        locks = _writer_locks.setdefault(loop, {})
+        return locks.setdefault(self._writer_lock_key, asyncio.Lock())
 
     async def connect(self) -> bool:
         """Connect to database and load sqlite-vec extension.
@@ -89,29 +123,30 @@ class DatabaseConnection:
         Returns:
             bool: True if sqlite-vec was loaded successfully
         """
-        async with self._lock:
-            if self.connection is not None:
-                return self._vec_loaded
+        async with self._writer_lock():
+            async with self._lock:
+                if self.connection is not None:
+                    return self._vec_loaded
 
-            # 데이터베이스 디렉토리 생성
-            db_path = Path(self.db_path)
-            db_path.parent.mkdir(parents=True, exist_ok=True)
+                # 데이터베이스 디렉토리 생성
+                db_path = Path(self.db_path)
+                db_path.parent.mkdir(parents=True, exist_ok=True)
 
-            try:
-                # 쓰기 전용 연결 생성 (PRAGMA + sqlite-vec 초기화 포함)
-                self.connection, self._vec_loaded = self._create_connection(
-                    read_only=False
-                )
+                try:
+                    # 쓰기 전용 연결 생성 (PRAGMA + sqlite-vec 초기화 포함)
+                    self.connection, self._vec_loaded = self._create_connection(
+                        read_only=False
+                    )
 
-                logger.info(f"Database connected: {self.db_path}")
-                return self._vec_loaded
+                    logger.info(f"Database connected: {self.db_path}")
+                    return self._vec_loaded
 
-            except Exception as e:
-                logger.error(f"Failed to connect to database: {e}")
-                if self.connection:
-                    self.connection.close()
-                    self.connection = None
-                raise
+                except Exception as e:
+                    logger.error(f"Failed to connect to database: {e}")
+                    if self.connection:
+                        self.connection.close()
+                        self.connection = None
+                    raise
 
     def _create_connection(
         self, read_only: bool = False
@@ -155,8 +190,11 @@ class DatabaseConnection:
         # busy_timeout 설정 (Requirement 4.4)
         conn.execute(f"PRAGMA busy_timeout={self.busy_timeout}")
 
-        # WAL 모드 활성화 (Requirement 4.1)
-        conn.execute("PRAGMA journal_mode=WAL")
+        # WAL is persistent and the writer established it before read-pool
+        # connections open. Reissuing journal_mode from every pooled reader can
+        # itself require a schema lock during concurrency=N startup.
+        if not read_only:
+            conn.execute("PRAGMA journal_mode=WAL")
 
         # Durability: under WAL the default synchronous=NORMAL does not fsync
         # the WAL on commit, so a power loss / kernel panic can lose the last
@@ -243,8 +281,10 @@ class DatabaseConnection:
 
     async def close(self) -> None:
         """Close database connection."""
-        async with self._lock:
-            if self.connection:
+        async with self._writer_lock():
+            async with self._lock:
+                if not self.connection:
+                    return
                 try:
                     # 진행 중인 트랜잭션 커밋
                     self.connection.commit()
@@ -281,8 +321,9 @@ class DatabaseConnection:
 
         if _in_transaction.get():
             return self._execute_raw(query, params)
-        async with self._lock:
-            return self._execute_raw(query, params)
+        async with self._writer_lock():
+            async with self._lock:
+                return self._execute_raw(query, params)
 
     def _execute_raw(self, query: str, params: Tuple = ()) -> sqlite3.Cursor:
         """Run a statement without acquiring the lock.
@@ -339,29 +380,26 @@ class DatabaseConnection:
             yield
             return
 
-        async with self._lock:
-            token = _in_transaction.set(True)
-            try:
-                # BEGIN IMMEDIATE grabs the write lock up front so busy_timeout
-                # actually applies to it. A plain deferred BEGIN upgrades to a
-                # write only on the first write statement; if another *process*
-                # (e.g. the relay worker) holds the write lock, that upgrade can
-                # fail instantly with SQLITE_BUSY ("database is locked") that
-                # busy_timeout cannot retry — the exact silent-drop cause for
-                # relay writes. The bounded retry covers residual contention.
-                self._execute_with_busy_retry("BEGIN IMMEDIATE")
-                yield
-                self._execute_with_busy_retry("COMMIT")
-            except Exception:
+        async with self._writer_lock():
+            async with self._lock:
+                token = _in_transaction.set(True)
                 try:
-                    self.connection.execute("ROLLBACK")
-                except Exception:  # noqa: BLE001 — rollback best-effort
-                    pass
-                raise
-            finally:
-                _in_transaction.reset(token)
+                    # BEGIN IMMEDIATE grabs the write lock up front so
+                    # busy_timeout applies before the transaction body runs.
+                    # The bounded retry covers residual cross-process contention.
+                    await self._execute_with_busy_retry("BEGIN IMMEDIATE")
+                    yield
+                    await self._execute_with_busy_retry("COMMIT")
+                except Exception:
+                    try:
+                        self.connection.execute("ROLLBACK")
+                    except Exception:  # noqa: BLE001 — rollback best-effort
+                        pass
+                    raise
+                finally:
+                    _in_transaction.reset(token)
 
-    def _execute_with_busy_retry(
+    async def _execute_with_busy_retry(
         self, sql: str, *, attempts: int = 6, base_sleep: float = 0.05
     ) -> None:
         """Run a lock-sensitive statement (BEGIN IMMEDIATE / COMMIT), retrying on
@@ -375,7 +413,7 @@ class DatabaseConnection:
                 self.connection.execute(sql)
                 return
             except sqlite3.OperationalError as e:
-                if "locked" in str(e).lower() and i < attempts - 1:
-                    time.sleep(base_sleep * (2**i))
+                if is_sqlite_busy_error(e) and i < attempts - 1:
+                    await asyncio.sleep(base_sleep * (2**i))
                     continue
                 raise
