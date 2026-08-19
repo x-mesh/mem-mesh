@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import random
 import sys
 import time
 import uuid
@@ -10,6 +11,7 @@ from typing import Optional
 
 from app.core.config import Settings
 from app.core.database.base import Database
+from app.core.database.connection import is_sqlite_busy_error
 from app.core.embeddings.service import EmbeddingService
 from app.core.services.llm_resolver import resolve_service_llm
 from app.core.services.relay import RelayService
@@ -20,6 +22,49 @@ from app.core.services.relay_worker import (
 )
 
 logger = logging.getLogger(__name__)
+_DB_BUSY_BACKOFF_MAX_SECONDS = 30.0
+
+
+async def _backoff_after_db_busy(
+    *, exc: BaseException, consecutive_failures: int, interval: float
+) -> None:
+    """Pause one daemon loop after transient SQLite contention."""
+
+    base = max(0.05, interval)
+    ceiling = min(
+        _DB_BUSY_BACKOFF_MAX_SECONDS, base * (2 ** min(consecutive_failures - 1, 8))
+    )
+    delay = ceiling * random.uniform(0.8, 1.2)
+    logger.warning(
+        "relay worker database busy; retrying in %.2fs (consecutive=%d): %s",
+        delay,
+        consecutive_failures,
+        exc,
+    )
+    await asyncio.sleep(delay)
+
+
+async def _connect_worker_database(
+    db: Database, *, once: bool, interval: float
+) -> None:
+    """Connect a daemon without letting startup contention terminate it."""
+
+    consecutive_db_busy = 0
+    while True:
+        try:
+            await db.connect()
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if once or not is_sqlite_busy_error(exc):
+                raise
+            consecutive_db_busy += 1
+            await _backoff_after_db_busy(
+                exc=exc,
+                consecutive_failures=consecutive_db_busy,
+                interval=interval,
+            )
 
 
 def cmd_relay_worker(
@@ -94,7 +139,11 @@ def cmd_relay_materialize(*, limit: int = 1000, json_mode: bool = False) -> int:
 
 async def _run_relay_materialize(*, limit: int = 1000) -> dict:
     settings = Settings()
-    db = Database(settings.database_path, embedding_dim=settings.embedding_dim)
+    db = Database(
+        settings.database_path,
+        busy_timeout=getattr(settings, "busy_timeout", 5000),
+        embedding_dim=settings.embedding_dim,
+    )
     await db.connect()
     try:
         service = RelayService(db)
@@ -652,8 +701,12 @@ async def _run_relay_worker_instance(
 ) -> dict:
     settings = Settings()
 
-    db = Database(settings.database_path, embedding_dim=settings.embedding_dim)
-    await db.connect()
+    db = Database(
+        settings.database_path,
+        busy_timeout=getattr(settings, "busy_timeout", 5000),
+        embedding_dim=settings.embedding_dim,
+    )
+    await _connect_worker_database(db, once=once, interval=interval)
     try:
         service = RelayService(
             db,
@@ -746,46 +799,75 @@ async def _run_relay_worker_instance(
         current: Optional[set[str]] = None
         last_signature: Optional[tuple] = None
         last_config_signature: Optional[tuple] = None
+        consecutive_db_busy = 0
+        needs_lease_recovery = False
         worker = None
         while True:
-            enabled = await _resolve_enabled(db, enabled_override)
-            active, waiting = await _probe(enabled)
-            # Rebuild only when the active set changes (avoids reloading the NLI
-            # model), but reprint the summary whenever active OR waiting shifts —
-            # so a config change that lands but can't activate yet (e.g. adding
-            # outbox with no hub token) is still visible instead of silent.
-            if active != current:
-                worker = await _build(active) if active else None
-                current = active
-            signature = (frozenset(active), tuple(sorted(waiting.items())))
-            if signature != last_signature:
-                _print_worker_state(
-                    worker_id=worker_id,
-                    enabled=enabled,
+            try:
+                if needs_lease_recovery:
+                    released = await service.release_worker_leases(worker_id)
+                    needs_lease_recovery = False
+                    if released:
+                        logger.info(
+                            "relay worker released %d job lease(s) after database contention",
+                            released,
+                        )
+                enabled = await _resolve_enabled(db, enabled_override)
+                active, waiting = await _probe(enabled)
+                # Rebuild only when the active set changes (avoids reloading the NLI
+                # model), but reprint the summary whenever active OR waiting shifts —
+                # so a config change that lands but can't activate yet (e.g. adding
+                # outbox with no hub token) is still visible instead of silent.
+                if active != current:
+                    worker = await _build(active) if active else None
+                    current = active
+                signature = (frozenset(active), tuple(sorted(waiting.items())))
+                if signature != last_signature:
+                    _print_worker_state(
+                        worker_id=worker_id,
+                        enabled=enabled,
+                        active=active,
+                        waiting=waiting,
+                        interval=interval,
+                        once=False,
+                    )
+                    logger.info(
+                        "relay worker active tasks: %s",
+                        ",".join(sorted(active)) or "(none — waiting for config)",
+                    )
+                    last_signature = signature
+                if worker is None:
+                    consecutive_db_busy = 0
+                    await asyncio.sleep(interval)
+                    continue
+                config_signature = await _refresh_worker_config(
+                    db=db,
+                    settings=settings,
+                    service=service,
+                    worker=worker,
                     active=active,
-                    waiting=waiting,
+                )
+                if config_signature != last_config_signature:
+                    logger.info(
+                        "relay worker config refreshed (key/token/model change detected)"
+                    )
+                    last_config_signature = config_signature
+                stats = await worker.run_once()
+                consecutive_db_busy = 0
+                if not any(stats.values()):
+                    await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if not is_sqlite_busy_error(exc):
+                    raise
+                consecutive_db_busy += 1
+                needs_lease_recovery = True
+                await _backoff_after_db_busy(
+                    exc=exc,
+                    consecutive_failures=consecutive_db_busy,
                     interval=interval,
-                    once=False,
                 )
-                logger.info(
-                    "relay worker active tasks: %s",
-                    ",".join(sorted(active)) or "(none — waiting for config)",
-                )
-                last_signature = signature
-            if worker is None:
-                await asyncio.sleep(interval)
-                continue
-            config_signature = await _refresh_worker_config(
-                db=db, settings=settings, service=service, worker=worker, active=active
-            )
-            if config_signature != last_config_signature:
-                logger.info(
-                    "relay worker config refreshed (key/token/model change detected)"
-                )
-                last_config_signature = config_signature
-            stats = await worker.run_once()
-            if not any(stats.values()):
-                await asyncio.sleep(interval)
     finally:
         await db.close()
 
@@ -842,7 +924,11 @@ async def _relay_debug_snapshot_from_settings(
     worker_options: dict,
 ) -> dict:
     settings = Settings()
-    db = Database(settings.database_path, embedding_dim=settings.embedding_dim)
+    db = Database(
+        settings.database_path,
+        busy_timeout=getattr(settings, "busy_timeout", 5000),
+        embedding_dim=settings.embedding_dim,
+    )
     await db.connect()
     try:
         service = RelayService(

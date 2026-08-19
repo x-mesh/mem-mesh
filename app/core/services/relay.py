@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Sequence, Union
 
 from ..database.base import Database
+from ..database.connection import is_sqlite_busy_error
 from ..database.models import Memory
 from ..errors import (
     RelayDeliveryConflict,
@@ -2615,6 +2616,38 @@ class RelayService:
 
         return self._outbox_job_from_row(claimed) if claimed else None
 
+    async def release_worker_leases(self, worker_id: str) -> int:
+        """Return this worker's claimed jobs after transient DB contention.
+
+        A claim increments ``attempts`` before slow work starts. SQLite
+        contention is infrastructure backpressure, not a job failure, so release
+        the lease and undo that increment. Other workers' leases are untouched.
+        """
+
+        released = 0
+        now = _utc_now()
+        async with self.db.transaction():
+            for table in (
+                "relay_outbox",
+                "relay_queue_item",
+                "relay_queue_aggregate",
+            ):
+                cursor = await self.db.execute(
+                    f"""
+                    UPDATE {table}
+                    SET status = 'pending',
+                        attempts = MAX(0, attempts - 1),
+                        locked_by = NULL,
+                        locked_at = NULL,
+                        updated_at = ?
+                    WHERE status = 'processing'
+                      AND locked_by = ?
+                    """,
+                    (now, worker_id),
+                )
+                released += max(0, cursor.rowcount)
+        return released
+
     async def mark_outbox_sent(self, outbox_id: str) -> None:
         await self.db.execute(
             """
@@ -2685,6 +2718,8 @@ class RelayService:
                 error=str(exc),
             )
         except Exception as exc:
+            if is_sqlite_busy_error(exc):
+                raise
             error = self._delivery_error_summary(exc)
             logger.warning(
                 "Relay outbox delivery failed for job %s; will retry: %s",
@@ -3083,6 +3118,8 @@ class RelayService:
                 current_memory_id=job.ref_id,
             )
         except Exception as exc:
+            if is_sqlite_busy_error(exc):
+                raise
             logger.exception("Relay item worker failed for job %s", job.id)
             await self._mark_item_failed(job.id, str(exc))
             return RelayProcessResult(
@@ -3301,6 +3338,8 @@ class RelayService:
                 current_memory_id=job.ref_id,
             )
         except Exception as exc:
+            if is_sqlite_busy_error(exc):
+                raise
             logger.exception("Relay aggregate worker failed for job %s", job.id)
             await self._mark_aggregate_failed(job.id, str(exc))
             return RelayProcessResult(
