@@ -15,6 +15,7 @@ from hypothesis.strategies import composite
 
 from app.core.database.base import Database
 from app.core.schemas.projects import ProjectUpdate
+from app.core.schemas.requests import normalize_project_id
 from app.core.services.project import ProjectService
 
 
@@ -114,10 +115,12 @@ class TestProjectProperties:
         # get_or_create 호출
         project = await project_service.get_or_create_project(project_id)
 
-        # 검증
+        # 검증 — 저장되는 id는 정규화된 형태다. 같은 저장소가 표기만 달라
+        # 여러 프로젝트로 갈라지지 않도록 생성 경로가 규칙을 적용한다.
+        expected_id = normalize_project_id(project_id)
         assert project is not None
-        assert project.id == project_id
-        assert project.name == project_id  # 기본값으로 id 사용
+        assert project.id == expected_id
+        assert project.name == expected_id  # 기본값으로 id 사용
         assert project.created_at is not None
         assert project.updated_at is not None
 

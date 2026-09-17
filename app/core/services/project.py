@@ -12,6 +12,7 @@ from app.core.schemas.projects import (
     ProjectUpdate,
     ProjectWithStats,
 )
+from app.core.schemas.requests import normalize_project_id
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,12 @@ class ProjectService:
         Returns:
             ProjectResponse
         """
+        # AddParams/SearchParams already normalize, but this path is reached
+        # straight from a URL segment and a session's raw id. Skipping it here
+        # created projects.id="CSAP" while memories.project_id became "csap",
+        # so per-project stats counted rows the filtered list could never find.
+        project_id = normalize_project_id(project_id)
+
         # Query existing project
         row = await self.db.fetchone(
             "SELECT * FROM projects WHERE id = ?", (project_id,)
@@ -67,6 +74,8 @@ class ProjectService:
 
     async def get_project(self, project_id: str) -> Optional[ProjectResponse]:
         """프로젝트 조회"""
+        project_id = normalize_project_id(project_id)
+
         row = await self.db.fetchone(
             "SELECT * FROM projects WHERE id = ?", (project_id,)
         )
@@ -80,6 +89,8 @@ class ProjectService:
         self, project_id: str, update: ProjectUpdate
     ) -> Optional[ProjectResponse]:
         """프로젝트 업데이트"""
+        project_id = normalize_project_id(project_id)
+
         # Check existing project
         existing = await self.get_project(project_id)
         if not existing:
@@ -439,6 +450,8 @@ class ProjectService:
 
     async def delete_project(self, project_id: str) -> bool:
         """프로젝트 삭제 (관련 세션, 핀도 삭제)"""
+        project_id = normalize_project_id(project_id)
+
         existing = await self.get_project(project_id)
         if not existing:
             return False
