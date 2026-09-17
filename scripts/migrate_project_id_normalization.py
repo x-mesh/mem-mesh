@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Normalize project ids across all tables to de-fragment the project list.
 
-Collapses worktree suffixes / casing / separator variants of the same repo into
-one canonical id (mirrors
-``app.web.dashboard.route_modules.hooks._normalize_project_id``), then merges
-the now-duplicate ``projects`` rows while preserving session/pin foreign keys.
+Collapses worktree suffixes / casing / separator / camelCase variants of the
+same repo into one canonical id, then merges the now-duplicate ``projects``
+rows while preserving session/pin foreign keys.
+
+The rule comes from ``app.core.schemas.requests.normalize_project_id`` — the
+same function the API, MCP and hook paths use. Do not reimplement it here: a
+migration that folds ids differently from the write paths closes one split by
+opening another.
 
     term-mesh-wt-170638b5  → term-mesh
     oci_tools / OCI-Tools  → oci-tools
+    MyProject              → my-project
     VLM                    → vlm
 
 Affected tables: memories, projects (PK), sessions, pins, token_usage,
@@ -24,7 +29,6 @@ Usage:
 
 import argparse
 import asyncio
-import re
 import sys
 from pathlib import Path
 
@@ -32,9 +36,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.config import Settings  # noqa: E402
 from app.core.database.base import Database  # noqa: E402
-
-# Keep in sync with hooks._normalize_project_id / hooks._WT_SUFFIX_RE.
-_WT_SUFFIX_RE = re.compile(r"[-_]wt[-_][0-9a-f]{6,}$", re.IGNORECASE)
+from app.core.schemas.requests import (  # noqa: E402
+    normalize_project_id as _canonical_project_id,
+)
 
 # Tables carrying a project_id column (``projects.id`` is handled separately
 # because it is a primary key that sessions/pins reference).
@@ -49,14 +53,20 @@ _CHILD_TABLES = (
 
 
 def normalize_project_id(name: str) -> str:
-    name = (name or "").strip()
-    if "/" in name:  # an absolute/relative path leaked in as the id
-        name = name.rstrip("/").split("/")[-1]
-    name = name.lower()
-    name = _WT_SUFFIX_RE.sub("", name)
-    name = re.sub(r"[_.]", "-", name)  # unify separators
-    name = re.sub(r"-{2,}", "-", name).strip("-")
-    return name or "unknown"
+    """Delegate to the server-wide single source of truth.
+
+    This used to carry its own copy of the rule, which stopped at lower-casing
+    and separator folding. The canonical version also splits camelCase, so the
+    copy mapped "MyProject" to "myproject" while every write path stored
+    "my-project" — a migration run would have created a fresh split instead of
+    closing the existing one.
+
+    ``strict=False`` because a migration must not abort on one odd row; an
+    un-normalizable value degrades to ``"unknown"``.
+    """
+    return (
+        _canonical_project_id((name or "").strip() or None, strict=False) or "unknown"
+    )
 
 
 def _collect_ids(conn) -> set[str]:
@@ -106,7 +116,9 @@ async def migrate(db_path: str, dry_run: bool = True) -> None:
             print(f"  {old:40s} → {new:25s} ({affected} rows)")
 
         targets = {new for new in mapping.values()}
-        print(f"\n예상 결과: {len(ids)} → {len(ids) - len(mapping) + len(targets - ids)} 프로젝트")
+        print(
+            f"\n예상 결과: {len(ids)} → {len(ids) - len(mapping) + len(targets - ids)} 프로젝트"
+        )
 
         if dry_run:
             print("\n[dry-run] 변경 사항 없음. 적용하려면 --apply 를 붙이세요.")
@@ -131,9 +143,7 @@ async def migrate(db_path: str, dry_run: bool = True) -> None:
                 if exists:
                     conn.execute("DELETE FROM projects WHERE id = ?", (old,))
                 else:
-                    conn.execute(
-                        "UPDATE projects SET id = ? WHERE id = ?", (new, old)
-                    )
+                    conn.execute("UPDATE projects SET id = ? WHERE id = ?", (new, old))
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
