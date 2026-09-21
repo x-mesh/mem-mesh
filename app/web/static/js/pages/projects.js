@@ -13,6 +13,7 @@ class ProjectsPage extends HTMLElement {
     this.currentSort = 'name';
     this.sortDirection = 'asc';
     this.searchQuery = '';
+    this.projectFilter = '';
     this.autoShareSubs = new Map();
     this.overviewSchedules = new Map();
   }
@@ -38,6 +39,7 @@ class ProjectsPage extends HTMLElement {
 
   connectedCallback() {
     console.log('ProjectsPage connected');
+    this.projectFilter = new URLSearchParams(window.location.search).get('project_id')?.trim() || '';
     this.render();
     this.setupEventListeners();
     
@@ -83,6 +85,11 @@ class ProjectsPage extends HTMLElement {
     const exportBtn = this.querySelector('.export-btn');
     if (exportBtn) {
       exportBtn.addEventListener('click', this.handleExport.bind(this));
+    }
+
+    const clearProjectFilterBtn = this.querySelector('.clear-project-filter-btn');
+    if (clearProjectFilterBtn) {
+      clearProjectFilterBtn.addEventListener('click', this.clearProjectFilter.bind(this));
     }
     
     // Project cards click events
@@ -187,6 +194,14 @@ class ProjectsPage extends HTMLElement {
     this.searchQuery = event.target.value.toLowerCase();
     this.renderProjects();
   }
+
+  clearProjectFilter() {
+    if (window.app?.router) {
+      window.app.router.navigate('/projects');
+    } else {
+      window.location.href = '/projects';
+    }
+  }
   
   /**
    * Handle sort change
@@ -255,9 +270,13 @@ class ProjectsPage extends HTMLElement {
    * Filter projects based on search query
    */
   getFilteredProjects() {
-    if (!this.searchQuery) return this.projects;
+    const projects = this.projectFilter
+      ? this.projects.filter(project => project.id === this.projectFilter)
+      : this.projects;
+
+    if (!this.searchQuery) return projects;
     
-    return this.projects.filter(project => 
+    return projects.filter(project =>
       project.name.toLowerCase().includes(this.searchQuery) ||
       project.categories.some(cat => cat.toLowerCase().includes(this.searchQuery)) ||
       project.tags.some(tag => tag.toLowerCase().includes(this.searchQuery))
@@ -964,10 +983,16 @@ class ProjectsPage extends HTMLElement {
     if (filteredProjects.length === 0) {
       container.innerHTML = `
         <div class="empty-state">
-          <p>No projects found</p>
+          <p>${this.projectFilter ? `Project not found: ${this._escapeHtml(this.projectFilter)}` : 'No projects found'}</p>
+          ${this.projectFilter ? '<button class="clear-project-filter-btn">Show all projects</button>' : ''}
           ${this.searchQuery ? '<button class="clear-search-btn">Clear search</button>' : ''}
         </div>
       `;
+
+      const clearProjectFilterBtn = container.querySelector('.clear-project-filter-btn');
+      if (clearProjectFilterBtn) {
+        clearProjectFilterBtn.addEventListener('click', this.clearProjectFilter.bind(this));
+      }
       
       const clearBtn = container.querySelector('.clear-search-btn');
       if (clearBtn) {
@@ -1068,14 +1093,14 @@ class ProjectsPage extends HTMLElement {
       const active = (c.pending || 0) + (c.processing || 0);
       const total = done + failed + active;
       if (!total || (!active && !failed)) return '';
-      const pct = Math.round((done / total) * 100);
       const retryBtn = failed && op !== 'reconcile'
         ? `<button class="maint-retry-btn" data-project-id="${this._escapeHtml(projectId)}" title="Requeue this project's failed jobs">Retry</button>`
         : '';
+      const progressTransform = `scaleX(${Math.max(0, Math.min(1, done / total))})`;
       return `
         <div class="maint-progress-row">
           <span class="maint-progress-op">${this._escapeHtml(op)}</span>
-          <div class="maint-progress-bar"><div class="maint-progress-fill${failed ? ' has-failed' : ''}" style="width:${pct}%"></div></div>
+          <div class="maint-progress-bar"><div class="maint-progress-fill${failed ? ' has-failed' : ''}" style="transform:${progressTransform}"></div></div>
           <span class="maint-progress-label">${done} / ${total}${active ? '' : ' done'}${failed ? ` · <span class="maint-progress-failed">${failed} failed</span>` : ''}</span>
           ${retryBtn}
         </div>`;
@@ -1216,6 +1241,13 @@ class ProjectsPage extends HTMLElement {
           <button class="sort-toggle">↑</button>
         </div>
       </div>
+
+      ${this.projectFilter ? `
+        <div class="project-filter-banner" role="status">
+          <span>Showing project <strong>${this._escapeHtml(this.projectFilter)}</strong></span>
+          <button class="clear-project-filter-btn">Show all projects</button>
+        </div>
+      ` : ''}
       
       <div class="loading-state" style="display: none;">
         <div class="loading-spinner"></div>
@@ -1436,6 +1468,38 @@ style.textContent = `
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
     gap: 1.5rem;
+  }
+
+  .project-filter-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 1rem 0 1.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    color: var(--text-secondary);
+  }
+
+  .project-filter-banner strong {
+    color: var(--text-primary);
+  }
+
+  .clear-project-filter-btn {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--primary-color);
+    cursor: pointer;
+    font: inherit;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .clear-project-filter-btn:hover {
+    text-decoration: underline;
   }
   
   .project-card {
@@ -1856,9 +1920,10 @@ style.textContent = `
 
   .maint-progress-fill {
     height: 100%;
+    transform-origin: left center;
     border-radius: 999px;
     background: var(--success-color, #16a34a);
-    transition: width 0.4s ease;
+    transition: transform 0.4s ease;
   }
 
   .maint-progress-fill.has-failed {

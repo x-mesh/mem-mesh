@@ -1555,7 +1555,7 @@ class MemoryDetailPage extends HTMLElement {
             ${this.memory.project_id ? `
               <div class="meta-item">
                 <span class="meta-label">Project:</span>
-                <span class="project-badge">${this.memory.project_id}</span>
+                <a class="project-badge" href="/projects?project_id=${encodeURIComponent(this.memory.project_id)}" aria-label="View project ${this.escapeHtml(this.memory.project_id)}">${this.escapeHtml(this.memory.project_id)}</a>
               </div>
             ` : ''}
             <div class="meta-item">
@@ -1880,12 +1880,23 @@ style.textContent = `
   }
   
   .project-badge {
+    display: inline-flex;
     background: var(--primary-color);
     color: white;
     padding: 0.25rem 0.5rem;
     border-radius: var(--border-radius-sm);
     font-size: 0.875rem;
     font-weight: 500;
+    text-decoration: none;
+  }
+
+  .project-badge:hover {
+    filter: brightness(0.92);
+  }
+
+  .project-badge:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
   }
 
   .client-badge {
@@ -2019,7 +2030,6 @@ style.textContent = `
     margin-bottom: 1rem;
     padding: 0.75rem 1rem;
     border: 1px solid var(--border-color);
-    border-left: 3px solid #6366f1;
     border-radius: var(--border-radius-sm);
     background: var(--bg-secondary);
   }
