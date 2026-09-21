@@ -27,7 +27,10 @@ def test_memory_project_link_scopes_projects_page() -> None:
     memory_detail = MEMORY_DETAIL.read_text(encoding="utf-8")
     projects = PROJECTS.read_text(encoding="utf-8")
 
-    assert 'href="/projects?project_id=${encodeURIComponent(this.memory.project_id)}"' in memory_detail
+    assert (
+        'href="/projects?project_id=${encodeURIComponent(this.memory.project_id)}"'
+        in memory_detail
+    )
     assert "new URLSearchParams(window.location.search).get('project_id')" in projects
     assert "project.id === this.projectFilter" in projects
     assert 'class="project-filter-banner"' in projects
