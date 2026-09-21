@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.2] - 2026-09-21
+
+### Changed
+
+- 프론트엔드 프로젝트 상세 회귀 테스트의 형식을 정리해 저장소의 포맷 검사와 일치시켰다. `tests/test_project_detail_frontend.py`
+
 ## [1.38.1] - 2026-09-21
 
 ### Added
