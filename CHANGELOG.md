@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.1] - 2026-09-21
+
+### Added
+
+- 메모리 상세의 프로젝트 배지를 클릭하면 해당 프로젝트만 표시하는 Projects 화면으로 이동한다. `app/web/static/js/pages/memory-detail.js`, `app/web/static/js/pages/projects.js`
+
+### Fixed
+
+- 프로젝트 필터 화면이 URL의 `project_id`를 기준으로 한 프로젝트만 렌더링하고 전체 목록 복귀 동작을 제공한다. `app/web/static/js/pages/projects.js`
+- 프로젝트 진행률 막대가 레이아웃 속성 대신 `transform`을 사용해 상태를 갱신한다. `app/web/static/js/pages/projects.js`
+
 ## [1.38.0] - 2026-07-20
 
 **두 노드를 실제로 띄우고 실데이터를 흘려 relay hub 전 구간을 검증했고, 그 과정에서 조용히 실패하던 버그 4건을 찾아 고쳤다. reconcile의 NLI pre-gate는 운영 데이터로 측정한 뒤 제거했다.**
