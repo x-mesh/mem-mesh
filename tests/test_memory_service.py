@@ -2,6 +2,7 @@
 Memory Service 테스트
 """
 
+import asyncio
 import os
 import tempfile
 from unittest.mock import Mock
@@ -95,6 +96,38 @@ class TestMemoryService:
         assert response1.status == "saved"
         assert response2.status == "duplicate"
         assert response1.id == response2.id
+
+    @pytest.mark.asyncio
+    async def test_concurrent_create_same_content_saves_once(
+        self, temp_db, mock_embedding_service
+    ):
+        """Two hooks (e.g. Codex + Claude Code scripts) posting the same turn at
+        once must not both pass the duplicate check and insert twice."""
+        dim = mock_embedding_service.dimension
+
+        async def slow_embed(_text):
+            await asyncio.sleep(0.05)
+            return [0.1] * dim
+
+        mock_embedding_service.aembed.side_effect = slow_embed
+        service_a = MemoryService(temp_db, mock_embedding_service)
+        service_b = MemoryService(temp_db, mock_embedding_service)
+        content = (
+            "Concurrent duplicate content from two hook clients — padded to exceed "
+            "the 100-character quality gate minimum length requirement here."
+        )
+
+        responses = await asyncio.gather(
+            service_a.create(content=content, project_id="p", client="codex"),
+            service_b.create(content=content, project_id="p", client="claude_code"),
+        )
+
+        assert sorted(r.status for r in responses) == ["duplicate", "saved"]
+        assert responses[0].id == responses[1].id
+        row = await temp_db.fetchone(
+            "SELECT COUNT(*) AS n FROM memories WHERE project_id = ?", ("p",)
+        )
+        assert row["n"] == 1
 
     @pytest.mark.asyncio
     async def test_create_redacts_secrets_at_chokepoint(self, memory_service):

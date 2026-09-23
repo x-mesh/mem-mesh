@@ -3,10 +3,12 @@ Memory Service for mem-mesh
 메모리 CRUD 작업을 담당하는 서비스
 """
 
+import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, AsyncIterator, List, Optional
 from uuid import uuid4
 
 from ..database.base import Database
@@ -26,6 +28,35 @@ from ..schemas.responses import (
 from .quality_gate import content_quality_gate, derivability_hint
 
 logger = logging.getLogger(__name__)
+
+
+class _KeyedLocks:
+    """Per-key asyncio locks, dropped once no caller holds or awaits them.
+
+    Module-level on purpose: several MemoryService instances share one DB in a
+    single process (web, MCP, pin promotion), so an instance lock would not
+    serialize them. Multi-process deployments are not covered.
+    """
+
+    def __init__(self) -> None:
+        self._locks: dict[tuple[Optional[str], str], asyncio.Lock] = {}
+        self._users: dict[tuple[Optional[str], str], int] = {}
+
+    @asynccontextmanager
+    async def hold(self, key: tuple[Optional[str], str]) -> AsyncIterator[None]:
+        lock = self._locks.setdefault(key, asyncio.Lock())
+        self._users[key] = self._users.get(key, 0) + 1
+        try:
+            async with lock:
+                yield
+        finally:
+            self._users[key] -= 1
+            if self._users[key] == 0:
+                del self._users[key]
+                del self._locks[key]
+
+
+_dedup_locks = _KeyedLocks()
 
 
 class MemoryService:
@@ -202,72 +233,75 @@ class MemoryService:
         # 1. Calculate content_hash
         content_hash = Memory.compute_hash(content)
 
-        # 2. Duplicate check
-        existing_memory = await self._find_duplicate(content_hash, project_id)
-        if existing_memory:
-            logger.info("Duplicate memory found: %s", existing_memory["id"])
-            return AddResponse(
-                id=existing_memory["id"],
-                status="duplicate",
-                created_at=existing_memory["created_at"],
+        # 2. Duplicate check. Held until the insert commits so concurrent
+        # saves of the same content (e.g. two hook clients firing on one turn)
+        # cannot both pass the check and insert twice.
+        async with _dedup_locks.hold((project_id, content_hash)):
+            existing_memory = await self._find_duplicate(content_hash, project_id)
+            if existing_memory:
+                logger.info("Duplicate memory found: %s", existing_memory["id"])
+                return AddResponse(
+                    id=existing_memory["id"],
+                    status="duplicate",
+                    created_at=existing_memory["created_at"],
+                )
+
+            # 3. Generate embedding (with retry logic)
+            embedding_vector = await self._generate_embedding_with_retry(content)
+            embedding_bytes = self.embedding_service.to_bytes(embedding_vector)
+
+            # 3.5. F1 sync gate (reconcile): nearest-neighbor candidates only.
+            # The NLI/LLM contradiction judgment is moved off the write path to the
+            # async reconcile worker (per-add cross-encoder = L1 system-stall risk).
+            # Gated by reconcile_enabled (env enable_conflict_detection OR app_config
+            # reconcile.enabled) — F1 needs no NLI model, only vector candidates.
+            reconcile_on = await self._reconcile_enabled()
+            reconcile_candidates: list[dict] | None = None
+            if reconcile_on:
+                reconcile_candidates = await self._find_reconcile_candidates(
+                    embedding_vector, project_id
+                )
+
+            # 4. Create Memory object (status defaults to 'canonical': new memories
+            # are immediately search-visible; only superseded old rows are demoted,
+            # and only after human approval).
+            memory = Memory(
+                content=content,
+                content_hash=content_hash,
+                project_id=project_id,
+                category=category,
+                source=source,
+                client=client,
+                embedding=embedding_bytes,
+                tags=json.dumps(tags) if tags else None,
+                anchors=json.dumps(anchors) if anchors else None,
             )
 
-        # 3. Generate embedding (with retry logic)
-        embedding_vector = await self._generate_embedding_with_retry(content)
-        embedding_bytes = self.embedding_service.to_bytes(embedding_vector)
+            # 5. Save + enqueue reconcile in ONE transaction (C2: a canonical memory
+            # is never left without its queue rows).
+            try:
+                async with self.db.transaction():
+                    await self.db.add_memory(memory.model_dump())
+                    await self._save_to_vector_index(memory.id, embedding_bytes)
+                    if reconcile_candidates:
+                        await self._enqueue_reconcile(
+                            memory.id,
+                            memory.content_hash,
+                            reconcile_candidates,
+                            project_id,
+                        )
 
-        # 3.5. F1 sync gate (reconcile): nearest-neighbor candidates only.
-        # The NLI/LLM contradiction judgment is moved off the write path to the
-        # async reconcile worker (per-add cross-encoder = L1 system-stall risk).
-        # Gated by reconcile_enabled (env enable_conflict_detection OR app_config
-        # reconcile.enabled) — F1 needs no NLI model, only vector candidates.
-        reconcile_on = await self._reconcile_enabled()
-        reconcile_candidates: list[dict] | None = None
-        if reconcile_on:
-            reconcile_candidates = await self._find_reconcile_candidates(
-                embedding_vector, project_id
-            )
+                logger.info("Memory created successfully: %s", memory.id)
+                response = AddResponse(
+                    id=memory.id,
+                    status="saved",
+                    created_at=memory.created_at,
+                    conflicts=None,
+                )
 
-        # 4. Create Memory object (status defaults to 'canonical': new memories
-        # are immediately search-visible; only superseded old rows are demoted,
-        # and only after human approval).
-        memory = Memory(
-            content=content,
-            content_hash=content_hash,
-            project_id=project_id,
-            category=category,
-            source=source,
-            client=client,
-            embedding=embedding_bytes,
-            tags=json.dumps(tags) if tags else None,
-            anchors=json.dumps(anchors) if anchors else None,
-        )
-
-        # 5. Save + enqueue reconcile in ONE transaction (C2: a canonical memory
-        # is never left without its queue rows).
-        try:
-            async with self.db.transaction():
-                await self.db.add_memory(memory.model_dump())
-                await self._save_to_vector_index(memory.id, embedding_bytes)
-                if reconcile_candidates:
-                    await self._enqueue_reconcile(
-                        memory.id,
-                        memory.content_hash,
-                        reconcile_candidates,
-                        project_id,
-                    )
-
-            logger.info("Memory created successfully: %s", memory.id)
-            response = AddResponse(
-                id=memory.id,
-                status="saved",
-                created_at=memory.created_at,
-                conflicts=None,
-            )
-
-        except Exception as e:
-            logger.error("Failed to save memory: %s", e)
-            raise DatabaseError(f"Failed to save memory: {e}") from e
+            except Exception as e:
+                logger.error("Failed to save memory: %s", e)
+                raise DatabaseError(f"Failed to save memory: {e}") from e
 
         # 5.5 C2 post-commit re-scan: a concurrent add that committed between the
         # pre-save scan and this commit was invisible mid-transaction, so neither
