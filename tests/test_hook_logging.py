@@ -23,9 +23,11 @@ import pytest
 from app.cli.hooks.hook_log import HOOK_LOG_BLOCK
 from app.cli.hooks.renderer import _render_template
 from app.cli.hooks.templates import (
+    POST_TOOL_USE_HOOK_TEMPLATE,
     SESSION_START_HOOK_TEMPLATE,
     STOP_DECIDE_HOOK_TEMPLATE,
     STOP_HOOK_TEMPLATE,
+    TASK_COMPLETED_HOOK_TEMPLATE,
     USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
 )
 
@@ -543,3 +545,79 @@ def test_rendered_stop_decide_term_mid_post(
     else:
         assert "killed signal=TERM last_stage=posting" in log
         assert "sent http=200" not in log
+
+
+# ---------------------------------------------------------------------------
+# Project id: forwarders resolve it from the hook payload via the shared
+# resolver (workspace.current_dir / cwd first), never the hook's own cwd
+# ---------------------------------------------------------------------------
+
+
+class _Ok(BaseHTTPRequestHandler):
+    def do_POST(self) -> None:
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        body = b'{"ok": true}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+@pytest.fixture
+def ok_server():
+    httpd = HTTPServer(("127.0.0.1", 0), _Ok)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def _project_dir(root: Path, name: str, project_id: str) -> Path:
+    """A non-git directory whose .mem-mesh/project-id pins its id."""
+    path = root / name
+    (path / ".mem-mesh").mkdir(parents=True)
+    (path / ".mem-mesh" / "project-id").write_text(project_id + "\n", encoding="utf-8")
+    return path
+
+
+@pytest.mark.skipif(not HAS_JQ, reason="jq not installed")
+@pytest.mark.parametrize(
+    "template,hook,extra",
+    [
+        (POST_TOOL_USE_HOOK_TEMPLATE, "post-tool-use", {"tool_name": "Edit"}),
+        (TASK_COMPLETED_HOOK_TEMPLATE, "task-completed", {"task_subject": "t"}),
+    ],
+    ids=["post-tool-use", "task-completed"],
+)
+def test_forwarder_resolves_project_from_payload(
+    tmp_path: Path, ok_server: str, template: str, hook: str, extra: dict
+) -> None:
+    """cwd in the payload wins over workspacePaths, and over the hook's own cwd."""
+    by_cwd = _project_dir(tmp_path, "by-cwd", "shared-id")
+    by_workspace = _project_dir(tmp_path, "by-workspace", "private-id")
+    script = tmp_path / f"{hook}.sh"
+    script.write_text(_render_template(template, ok_server), encoding="utf-8")
+    script.chmod(0o755)
+    env = {**_base_env(tmp_path), "MEM_MESH_HOOK_LOG": "1"}
+    env.pop("MEM_MESH_PROJECT_ID", None)
+    payload = {"cwd": str(by_cwd), "workspacePaths": [str(by_workspace)], **extra}
+    result = subprocess.run(
+        ["bash", str(script)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=env,
+        cwd=str(tmp_path),  # the hook's own cwd must not decide the project
+    )
+    assert result.returncode == 0
+    log = (tmp_path / ".mem-mesh" / "hooks.log").read_text(encoding="utf-8")
+    assert f"[claude_code/{hook}] " in log
+    assert "sent http=200 project=shared-id" in log

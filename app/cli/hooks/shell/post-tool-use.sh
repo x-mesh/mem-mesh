@@ -26,17 +26,10 @@ if [ -n "$HOOK_TOKEN" ]; then
 fi
 
 INPUT=$(cat)
-HOOK_WORKSPACE_PATH="$(printf '%s' "$INPUT" | jq -r '
-  [.workspacePaths, .workspace_paths, .workspacePath, .workspace_path, .cwd]
-  | map(if type == "array" then .[0] elif type == "string" then . else empty end)
-  | map(select(. != null and . != ""))
-  | .[0] // empty
-' 2>/dev/null || true)"
-PROJECT_DIR=""
-if [ -n "$HOOK_WORKSPACE_PATH" ] && [ -d "$HOOK_WORKSPACE_PATH" ]; then
-  PROJECT_DIR="$(cd "$HOOK_WORKSPACE_PATH" 2>/dev/null && mem_mesh_project_id || true)"
-fi
-[ -n "$PROJECT_DIR" ] || PROJECT_DIR="$(mem_mesh_project_id)"
+# Same resolver as every other forwarder, so the write signal lands on the
+# project id the rest of the session records (a private resolver here once
+# preferred workspacePaths over cwd and diverged from them).
+PROJECT_DIR="$(mem_mesh_project_id_from_input "$INPUT")"
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   --arg pid "$PROJECT_DIR" \
