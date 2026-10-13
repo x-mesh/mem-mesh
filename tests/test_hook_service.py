@@ -147,6 +147,55 @@ class TestQAPairing:
         )
         assert await hook_service.get_last_prompt("s1") is None
 
+    @pytest.mark.asyncio
+    async def test_before_pairs_by_client_clock_not_record_order(self, hook_service):
+        """A Stop that reaches the server after the next turn's prompt still
+        pairs with its own question: prompts carry the hook's client-clock
+        start, and the Stop asks for the last one stamped before it started."""
+        for prompt, fired in (("first question", 100.0), ("second question", 103.0)):
+            await hook_service.record_event(
+                project_id="p",
+                ide_session_id="s1",
+                event_name="UserPromptSubmit",
+                prompt=prompt,
+                client_fired_at=fired,
+            )
+        # the first turn's Stop started at 102: after its prompt, before the next
+        assert (
+            await hook_service.get_last_prompt("s1", before=102.0) == "first question"
+        )
+        assert (
+            await hook_service.get_last_prompt("s1", before=104.0) == "second question"
+        )
+        assert await hook_service.get_last_prompt("s1") == "second question"
+
+    @pytest.mark.asyncio
+    async def test_before_without_stamped_prompts_uses_record_order(self, hook_service):
+        """Older hooks send no stamp; a stamped Stop then falls back to order."""
+        await hook_service.record_event(
+            project_id="p",
+            ide_session_id="s1",
+            event_name="UserPromptSubmit",
+            prompt="unstamped question",
+        )
+        assert (
+            await hook_service.get_last_prompt("s1", before=50.0)
+            == "unstamped question"
+        )
+
+    @pytest.mark.asyncio
+    async def test_before_earlier_than_every_stamp_pairs_nothing(self, hook_service):
+        """When the Stop's own prompt never arrived, a later prompt is not a
+        substitute: no question beats the wrong question."""
+        await hook_service.record_event(
+            project_id="p",
+            ide_session_id="s1",
+            event_name="UserPromptSubmit",
+            prompt="later question",
+            client_fired_at=200.0,
+        )
+        assert await hook_service.get_last_prompt("s1", before=150.0) is None
+
 
 class TestTurnsSinceSave:
     """turns_since_save — 이벤트 스트림 기반 턴 카운터"""

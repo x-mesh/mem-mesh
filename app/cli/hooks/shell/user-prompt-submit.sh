@@ -24,6 +24,11 @@ if [ -n "$HOOK_TOKEN" ]; then
   AUTH_STATE=present
 fi
 
+# Client-clock start of this hook (epoch seconds, sub-second from jq): the
+# server pairs a Stop with the last prompt stamped before the Stop started, so
+# a send that outlives a host cancel still pairs with its own question.
+FIRED_AT="$(jq -n 'now' 2>/dev/null || echo null)"
+
 INPUT=$(cat)
 PROJECT_DIR="$(mem_mesh_project_id_from_input "$INPUT")"
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
@@ -31,7 +36,8 @@ PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   --arg pid "$PROJECT_DIR" \
   --arg source "__SOURCE_TAG__" \
   --arg client "__CLIENT_TAG__" \
-  '. + {project_id: $pid, hook_source: $source, client: $client}' 2>/dev/null) || PAYLOAD="$INPUT"
+  --argjson fired "$FIRED_AT" \
+  '. + {project_id: $pid, hook_source: $source, client: $client, hook_fired_at: $fired}' 2>/dev/null) || PAYLOAD="$INPUT"
 
 # Capture HTTP status + timing alongside the body (-w appends "\n<code> <time>")
 # so the log distinguishes a 401 / 000 from a 200 with no reminder. Body =

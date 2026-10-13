@@ -624,3 +624,75 @@ def test_forwarder_resolves_project_from_payload(
     log = (tmp_path / ".mem-mesh" / "hooks.log").read_text(encoding="utf-8")
     assert f"[claude_code/{hook}] " in log
     assert "sent http=200 project=shared-id" in log
+
+
+# ---------------------------------------------------------------------------
+# Client-clock stamp: user-prompt-submit and stop forwarders send hook_fired_at
+# ---------------------------------------------------------------------------
+
+
+class _CaptureBody(BaseHTTPRequestHandler):
+    bodies: list[bytes] = []
+
+    def do_POST(self) -> None:
+        length = int(self.headers.get("Content-Length", "0"))
+        type(self).bodies.append(self.rfile.read(length))
+        body = b"{}"
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+@pytest.fixture
+def capture_server():
+    _CaptureBody.bodies = []
+    httpd = HTTPServer(("127.0.0.1", 0), _CaptureBody)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+@pytest.mark.skipif(not HAS_JQ, reason="jq not installed")
+@pytest.mark.parametrize(
+    "template,payload",
+    [
+        (USER_PROMPT_SUBMIT_HOOK_TEMPLATE, {"prompt": "hello", "session_id": "s"}),
+        (
+            STOP_DECIDE_HOOK_TEMPLATE,
+            {"stop_hook_active": False, "last_assistant_message": "hi"},
+        ),
+    ],
+    ids=["user-prompt-submit", "stop-decide"],
+)
+def test_forwarder_stamps_hook_fired_at(
+    tmp_path: Path, capture_server: str, template: str, payload: dict
+) -> None:
+    """The POST carries hook_fired_at: the hook's start on the client clock,
+    sub-second, taken from jq's now (bash 3.2 on macOS has no EPOCHREALTIME)."""
+    script = tmp_path / "hook.sh"
+    script.write_text(_render_template(template, capture_server), encoding="utf-8")
+    script.chmod(0o755)
+    before = time.time()
+    result = subprocess.run(
+        ["bash", str(script)],
+        input=json.dumps({**payload, "cwd": str(tmp_path)}),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=_base_env(tmp_path),
+    )
+    assert result.returncode == 0
+    assert len(_CaptureBody.bodies) == 1
+    sent = json.loads(_CaptureBody.bodies[0])
+    assert isinstance(sent["hook_fired_at"], float)
+    assert before - 1 <= sent["hook_fired_at"] <= time.time() + 1
+    assert sent["prompt" if "prompt" in payload else "last_assistant_message"]
