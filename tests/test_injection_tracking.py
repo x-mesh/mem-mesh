@@ -228,6 +228,50 @@ async def test_user_prompt_submit_records_injected_memories(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_noise_prompt_skips_search(monkeypatch):
+    """A machine-generated prompt (agent-completion envelope) that passes the
+    length+keyword gate must not run the embedding search: it carries no
+    question, and such prompts arrive in bursts when several agents finish
+    together. The turn is still recorded for the reminder counters."""
+    async with _temp_db() as db:
+        hook_service = _quiet_hook_service(db)
+        search_service = _search_stub([_result("mem-x", 0.9)])
+        monkeypatch.setattr(
+            hooks_mod,
+            "get_services",
+            lambda: {
+                "search_service": search_service,
+                "embedding_service": SimpleNamespace(is_ready=True),
+            },
+        )
+
+        app, get_hook_service, get_pin_service, _ = _app()
+        app.dependency_overrides[get_hook_service] = lambda: hook_service
+        app.dependency_overrides[get_pin_service] = lambda: SimpleNamespace(
+            get_pins=AsyncMock(return_value=[])
+        )
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            r = await client.post(
+                "/api/hooks/claude/user-prompt-submit",
+                json={
+                    "session_id": "sess-n",
+                    "cwd": "/tmp/mem-mesh",
+                    "prompt": f"<task-notification>{_PROMPT}</task-notification>",
+                },
+            )
+
+        assert r.status_code == 200
+        search_service.search.assert_not_called()
+        assert await _injected_rows(db) == []
+        events = await db.fetchall(
+            "SELECT event_name FROM hook_events WHERE ide_session_id = 'sess-n'"
+        )
+        assert [row["event_name"] for row in events] == ["UserPromptSubmit"]
+
+
+@pytest.mark.asyncio
 async def test_below_threshold_results_not_recorded_as_injected(monkeypatch):
     """Results searched but dropped below threshold are never recorded — only
     what actually reaches additionalContext counts as injected."""

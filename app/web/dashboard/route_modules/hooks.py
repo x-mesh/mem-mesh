@@ -679,8 +679,16 @@ async def user_prompt_submit(
 
     parts: list[str] = []
 
-    # Part 1: keyword-filtered memory search.
-    if len(prompt) >= 30 and any(kw in prompt.lower() for kw in _SEARCH_KEYWORDS):
+    # Part 1: keyword-filtered memory search. Machine-generated prompts
+    # (agent-completion envelopes, injected reminders) pass the length+keyword
+    # gate yet carry no question to answer, and they arrive in bursts — several
+    # agents finishing together — right when the embedding search is slowest
+    # (hooks.log: p50 0.03s alone, 2.7s with 4+ concurrent prompts).
+    if (
+        len(prompt) >= 30
+        and not _is_noise(prompt)
+        and any(kw in prompt.lower() for kw in _SEARCH_KEYWORDS)
+    ):
         services = get_services()
         search_service = services.get("search_service")
         embedding_service = services.get("embedding_service")
