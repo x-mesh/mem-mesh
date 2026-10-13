@@ -245,6 +245,7 @@ class HookService:
         prompt: Optional[str] = None,
         assistant_message: Optional[str] = None,
         saved_memory: Optional[bool] = None,
+        client_fired_at: Optional[float] = None,
     ) -> int:
         """Append an event to the session stream and return its turn index.
 
@@ -266,8 +267,9 @@ class HookService:
             """
             INSERT INTO hook_events (
                 id, project_id, ide_session_id, client_type, event_name,
-                turn_index, prompt, assistant_message, saved_memory, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                turn_index, prompt, assistant_message, saved_memory,
+                client_fired_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(uuid4()),
@@ -279,6 +281,7 @@ class HookService:
                 prompt,
                 assistant_message,
                 1 if saved_memory else 0,
+                client_fired_at,
                 now,
             ),
         )
@@ -300,10 +303,41 @@ class HookService:
         )
         return bool(row and row["c"])
 
-    async def get_last_prompt(self, ide_session_id: str) -> Optional[str]:
-        """The most recent user prompt recorded for this session, if any."""
+    async def get_last_prompt(
+        self, ide_session_id: str, before: Optional[float] = None
+    ) -> Optional[str]:
+        """The most recent user prompt recorded for this session, if any.
+
+        With ``before`` (a Stop hook's client-clock start) and a session whose
+        prompts carry ``client_fired_at``, the answer is the latest prompt
+        stamped earlier than that instant — so a Stop recorded after the next
+        turn's prompt still pairs with its own question, and a Stop with no
+        earlier stamped prompt pairs with nothing rather than the wrong one.
+        Sessions without stamps (older hooks) keep record order (turn_index).
+        """
         if not ide_session_id:
             return None
+        if before is not None:
+            stamped = await self.db.fetchone(
+                """
+                SELECT 1 AS present FROM hook_events
+                WHERE ide_session_id = ? AND client_fired_at IS NOT NULL
+                LIMIT 1
+                """,
+                (ide_session_id,),
+            )
+            if stamped:
+                row = await self.db.fetchone(
+                    """
+                    SELECT prompt FROM hook_events
+                    WHERE ide_session_id = ? AND prompt IS NOT NULL AND prompt != ''
+                      AND client_fired_at IS NOT NULL AND client_fired_at < ?
+                    ORDER BY client_fired_at DESC
+                    LIMIT 1
+                    """,
+                    (ide_session_id, before),
+                )
+                return row["prompt"] if row else None
         row = await self.db.fetchone(
             """
             SELECT prompt FROM hook_events

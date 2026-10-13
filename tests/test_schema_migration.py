@@ -189,9 +189,9 @@ async def test_add_column_if_missing():
                 os.unlink(p)
 
 
-def test_current_schema_version_is_15():
-    """CURRENT_SCHEMA_VERSION bumped to 15 for the memories.is_starred flag."""
-    assert CURRENT_SCHEMA_VERSION == 15
+def test_current_schema_version_is_16():
+    """CURRENT_SCHEMA_VERSION bumped to 16 for hook_events.client_fired_at."""
+    assert CURRENT_SCHEMA_VERSION == 16
 
 
 @pytest.mark.asyncio
@@ -490,3 +490,66 @@ async def test_v15_adds_is_starred_from_v14_state():
             p = path + ext
             if os.path.exists(p):
                 os.unlink(p)
+
+
+@pytest.mark.asyncio
+async def test_v16_new_db_has_client_fired_at(temp_db_path):
+    """A freshly created DB exposes hook_events.client_fired_at (nullable REAL)."""
+    db = Database(temp_db_path)
+    await db.connect()
+
+    cursor = await db.execute("PRAGMA table_info(hook_events)")
+    cols = {row["name"]: row for row in cursor.fetchall()}
+    assert "client_fired_at" in cols
+    assert cols["client_fired_at"]["type"] == "REAL"
+    assert cols["client_fired_at"]["notnull"] == 0
+
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_v16_adds_client_fired_at_from_v15_state():
+    """A v15-state hook_events table gains client_fired_at at v16, existing rows
+    read NULL (pairing falls back to turn_index), and re-applying is idempotent."""
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+
+    try:
+        conn = DatabaseConnection(path)
+        await conn.connect()
+
+        conn.connection.execute(
+            "CREATE TABLE hook_events (id TEXT PRIMARY KEY, ide_session_id TEXT NOT NULL, "
+            "event_name TEXT NOT NULL, turn_index INTEGER NOT NULL DEFAULT 0, prompt TEXT)"
+        )
+        conn.connection.execute(
+            "INSERT INTO hook_events (id, ide_session_id, event_name, turn_index, prompt) "
+            "VALUES ('e1', 's1', 'UserPromptSubmit', 0, 'old prompt')"
+        )
+        conn.connection.execute(
+            "CREATE TABLE _schema_migrations ("
+            "version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL, description TEXT)"
+        )
+        conn.connection.execute(
+            "INSERT INTO _schema_migrations (version, applied_at) "
+            "VALUES (15, '2026-01-01T00:00:00+00:00')"
+        )
+        conn.commit()
+
+        migrator = SchemaMigrator(conn)
+        await migrator.migrate()
+
+        assert await migrator._column_exists("hook_events", "client_fired_at")
+        cursor = await conn.execute(
+            "SELECT client_fired_at FROM hook_events WHERE id = 'e1'"
+        )
+        assert cursor.fetchone()["client_fired_at"] is None
+
+        # idempotent: the v16 step on an already-migrated table is a no-op
+        await migrator._migration_v16_hook_event_client_time(migrator)
+        assert await migrator._get_current_version() == CURRENT_SCHEMA_VERSION
+    finally:
+        await conn.close()
+        for ext in ["", "-wal", "-shm"]:
+            if os.path.exists(path + ext):
+                os.unlink(path + ext)

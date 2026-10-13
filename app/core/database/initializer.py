@@ -279,6 +279,7 @@ class DatabaseInitializer:
                 prompt TEXT,
                 assistant_message TEXT,
                 saved_memory INTEGER NOT NULL DEFAULT 0,
+                client_fired_at REAL,
                 created_at TEXT NOT NULL
             )
         """)

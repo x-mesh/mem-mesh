@@ -219,6 +219,11 @@ if [ -n "$HOOK_TOKEN" ]; then
   AUTH_STATE=present
 fi
 
+# Client-clock start of this hook (epoch seconds, sub-second from jq): the
+# server pairs a Stop with the last prompt stamped before the Stop started, so
+# a send that outlives a host cancel still pairs with its own question.
+FIRED_AT="$(jq -n 'now' 2>/dev/null || echo null)"
+
 INPUT=$(cat)
 
 # Loop guard locally to skip a needless request (server also enforces this).
@@ -231,7 +236,8 @@ PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   --arg pid "$PROJECT_DIR" \
   --arg source "claude-code-hook" \
   --arg client "claude_code" \
-  '. + {project_id: $pid, hook_source: $source, client: $client}' 2>/dev/null) || PAYLOAD="$INPUT"
+  --argjson fired "$FIRED_AT" \
+  '. + {project_id: $pid, hook_source: $source, client: $client, hook_fired_at: $fired}' 2>/dev/null) || PAYLOAD="$INPUT"
 
 CURL_EXIT=0
 # Shield the send, then leave a verbose breadcrumb: from here a host TERM is

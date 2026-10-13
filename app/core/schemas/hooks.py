@@ -45,6 +45,13 @@ class HookEventBase(BaseModel):
         default=None,
         description="Hook installer/source tag stamped by command hooks",
     )
+    hook_fired_at: Optional[float] = Field(
+        default=None,
+        description=(
+            "Client-clock epoch seconds when the hook started (jq now); the server"
+            " pairs a Stop with the last prompt stamped before it, not by record order"
+        ),
+    )
 
 
 class SessionStartPayload(HookEventBase):

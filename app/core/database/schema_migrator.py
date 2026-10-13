@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Current schema version - increment when adding new migrations
-CURRENT_SCHEMA_VERSION = 15
+CURRENT_SCHEMA_VERSION = 16
 
 
 class SchemaMigrator:
@@ -48,6 +48,7 @@ class SchemaMigrator:
             13: self._migration_v13_injection_utilization,
             14: self._migration_v14_stale_status,
             15: self._migration_v15_starred,
+            16: self._migration_v16_hook_event_client_time,
         }
 
     async def migrate(self) -> None:
@@ -483,6 +484,22 @@ class SchemaMigrator:
             logger.info(
                 "Added stale_status/stale_checked_at on memories via migration v14"
             )
+
+    async def _migration_v16_hook_event_client_time(
+        self, migrator: "SchemaMigrator"
+    ) -> None:
+        """Client-clock start time on hook events, for Stop/prompt pairing.
+
+        ``get_last_prompt`` picked the prompt with the highest ``turn_index``,
+        i.e. record order. A Stop whose send outlives the host's cancel (the
+        TERM shield in the forwarders) can be recorded after the next turn's
+        prompt and would pair the answer with the wrong question. Hooks now
+        send ``hook_fired_at`` (epoch seconds from ``jq now``) and the server
+        pairs by that clock; rows without it keep the turn_index path.
+        """
+        if await self._table_exists("hook_events"):
+            await self._add_column_if_missing("hook_events", "client_fired_at", "REAL")
+            logger.info("Added client_fired_at column to hook_events via migration v16")
 
     async def _migration_v15_starred(self, migrator: "SchemaMigrator") -> None:
         """Durable star (favorite) flag on memories.

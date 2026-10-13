@@ -354,6 +354,7 @@ async def _record(
     client_type: Optional[str] = None,
     prompt: Optional[str] = None,
     assistant_message: Optional[str] = None,
+    client_fired_at: Optional[float] = None,
 ) -> Optional[int]:
     """Best-effort event recording — never raises into the handler.
 
@@ -377,6 +378,7 @@ async def _record(
             client_type=client_type,
             prompt=_redact_optional(prompt),
             assistant_message=_redact_optional(assistant_message),
+            client_fired_at=client_fired_at,
         )
     except Exception as e:  # noqa: BLE001 - hooks must not break the session
         logger.warning(f"hook event record failed ({event_name}): {e}")
@@ -675,6 +677,7 @@ async def user_prompt_submit(
         event_name="UserPromptSubmit",
         client_type=client,
         prompt=prompt,
+        client_fired_at=payload.hook_fired_at,
     )
 
     parts: list[str] = []
@@ -1080,6 +1083,7 @@ async def stop(
         event_name="Stop",
         client_type=client,
         assistant_message=message,
+        client_fired_at=payload.hook_fired_at,
     )
 
     # Judge whether this session's injected memories were utilized (t9). Runs on
@@ -1110,7 +1114,9 @@ async def stop(
     content = message
     if ide_session_id:
         try:
-            question = await hook_service.get_last_prompt(ide_session_id)
+            question = await hook_service.get_last_prompt(
+                ide_session_id, before=payload.hook_fired_at
+            )
             if question and not _is_noise(question):
                 content = f"Q: {question[:500]}\n\nA: {message[:_MAX_CONTENT]}"
         except Exception as e:  # noqa: BLE001
