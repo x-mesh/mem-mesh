@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.39.1] - 2026-10-13
+
+**sentence-transformers 최소 버전을 5.6.0으로 올려 CVE-2026-68770을 막았다.**
+
+WHY: sentence-transformers 5.6.0 미만은 로컬 경로에 있는 모델 디렉터리를 로드할 때 `trust_remote_code=False`여도 `modules.json`이 가리키는 Python 코드를 실행한다(GHSA-jhr6-gm9c-rqjv). `requirements.txt`가 `<4.0.0`으로 묶어 두어 모든 설치와 Docker 이미지가 취약 버전을 썼다. Dependabot 경고는 dependency graph가 버전을 읽지 못해 자동으로 닫혔을 뿐 해결된 상태가 아니었다.
+
+### Security
+
+- **sentence-transformers 5.6.0 이상 요구** — `requirements.txt`는 `>=5.6.0,<6.0.0`, server extra는 `>=5.6.0`으로 올렸고, `transformers` 하한은 5.6이 요구하는 4.41.0으로 맞췄다. 코드가 쓰는 `encode`와 `CrossEncoder.predict`는 3.4.1과 5.7.0에서 같은 결과를 냈다(임베딩 cosine 1.0, `predict` 차이 0). (`requirements.txt`, `pyproject.toml`)
+
+## [1.39.0] - 2026-10-13
+
+**훅이 호스트 종료 신호에 끊겨 턴을 잃던 문제를 막고, 훅 로그만으로 실패 원인을 가릴 수 있게 했다. Stop의 Q&A 짝짓기를 기록 순서 대신 훅 시작 시각으로 바꾸고, 기계 생성 프롬프트에는 메모리 검색을 돌리지 않는다.**
+
+WHY: `~/.mem-mesh/hooks.log` 분석에서 `stop-decide` 강제 종료 343건 중 330건이 전송 직전(`posting`) 단계였고 257건이 0초 만에 끝났다. 시간 초과가 아니라 세션 종료·취소 때 호스트가 보낸 TERM이었고, 그 턴은 서버에 도달하지 못했다. `user-prompt-submit`은 같은 초에 프롬프트가 4건 이상 겹치면 중앙값 응답이 0.03초에서 2.7초로 늘었는데, 겹치는 시점은 여러 에이전트가 함께 끝나 완료 알림이 몰릴 때였다. codex `stop-decide`의 422는 응답 본문을 버려서 원인을 알 수 없었고, 로그는 회전 없이 29MB까지 커져 있었다.
+
+### Added
+
+- **훅 4xx 오류 요약과 로그 회전** — `stop-decide`와 `subagent-stop`이 4xx/5xx 응답에서 Pydantic 오류의 `loc`/`msg`/`type`만 verbose 레벨로 기록한다. 거부된 값(`input`)은 대화 내용이므로 남기지 않는다. `hooks.log`는 10MB를 넘으면 `hooks.log.1`로 교체한다. `user-prompt-submit`·`subagent-start`의 `posting` 단계와 `precompact`·`subagent-start`의 HTTP 코드·응답 시간을 `sent http=<code>` 형태로 기록한다. (`app/cli/hooks/hook_log.py`, `app/cli/hooks/shell/`)
+- **훅 시작 시각 기록** — `user-prompt-submit`, `stop-decide`, `stop` 훅이 시작 시각(`jq -n 'now'`)을 `hook_fired_at`으로 보내고, 서버가 `hook_events.client_fired_at`(스키마 v16)에 저장한다. (`app/core/database/schema_migrator.py`, `app/core/services/hook.py`)
+
+### Changed
+
+- **전송 전용 훅이 호스트 TERM을 무시** — 응답을 돌려주지 않는 forwarder 6개가 전송 직전부터 TERM/HUP을 무시해 세션 종료 중에도 이벤트가 서버에 도달한다. `curl --max-time`이 실행 시간을 제한하고, SIGKILL은 막지 못한다. (`app/cli/hooks/hook_log.py`, `app/cli/hooks/shell/`)
+- **프로젝트 ID 해석 통일** — `post-tool-use`와 `task-completed`가 다른 훅과 같은 `mem_mesh_project_id_from_input`으로 페이로드의 `cwd`를 기준으로 해석한다. (`app/cli/hooks/shell/post-tool-use.sh`, `app/cli/hooks/shell/task-completed.sh`)
+
+### Fixed
+
+- **훅 curl 제한을 호스트 제한 아래로** — `user-prompt-submit`과 `post-tool-use`의 `--max-time`을 4초로 낮췄다. 호스트 제한(5초)보다 길어 서버가 느리면 Claude Code가 훅을 강제 종료하고 경고를 띄웠다. (`app/cli/hooks/shell/user-prompt-submit.sh`, `app/cli/hooks/shell/post-tool-use.sh`)
+- **Stop의 Q&A 짝짓기를 훅 시작 시각 기준으로** — `/stop`은 자기 시작 시각보다 앞서 기록된 마지막 프롬프트와 짝짓는다. 기록 순서로 고르면 늦게 도착한 Stop이 다음 턴의 질문과 짝지어질 수 있었다. 시각이 없는 세션은 기존 `turn_index` 방식을 쓴다. (`app/core/services/hook.py`, `app/web/dashboard/route_modules/hooks.py`)
+- **기계 생성 프롬프트의 메모리 검색 생략** — `user-prompt-submit`이 `<task-notification>` 같은 마커가 있는 프롬프트에는 hybrid 검색을 실행하지 않는다. 턴 기록과 저장·pin 알림은 그대로다. (`app/web/dashboard/route_modules/hooks.py`)
+- **같은 내용 동시 저장 직렬화** — 같은 턴에 두 훅 클라이언트가 같은 내용을 저장하면 둘 다 `content_hash` 중복 검사를 통과해 메모리가 두 번 저장됐다. `(project_id, content_hash)`별 잠금을 중복 검사부터 insert 커밋까지 유지한다. (`app/core/services/memory.py`)
+
 ## [1.38.2] - 2026-09-21
 
 ### Changed
