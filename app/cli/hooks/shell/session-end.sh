@@ -27,8 +27,10 @@ fi
 
 # End the most recent active session for this project
 CURL_EXIT=0
-# Verbose breadcrumb BEFORE the network send: if the host kills this hook
-# mid-curl, the kill trap logs last_stage=posting — the exact stalled stage.
+# Shield the send, then leave a verbose breadcrumb: from here a host TERM is
+# ignored so the event still lands (see mem_mesh_post_shield); a "posting"
+# line with no "sent" line therefore means a hard kill.
+mem_mesh_post_shield
 mem_mesh_logv "session-end" "posting"
 HTTP_META=$(curl -s -o /dev/null --max-time 5 -w '%{http_code} %{time_total}' \
   -X POST "${API_URL}/api/work/sessions/end-by-project/${PROJECT_DIR}" \

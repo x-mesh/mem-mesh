@@ -137,6 +137,17 @@ _mm_arm_kill_trap() {
   trap '_mm_on_kill INT' INT
   trap '_mm_on_kill HUP' HUP
 }
+# Delivery over cancel: forwarders that return nothing to the host call this
+# right before their POST. A host TERM mid-send (session exit, hook cancel: 330
+# of 343 stop-decide kills sat at "posting" with elapsed=0s) only loses the
+# event, so from here TERM/HUP are ignored and the kill trap above no longer
+# fires for them; curl inherits the ignore. curl --max-time still bounds the
+# run (kept below the host timeout), and SIGKILL still ends it — a "posting"
+# line with no "sent" line. Hooks whose stdout the host waits on must not use
+# this: the host would block on a send it tried to cancel.
+mem_mesh_post_shield() {
+  trap '' TERM HUP
+}
 mem_mesh_log() {
   [ "${_MM_LOG:-0}" -ge 1 ] 2>/dev/null || return 0
   _mm_hook="${1:-?}"; _mm_stage="${2:-?}"

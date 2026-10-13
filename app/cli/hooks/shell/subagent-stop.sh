@@ -36,8 +36,10 @@ PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   '. + {project_id: $pid, hook_source: $source, client: $client}' 2>/dev/null) || PAYLOAD="$INPUT"
 
 CURL_EXIT=0
-# Verbose breadcrumb BEFORE the network send: if the host kills this hook
-# mid-curl, the kill trap logs last_stage=posting — the exact stalled stage.
+# Shield the send, then leave a verbose breadcrumb: from here a host TERM is
+# ignored so the event still lands (see mem_mesh_post_shield); a "posting"
+# line with no "sent" line therefore means a hard kill.
+mem_mesh_post_shield
 mem_mesh_logv "subagent-stop" "posting"
 # Keep the body: on 4xx the server's error detail is the only diagnosis there
 # is. -w appends "\n<code> <time> <status>".
