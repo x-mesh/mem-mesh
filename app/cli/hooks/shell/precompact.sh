@@ -95,10 +95,13 @@ except Exception:
 fi
 
 # ── End session via API ──
-curl -s -o /dev/null --max-time 5 \
+END_META=$(curl -s -o /dev/null --max-time 5 -w '%{http_code} %{time_total}' \
   -X POST "${API_URL}/api/work/sessions/end-by-project/${PROJECT_DIR}?summary=Auto-ended%20by%20PreCompact%20hook" \
   ${AUTH[@]+"${AUTH[@]}"} \
-  2>/dev/null || true
+  2>/dev/null) || true
+END_CODE="${END_META%% *}"
+[ -n "$END_CODE" ] || END_CODE="000"
+mem_mesh_log "precompact" "sent" "http=$END_CODE call=end-session project=$PROJECT_DIR"
 
 # ── Return save reminder as hookSpecificOutput ──
 if [ -n "$SAVE_HINT" ]; then
@@ -112,11 +115,22 @@ ${SAVE_HINT}
 fi
 
 # ── Query open pins via API ──
-OPEN_PINS=""
-OPEN_PINS=$(curl -s --max-time 3 \
+# -w appends "\n<code> <time>" so the log carries the status of this call too.
+PINS_RAW=$(curl -s --max-time 3 -w '\n%{http_code} %{time_total}' \
   "${API_URL}/api/work/sessions/resume/${PROJECT_DIR}?expand=false" \
   ${AUTH[@]+"${AUTH[@]}"} \
-  2>/dev/null | python3 -c "
+  2>/dev/null) || PINS_RAW=""
+if [ -n "$PINS_RAW" ]; then
+  PINS_META="${PINS_RAW##*$'\n'}"
+  PINS_BODY="${PINS_RAW%$'\n'*}"
+else
+  PINS_META=""; PINS_BODY=""
+fi
+PINS_CODE="${PINS_META%% *}"
+[ -n "$PINS_CODE" ] || PINS_CODE="000"
+mem_mesh_log "precompact" "sent" "http=$PINS_CODE call=pins bytes=${#PINS_BODY} project=$PROJECT_DIR"
+OPEN_PINS=""
+OPEN_PINS=$(printf '%s' "$PINS_BODY" | python3 -c "
 import sys, json
 try:
     data = json.load(sys.stdin)
@@ -143,8 +157,10 @@ PARTS=()
 [ -n "$OPEN_PINS" ] && PARTS+=("$OPEN_PINS")
 
 if [ ${#PARTS[@]} -eq 0 ]; then
+  mem_mesh_log "precompact" "output" "none"
   exit 0
 fi
+mem_mesh_log "precompact" "output" "parts=${#PARTS[@]}"
 
 COMBINED=""
 for part in "${PARTS[@]}"; do

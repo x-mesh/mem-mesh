@@ -39,6 +39,9 @@ PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
 # host's UserPromptSubmit timeout (5s in install_hooks.py); otherwise the host
 # kills the hook mid-request and reports a timeout instead of a silent skip.
 CURL_EXIT=0
+# Verbose breadcrumb BEFORE the network send: if the host kills this hook
+# mid-curl, the kill trap logs last_stage=posting — the exact stalled stage.
+mem_mesh_logv "user-prompt-submit" "posting"
 RESP_RAW=$(curl -s --max-time 4 -w '\n%{http_code} %{time_total}' \
   -X POST "${API_URL}/api/hooks/claude/user-prompt-submit" \
   -H "Content-Type: application/json" \

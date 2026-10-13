@@ -102,6 +102,8 @@ mem_mesh_project_id_from_input() {
 #   2 / debug / verbose-> + a "config" line per request: url, auth present?,
 #                          hook-key tail (last 4 chars), curl time + exit code
 #                          (metadata only, never the full token or any content)
+# The file is rotated once per hook run (at the "fired" stage) when it passes
+# 10 MB: hooks.log -> hooks.log.1, one previous generation kept.
 case "${MEM_MESH_HOOK_LOG:-}" in
   ""|0|false|no|off|FALSE|NO|OFF) _MM_LOG=0 ;;
   2|3|debug|DEBUG|verbose|VERBOSE|trace|TRACE) _MM_LOG=2 ;;
@@ -141,10 +143,24 @@ mem_mesh_log() {
   _MM_STAGE="$_mm_stage"
   if [ "$#" -gt 2 ]; then shift 2; _mm_detail=" $*"; else _mm_detail=""; fi
   _mm_ts="$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo '-')"
+  _mm_file="${HOME}/.mem-mesh/hooks.log"
   mkdir -p "${HOME}/.mem-mesh" 2>/dev/null || true
+  # Rotation: append-only under a global MEM_MESH_HOOK_LOG=2 the file passed
+  # 29 MB (every stage of every client). Checked once per run, at "fired", so
+  # the other stages stay a single printf. `wc -c` pads on BSD; keep digits only
+  # before the numeric compare. Not atomic across hooks firing in the same
+  # second: two can both pass the check and the later mv overwrites .1 with a
+  # near-empty file — the previous generation is best-effort for a trace log.
+  if [ "$_mm_stage" = "fired" ] && [ -f "$_mm_file" ]; then
+    _mm_size="$(wc -c <"$_mm_file" 2>/dev/null || echo 0)"
+    _mm_size="${_mm_size//[^0-9]/}"
+    if [ "${_mm_size:-0}" -gt 10485760 ] 2>/dev/null; then
+      mv -f "$_mm_file" "${_mm_file}.1" 2>/dev/null || true
+    fi
+  fi
   printf '%s [%s/%s] pid=%s %s%s\n' \
     "$_mm_ts" "${_MM_CLIENT:-hook}" "$_mm_hook" "$$" "$_mm_stage" "$_mm_detail" \
-    >>"${HOME}/.mem-mesh/hooks.log" 2>/dev/null || true
+    >>"$_mm_file" 2>/dev/null || true
 }
 # Verbose channel: only emits at level >= 2. Detail is connection metadata
 # (url / auth-present / key tail / timing / curl exit) — never request or
@@ -161,6 +177,22 @@ mem_mesh_keytail() {
   else
     printf 'none'
   fi
+}
+# 4xx/5xx diagnosis: FastAPI returns the validation error in the response body,
+# which the forwarders used to discard (-o /dev/null) — a 422 was undiagnosable.
+# Level 2 only. Logs each error's loc/msg/type and never its "input" echo (that
+# is the rejected value, i.e. turn content); the summary is capped at 300 chars.
+mem_mesh_log_http_error() {
+  [ "${_MM_LOG:-0}" -ge 2 ] 2>/dev/null || return 0
+  _mm_hook="${1:-?}"; _mm_code="${2:-000}"; _mm_body="${3:-}"
+  case "$_mm_code" in 4[0-9][0-9]|5[0-9][0-9]) ;; *) return 0 ;; esac
+  [ -n "$_mm_body" ] || return 0
+  _mm_err="$(printf '%s' "$_mm_body" | jq -c '
+    if (.detail | type) == "array" then [.detail[] | {loc, msg, type}]
+    elif (.detail | type) == "string" then {detail}
+    else {keys: keys} end' 2>/dev/null | head -c 300)" || _mm_err=""
+  [ -n "$_mm_err" ] || _mm_err="non-json body bytes=${#_mm_body}"
+  mem_mesh_log "$_mm_hook" "error" "http=$_mm_code $_mm_err"
 }
 mem_mesh_log "session-start" "fired" "cwd=$PWD"
 command -v jq >/dev/null 2>&1 || { mem_mesh_log "session-start" "abort" "jq not found"; echo '{}'; exit 0; }
