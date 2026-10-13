@@ -520,11 +520,14 @@ def test_rendered_stop_decide_term_mid_post(
     script.chmod(0o755)
     log_path = tmp_path / ".mem-mesh" / "hooks.log"
 
+    # stdout/stderr go to DEVNULL and the exit is awaited with wait(): on
+    # Python 3.10, communicate() after an explicit stdin.close() raises
+    # "I/O operation on closed file" (it flushes stdin first).
     proc = subprocess.Popen(
         ["bash", str(script)],
         stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         text=True,
         env={**_base_env(tmp_path), "MEM_MESH_HOOK_LOG": "2"},
         start_new_session=True,  # own process group, like a host-spawned hook
@@ -534,7 +537,7 @@ def test_rendered_stop_decide_term_mid_post(
     proc.stdin.close()
     _wait_for_log(log_path, "posting")  # logged after the shield is armed
     os.killpg(proc.pid, signal.SIGTERM)
-    proc.communicate(timeout=10)
+    proc.wait(timeout=10)
 
     assert proc.returncode == 0
     log = log_path.read_text(encoding="utf-8")
