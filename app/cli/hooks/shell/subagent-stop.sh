@@ -36,15 +36,25 @@ PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   '. + {project_id: $pid, hook_source: $source, client: $client}' 2>/dev/null) || PAYLOAD="$INPUT"
 
 CURL_EXIT=0
-# Verbose breadcrumb BEFORE the network send: if the host kills this hook
-# mid-curl, the kill trap logs last_stage=posting — the exact stalled stage.
+# Shield the send, then leave a verbose breadcrumb: from here a host TERM is
+# ignored so the event still lands (see mem_mesh_post_shield); a "posting"
+# line with no "sent" line therefore means a hard kill.
+mem_mesh_post_shield
 mem_mesh_logv "subagent-stop" "posting"
-HTTP_META=$(curl -s -o /dev/null --max-time 8 \
-  -w '%{http_code} %{time_total} %header{x-mem-mesh-hook-status}' \
+# Keep the body: on 4xx the server's error detail is the only diagnosis there
+# is. -w appends "\n<code> <time> <status>".
+RESP_RAW=$(curl -s --max-time 8 \
+  -w '\n%{http_code} %{time_total} %header{x-mem-mesh-hook-status}' \
   -X POST "${API_URL}/api/hooks/claude/subagent-stop" \
   -H "Content-Type: application/json" \
   ${AUTH[@]+"${AUTH[@]}"} \
   -d "$PAYLOAD" 2>/dev/null) || CURL_EXIT=$?
+if [ -n "$RESP_RAW" ]; then
+  HTTP_META="${RESP_RAW##*$'\n'}"
+  RESP="${RESP_RAW%$'\n'*}"
+else
+  HTTP_META=""; RESP=""
+fi
 HTTP_CODE="${HTTP_META%% *}"
 [ -n "$HTTP_CODE" ] || HTTP_CODE="000"
 # Split "<code> <time> <status...>" — status (server's save/skip reason from the
@@ -53,5 +63,6 @@ _REST="${HTTP_META#* }"; TIME_TOTAL="${_REST%% *}"; HOOK_STATUS="${_REST#* }"
 [ "$HOOK_STATUS" = "$TIME_TOTAL" ] && HOOK_STATUS=""
 mem_mesh_log "subagent-stop" "sent" "http=$HTTP_CODE status=${HOOK_STATUS:-?} project=$PROJECT_DIR"
 mem_mesh_logv "subagent-stop" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN") time=${TIME_TOTAL}s curl_exit=$CURL_EXIT"
+mem_mesh_log_http_error "subagent-stop" "$HTTP_CODE" "$RESP"
 
 exit 0

@@ -23,7 +23,7 @@ if [ -n "$HOOK_TOKEN" ]; then
 fi
 
 INPUT=$(cat)
-PROJECT_DIR="$(mem_mesh_project_id)"
+PROJECT_DIR="$(mem_mesh_project_id_from_input "$INPUT")"
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="unknown"
 PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   --arg pid "$PROJECT_DIR" \
@@ -32,8 +32,10 @@ PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   '. + {project_id: $pid, hook_source: $source, client: $client}' 2>/dev/null) || PAYLOAD="$INPUT"
 
 CURL_EXIT=0
-# Verbose breadcrumb BEFORE the network send: if the host kills this hook
-# mid-curl, the kill trap logs last_stage=posting — the exact stalled stage.
+# Shield the send, then leave a verbose breadcrumb: from here a host TERM is
+# ignored so the event still lands (see mem_mesh_post_shield); a "posting"
+# line with no "sent" line therefore means a hard kill.
+mem_mesh_post_shield
 mem_mesh_logv "task-completed" "posting"
 HTTP_META=$(curl -s -o /dev/null --max-time 8 -w '%{http_code} %{time_total}' \
   -X POST "${API_URL}/api/hooks/claude/task-completed" \

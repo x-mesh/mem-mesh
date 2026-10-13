@@ -100,6 +100,8 @@ mem_mesh_project_id_from_input() {
 #   2 / debug / verbose-> + a "config" line per request: url, auth present?,
 #                          hook-key tail (last 4 chars), curl time + exit code
 #                          (metadata only, never the full token or any content)
+# The file is rotated once per hook run (at the "fired" stage) when it passes
+# 10 MB: hooks.log -> hooks.log.1, one previous generation kept.
 case "${MEM_MESH_HOOK_LOG:-}" in
   ""|0|false|no|off|FALSE|NO|OFF) _MM_LOG=0 ;;
   2|3|debug|DEBUG|verbose|VERBOSE|trace|TRACE) _MM_LOG=2 ;;
@@ -132,6 +134,17 @@ _mm_arm_kill_trap() {
   trap '_mm_on_kill INT' INT
   trap '_mm_on_kill HUP' HUP
 }
+# Delivery over cancel: forwarders that return nothing to the host call this
+# right before their POST. A host TERM mid-send (session exit, hook cancel: 330
+# of 343 stop-decide kills sat at "posting" with elapsed=0s) only loses the
+# event, so from here TERM/HUP are ignored and the kill trap above no longer
+# fires for them; curl inherits the ignore. curl --max-time still bounds the
+# run (kept below the host timeout), and SIGKILL still ends it — a "posting"
+# line with no "sent" line. Hooks whose stdout the host waits on must not use
+# this: the host would block on a send it tried to cancel.
+mem_mesh_post_shield() {
+  trap '' TERM HUP
+}
 mem_mesh_log() {
   [ "${_MM_LOG:-0}" -ge 1 ] 2>/dev/null || return 0
   _mm_hook="${1:-?}"; _mm_stage="${2:-?}"
@@ -139,10 +152,24 @@ mem_mesh_log() {
   _MM_STAGE="$_mm_stage"
   if [ "$#" -gt 2 ]; then shift 2; _mm_detail=" $*"; else _mm_detail=""; fi
   _mm_ts="$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo '-')"
+  _mm_file="${HOME}/.mem-mesh/hooks.log"
   mkdir -p "${HOME}/.mem-mesh" 2>/dev/null || true
+  # Rotation: append-only under a global MEM_MESH_HOOK_LOG=2 the file passed
+  # 29 MB (every stage of every client). Checked once per run, at "fired", so
+  # the other stages stay a single printf. `wc -c` pads on BSD; keep digits only
+  # before the numeric compare. Not atomic across hooks firing in the same
+  # second: two can both pass the check and the later mv overwrites .1 with a
+  # near-empty file — the previous generation is best-effort for a trace log.
+  if [ "$_mm_stage" = "fired" ] && [ -f "$_mm_file" ]; then
+    _mm_size="$(wc -c <"$_mm_file" 2>/dev/null || echo 0)"
+    _mm_size="${_mm_size//[^0-9]/}"
+    if [ "${_mm_size:-0}" -gt 10485760 ] 2>/dev/null; then
+      mv -f "$_mm_file" "${_mm_file}.1" 2>/dev/null || true
+    fi
+  fi
   printf '%s [%s/%s] pid=%s %s%s\n' \
     "$_mm_ts" "${_MM_CLIENT:-hook}" "$_mm_hook" "$$" "$_mm_stage" "$_mm_detail" \
-    >>"${HOME}/.mem-mesh/hooks.log" 2>/dev/null || true
+    >>"$_mm_file" 2>/dev/null || true
 }
 # Verbose channel: only emits at level >= 2. Detail is connection metadata
 # (url / auth-present / key tail / timing / curl exit) — never request or
@@ -159,6 +186,22 @@ mem_mesh_keytail() {
   else
     printf 'none'
   fi
+}
+# 4xx/5xx diagnosis: FastAPI returns the validation error in the response body,
+# which the forwarders used to discard (-o /dev/null) — a 422 was undiagnosable.
+# Level 2 only. Logs each error's loc/msg/type and never its "input" echo (that
+# is the rejected value, i.e. turn content); the summary is capped at 300 chars.
+mem_mesh_log_http_error() {
+  [ "${_MM_LOG:-0}" -ge 2 ] 2>/dev/null || return 0
+  _mm_hook="${1:-?}"; _mm_code="${2:-000}"; _mm_body="${3:-}"
+  case "$_mm_code" in 4[0-9][0-9]|5[0-9][0-9]) ;; *) return 0 ;; esac
+  [ -n "$_mm_body" ] || return 0
+  _mm_err="$(printf '%s' "$_mm_body" | jq -c '
+    if (.detail | type) == "array" then [.detail[] | {loc, msg, type}]
+    elif (.detail | type) == "string" then {detail}
+    else {keys: keys} end' 2>/dev/null | head -c 300)" || _mm_err=""
+  [ -n "$_mm_err" ] || _mm_err="non-json body bytes=${#_mm_body}"
+  mem_mesh_log "$_mm_hook" "error" "http=$_mm_code $_mm_err"
 }
 mem_mesh_log "subagent-stop" "fired" "cwd=$PWD"
 command -v jq >/dev/null 2>&1 || { mem_mesh_log "subagent-stop" "abort" "jq not found"; exit 0; }
@@ -188,15 +231,25 @@ PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
   '. + {project_id: $pid, hook_source: $source, client: $client}' 2>/dev/null) || PAYLOAD="$INPUT"
 
 CURL_EXIT=0
-# Verbose breadcrumb BEFORE the network send: if the host kills this hook
-# mid-curl, the kill trap logs last_stage=posting — the exact stalled stage.
+# Shield the send, then leave a verbose breadcrumb: from here a host TERM is
+# ignored so the event still lands (see mem_mesh_post_shield); a "posting"
+# line with no "sent" line therefore means a hard kill.
+mem_mesh_post_shield
 mem_mesh_logv "subagent-stop" "posting"
-HTTP_META=$(curl -s -o /dev/null --max-time 8 \
-  -w '%{http_code} %{time_total} %header{x-mem-mesh-hook-status}' \
+# Keep the body: on 4xx the server's error detail is the only diagnosis there
+# is. -w appends "\n<code> <time> <status>".
+RESP_RAW=$(curl -s --max-time 8 \
+  -w '\n%{http_code} %{time_total} %header{x-mem-mesh-hook-status}' \
   -X POST "${API_URL}/api/hooks/claude/subagent-stop" \
   -H "Content-Type: application/json" \
   ${AUTH[@]+"${AUTH[@]}"} \
   -d "$PAYLOAD" 2>/dev/null) || CURL_EXIT=$?
+if [ -n "$RESP_RAW" ]; then
+  HTTP_META="${RESP_RAW##*$'\n'}"
+  RESP="${RESP_RAW%$'\n'*}"
+else
+  HTTP_META=""; RESP=""
+fi
 HTTP_CODE="${HTTP_META%% *}"
 [ -n "$HTTP_CODE" ] || HTTP_CODE="000"
 # Split "<code> <time> <status...>" — status (server's save/skip reason from the
@@ -205,5 +258,6 @@ _REST="${HTTP_META#* }"; TIME_TOTAL="${_REST%% *}"; HOOK_STATUS="${_REST#* }"
 [ "$HOOK_STATUS" = "$TIME_TOTAL" ] && HOOK_STATUS=""
 mem_mesh_log "subagent-stop" "sent" "http=$HTTP_CODE status=${HOOK_STATUS:-?} project=$PROJECT_DIR"
 mem_mesh_logv "subagent-stop" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN") time=${TIME_TOTAL}s curl_exit=$CURL_EXIT"
+mem_mesh_log_http_error "subagent-stop" "$HTTP_CODE" "$RESP"
 
 exit 0

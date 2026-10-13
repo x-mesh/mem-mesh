@@ -7,10 +7,15 @@ truthy, and (c) be a complete no-op (no file, no output) when it is unset/0 so
 installed hooks keep their current zero-overhead behavior.
 """
 
+import json
 import os
 import re
 import shutil
+import signal
 import subprocess
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -18,8 +23,11 @@ import pytest
 from app.cli.hooks.hook_log import HOOK_LOG_BLOCK
 from app.cli.hooks.renderer import _render_template
 from app.cli.hooks.templates import (
+    POST_TOOL_USE_HOOK_TEMPLATE,
     SESSION_START_HOOK_TEMPLATE,
+    STOP_DECIDE_HOOK_TEMPLATE,
     STOP_HOOK_TEMPLATE,
+    TASK_COMPLETED_HOOK_TEMPLATE,
     USER_PROMPT_SUBMIT_HOOK_TEMPLATE,
 )
 
@@ -107,6 +115,7 @@ def test_logging_writes_line_when_enabled(tmp_path: Path) -> None:
         tmp_path, 'mem_mesh_log "stop" "sent" "http=200 project=demo"'
     )
     result = _run(harness, home=tmp_path, log_env={"MEM_MESH_HOOK_LOG": "1"})
+    assert result.stderr == ""  # first run: no log yet, and no shell noise
     assert result.returncode == 0
 
     log_file = tmp_path / ".mem-mesh" / "hooks.log"
@@ -136,6 +145,7 @@ def test_logging_accumulates_multiple_stages(tmp_path: Path) -> None:
         'mem_mesh_log "stop" "sent" "http=401"',
     )
     result = _run(harness, home=tmp_path, log_env={"MEM_MESH_HOOK_LOG": "1"})
+    assert result.stderr == ""  # "fired" with no log yet must not print shell noise
     assert result.returncode == 0
     lines = (tmp_path / ".mem-mesh" / "hooks.log").read_text().strip().splitlines()
     assert len(lines) == 2
@@ -297,3 +307,320 @@ def test_rendered_cursor_stop_tags_client(tmp_path: Path) -> None:
     assert result.returncode == 0
     log = (tmp_path / ".mem-mesh" / "hooks.log").read_text(encoding="utf-8")
     assert "[cursor/stop]" in log  # client tag, not [claude_code/...]
+
+
+# ---------------------------------------------------------------------------
+# Rotation: hooks.log rolls over to hooks.log.1 once past 10 MB (at "fired")
+# ---------------------------------------------------------------------------
+
+_ROTATE_LIMIT_BYTES = 10 * 1024 * 1024
+
+
+def test_log_rotates_once_over_limit(tmp_path: Path) -> None:
+    """A log past 10 MB is moved to hooks.log.1 at the next "fired" stage."""
+    log_dir = tmp_path / ".mem-mesh"
+    log_dir.mkdir()
+    current = log_dir / "hooks.log"
+    with current.open("wb") as fh:
+        fh.write(b"OLD-GENERATION\n")
+        fh.truncate(_ROTATE_LIMIT_BYTES + 1)  # sparse: the size without the bytes
+    harness = _write_block_harness(tmp_path, 'mem_mesh_log "stop" "fired" "x"')
+    result = _run(harness, home=tmp_path, log_env={"MEM_MESH_HOOK_LOG": "1"})
+    assert result.returncode == 0
+    rotated = log_dir / "hooks.log.1"
+    assert rotated.exists()
+    assert rotated.read_bytes().startswith(b"OLD-GENERATION\n")
+    fresh = current.read_text(encoding="utf-8").strip().splitlines()
+    assert len(fresh) == 1 and "fired" in fresh[0]
+
+
+def test_log_appends_under_limit(tmp_path: Path) -> None:
+    """Under the limit the file is appended to, never rotated."""
+    log_dir = tmp_path / ".mem-mesh"
+    log_dir.mkdir()
+    (log_dir / "hooks.log").write_text("PREVIOUS\n", encoding="utf-8")
+    harness = _write_block_harness(tmp_path, 'mem_mesh_log "stop" "fired" "x"')
+    result = _run(harness, home=tmp_path, log_env={"MEM_MESH_HOOK_LOG": "1"})
+    assert result.returncode == 0
+    assert not (log_dir / "hooks.log.1").exists()
+    lines = (log_dir / "hooks.log").read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "PREVIOUS" and "fired" in lines[1]
+
+
+# ---------------------------------------------------------------------------
+# 4xx summary: loc/msg/type of a FastAPI validation error, never its input
+# ---------------------------------------------------------------------------
+
+_VALIDATION_422 = json.dumps(
+    {
+        "detail": [
+            {
+                "type": "string_type",
+                "loc": ["body", "last_assistant_message"],
+                "msg": "Input should be a valid string",
+                "input": {"secret": "TURN-CONTENT-MUST-NOT-LEAK"},
+            }
+        ]
+    }
+)
+
+
+@pytest.mark.skipif(not HAS_JQ, reason="jq not installed")
+def test_http_error_summary_logs_loc_not_input(tmp_path: Path) -> None:
+    harness = _write_block_harness(
+        tmp_path, f'mem_mesh_log_http_error "stop" "422" \'{_VALIDATION_422}\''
+    )
+    result = _run(harness, home=tmp_path, log_env={"MEM_MESH_HOOK_LOG": "2"})
+    assert result.returncode == 0
+    log = (tmp_path / ".mem-mesh" / "hooks.log").read_text(encoding="utf-8")
+    assert "error http=422" in log
+    assert "last_assistant_message" in log
+    assert "string_type" in log
+    assert "TURN-CONTENT-MUST-NOT-LEAK" not in log
+
+
+@pytest.mark.skipif(not HAS_JQ, reason="jq not installed")
+@pytest.mark.parametrize("level,code", [("1", "422"), ("2", "200"), ("2", "000")])
+def test_http_error_summary_silent(tmp_path: Path, level: str, code: str) -> None:
+    """Nothing below level 2, and nothing for a non-error status."""
+    harness = _write_block_harness(
+        tmp_path, f'mem_mesh_log_http_error "stop" "{code}" \'{_VALIDATION_422}\''
+    )
+    result = _run(harness, home=tmp_path, log_env={"MEM_MESH_HOOK_LOG": level})
+    assert result.returncode == 0
+    assert not (tmp_path / ".mem-mesh" / "hooks.log").exists()
+
+
+@pytest.mark.skipif(not HAS_JQ, reason="jq not installed")
+def test_http_error_summary_non_json_body(tmp_path: Path) -> None:
+    harness = _write_block_harness(
+        tmp_path, 'mem_mesh_log_http_error "stop" "502" "<html>bad gateway</html>"'
+    )
+    result = _run(harness, home=tmp_path, log_env={"MEM_MESH_HOOK_LOG": "2"})
+    assert result.returncode == 0
+    log = (tmp_path / ".mem-mesh" / "hooks.log").read_text(encoding="utf-8")
+    assert "error http=502 non-json body bytes=" in log
+    assert "bad gateway" not in log
+
+
+class _Reply422(BaseHTTPRequestHandler):
+    """Stand-in for the server: every POST is a FastAPI-shaped 422."""
+
+    def do_POST(self) -> None:
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        body = _VALIDATION_422.encode("utf-8")
+        self.send_response(422)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+@pytest.fixture
+def server_422():
+    httpd = HTTPServer(("127.0.0.1", 0), _Reply422)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+@pytest.mark.skipif(not HAS_JQ, reason="jq not installed")
+def test_rendered_stop_decide_logs_422_summary(tmp_path: Path, server_422: str) -> None:
+    """End to end: a 422 reply logs sent http=422 plus the error summary."""
+    script = tmp_path / "stop-decide.sh"
+    script.write_text(
+        _render_template(STOP_DECIDE_HOOK_TEMPLATE, server_422), encoding="utf-8"
+    )
+    script.chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(script)],
+        input='{"stop_hook_active": false, "last_assistant_message": "hi"}',
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env={**_base_env(tmp_path), "MEM_MESH_HOOK_LOG": "2"},
+    )
+    assert result.returncode == 0
+    log = (tmp_path / ".mem-mesh" / "hooks.log").read_text(encoding="utf-8")
+    assert "[claude_code/stop-decide] " in log
+    assert "sent http=422" in log
+    assert "error http=422" in log and "last_assistant_message" in log
+    assert "TURN-CONTENT-MUST-NOT-LEAK" not in log
+
+
+# ---------------------------------------------------------------------------
+# Delivery over cancel: a forwarder shielded at "posting" survives a host TERM
+# ---------------------------------------------------------------------------
+
+
+class _SlowOk(BaseHTTPRequestHandler):
+    """Stand-in server: answers each POST after a delay, counting arrivals."""
+
+    received = 0
+    delay_seconds = 1.0
+
+    def do_POST(self) -> None:
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        type(self).received += 1
+        time.sleep(self.delay_seconds)
+        body = b'{"ok": true}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+@pytest.fixture
+def slow_server():
+    _SlowOk.received = 0
+    httpd = HTTPServer(("127.0.0.1", 0), _SlowOk)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def _wait_for_log(log_path: Path, needle: str, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if log_path.exists() and needle in log_path.read_text(encoding="utf-8"):
+            return
+        time.sleep(0.02)
+    pytest.fail(f"hook never logged {needle!r}")
+
+
+@pytest.mark.skipif(not HAS_JQ, reason="jq not installed")
+@pytest.mark.parametrize("shielded", [True, False], ids=["shielded", "control"])
+def test_rendered_stop_decide_term_mid_post(
+    tmp_path: Path, slow_server: str, shielded: bool
+) -> None:
+    """TERM to the hook's process group during the send: the shielded hook
+    still logs sent http=200; the control (shield stubbed out) is killed at
+    posting, which proves the signal reaches an unshielded hook."""
+    rendered = _render_template(STOP_DECIDE_HOOK_TEMPLATE, slow_server)
+    if not shielded:
+        assert rendered.count("\nmem_mesh_post_shield\n") == 1
+        rendered = rendered.replace("\nmem_mesh_post_shield\n", "\n:\n")
+    script = tmp_path / "stop-decide.sh"
+    script.write_text(rendered, encoding="utf-8")
+    script.chmod(0o755)
+    log_path = tmp_path / ".mem-mesh" / "hooks.log"
+
+    # stdout/stderr go to DEVNULL and the exit is awaited with wait(): on
+    # Python 3.10, communicate() after an explicit stdin.close() raises
+    # "I/O operation on closed file" (it flushes stdin first).
+    proc = subprocess.Popen(
+        ["bash", str(script)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        env={**_base_env(tmp_path), "MEM_MESH_HOOK_LOG": "2"},
+        start_new_session=True,  # own process group, like a host-spawned hook
+    )
+    assert proc.stdin is not None
+    proc.stdin.write('{"stop_hook_active": false, "last_assistant_message": "hi"}')
+    proc.stdin.close()
+    _wait_for_log(log_path, "posting")  # logged after the shield is armed
+    os.killpg(proc.pid, signal.SIGTERM)
+    proc.wait(timeout=10)
+
+    assert proc.returncode == 0
+    log = log_path.read_text(encoding="utf-8")
+    if shielded:
+        assert _SlowOk.received == 1
+        assert "sent http=200" in log
+        assert "killed" not in log
+    else:
+        assert "killed signal=TERM last_stage=posting" in log
+        assert "sent http=200" not in log
+
+
+# ---------------------------------------------------------------------------
+# Project id: forwarders resolve it from the hook payload via the shared
+# resolver (workspace.current_dir / cwd first), never the hook's own cwd
+# ---------------------------------------------------------------------------
+
+
+class _Ok(BaseHTTPRequestHandler):
+    def do_POST(self) -> None:
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        body = b'{"ok": true}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+@pytest.fixture
+def ok_server():
+    httpd = HTTPServer(("127.0.0.1", 0), _Ok)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def _project_dir(root: Path, name: str, project_id: str) -> Path:
+    """A non-git directory whose .mem-mesh/project-id pins its id."""
+    path = root / name
+    (path / ".mem-mesh").mkdir(parents=True)
+    (path / ".mem-mesh" / "project-id").write_text(project_id + "\n", encoding="utf-8")
+    return path
+
+
+@pytest.mark.skipif(not HAS_JQ, reason="jq not installed")
+@pytest.mark.parametrize(
+    "template,hook,extra",
+    [
+        (POST_TOOL_USE_HOOK_TEMPLATE, "post-tool-use", {"tool_name": "Edit"}),
+        (TASK_COMPLETED_HOOK_TEMPLATE, "task-completed", {"task_subject": "t"}),
+    ],
+    ids=["post-tool-use", "task-completed"],
+)
+def test_forwarder_resolves_project_from_payload(
+    tmp_path: Path, ok_server: str, template: str, hook: str, extra: dict
+) -> None:
+    """cwd in the payload wins over workspacePaths, and over the hook's own cwd."""
+    by_cwd = _project_dir(tmp_path, "by-cwd", "shared-id")
+    by_workspace = _project_dir(tmp_path, "by-workspace", "private-id")
+    script = tmp_path / f"{hook}.sh"
+    script.write_text(_render_template(template, ok_server), encoding="utf-8")
+    script.chmod(0o755)
+    env = {**_base_env(tmp_path), "MEM_MESH_HOOK_LOG": "1"}
+    env.pop("MEM_MESH_PROJECT_ID", None)
+    payload = {"cwd": str(by_cwd), "workspacePaths": [str(by_workspace)], **extra}
+    result = subprocess.run(
+        ["bash", str(script)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=env,
+        cwd=str(tmp_path),  # the hook's own cwd must not decide the project
+    )
+    assert result.returncode == 0
+    log = (tmp_path / ".mem-mesh" / "hooks.log").read_text(encoding="utf-8")
+    assert f"[claude_code/{hook}] " in log
+    assert "sent http=200 project=shared-id" in log

@@ -28,18 +28,30 @@ esac
 
 PROJECT_DIR="$(mem_mesh_project_id_from_input "$INPUT")"
 
-mem_mesh_logv "subagent-start" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN") agent=$AGENT_TYPE"
-
-# Fetch key decisions/rules (lightweight: limit=5, category=decision)
-RESPONSE=$(curl -s --max-time 3 \
+# Fetch key decisions/rules (lightweight: limit=5, category=decision).
+# -w appends "\n<code> <time>" so the log carries status + latency like the
+# forwarders do; a failed request logs http=000 instead of vanishing.
+CURL_EXIT=0
+mem_mesh_logv "subagent-start" "posting" "agent=$AGENT_TYPE"
+RESP_RAW=$(curl -s --max-time 3 -w '\n%{http_code} %{time_total}' \
   -G "${API_URL}/api/memories/search" \
   --data-urlencode "query=project rules architecture decision" \
   --data-urlencode "project_id=${PROJECT_DIR}" \
   --data-urlencode "category=decision" \
   --data-urlencode "limit=5" \
   ${AUTH[@]+"${AUTH[@]}"} \
-  2>/dev/null) || { mem_mesh_log "subagent-start" "abort" "search request failed"; exit 0; }
-mem_mesh_log "subagent-start" "sent" "search bytes=${#RESPONSE} project=$PROJECT_DIR"
+  2>/dev/null) || CURL_EXIT=$?
+if [ -n "$RESP_RAW" ]; then
+  HTTP_META="${RESP_RAW##*$'\n'}"
+  RESPONSE="${RESP_RAW%$'\n'*}"
+else
+  HTTP_META=""; RESPONSE=""
+fi
+HTTP_CODE="${HTTP_META%% *}"
+[ -n "$HTTP_CODE" ] || HTTP_CODE="000"
+mem_mesh_log "subagent-start" "sent" "http=$HTTP_CODE bytes=${#RESPONSE} project=$PROJECT_DIR"
+mem_mesh_logv "subagent-start" "config" "url=$API_URL auth=$AUTH_STATE key=$(mem_mesh_keytail "$HOOK_TOKEN") time=${HTTP_META#* }s curl_exit=$CURL_EXIT agent=$AGENT_TYPE"
+[ "$CURL_EXIT" -eq 0 ] || exit 0
 
 CONTEXT=$(python3 -c "
 import sys, json
@@ -57,7 +69,7 @@ except Exception:
     sys.exit(0)
 " <<< "$RESPONSE" 2>/dev/null) || exit 0
 
-[ -z "$CONTEXT" ] && exit 0
+[ -z "$CONTEXT" ] && { mem_mesh_log "subagent-start" "output" "none"; exit 0; }
 
 case "$HOOK_OUTPUT_MODE" in
   quiet|none|off)
@@ -68,6 +80,7 @@ case "$HOOK_OUTPUT_MODE" in
     ;;
 esac
 
+mem_mesh_log "subagent-start" "output" "chars=${#CONTEXT}"
 jq -n --arg ctx "$CONTEXT" '{
   hookSpecificOutput: {
     hookEventName: "SubagentStart",
