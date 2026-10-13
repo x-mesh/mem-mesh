@@ -187,9 +187,11 @@ PAYLOAD=$(printf '%s' "$INPUT" | jq -c \
 
 # Capture HTTP status + timing alongside the body (-w appends "\n<code> <time>")
 # so the log distinguishes a 401 / 000 from a 200 with no reminder. Body =
-# everything before the final newline.
+# everything before the final newline. --max-time must stay below the
+# host's UserPromptSubmit timeout (5s in install_hooks.py); otherwise the host
+# kills the hook mid-request and reports a timeout instead of a silent skip.
 CURL_EXIT=0
-RESP_RAW=$(curl -s --max-time 8 -w '\n%{http_code} %{time_total}' \
+RESP_RAW=$(curl -s --max-time 4 -w '\n%{http_code} %{time_total}' \
   -X POST "${API_URL}/api/hooks/claude/user-prompt-submit" \
   -H "Content-Type: application/json" \
   ${AUTH[@]+"${AUTH[@]}"} \
