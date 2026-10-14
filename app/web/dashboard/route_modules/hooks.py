@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timedelta, timezone
 from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 from typing import Optional
@@ -79,6 +80,16 @@ router = APIRouter(
 # Memory categories the keyword matcher is allowed to auto-save (mirrors the
 # CLAUDE.md M3 rule). ``task`` / ``git-history`` stay system-only.
 _SAVE_CATEGORIES = {"bug", "decision", "incident", "idea", "code_snippet"}
+
+# A scheduled/headless job (cron `claude -p`, an autopilot loop) opens a fresh
+# session per run with a byte-identical prompt. One such loop produced ~35 Stop
+# saves a day that were never injected back (2026-10). A person repeating a
+# short instruction ("해봐") across sessions is not a job, hence the length
+# floor; repeats inside one session are a person's workflow, hence counting
+# only other sessions.
+_JOB_PROMPT_MIN_CHARS = 200
+_JOB_PROMPT_MIN_OTHER_SESSIONS = 2
+_JOB_PROMPT_WINDOW = timedelta(days=3)
 
 _MAX_CONTENT = 9500
 _SEARCH_KEYWORDS = (
@@ -1119,16 +1130,32 @@ async def stop(
     # Pair the question from the event stream. A noise-only question (task
     # notification / tool-use envelope) is dropped so it doesn't pollute the
     # saved memory; the answer is still kept on its own.
-    content = message
+    question: Optional[str] = None
     if ide_session_id:
         try:
             question = await hook_service.get_last_prompt(
                 ide_session_id, before=payload.hook_fired_at
             )
-            if question and not _is_noise(question):
-                content = f"Q: {question[:500]}\n\nA: {message[:_MAX_CONTENT]}"
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Q&A pairing failed: {e}")
+
+    if question and len(question) >= _JOB_PROMPT_MIN_CHARS:
+        try:
+            others = await hook_service.count_other_sessions_with_prompt(
+                project_id=project_id,
+                prompt=question,
+                exclude_session_id=ide_session_id,
+                since=datetime.now(timezone.utc) - _JOB_PROMPT_WINDOW,
+            )
+        except Exception as e:  # noqa: BLE001 — a hook must never raise into the caller
+            logger.warning(f"job-prompt repeat check failed: {e}")
+            others = 0
+        if others >= _JOB_PROMPT_MIN_OTHER_SESSIONS:
+            return _ok(f"stop: skip (job prompt repeated in {others} other sessions)")
+
+    content = message
+    if question and not _is_noise(question):
+        content = f"Q: {question[:500]}\n\nA: {message[:_MAX_CONTENT]}"
 
     background_tasks.add_task(
         _save_memory,

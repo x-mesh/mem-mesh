@@ -349,6 +349,27 @@ class HookService:
         )
         return row["prompt"] if row else None
 
+    async def count_other_sessions_with_prompt(
+        self,
+        *,
+        project_id: str,
+        prompt: str,
+        exclude_session_id: str,
+        since: datetime,
+    ) -> int:
+        """Distinct sessions of this project, other than ``exclude_session_id``,
+        that sent exactly ``prompt`` (as recorded) since ``since``."""
+        row = await self.db.fetchone(
+            """
+            SELECT COUNT(DISTINCT ide_session_id) AS c FROM hook_events
+            WHERE created_at >= ? AND project_id = ?
+              AND event_name = 'UserPromptSubmit'
+              AND ide_session_id != ? AND prompt = ?
+            """,
+            (since.isoformat(), project_id, exclude_session_id, prompt),
+        )
+        return int(row["c"]) if row and row["c"] else 0
+
     async def turns_since_save(self, ide_session_id: str) -> int:
         """Count user-prompt turns since the last memory save in this session.
 
