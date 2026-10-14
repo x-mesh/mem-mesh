@@ -112,6 +112,48 @@ async def test_subagent_stop_queues_save(monkeypatch):
     assert recorder.calls
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "agent_fields",
+    [{}, {"agent_type": ""}, {"agent_type": None}],
+    ids=["missing", "empty", "null"],
+)
+async def test_subagent_stop_without_agent_type_records_but_skips_save(
+    monkeypatch, agent_fields
+):
+    recorder = _SlowSaveRecorder(delay=0)
+    monkeypatch.setattr(hooks_mod, "_save_memory", recorder)
+    recorded = []
+
+    async def _capture_record(*a, **k):
+        recorded.append(k.get("event_name"))
+
+    monkeypatch.setattr(hooks_mod, "_record", _capture_record)
+
+    transport = ASGITransport(app=_app())
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        r = await client.post(
+            "/api/hooks/claude/subagent-stop",
+            json={
+                "session_id": "s1",
+                "cwd": "/tmp/proj",
+                "stop_hook_active": False,
+                **agent_fields,
+                "last_assistant_message": (
+                    "mem-mesh 훅을 재설치했고 버그 수정 결과가 정상 동작하는 것을 "
+                    "확인했습니다. 다음으로 Codex를 재시작한 뒤 변경된 훅을 승인해 "
+                    "주세요. 자리 비움 요약과 같은 형태로 키워드 매칭과 길이 게이트를 "
+                    "모두 통과하도록 충분히 긴 문장을 덧붙였다."
+                ),
+            },
+        )
+
+    assert r.status_code == 200
+    assert "skip (no agent_type" in r.headers.get("X-Mem-Mesh-Hook-Status", "")
+    assert recorded == ["SubagentStop"]
+    assert not recorder.calls
+
+
 # ── structured JSON envelope → markdown (server-side hook saves) ────────────
 
 
