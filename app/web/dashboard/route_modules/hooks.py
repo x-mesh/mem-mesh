@@ -1169,6 +1169,15 @@ async def subagent_stop(
         assistant_message=message,
     )
 
+    # Claude Code also fires SubagentStop, with no agent_type, for its own
+    # internal agents: the idle recap (away_summary) and the compaction summary
+    # ("<analysis>..."). Saving those duplicated the turn Stop already saved —
+    # 2,029 "[unknown agent]" memories by 2026-10. Real subagents always carry
+    # their type (Claude: general-purpose/Explore/fork, Codex: worker/default).
+    agent_type = payload.agent_type
+    if not agent_type:
+        return _ok("subagent-stop: skip (no agent_type: host-internal agent)")
+
     min_len = rc.effective_int("hook_min_message_length")
     if len(message) < min_len:
         return _ok(f"subagent-stop: skip (message {len(message)} < {min_len} chars)")
@@ -1179,7 +1188,6 @@ async def subagent_stop(
     if category not in _SAVE_CATEGORIES:
         return _ok(f"subagent-stop: skip (no keyword match: {category})")
 
-    agent_type = payload.agent_type or "unknown"
     background_tasks.add_task(
         _save_memory,
         project_id,
