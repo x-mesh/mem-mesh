@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.40.1] - 2026-10-21
+
+### Changed
+
+- Reconciler는 improve·enrich와 같은 공통 LLM 설정을 따른다. 프로젝트별 외부 전송 허용 제약과 체크박스를 제거했다. 개별 메모리 보호·마스킹·근거 보관 정책은 유지한다. (`app/core/services/memory_reconciler.py`, `app/core/schemas/reconciler.py`, `app/web/static/js/pages/curation.js`)
+- 프로젝트 선택에 이름·ID 검색과 키보드 선택을 지원하는 기존 combobox를 연결했다. 선택되지 않은 검색어로 실행하는 것을 막는다. (`app/web/static/js/pages/curation.js`)
+
+### Fixed
+
+- 기존 두 메모리 비교 경로의 프로젝트 범위 검증을 외부 전송 허용 검사와 분리했다. (`app/core/services/reconcile.py`)
+
 ## [1.40.0] - 2026-10-21
 
 ### Added
