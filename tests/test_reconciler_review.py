@@ -283,3 +283,59 @@ async def test_overview_schedule_detects_result_cancellation(temp_db):
         await scheduler._claim_due_project("2026-10-22T00:00:00Z")
         == "reconciler-project"
     )
+
+
+@pytest.mark.asyncio
+async def test_judge_reports_lease_ownership_loss(temp_db):
+    import asyncio
+
+    from app.core.services.memory_reconciler import (
+        MemoryReconcilerService,
+        ReconcilerConflictError,
+    )
+    from tests.test_memory_reconciler import _add_memory
+
+    await _add_memory(temp_db, "m1", "Release requires review.")
+    service = MemoryReconcilerService(temp_db, lease_seconds=0.15)
+    await service.create_run("reconciler-project")
+    candidate = await service._claim_candidate("first")
+
+    class Judge:
+        async def reconcile_group(self, evidence):
+            await temp_db.execute(
+                "UPDATE reconciler_candidates SET lease_owner = 'other' WHERE id = ?",
+                (candidate["id"],),
+            )
+            await asyncio.sleep(0.2)
+            return {"action": "no_op"}
+
+    with pytest.raises(ReconcilerConflictError, match="lease lost"):
+        await service._judge_with_lease(candidate, Judge(), [])
+    row = await temp_db.fetchone(
+        "SELECT lease_owner FROM reconciler_candidates WHERE id = ?", (candidate["id"],)
+    )
+    assert row["lease_owner"] == "other"
+    assert not await temp_db.fetchall("SELECT id FROM reconciler_proposals")
+
+
+@pytest.mark.asyncio
+async def test_effective_cache_reuses_response_and_bypasses_source_filter(temp_db):
+    from tests.test_memory_reconciler import _add_memory
+
+    await _add_memory(temp_db, "m1", "Release fact", source="left")
+    await _add_memory(temp_db, "m2", "Release fact", source="right")
+    service = EffectiveReadService(temp_db)
+    service._raw_candidates = AsyncMock(wraps=service._raw_candidates)
+    service.cache_manager.get_cached_search = AsyncMock(
+        wraps=service.cache_manager.get_cached_search
+    )
+    filters = {"project_id": "reconciler-project"}
+    first = await service.search("Release", filters)
+    second = await service.search("Release", filters)
+    assert second == first
+    assert service._raw_candidates.await_count == 1
+    assert service.cache_manager.get_cached_search.await_count == 2
+    filtered = await service.search("Release", {**filters, "source": "left"})
+    assert service._raw_candidates.await_count == 2
+    assert service.cache_manager.get_cached_search.await_count == 2
+    assert {item.source for item in filtered.results} == {"left"}

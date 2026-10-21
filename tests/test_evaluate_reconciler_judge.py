@@ -151,3 +151,22 @@ async def test_judge_report_rejects_uncited_required_conclusion():
     report = await evaluate_cases(Judge(), [case])
     assert report["passed"] == 0
     assert "uncited term: stable" in report["cases"][0]["failures"]
+
+
+def test_judge_case_rejects_combined_evidence_budget_overflow():
+    from pydantic import ValidationError
+
+    from app.core.services.memory_reconciler import MAX_EVIDENCE_CHARS
+    from scripts.evaluate_reconciler_judge import Evidence
+
+    evidence = [
+        Evidence(
+            memory_id=str(index),
+            input_hash="hash",
+            content="x" * (MAX_EVIDENCE_CHARS // 2),
+        )
+        for index in range(2)
+    ]
+    assert all(len(item.content) <= MAX_EVIDENCE_CHARS for item in evidence)
+    with pytest.raises(ValidationError, match="case evidence exceeds"):
+        JudgeCase(id="combined", evidence=evidence, expected_actions=["no_op"])

@@ -383,3 +383,22 @@ async def test_curated_promotion_keeps_previous_index_visible_until_commit(
     finally:
         await reader.close()
         await writer.close()
+
+
+@pytest.mark.asyncio
+async def test_curated_promotion_rolls_back_with_outer_publication_failure(db):
+    await db.execute(
+        "INSERT INTO curated_results_vec_active(result_id, embedding) VALUES (?, ?)",
+        ("old", json.dumps([1.0] * 4)),
+    )
+    await db._migrator.prepare_curated_next(6)
+    await db._migrator.write_curated_next("new", [1.0] * 6)
+    await db.set_embedding_metadata("embedding_model", "old-model")
+    with pytest.raises(RuntimeError, match="publication failure"):
+        async with db.transaction():
+            await db._migrator.promote_curated_next(6)
+            await db.set_embedding_metadata("embedding_model", "new-model")
+            raise RuntimeError("publication failure")
+    rows = await db.fetchall("SELECT result_id FROM curated_results_vec_active")
+    assert [row["result_id"] for row in rows] == ["old"]
+    assert await db.get_embedding_metadata("embedding_model") == "old-model"
