@@ -29,12 +29,13 @@ export class CurationPage extends HTMLElement {
       e.preventDefault();
       this.startReconcilerRun(form);
     });
-    this.addEventListener('change', (e) => {
-      if (e.target.closest('.cur-reconciler-project')) {
-        this.loadLatestReconcilerRun();
-        this.loadReconcilerProposals();
-        this.loadReconcilerPolicy();
-      }
+    this.addEventListener('change', (event) => this._onReconcilerProjectChange(event));
+    const projectInput = this.querySelector('.cur-reconciler-project-picker .combobox-input');
+    projectInput?.addEventListener('focus', () => {
+      projectInput.select();
+      const picker = this.querySelector('.cur-reconciler-project-picker');
+      picker.searchQuery = '';
+      picker.filterOptions();
     });
     this._applyDeepLink();
     this.loadData();
@@ -201,11 +202,29 @@ export class CurationPage extends HTMLElement {
     });
   }
 
+  _onReconcilerProjectChange(event) {
+    const select = this.querySelector('.cur-reconciler-project');
+    const picker = this.querySelector('.cur-reconciler-project-picker');
+    if (event.target === picker && typeof event.detail?.value === 'string') {
+      if (select.value === event.detail.value) return;
+      select.value = event.detail.value;
+    } else if (event.target !== select) {
+      return;
+    }
+    this.loadLatestReconcilerRun();
+    this.loadReconcilerProposals();
+    this.loadReconcilerPolicy();
+  }
+
   async loadReconcilerProjects() {
     const api = window.app?.apiClient;
     const select = this.querySelector('.cur-reconciler-project');
     if (!api || !select) return;
     const selected = select.value;
+    const picker = this.querySelector('.cur-reconciler-project-picker');
+    picker.close();
+    picker.querySelector('.combobox-input').placeholder = 'Loading projects…';
+    picker.querySelectorAll('input, button').forEach(control => { control.disabled = true; });
     select.innerHTML = '<option value="">Loading projects…</option>';
     try {
       api.invalidateCache?.('/projects');
@@ -220,24 +239,38 @@ export class CurationPage extends HTMLElement {
             + ' memories</option>';
         }).join('')
         : '<option value="">No projects found</option>';
+      picker.searchQuery = '';
+      picker.setOptions(projects.length ? [{ value: '', text: 'Select a project' }, ...projects.map(project => ({
+        value: String(project.id || project.project_id || ''),
+        text: String(project.name || project.id || project.project_id || '')
+          + ' · ' + (project.memory_count || 0) + ' memories',
+      }))] : []);
+      picker.setValue(select.value);
+      picker.querySelector('.combobox-input').placeholder = projects.length
+        ? 'Search projects…' : 'No projects found';
       await this.loadReconcilerPolicy();
-      if (select.value) await this.loadLatestReconcilerRun();
+      await this.loadLatestReconcilerRun();
     } catch (error) {
       select.innerHTML = '<option value="">Failed to load projects</option>';
+      picker.setOptions([]);
+      picker.setValue('');
+      picker.querySelector('.combobox-input').placeholder = 'Failed to load projects';
       this._setReconcilerRunMessage(this._errText(error), true);
+    } finally {
+      picker.querySelectorAll('input, button').forEach(control => {
+        control.disabled = !picker.options.some(option => option.value);
+      });
+      picker.querySelector('.combobox-input').setAttribute('aria-label', 'Search and select a project');
     }
   }
 
   async loadReconcilerPolicy() {
     const api = window.app?.apiClient;
     const projectId = this.querySelector('.cur-reconciler-project')?.value;
-    const checkbox = this.querySelector('.cur-reconciler-external-llm');
     const retention = this.querySelector('.cur-reconciler-retain-evidence');
     const button = this.querySelector('.cur-reconciler-policy-save');
-    if (!checkbox || !retention || !button) return;
+    if (!retention || !button) return;
     this._reconcilerProjectPolicy = null;
-    checkbox.checked = false;
-    checkbox.disabled = true;
     retention.checked = true;
     retention.disabled = true;
     button.disabled = true;
@@ -246,13 +279,10 @@ export class CurationPage extends HTMLElement {
       const policy = await api.get('/projects/' + encodeURIComponent(projectId) + '/policy');
       if (this.querySelector('.cur-reconciler-project')?.value !== projectId) return;
       this._reconcilerProjectPolicy = policy;
-      checkbox.checked = Boolean(policy.allow_external_llm);
-      checkbox.disabled = false;
       retention.checked = policy.retain_evidence_content !== false;
       retention.disabled = false;
       button.disabled = false;
     } catch (error) {
-      checkbox.disabled = true;
       retention.disabled = true;
       button.disabled = true;
       this._setReconcilerRunMessage(this._errText(error), true);
@@ -262,10 +292,9 @@ export class CurationPage extends HTMLElement {
   async saveReconcilerPolicy() {
     const api = window.app?.apiClient;
     const projectId = this.querySelector('.cur-reconciler-project')?.value;
-    const checkbox = this.querySelector('.cur-reconciler-external-llm');
     const retention = this.querySelector('.cur-reconciler-retain-evidence');
     const button = this.querySelector('.cur-reconciler-policy-save');
-    if (!api || !projectId || !checkbox || !retention || !button || !this._reconcilerProjectPolicy) return;
+    if (!api || !projectId || !retention || !button || !this._reconcilerProjectPolicy) return;
     button.disabled = true;
     try {
       const current = this._reconcilerProjectPolicy;
@@ -274,17 +303,15 @@ export class CurationPage extends HTMLElement {
         {
           auto_noise_suppression: Boolean(current.auto_noise_suppression),
           auto_derived_relations: Boolean(current.auto_derived_relations),
-          allow_external_llm: checkbox.checked,
           retain_evidence_content: retention.checked,
         }
       );
       if (this.querySelector('.cur-reconciler-project')?.value !== projectId) return;
       this._reconcilerProjectPolicy = saved;
-      this._setReconcilerRunMessage('Project LLM policy saved.', false);
+      this._setReconcilerRunMessage('Evidence retention policy saved.', false);
     } catch (error) {
       this._setReconcilerRunMessage(this._errText(error), true);
       if (this.querySelector('.cur-reconciler-project')?.value === projectId) {
-        checkbox.checked = Boolean(this._reconcilerProjectPolicy?.allow_external_llm);
         retention.checked = this._reconcilerProjectPolicy?.retain_evidence_content !== false;
       }
     } finally {
@@ -297,6 +324,11 @@ export class CurationPage extends HTMLElement {
   async startReconcilerRun(form) {
     const api = window.app?.apiClient;
     const projectId = form.querySelector('.cur-reconciler-project')?.value;
+    const picker = form.querySelector('.cur-reconciler-project-picker');
+    if (picker && picker.querySelector('.combobox-input')?.value !== picker.selectedText) {
+      this._setReconcilerRunMessage('Select a project from the search results first.', true);
+      return;
+    }
     const button = form.querySelector('.cur-reconciler-run-start');
     if (!api || !projectId || !button) {
       this._setReconcilerRunMessage(
@@ -1345,7 +1377,8 @@ export class CurationPage extends HTMLElement {
           <p class="cur-hint">Review derived summaries and evidence. Canonical memories stay unchanged.</p>
           <form class="cur-reconciler-run-form">
             <label>Project
-              <select class="cur-reconciler-project" required>
+              <searchable-combobox class="cur-reconciler-project-picker" placeholder="Search projects…"></searchable-combobox>
+              <select class="cur-reconciler-project" hidden aria-hidden="true" tabindex="-1">
                 <option value="">Select a project</option>
               </select>
             </label>
@@ -1367,14 +1400,11 @@ export class CurationPage extends HTMLElement {
             <span class="cur-reconciler-run-status" role="status" aria-live="polite"></span>
           </form>
           <div class="cur-reconciler-policy">
-            <label><input class="cur-reconciler-external-llm" type="checkbox" disabled>
-              Allow this project's memory evidence to be sent to an external LLM
-            </label>
             <label><input class="cur-reconciler-retain-evidence" type="checkbox" checked disabled>
               Retain redacted evidence content in new runs
             </label>
             <button class="cur-btn cur-reconciler-policy-save" type="button" disabled>Save policy</button>
-            <span class="cur-muted">Applies to dry-run and live runs. Existing results stay unchanged.</span>
+            <span class="cur-muted">Uses the configured LLM, as improve and enrich do. Evidence retention applies to new runs.</span>
           </div>
           <div class="cur-reconciler-progress" hidden>
             <progress max="100" value="0" aria-label="Reconciler run progress"></progress>
@@ -1447,7 +1477,8 @@ export class CurationPage extends HTMLElement {
       .cur-reconciler-policy label { display: inline-flex; align-items: center; gap: 6px; }
       .cur-reconciler-run-form label { display: flex; align-items: center; gap: 8px; color: var(--text-primary); font-size: 0.88rem; }
       .cur-reconciler-run-form > label:first-child { align-items: start; flex-direction: column; gap: 4px; }
-      .cur-reconciler-project { min-width: 220px; max-width: 100%; padding: 7px 9px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); }
+      .cur-reconciler-run-form > label:first-child { width: 360px; max-width: 100%; }
+      .cur-reconciler-project-picker { display: block; width: 100%; min-width: 0; }
       .cur-reconciler-run-status { flex-basis: 100%; color: var(--text-secondary); font-size: 0.82rem; overflow-wrap: anywhere; }
       .cur-reconciler-run-message { min-height: 1.2em; }
       .cur-reconciler-progress { display: grid; gap: 5px; margin: 4px 0 12px; }

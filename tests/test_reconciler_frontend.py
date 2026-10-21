@@ -115,7 +115,6 @@ const { CurationPage } = await import(pathToFileURL(process.argv[1]));
 const page = Object.create(CurationPage.prototype);
 const fields = {
   '.cur-reconciler-project': { value: 'project' },
-  '.cur-reconciler-external-llm': {},
   '.cur-reconciler-retain-evidence': {},
   '.cur-reconciler-policy-save': {},
   '.cur-reconciler-alerts': {},
@@ -125,17 +124,16 @@ page._setReconcilerRunMessage = () => {};
 let submitted;
 globalThis.window = { app: { apiClient: {
   get: async () => ({ auto_noise_suppression: true, auto_derived_relations: true,
-    allow_external_llm: false, retain_evidence_content: false }),
+    retain_evidence_content: false }),
   put: async (path, body) => { submitted = body; return body; },
 } } };
 await page.loadReconcilerPolicy();
 assert.equal(fields['.cur-reconciler-retain-evidence'].checked, false);
 assert.equal(fields['.cur-reconciler-retain-evidence'].disabled, false);
 fields['.cur-reconciler-retain-evidence'].checked = true;
-fields['.cur-reconciler-external-llm'].checked = true;
 await page.saveReconcilerPolicy();
 assert.deepEqual(submitted, { auto_noise_suppression: true,
-  auto_derived_relations: true, allow_external_llm: true, retain_evidence_content: true });
+  auto_derived_relations: true, retain_evidence_content: true });
 assert.equal(fields['.cur-reconciler-policy-save'].disabled, false);
 let refreshed = 0;
 let request;
@@ -168,6 +166,70 @@ page._errText = error => error.message;
 await page.deactivateReconcilerResult(button);
 assert.equal(button.disabled, false);
 assert.equal(refreshed, 1);
+"""
+    subprocess.run(
+        ["node", "--input-type=module", "-e", script, str(source)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_project_combobox_preserves_selection_and_rejects_uncommitted_search():
+    source = Path(__file__).resolve().parents[1] / "app/web/static/js/pages/curation.js"
+    script = """
+import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
+globalThis.HTMLElement = class {};
+globalThis.customElements = { define() {} };
+const { CurationPage } = await import(pathToFileURL(process.argv[1]));
+const page = Object.create(CurationPage.prototype);
+const input = { value: '', setAttribute() {} };
+const toggle = {};
+const picker = { options: [], searchQuery: '', close() {},
+  querySelector: () => input, querySelectorAll: () => [input, toggle],
+  setOptions(options) { this.options = options; },
+  setValue(value) { this.selectedText = this.options.find(option => option.value === value)?.text || ''; input.value = this.selectedText; },
+};
+const select = { value: 'landing-maker', set innerHTML(html) {
+  this.html = html;
+  this.value = /value="([^"]+)" selected/.exec(html)?.[1] || '';
+} };
+page.querySelector = selector => selector === '.cur-reconciler-project' ? select : picker;
+let latest = 0;
+page.loadLatestReconcilerRun = async () => { latest++; };
+page.loadReconcilerPolicy = async () => {};
+page.loadReconcilerProposals = async () => {};
+let message;
+page._setReconcilerRunMessage = value => { message = value; };
+page._errText = error => error.message;
+globalThis.window = { app: { apiClient: { get: async () => ({ projects: [
+  { id: 'landing-maker', name: 'Landing Maker', memory_count: 7 },
+  { id: 'other', memory_count: 2 },
+] }) } } };
+await page.loadReconcilerProjects();
+assert.equal(select.value, 'landing-maker');
+assert.equal(input.value, 'Landing Maker · 7 memories');
+assert.equal(input.disabled, false);
+assert.equal(picker.options.length, 3);
+page._onReconcilerProjectChange({ target: input });
+assert.equal(latest, 1);
+page._onReconcilerProjectChange({ target: picker, detail: { value: 'other' } });
+assert.equal(select.value, 'other');
+assert.equal(latest, 2);
+input.value = 'unselected search';
+const form = { querySelector: selector => selector === '.cur-reconciler-project' ? select : picker };
+await page.startReconcilerRun(form);
+assert.equal(message, 'Select a project from the search results first.');
+window.app.apiClient.get = async () => ({ projects: [] });
+await page.loadReconcilerProjects();
+assert.equal(input.disabled, true);
+assert.equal(input.placeholder, 'No projects found');
+window.app.apiClient.get = async () => { throw new Error('network failed'); };
+await page.loadReconcilerProjects();
+assert.equal(input.disabled, true);
+assert.equal(input.placeholder, 'Failed to load projects');
+assert.equal(message, 'network failed');
 """
     subprocess.run(
         ["node", "--input-type=module", "-e", script, str(source)],

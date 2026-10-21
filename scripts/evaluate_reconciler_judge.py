@@ -18,7 +18,6 @@ from app.core.services.memory_reconciler import (
     MAX_EVIDENCE_CHARS,
     PROMPT_VERSION,
     MemoryReconcilerService,
-    is_external_llm_endpoint,
 )
 from app.core.services.relay_worker import build_relay_enricher
 
@@ -123,12 +122,6 @@ async def _run(database_path: str, project_id: str, suite: JudgeSuite) -> dict:
         config = await resolve_service_llm(db, settings, "reconcile")
         if not config["api_key"] or not config["model"]:
             raise ValueError("reconciler LLM is not configured")
-        policy = await MemoryReconcilerService(db).get_policy(project_id)
-        if (
-            is_external_llm_endpoint(config["base_url"])
-            and not policy["allow_external_llm"]
-        ):
-            raise ValueError("external LLM is not allowed for this project")
         judge = build_relay_enricher(
             provider=config["provider"],
             api_key=config["api_key"],

@@ -62,8 +62,8 @@ Modular route structure for better maintainability:
   - POST /api/curation/reconciler/results/{id}/cancel - Cancel a curated result
   - GET /api/curation/reconciler/results/{id} - Read status, claims, and source versions within a project
 - `route_modules/overview.py` - Project overview and reconciler policy endpoints
-  - GET/PUT /api/projects/{project_id}/policy - Read or update project opt-in policy
-    - `allow_external_llm` defaults to false and gates dry-run and live Reconciler LLM calls
+  - GET/PUT /api/projects/{project_id}/policy - Read or update project processing and evidence retention policy
+    - Reconciler uses the configured shared LLM. Project policy controls evidence retention and optional processing actions.
 - `route_modules/stats.py` - Statistics endpoints (65 lines)
   - GET /api/memories/stats - Overall statistics
   - GET /api/memories/stats/projects - Project statistics

@@ -916,9 +916,10 @@ Reconciler는 기존 Q/A·speaker turn 판별과 JSON·JSONL의 role/content 및
 ### 21.2 전송 정책
 
 - 기존 provider·base URL 설정을 재사용한다. 로컬 또는 외부 사용 가능 범위는 해당 설정과 구현을 따른다.
-- 외부 provider 사용은 기본 차단한다. project별 `allow_external_llm` 허용을 저장한 뒤에만 Reconciler judge가 원본 근거를 보낼 수 있다.
-- dry-run과 live run 시작 시 허용을 확인한다. 워커는 전송 직전에 다시 확인한다. 설정 변경 뒤 기존 실행의 남은 후보에도 새 정책을 적용한다.
-- loopback endpoint만 로컬로 취급한다. 그 밖의 endpoint와 기본 provider URL은 외부로 취급한다. 허용되지 않으면 다른 provider로 자동 전환하지 않는다.
+- Reconciler는 improve·enrich와 같은 공통 LLM 설정을 따른다. 프로젝트별 외부 LLM 허용을 별도로 요구하지 않는다.
+- 이전 `allow_external_llm` DB 열은 스키마 호환성을 위해 유지하며, 현재 정책 API와 실행 판단에서는 제외한다.
+- dry-run과 live run은 설정된 LLM을 사용한다. 처리·근거 보관 정책이 바뀌면 기존 실행의 남은 후보를 보류하고 새 실행을 요구한다.
+- loopback endpoint만 로컬로 분류한다. 그 밖의 endpoint와 기본 provider URL은 외부로 분류해 감사 기록에 남긴다.
 - 이 정책은 Reconciler judge와 기존 pair 비교 큐에 적용한다. Project Overview의 Chat LLM 생성 정책은 별도다.
 - 외부 전송 전 redaction과 길이 제한을 적용한다.
 - provider, model, data classification을 run에 기록한다.
@@ -1246,7 +1247,7 @@ proposal 한 건은 원자적으로 활성화하거나 실패한다. run 전체�
 ## 29. 운영 정책 기본값
 
 - Reconciler 비활성, 실행 시 dry-run 기본
-- Reconciler의 외부 LLM 전송은 project별 명시적 허용 전까지 차단
+- Reconciler는 설정된 공통 LLM을 사용하며, 프로젝트별 외부 전송 허용 제약을 두지 않음
 - project scope 필수, cross-project와 원본 수정·영구 삭제 금지
 - dry-run proposal은 preview 상태로 저장하며 승인·활성화하지 않음
 - activation-capable run은 canonical 입력의 `MERGE`·`SUPERSEDE`를 category와 관계없이 검증 후 자동 활성화

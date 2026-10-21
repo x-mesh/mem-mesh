@@ -226,28 +226,27 @@ class ReconcileService:
                 )
                 return {"job_id": item["id"], "processed": False, "error": reason}
 
-            if self.can_send_llm is not None:
-                project_id = str(new.get("project_id") or "")
-                if not project_id or project_id != str(old.get("project_id") or ""):
-                    policy_error = (
-                        "legacy reconcile project scope is unknown or mismatched"
-                    )
-                elif not await self.can_send_llm(
+            policy_error = ""
+            project_id = new["project_id"]
+            if project_id != old["project_id"]:
+                policy_error = "legacy reconcile project scope is mismatched"
+            elif self.can_send_llm is not None and (
+                not project_id
+                or not await self.can_send_llm(
                     project_id, getattr(enricher, "base_url", "")
-                ):
-                    policy_error = "external LLM is not allowed for this project"
-                else:
-                    policy_error = ""
-                if policy_error:
-                    await self.db.execute(
-                        "UPDATE reconcile_queue SET status = 'dead_letter', last_error = ?, locked_by = NULL, locked_at = NULL, updated_at = ? WHERE id = ?",
-                        (policy_error, self._now_iso(), item["id"]),
-                    )
-                    return {
-                        "job_id": item["id"],
-                        "processed": False,
-                        "error": policy_error,
-                    }
+                )
+            ):
+                policy_error = "external LLM is not allowed for this project"
+            if policy_error:
+                await self.db.execute(
+                    "UPDATE reconcile_queue SET status = 'dead_letter', last_error = ?, locked_by = NULL, locked_at = NULL, updated_at = ? WHERE id = ?",
+                    (policy_error, self._now_iso(), item["id"]),
+                )
+                return {
+                    "job_id": item["id"],
+                    "processed": False,
+                    "error": policy_error,
+                }
 
             excluded = reconciler_evidence_exclusion(
                 new["content"]

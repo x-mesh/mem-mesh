@@ -223,25 +223,25 @@ def test_external_llm_endpoint_classification(base_url, external):
 
 
 @pytest.mark.asyncio
-async def test_external_llm_run_requires_project_opt_in(temp_db):
+@pytest.mark.parametrize("dry_run", [True, False])
+async def test_external_llm_uses_configured_provider_without_project_opt_in(
+    temp_db, dry_run
+):
     await _add_memory(temp_db, "m1", "The same task has a first supported form.")
     await _add_memory(temp_db, "m2", "The same task has a second supported form.")
     service = MemoryReconcilerService(
-        temp_db, llm_base_url="https://api.example.com/v1"
+        temp_db,
+        llm_base_url="https://api.example.com/v1",
+        embedding_service=_FakeEmbedding(temp_db.embedding_dim),
+        llm_configured=True,
     )
-
-    with pytest.raises(ReconcilerValidationError, match="external LLM"):
-        await service.create_run("reconciler-project")
-
-    assert await temp_db.fetchone("SELECT id FROM reconciler_runs") is None
-    await service.set_policy("reconciler-project", {"allow_external_llm": True})
-    run = await service.create_run("reconciler-project")
+    run = await service.create_run("reconciler-project", dry_run=dry_run)
     provider = MergeProvider()
     provider.base_url = "https://api.example.com/v1"
     result = await service.process_next("worker-1", provider)
 
     assert run["candidate_counts"]["pending_judgment"] == 1
-    assert result["status"] == "preview"
+    assert result["status"] == ("preview" if dry_run else "active")
     assert provider.calls == 1
 
 
@@ -307,7 +307,7 @@ async def test_worker_holds_candidate_when_judge_model_differs_from_run(temp_db)
 
 
 @pytest.mark.asyncio
-async def test_worker_rechecks_external_llm_policy_before_judgment(temp_db):
+async def test_legacy_external_llm_flag_does_not_block_judgment(temp_db):
     await _add_memory(temp_db, "m1", "The same task has a first supported form.")
     await _add_memory(temp_db, "m2", "The same task has a second supported form.")
     service = MemoryReconcilerService(temp_db)
@@ -319,9 +319,8 @@ async def test_worker_rechecks_external_llm_policy_before_judgment(temp_db):
 
     result = await service.process_next("worker-1", provider)
 
-    assert result["status"] == "needs_review"
-    assert "external LLM" in result["error"]
-    assert provider.calls == 0
+    assert result["status"] == "preview"
+    assert provider.calls == 1
 
 
 @pytest.mark.asyncio
@@ -433,7 +432,10 @@ async def test_worker_holds_source_with_stale_anchor_before_judgment(temp_db):
 
 
 @pytest.mark.asyncio
-async def test_legacy_reconcile_fallback_cannot_bypass_external_policy(temp_db):
+@pytest.mark.parametrize("other_project", [False, True])
+async def test_legacy_reconcile_uses_common_llm_without_project_opt_in(
+    temp_db, other_project
+):
     class LegacyProvider:
         base_url = "https://api.example.com/v1"
 
@@ -468,6 +470,10 @@ async def test_legacy_reconcile_fallback_cannot_bypass_external_policy(temp_db):
             "2026-10-20T00:00:00+00:00",
         ),
     )
+    if other_project:
+        await temp_db.execute(
+            "UPDATE memories SET project_id = 'other' WHERE id = 'm1'"
+        )
     service = MemoryReconcilerService(temp_db)
     provider = LegacyProvider()
 
@@ -476,10 +482,15 @@ async def test_legacy_reconcile_fallback_cannot_bypass_external_policy(temp_db):
         "SELECT status, last_error FROM reconcile_queue WHERE id = 'legacy-1'"
     )
 
-    assert provider.calls == 0
-    assert result["processed"] is False
-    assert row["status"] == "dead_letter"
-    assert "external LLM" in row["last_error"]
+    if other_project:
+        assert provider.calls == 0
+        assert result["processed"] is False
+        assert row["status"] == "dead_letter"
+        assert "project scope" in row["last_error"]
+    else:
+        assert provider.calls == 1
+        assert result["processed"] is True
+        assert row["status"] == "done"
 
 
 @pytest.mark.asyncio
@@ -496,7 +507,7 @@ async def test_local_llm_run_needs_no_external_opt_in(temp_db):
 
 
 @pytest.mark.asyncio
-async def test_dashboard_policy_controls_external_run_start(temp_db):
+async def test_dashboard_retention_policy_does_not_gate_external_run_start(temp_db):
     from fastapi import FastAPI
     from httpx import ASGITransport, AsyncClient
 
@@ -537,10 +548,9 @@ async def test_dashboard_policy_controls_external_run_start(temp_db):
             json={"project_id": "reconciler-project", "dry_run": True},
         )
 
-    assert blocked.status_code == 422
-    assert "external LLM" in blocked.json()["detail"]
-    assert policy.json()["allow_external_llm"] is False
-    assert saved.json()["allow_external_llm"] is True
+    assert blocked.status_code == 200
+    assert "allow_external_llm" not in policy.json()
+    assert "allow_external_llm" not in saved.json()
     assert saved.json()["retain_evidence_content"] is False
     assert (await service.get_policy("reconciler-project"))[
         "retain_evidence_content"

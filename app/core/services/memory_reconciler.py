@@ -148,7 +148,7 @@ class MemoryReconcilerService:
         if retained not in {None, "true", "false"}:
             raise ReconcilerValidationError("invalid evidence retention policy")
         row = await self.db.fetchone(
-            "SELECT auto_noise_suppression, auto_derived_relations, allow_external_llm FROM reconciler_project_policy WHERE project_id = ?",
+            "SELECT auto_noise_suppression, auto_derived_relations FROM reconciler_project_policy WHERE project_id = ?",
             (project_id,),
         )
         if not row:
@@ -156,14 +156,8 @@ class MemoryReconcilerService:
         return ReconcilerPolicy(
             auto_noise_suppression=bool(row["auto_noise_suppression"]),
             auto_derived_relations=bool(row["auto_derived_relations"]),
-            allow_external_llm=bool(row["allow_external_llm"]),
             retain_evidence_content=retained != "false",
         )
-
-    async def _llm_allowed(self, project_id: str, base_url: str) -> bool:
-        if not is_external_llm_endpoint(base_url):
-            return True
-        return (await self._policy(project_id)).allow_external_llm
 
     async def get_policy(self, project_id: str) -> dict:
         policy = await self._policy(project_id)
@@ -202,12 +196,11 @@ class MemoryReconcilerService:
                 (project_id,),
             )
             await self.db.execute(
-                "INSERT INTO reconciler_project_policy(project_id, auto_noise_suppression, auto_derived_relations, allow_external_llm, revision, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO reconciler_project_policy(project_id, auto_noise_suppression, auto_derived_relations, revision, updated_at) VALUES (?, ?, ?, ?, ?)",
                 (
                     project_id,
                     int(value.auto_noise_suppression),
                     int(value.auto_derived_relations),
-                    int(value.allow_external_llm),
                     revision,
                     now,
                 ),
@@ -347,12 +340,6 @@ class MemoryReconcilerService:
             "created_before": before_value,
         }
         policy = await self._policy(project_id)
-        if self.llm_base_url is not None and not await self._llm_allowed(
-            project_id, self.llm_base_url
-        ):
-            raise ReconcilerValidationError(
-                "external LLM is not allowed for this project"
-            )
         policy_hash = _hash(policy.model_dump())
         run_id = "rr_" + uuid4().hex
         now = _now()
@@ -1296,9 +1283,7 @@ class MemoryReconcilerService:
             if self._legacy_service is None:
                 from .reconcile import ReconcileService
 
-                self._legacy_service = ReconcileService(
-                    self.db, can_send_llm=self._llm_allowed, **self._legacy_options
-                )
+                self._legacy_service = ReconcileService(self.db, **self._legacy_options)
             return await self._legacy_service.process_next(
                 worker_id=worker_id,
                 enricher=enricher,
@@ -1436,19 +1421,6 @@ class MemoryReconcilerService:
                         "candidate_id": candidate["id"],
                         "processed": False,
                         "status": "lease_lost",
-                    }
-                if not await self._llm_allowed(
-                    candidate["project_id"], getattr(enricher, "base_url", "")
-                ):
-                    reason = "external LLM is not allowed for this project"
-                    await self._finish_candidate(
-                        candidate["id"], "needs_review", reason, lease=candidate
-                    )
-                    return {
-                        "candidate_id": candidate["id"],
-                        "processed": True,
-                        "status": "needs_review",
-                        "error": reason,
                     }
                 budget_error = await self._reserve_judge_call(
                     candidate["run_id"],

@@ -37,13 +37,15 @@ async def api(temp_db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_policy_put_get_and_invalid_payload(api):
-    payload = {"allow_external_llm": True, "retain_evidence_content": False}
+    payload = {"retain_evidence_content": False}
     saved = await api.put("/projects/test/policy", json=payload)
     assert saved.status_code == 200
     read = await api.get("/projects/test/policy")
-    assert read.json()["allow_external_llm"] is True
+    assert "allow_external_llm" not in read.json()
     assert read.json()["retain_evidence_content"] is False
-    invalid = await api.put("/projects/test/policy", json={"allow_external_llm": []})
+    invalid = await api.put(
+        "/projects/test/policy", json={"retain_evidence_content": []}
+    )
     assert invalid.status_code == 422
     assert (await api.get("/projects/test/policy")).json() == read.json()
 
@@ -86,11 +88,11 @@ async def test_run_create_scope_candidates_and_cancel(api, temp_db):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "allowed,configured,success",
-    [(False, True, False), (True, False, False), (True, True, True)],
+    "configured,success",
+    [(False, False), (True, True)],
 )
-async def test_judge_cli_checks_consent_configuration_and_closes_database(
-    monkeypatch, allowed, configured, success
+async def test_judge_cli_uses_configured_llm_and_closes_database(
+    monkeypatch, configured, success
 ):
     import scripts.evaluate_reconciler_judge as module
 
@@ -112,11 +114,6 @@ async def test_judge_cli_checks_consent_configuration_and_closes_database(
                 "base_url": "https://example.com/v1",
             }
         ),
-    )
-    monkeypatch.setattr(
-        module.MemoryReconcilerService,
-        "get_policy",
-        AsyncMock(return_value={"allow_external_llm": allowed}),
     )
     build = Mock()
     monkeypatch.setattr(module, "build_relay_enricher", build)

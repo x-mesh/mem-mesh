@@ -57,7 +57,6 @@ class ReconcilerClaim(BaseModel):
 class ReconcilerPolicy(BaseModel):
     auto_noise_suppression: bool = False
     auto_derived_relations: bool = False
-    allow_external_llm: bool = False
     retain_evidence_content: bool = True
 
 
