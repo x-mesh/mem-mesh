@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.40.0] - 2026-10-21
 
 ### Added
 
@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Project Overview는 활성 파생 결과로 생성하며, 입력 범위와 캐시의 갱신 필요 여부를 표시한다.
 
 ### Fixed
+
+- 예약 작업의 반복 프롬프트와 호스트 내부 SubagentStop 이벤트를 메모리에 저장하지 않는다.
 
 - Reconciler 검색의 프로젝트 범위, 필터 캐시와 페이지 처리 오류를 수정했다.
 - 임베딩 마이그레이션의 중복 실행과 승격 경합을 막고 본문을 배치로 조회한다.
