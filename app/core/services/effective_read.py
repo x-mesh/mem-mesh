@@ -226,7 +226,7 @@ class EffectiveReadService:
 
         filters = filters or {}
         excluded: Set[str] = set()
-        for result in await self._active_results():
+        for result in await self._active_results(filters.get("project_id")):
             if result.get("action") in {"add_relation", "mark_stale"}:
                 continue
             if await self._eligible_result(result, filters):
@@ -390,7 +390,7 @@ class EffectiveReadService:
         query: str,
         query_embedding: Any = None,
         filters: Optional[Dict[str, Any]] = None,
-        limit: int = 20,
+        limit: Optional[int] = 20,
     ) -> List[SearchResult]:
         """Search derived FTS/vector rows independently from canonical rows."""
 
@@ -407,7 +407,7 @@ class EffectiveReadService:
                 query_embedding = None
         results: List[SearchResult] = []
         active_results = await self._active_results(filters.get("project_id"))
-        vector_results = await self._active_results()
+        vector_results = active_results
         vector_scores = await self._curated_vector_scores(
             vector_results, query_embedding
         )
@@ -440,11 +440,11 @@ class EffectiveReadService:
                 continue
             results.append(self._curated_result(result, sources, score))
         results.sort(key=lambda item: (-item.similarity_score, item.id))
-        return results[: max(0, limit)]
+        return results if limit is None else results[: max(0, limit)]
 
     async def _raw_candidates(
         self, query: str, filters: Dict[str, Any], limit: int, offset: int = 0
-    ) -> List[SearchResult]:
+    ) -> SearchResponse:
         excluded = await self.raw_exclusion(filters)
         conditions = ["COALESCE(m.status, 'canonical') = 'canonical'"]
         params: List[Any] = []
@@ -479,11 +479,75 @@ class EffectiveReadService:
             placeholders = ",".join("?" for _ in excluded)
             conditions.append(f"m.id NOT IN ({placeholders})")
             params.extend(sorted(excluded))
+        if query.strip() and self.embedding_service is not None:
+            from .search import SearchService
+
+            search = SearchService(self.db, self.embedding_service)
+            mode = filters.get("search_mode", "hybrid")
+            search_filters = {
+                key: value for key, value in filters.items() if key != "search_mode"
+            }
+            if mode == "semantic":
+                response = await search._semantic_search(
+                    query, search_filters, limit + len(excluded)
+                )
+            elif mode == "exact":
+                response = await search._exact_search(
+                    query, search_filters, limit + len(excluded)
+                )
+            elif mode == "fuzzy":
+                response = await search._fuzzy_search(
+                    query, search_filters, limit + len(excluded)
+                )
+            else:
+                response = await search._vector_search(
+                    query, search_filters, limit + len(excluded)
+                )
+            eligible = []
+            for item in response.results:
+                if item.id in excluded:
+                    continue
+                row = await self.db.fetchone(
+                    "SELECT * FROM memories WHERE id = ?", (item.id,)
+                )
+                if row and self._source_matches(dict(row), filters):
+                    eligible.append(item)
+            return SearchResponse(
+                results=eligible[offset : offset + limit],
+                total=None,
+            )
+        order = "m.created_at DESC, m.id"
+        order_params = []
+        if query.strip():
+            terms = sorted(set(_TOKEN_RE.findall(query.casefold())))
+            if not terms:
+                return SearchResponse(results=[], total=0)
+            conditions.append(
+                "(" + " OR ".join("instr(LOWER(m.content), ?) > 0" for _ in terms) + ")"
+            )
+            params.extend(terms)
+            matches = " + ".join(
+                "CASE WHEN instr(LOWER(m.content), ?) > 0 THEN 1.0 ELSE 0 END"
+                for _ in terms
+            )
+            order = (
+                "CASE WHEN instr(LOWER(m.content), ?) > 0 "
+                "THEN MIN(1.0, 0.75 + length(?) * 0.25 / MAX(length(m.content), 1)) "
+                "ELSE (" + matches + ") / ? END DESC, m.created_at, m.id"
+            )
+            order_params = [query.casefold(), query.casefold(), *terms, len(terms)]
+        count = await self.db.fetchone(
+            "SELECT COUNT(*) AS total FROM memories m WHERE "
+            + " AND ".join(conditions),
+            tuple(params),
+        )
         rows = await self.db.fetchall(
             "SELECT m.* FROM memories m WHERE "
             + " AND ".join(conditions)
-            + " ORDER BY m.created_at DESC",
-            tuple(params),
+            + " ORDER BY "
+            + order
+            + " LIMIT ?",
+            tuple([*params, *order_params, limit + offset]),
         )
         results = []
         for row in rows:
@@ -506,7 +570,9 @@ class EffectiveReadService:
         results.sort(
             key=lambda item: (-item.similarity_score, item.created_at, item.id)
         )
-        return results[offset : offset + limit]
+        return SearchResponse(
+            results=results[offset : offset + limit], total=int(count["total"])
+        )
 
     async def search(
         self,
@@ -525,7 +591,12 @@ class EffectiveReadService:
         if isinstance(cache_category, (list, tuple, set)):
             cache_category = ",".join(sorted(str(item) for item in cache_category))
         cache_compatible = (
-            bool(query.strip()) and not await self.db.migration_in_progress()
+            bool(query.strip())
+            and not any(
+                filters.get(key)
+                for key in ("source", "tag", "anchored_path", "starred_only")
+            )
+            and not await self.db.migration_in_progress()
         )
         if self.embedding_service is not None:
             configured_model = str(
@@ -551,9 +622,7 @@ class EffectiveReadService:
         if cache_compatible:
             cached = await self.cache_manager.get_cached_search(
                 query=query,
-                project_id=self.cache_namespace
-                + ":"
-                + str(filters.get("project_id") or ""),
+                project_id=self.cache_namespace + ":" + _stable_hash(filters),
                 category=cache_category,
                 limit=limit,
                 read_view="effective",
@@ -561,18 +630,17 @@ class EffectiveReadService:
             )
         if cached is not None and offset == 0:
             return cached
-        curated = await self.search_curated(
-            query, query_embedding, filters, limit=max(limit * 4, 20)
+        curated = await self.search_curated(query, query_embedding, filters, limit=None)
+        raw = await self._raw_candidates(
+            query, filters, limit=max((offset + limit) * 4, 20)
         )
-        raw = await self._raw_candidates(query, filters, limit=max(limit * 4, 20))
-        response = self.compose_search(raw, curated, limit=limit, offset=offset)
+        response = self.compose_search(raw.results, curated, limit=limit, offset=offset)
+        response.total = None if raw.total is None else raw.total + len(curated)
         if cache_compatible and offset == 0:
             await self.cache_manager.cache_search_results(
                 query=query,
                 results=response,
-                project_id=self.cache_namespace
-                + ":"
-                + str(filters.get("project_id") or ""),
+                project_id=self.cache_namespace + ":" + _stable_hash(filters),
                 category=cache_category,
                 limit=limit,
                 read_view="effective",

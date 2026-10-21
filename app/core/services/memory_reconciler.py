@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import ipaddress
 import json
@@ -33,6 +34,7 @@ from .quality_gate import reconciler_evidence_exclusion
 logger = logging.getLogger(__name__)
 
 MAX_GROUP_MEMORIES = 12
+MAX_COMPARISON_GROUPS = 256
 MAX_PROVENANCE_SOURCES = 8
 MAX_TEMPORAL_WINDOW_DAYS = 365
 MAX_EVIDENCE_CHARS = 48000
@@ -46,7 +48,7 @@ METRIC_TREND_WINDOW_RUNS = 10
 DETECTION_LEASE_SECONDS = 3600
 JUDGE_REPAIR_RETRIES = 1
 LEASE_SECONDS = 120
-DETECTOR_VERSION = "candidate-v4"
+DETECTOR_VERSION = "candidate-v5"
 PROMPT_VERSION = "reconciler-v9"
 EVIDENCE_RETENTION_CONFIG_PREFIX = "reconciler.retain_evidence_content."
 
@@ -213,13 +215,17 @@ class MemoryReconcilerService:
         return await self.get_policy(project_id)
 
     async def _snapshot_memory(
-        self, row: Any, provenance: Optional[dict] = None
+        self,
+        row: Any,
+        provenance: Optional[dict] = None,
+        relations: Optional[List[dict]] = None,
     ) -> dict:
         memory_id = str(row["id"])
-        relations = await self.db.fetchall(
-            "SELECT source_id, target_id, relation_type, strength, metadata FROM memory_relations WHERE source_id = ? OR target_id = ? ORDER BY source_id, target_id, relation_type, id",
-            (memory_id, memory_id),
-        )
+        if relations is None:
+            relations = await self.db.fetchall(
+                "SELECT source_id, target_id, relation_type, strength, metadata FROM memory_relations WHERE source_id = ? OR target_id = ? ORDER BY source_id, target_id, relation_type, id",
+                (memory_id, memory_id),
+            )
         relation_data = [dict(item) for item in relations]
         metadata = {
             "project_id": row["project_id"],
@@ -472,8 +478,23 @@ class MemoryReconcilerService:
                 session_id = str(pin["session_id"])
                 if session_id not in source["session_ids"]:
                     source["session_ids"].append(session_id)
+        relation_rows = await self.db.fetchall(
+            "SELECT r.source_id, r.target_id, r.relation_type, r.strength, r.metadata "
+            "FROM memory_relations r WHERE r.source_id IN (SELECT id FROM memories WHERE project_id = ?) "
+            "OR r.target_id IN (SELECT id FROM memories WHERE project_id = ?) "
+            "ORDER BY r.source_id, r.target_id, r.relation_type, r.id",
+            (project_id, project_id),
+        )
+        relations_by_id = {}
+        for relation in relation_rows:
+            for memory_id in {relation["source_id"], relation["target_id"]}:
+                relations_by_id.setdefault(str(memory_id), []).append(dict(relation))
         snapshots = [
-            await self._snapshot_memory(row, provenance_by_memory.get(str(row["id"])))
+            await self._snapshot_memory(
+                row,
+                provenance_by_memory.get(str(row["id"])),
+                relations_by_id.get(str(row["id"]), []),
+            )
             for row in rows
         ]
         vectors: dict[str, np.ndarray] = {}
@@ -510,6 +531,7 @@ class MemoryReconcilerService:
             if not lease_token and current_stats.get("detection_lease_token"):
                 return {"id": run_id, "status": current["status"]}
             current_stats["snapshot_count"] = len(snapshots)
+            current_stats["comparison_group_limit"] = MAX_COMPARISON_GROUPS
             current_stats["candidate_group_count"] = len(groups)
             current_stats["deduplicated_candidate_count"] = 0
             retain_content = current_stats.get("policy", {}).get(
@@ -575,6 +597,18 @@ class MemoryReconcilerService:
                 if scoped_values:
                     hash_payload["scope"] = scoped_values
                 input_policy_hash = _hash(hash_payload)
+                previous = await self.db.fetchone(
+                    "SELECT id, status FROM reconciler_candidates WHERE project_id = ? AND input_policy_hash = ?",
+                    (project_id, input_policy_hash),
+                )
+                while previous and previous["status"] == "failed":
+                    input_policy_hash = _hash(
+                        {**hash_payload, "retry_of": previous["id"]}
+                    )
+                    previous = await self.db.fetchone(
+                        "SELECT id, status FROM reconciler_candidates WHERE project_id = ? AND input_policy_hash = ?",
+                        (project_id, input_policy_hash),
+                    )
                 candidate_id = (
                     "rc_"
                     + hashlib.sha256(input_policy_hash.encode("utf-8")).hexdigest()[:32]
@@ -683,7 +717,10 @@ class MemoryReconcilerService:
         threshold = 0.35
         for snapshot in snapshots:
             placed = False
-            for index, group in enumerate(groups):
+            for index in range(
+                max(0, len(groups) - MAX_COMPARISON_GROUPS), len(groups)
+            ):
+                group = groups[index]
                 group_times = [creation_times[item["memory_id"]] for item in group]
                 group_times.append(creation_times[snapshot["memory_id"]])
                 if max(group_times) - min(group_times) > timedelta(
@@ -1017,6 +1054,47 @@ class MemoryReconcilerService:
         if not isinstance(result, dict):
             raise ReconcilerValidationError("provider result must be an object")
         return result
+
+    async def _judge_with_lease(
+        self,
+        candidate: dict,
+        enricher: Any,
+        evidence: List[dict],
+        repair_error: Optional[str] = None,
+    ) -> dict:
+        stopped = asyncio.Event()
+
+        async def renew() -> None:
+            while not stopped.is_set():
+                try:
+                    await asyncio.wait_for(
+                        stopped.wait(), timeout=max(0.05, self.lease_seconds / 3)
+                    )
+                    return
+                except asyncio.TimeoutError:
+                    until = _epoch() + self.lease_seconds
+                    changed = await self.db.execute(
+                        "UPDATE reconciler_candidates SET lease_until = ?, updated_at = ? WHERE id = ? AND status = 'processing' AND lease_owner = ? AND lease_until = ?",
+                        (
+                            until,
+                            _now(),
+                            candidate["id"],
+                            candidate["lease_owner"],
+                            candidate["lease_until"],
+                        ),
+                    )
+                    if changed.rowcount != 1:
+                        raise ReconcilerConflictError(
+                            "candidate lease lost during judgment"
+                        )
+                    candidate["lease_until"] = until
+
+        task = asyncio.create_task(renew())
+        try:
+            return await self._call_judge(enricher, evidence, repair_error)
+        finally:
+            stopped.set()
+            await task
 
     def _normalize_payload(self, payload: dict, evidence: List[dict]) -> dict:
         allowed_verdicts = {
@@ -1429,8 +1507,8 @@ class MemoryReconcilerService:
                     if hasattr(enricher, "last_usage"):
                         enricher.last_usage = None
                     try:
-                        payload = await self._call_judge(
-                            enricher, evidence, repair_error=repair_error
+                        payload = await self._judge_with_lease(
+                            candidate, enricher, evidence, repair_error=repair_error
                         )
                     finally:
                         await self._record_provider_usage(

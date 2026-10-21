@@ -493,14 +493,18 @@ class OverviewScheduler:
                     OR EXISTS (
                         SELECT 1 FROM curated_results cr
                         WHERE cr.project_id = s.project_id
-                          AND cr.status = 'active'
-                          AND (s.last_run_at IS NULL OR COALESCE(cr.activated_at, cr.created_at) > s.last_run_at)
+                          AND (s.last_run_at IS NULL OR MAX(COALESCE(cr.activated_at, cr.created_at), COALESCE(cr.cancelled_at, ''), COALESCE(cr.stale_at, '')) > s.last_run_at)
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM reconciler_proposals p
+                        WHERE p.project_id = s.project_id
+                          AND p.updated_at > COALESCE(s.last_run_at, ?)
                     )
               )
             ORDER BY s.last_run_at IS NOT NULL, s.last_run_at ASC
             LIMIT 1
             """,
-            (cutoff_iso, cutoff_iso),
+            (cutoff_iso, cutoff_iso, cutoff_iso),
         )
         return str(row["project_id"]) if row else None
 

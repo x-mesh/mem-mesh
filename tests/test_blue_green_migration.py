@@ -298,3 +298,88 @@ async def test_manager_failure_restores_old_active_state(db, failure_kind):
     assert (
         await db.fetchone("SELECT COUNT(*) AS count FROM curated_results_vec_next")
     )["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_revision_conflict_preserves_concurrent_memory_update(db, monkeypatch):
+    await _add(db, "m1", EMBEDDING_TABLE_PRIMARY, (0.1, 0.2, 0.3, 0.4))
+    manager = EmbeddingManagerService(db, _FakeEmbeddingService())
+    manager._migration_progress["total"] = 1
+    validate = db._migrator.validate_raw_slot
+
+    async def change_before_promotion(*args):
+        valid = await validate(*args)
+        await db.execute(
+            "UPDATE memories SET content = 'concurrent edit', updated_at = '2030-01-01' WHERE id = 'm1'"
+        )
+        return valid
+
+    monkeypatch.setattr(db._migrator, "validate_raw_slot", change_before_promotion)
+    with pytest.raises(RuntimeError, match="read revision changed"):
+        await manager._run_migration(batch_size=1)
+    row = await db.fetchone("SELECT content, updated_at FROM memories WHERE id = 'm1'")
+    assert row["content"] == "concurrent edit"
+    assert row["updated_at"] == "2030-01-01"
+    assert await db.active_embedding_table() == EMBEDDING_TABLE_PRIMARY
+
+
+@pytest.mark.asyncio
+async def test_migration_reads_canonical_bodies_in_requested_batches(db, monkeypatch):
+    for i in range(5):
+        await _add(db, f"m{i}", EMBEDDING_TABLE_PRIMARY, (0.1, 0.2, 0.3, 0.4))
+    reads = []
+    fetch = db.fetchall
+
+    async def track(query, params=()):
+        rows = await fetch(query, params)
+        if "SELECT id, content FROM memories" in query:
+            reads.append(len(rows))
+        return rows
+
+    monkeypatch.setattr(db, "fetchall", track)
+    manager = EmbeddingManagerService(db, _FakeEmbeddingService())
+    manager._migration_progress["total"] = 5
+    result = await manager._run_migration(batch_size=2)
+    assert result["success"] is True
+    assert reads == [2, 2, 1, 0]
+
+
+@pytest.mark.asyncio
+async def test_curated_promotion_keeps_previous_index_visible_until_commit(
+    temp_db_path, monkeypatch
+):
+    writer = Database(temp_db_path, embedding_dim=4)
+    reader = Database(temp_db_path, embedding_dim=4)
+    await writer.connect()
+    await reader.connect()
+    try:
+        await writer.execute(
+            "INSERT INTO curated_results_vec_active(result_id, embedding) VALUES (?, ?)",
+            ("old", json.dumps([1.0] * 4)),
+        )
+        await writer._migrator.prepare_curated_next(6)
+        await writer._migrator.write_curated_next("new", [1.0] * 6)
+        recreate = writer._migrator._recreate_curated_table
+        observed = []
+
+        async def inspect_during_promotion(*args, **kwargs):
+            await recreate(*args, **kwargs)
+            rows = await reader.fetchall(
+                "SELECT result_id FROM curated_results_vec_active"
+            )
+            observed.extend(row["result_id"] for row in rows)
+
+        monkeypatch.setattr(
+            writer._migrator, "_recreate_curated_table", inspect_during_promotion
+        )
+        await writer._migrator.promote_curated_next(6)
+        assert observed == ["old"]
+        assert [
+            row["result_id"]
+            for row in await reader.fetchall(
+                "SELECT result_id FROM curated_results_vec_active"
+            )
+        ] == ["new"]
+    finally:
+        await reader.close()
+        await writer.close()

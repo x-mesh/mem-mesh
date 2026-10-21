@@ -196,6 +196,7 @@ class SearchService:
                         "tag": tag,
                         "anchored_path": anchored_path,
                         "starred_only": starred_only,
+                        "search_mode": search_mode,
                     }
                     return await self.effective_read.search(
                         query=query,

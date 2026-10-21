@@ -97,3 +97,57 @@ async def test_judge_report_requires_expected_review_classification(reason, pass
     report = await evaluate_cases(Judge(), [case])
     assert report["passed"] == passed
     assert report["cases"][0]["review_reason"] == reason
+
+
+def test_judge_case_rejects_oversized_evidence():
+    from pydantic import ValidationError
+
+    from app.core.services.memory_reconciler import MAX_EVIDENCE_CHARS
+
+    with pytest.raises(ValidationError):
+        JudgeCase(
+            id="large",
+            evidence=[
+                {
+                    "memory_id": "m1",
+                    "input_hash": "h1",
+                    "content": "x" * (MAX_EVIDENCE_CHARS + 1),
+                }
+            ],
+            expected_actions=["no_op"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_judge_report_rejects_uncited_required_conclusion():
+    case = JudgeCase(
+        id="uncited",
+        evidence=[
+            {
+                "memory_id": "m1",
+                "input_hash": "h1",
+                "content": "Stable releases require review.",
+            }
+        ],
+        expected_actions=["merge"],
+        required_terms=["stable"],
+        required_source_ids=["m1"],
+    )
+
+    class Judge:
+        async def reconcile_group(self, evidence):
+            return {
+                "action": "merge",
+                "representative_memory_id": "m1",
+                "body": "Stable releases require review.",
+                "claims": [
+                    {
+                        "text": "Other fact",
+                        "source_refs": [{"memory_id": "m1", "input_hash": "h1"}],
+                    }
+                ],
+            }
+
+    report = await evaluate_cases(Judge(), [case])
+    assert report["passed"] == 0
+    assert "uncited term: stable" in report["cases"][0]["failures"]

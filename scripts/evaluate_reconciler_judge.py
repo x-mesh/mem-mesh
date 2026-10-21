@@ -9,12 +9,13 @@ import json
 from pathlib import Path
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.core.config import get_settings
 from app.core.database.base import Database
 from app.core.services.llm_resolver import resolve_service_llm
 from app.core.services.memory_reconciler import (
+    MAX_EVIDENCE_CHARS,
     PROMPT_VERSION,
     MemoryReconcilerService,
     is_external_llm_endpoint,
@@ -25,7 +26,7 @@ from app.core.services.relay_worker import build_relay_enricher
 class Evidence(BaseModel):
     memory_id: str = Field(min_length=1)
     input_hash: str = Field(min_length=1)
-    content: str = Field(min_length=1)
+    content: str = Field(min_length=1, max_length=MAX_EVIDENCE_CHARS)
     metadata: dict[str, str] = Field(default_factory=dict)
 
 
@@ -36,6 +37,19 @@ class JudgeCase(BaseModel):
     expected_review_reason: Optional[str] = None
     required_terms: list[str] = Field(default_factory=list)
     required_source_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def bound_evidence(self):
+        if (
+            len(
+                json.dumps(
+                    [item.model_dump() for item in self.evidence], ensure_ascii=False
+                )
+            )
+            > MAX_EVIDENCE_CHARS
+        ):
+            raise ValueError("case evidence exceeds the Reconciler input budget")
+        return self
 
 
 class JudgeSuite(BaseModel):
@@ -66,6 +80,15 @@ async def evaluate_cases(judge: Any, cases: list[JudgeCase]) -> dict:
             for term in case.required_terms:
                 if term.casefold() not in body:
                     failures.append(f"missing term: {term}")
+            for term in case.required_terms:
+                supporting_claims = [
+                    claim
+                    for claim in decision.get("claims") or []
+                    if term.casefold() in claim.get("text", "").casefold()
+                    and claim.get("source_refs")
+                ]
+                if not supporting_claims:
+                    failures.append(f"uncited term: {term}")
             cited = {
                 ref["memory_id"]
                 for claim in decision.get("claims") or []

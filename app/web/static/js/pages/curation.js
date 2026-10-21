@@ -140,6 +140,8 @@ export class CurationPage extends HTMLElement {
     const api = window.app?.apiClient;
     const list = this.querySelector('.cur-reconciler-list');
     if (!api || !list) return;
+    const requestId = (this._reconcilerProposalRequestId || 0) + 1;
+    this._reconcilerProposalRequestId = requestId;
     const projectId = this.querySelector('.cur-reconciler-project')?.value;
     const count = this.querySelector('.cur-reconciler-count');
     if (!projectId) {
@@ -158,6 +160,8 @@ export class CurationPage extends HTMLElement {
       let proposals = responses.flatMap((response) => response?.proposals || [])
         .sort((left, right) => String(right.created_at || '').localeCompare(String(left.created_at || '')));
       proposals = await this._resolveReconcilerProposalStates(api, proposals);
+      if (this._reconcilerProposalRequestId !== requestId
+          || this.querySelector('.cur-reconciler-project')?.value !== projectId) return;
       if (count) count.textContent = String(proposals.length);
       if (!proposals.length) {
         list.innerHTML = '<div class="cur-empty">No Memory Reconciler results for this project.</div>';
@@ -165,6 +169,8 @@ export class CurationPage extends HTMLElement {
       }
       list.innerHTML = proposals.map((proposal) => this._reconcilerRow(proposal)).join('');
     } catch (error) {
+      if (this._reconcilerProposalRequestId !== requestId
+          || this.querySelector('.cur-reconciler-project')?.value !== projectId) return;
       list.innerHTML = '<div class="cur-empty cur-msg-error">Failed to load: '
         + this._esc(this._errText(error)) + '</div>';
     }
@@ -316,10 +322,12 @@ export class CurationPage extends HTMLElement {
       if (fromDate) request.created_after = new Date(`${fromDate}T00:00:00`).toISOString();
       if (throughDate) request.created_before = new Date(`${throughDate}T23:59:59.999`).toISOString();
       const run = await api.post('/curation/reconciler/runs', request);
+      if (this.querySelector('.cur-reconciler-project')?.value !== projectId) return;
       this._renderReconcilerRun(run);
       this._startReconcilerPolling();
       await this.loadReconcilerProposals();
     } catch (error) {
+      if (this.querySelector('.cur-reconciler-project')?.value !== projectId) return;
       this._setReconcilerRunMessage(this._errText(error), true);
     } finally {
       button.disabled = false;

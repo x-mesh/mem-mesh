@@ -305,9 +305,17 @@ class MemoryDetailPage extends HTMLElement {
       }
       const projectId = context.primary_memory.project_id;
       const params = new URLSearchParams({ project_id: projectId });
-      this.curatedDetail = await window.app.apiClient.get(
+      const detail = await window.app.apiClient.get(
         '/curation/reconciler/results/' + encodeURIComponent(this.memoryId) + '?' + params.toString()
       );
+      if (!Array.isArray(detail?.sources) || !Array.isArray(detail?.claims)
+          || detail.sources.some(source => !source || typeof source !== 'object')
+          || detail.claims.some(claim => !claim || typeof claim !== 'object'
+            || !Array.isArray(claim.source_refs)
+            || claim.source_refs.some(source => !source || typeof source !== 'object'))) {
+        throw new Error('Invalid derived result evidence');
+      }
+      this.curatedDetail = detail;
       this.memory = context.primary_memory;
       this.contextData = context.related_memories || [];
     } catch (error) {

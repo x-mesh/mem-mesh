@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reconciler 검색의 프로젝트 범위, 필터 캐시와 페이지 처리 오류를 수정했다.
+- 임베딩 마이그레이션의 중복 실행과 승격 경합을 막고 본문을 배치로 조회한다.
+- 실패 후보 재시도, 판정 중 lease 갱신과 취소 후 Overview 재생성을 보완했다.
+- 프로젝트 전환 중 늦은 응답과 비정상 파생 근거 응답을 차단한다.
+
 - 배치 검색은 각 항목의 프로젝트, 검색 조건과 `read_view`를 유지한다.
 - MCP 압축 응답은 파생 결과의 전체 ID와 원본 근거를 유지한다.
 

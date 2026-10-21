@@ -216,34 +216,35 @@ class DatabaseMigrator:
         }
 
     async def promote_curated_next(self, dimension: int) -> Dict[str, Any]:
-        snapshot = await self.snapshot_curated_active()
-        next_sql = await self._table_sql("curated_results_vec_next")
-        if next_sql is None:
-            raise RuntimeError("curated next vector table is missing")
-        await self._recreate_curated_table(
-            "curated_results_vec_active",
-            dimension,
-            use_vec="USING VEC0" in next_sql.upper(),
-        )
-        active_sql = await self._table_sql("curated_results_vec_active")
-        use_vec = bool(active_sql and "USING VEC0" in active_sql.upper())
-        rows = await self.connection.fetchall(
-            "SELECT result_id, embedding FROM curated_results_vec_next"
-        )
-        for row in rows:
-            await self.connection.execute(
-                "DELETE FROM curated_results_vec_active WHERE result_id = ?",
-                (row["result_id"],),
+        async with self.connection.transaction():
+            snapshot = await self.snapshot_curated_active()
+            next_sql = await self._table_sql("curated_results_vec_next")
+            if next_sql is None:
+                raise RuntimeError("curated next vector table is missing")
+            await self._recreate_curated_table(
+                "curated_results_vec_active",
+                dimension,
+                use_vec="USING VEC0" in next_sql.upper(),
             )
-            await self.connection.execute(
-                "INSERT INTO curated_results_vec_active(result_id, embedding) VALUES (?, ?)",
-                (
-                    row["result_id"],
-                    self._vector_insert_value(row["embedding"], use_vec),
-                ),
+            active_sql = await self._table_sql("curated_results_vec_active")
+            use_vec = bool(active_sql and "USING VEC0" in active_sql.upper())
+            rows = await self.connection.fetchall(
+                "SELECT result_id, embedding FROM curated_results_vec_next"
             )
-        self.connection.commit()
-        return snapshot
+            for row in rows:
+                await self.connection.execute(
+                    "DELETE FROM curated_results_vec_active WHERE result_id = ?",
+                    (row["result_id"],),
+                )
+                await self.connection.execute(
+                    "INSERT INTO curated_results_vec_active(result_id, embedding) VALUES (?, ?)",
+                    (
+                        row["result_id"],
+                        self._vector_insert_value(row["embedding"], use_vec),
+                    ),
+                )
+            self.connection.commit()
+            return snapshot
 
     async def restore_curated_active(self, snapshot: Dict[str, Any]) -> None:
         if not snapshot.get("exists"):
