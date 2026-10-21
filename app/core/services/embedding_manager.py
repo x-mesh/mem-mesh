@@ -116,6 +116,12 @@ class EmbeddingManagerService:
                 "progress": self._migration_progress,
             }
 
+        if await self.db.migration_in_progress():
+            return {
+                "success": False,
+                "error": "Migration already in progress",
+            }
+
         status = await self.get_status()
 
         # Check whether migration is needed
@@ -183,20 +189,137 @@ class EmbeddingManagerService:
         blue-green 마이그레이션은 이 헬퍼로 inactive(green) 슬롯만 비운다.
         active(blue) 슬롯은 건드리지 않아 진행 중 검색이 유지된다.
         """
-        conn = self.db.connection
+        if table_name not in {"memory_embeddings", "memory_embeddings_b"}:
+            raise ValueError(f"Invalid raw vector table: {table_name}")
         try:
-            conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-            conn.execute(f"""
-                CREATE VIRTUAL TABLE IF NOT EXISTS {table_name} USING vec0(
-                    memory_id TEXT PRIMARY KEY,
-                    embedding FLOAT[{new_dim}]
-                )
-            """)
-            conn.commit()
+            await self.db.execute(f"DROP TABLE IF EXISTS {table_name}")
+            if self.db._connection.is_vec_available:
+                await self.db.execute(f"""CREATE VIRTUAL TABLE {table_name} USING vec0(
+                        memory_id TEXT PRIMARY KEY,
+                        embedding FLOAT[{new_dim}]
+                    )""")
+            else:
+                await self.db.execute(f"""CREATE TABLE {table_name} (
+                        memory_id TEXT PRIMARY KEY,
+                        embedding BLOB NOT NULL
+                    )""")
+            self.db.connection.commit()
             logger.info(f"Recreated vector table {table_name} (dim={new_dim})")
         except Exception as e:
             logger.error(f"Failed to recreate vector table {table_name}: {e}")
             raise
+
+    async def _drop_vector_table(self, table_name: str) -> None:
+        if table_name not in {"memory_embeddings", "memory_embeddings_b"}:
+            raise ValueError(f"Invalid raw vector table: {table_name}")
+        await self.db.execute(f"DROP TABLE IF EXISTS {table_name}")
+        self.db.connection.commit()
+
+    @staticmethod
+    def _embedding_bytes(service: Any, vector: Any) -> bytes:
+        values = [float(item) for item in vector]
+        if hasattr(service, "to_bytes"):
+            value = service.to_bytes(values)
+        else:
+            import numpy as np
+
+            value = np.asarray(values, dtype=np.float32).tobytes()
+        if isinstance(value, memoryview):
+            return value.tobytes()
+        if not isinstance(value, (bytes, bytearray)):
+            raise TypeError("embedding service returned a non-byte vector")
+        return bytes(value)
+
+    async def _snapshot_migration_state(self, metadata_keys: tuple[str, ...]) -> dict:
+        metadata_rows = await self.db.fetchall(
+            "SELECT key, value, updated_at FROM embedding_metadata WHERE key IN ("
+            + ",".join("?" for _ in metadata_keys)
+            + ")",
+            metadata_keys,
+        )
+        memory_rows = await self.db.fetchall(
+            "SELECT id, embedding, updated_at FROM memories ORDER BY id"
+        )
+        active_rows = await self.db.fetchall(
+            "SELECT id, revision FROM curated_results WHERE status = 'active' ORDER BY id"
+        )
+        state_rows = await self.db.fetchall(
+            "SELECT state_key, state_value, updated_at FROM reconciler_state ORDER BY state_key"
+        )
+        return {
+            "metadata": {str(row["key"]): dict(row) for row in metadata_rows},
+            "memory_rows": [dict(row) for row in memory_rows],
+            "active_curated": tuple(
+                (str(row["id"]), int(row["revision"])) for row in active_rows
+            ),
+            "state_rows": [dict(row) for row in state_rows],
+            "active_raw": await self.db.active_embedding_table(),
+            "read_revision": await self._read_revision(),
+            "curated_active_table": await self.db._migrator.snapshot_curated_active(),
+            "db_embedding_dim": self.db.embedding_dim,
+        }
+
+    async def _read_revision(self) -> int:
+        row = await self.db.fetchone(
+            "SELECT state_value FROM reconciler_state WHERE state_key = 'read_revision'"
+        )
+        try:
+            return int(row["state_value"]) if row else 0
+        except (TypeError, ValueError):
+            return 0
+
+    async def _write_metadata(self, values: dict[str, str]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        async with self.db.transaction():
+            for key, value in values.items():
+                await self.db.execute(
+                    "INSERT INTO embedding_metadata(key, value, updated_at) VALUES (?, ?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                    (key, str(value), now),
+                )
+
+    async def _restore_migration_state(
+        self, snapshot: dict, green: str, promoted: bool
+    ) -> None:
+        if promoted:
+            await self.db._migrator.restore_curated_active(
+                snapshot["curated_active_table"]
+            )
+        await self.db._migrator.invalidate_curated_next()
+        await self._drop_vector_table(green)
+        async with self.db.transaction():
+            for row in snapshot["memory_rows"]:
+                await self.db.execute(
+                    "UPDATE memories SET embedding = ?, updated_at = ? WHERE id = ?",
+                    (row["embedding"], row["updated_at"], row["id"]),
+                )
+            for key in (
+                "embedding_model",
+                "embedding_dimension",
+                "last_migration",
+                "active_embedding_table",
+                "migration_in_progress",
+                "reconciler_embedding_model",
+                "reconciler_embedding_dimension",
+                "target_embedding_model",
+                "target_embedding_dimension",
+            ):
+                await self.db.execute(
+                    "DELETE FROM embedding_metadata WHERE key = ?", (key,)
+                )
+            for row in snapshot["metadata"].values():
+                await self.db.execute(
+                    "INSERT INTO embedding_metadata(key, value, updated_at) VALUES (?, ?, ?)",
+                    (row["key"], row["value"], row["updated_at"]),
+                )
+            await self.db.execute("DELETE FROM reconciler_state")
+            for row in snapshot["state_rows"]:
+                await self.db.execute(
+                    "INSERT INTO reconciler_state(state_key, state_value, updated_at) VALUES (?, ?, ?)",
+                    (row["state_key"], row["state_value"], row["updated_at"]),
+                )
+        self.db._active_embedding_table = snapshot["active_raw"]
+        self.db.embedding_dim = snapshot["db_embedding_dim"]
 
     async def _run_migration(
         self,
@@ -210,136 +333,204 @@ class EmbeddingManagerService:
             "failed": 0,
             "skipped": 0,
         }
+        metadata_keys = (
+            "embedding_model",
+            "embedding_dimension",
+            "last_migration",
+            "active_embedding_table",
+            "migration_in_progress",
+            "reconciler_embedding_model",
+            "reconciler_embedding_dimension",
+            "target_embedding_model",
+            "target_embedding_dimension",
+        )
+        snapshot = await self._snapshot_migration_state(metadata_keys)
+        green = await self.db.inactive_embedding_table()
+        promoted = False
+        migration_started = False
+        temp_table = "mem_mesh_embedding_stage"
+        try:
+            ready = getattr(self.embedding_service, "is_ready", True)
+            if not ready:
+                self._migration_progress["message"] = "Loading embedding model..."
+                if progress_callback:
+                    progress_callback(self._migration_progress)
+                await asyncio.to_thread(self.embedding_service.load_model)
 
-        # Re-embedding needs the (new) model loaded. Production uses deferred
-        # loading, so right after switch_model the status is "not_loaded" and
-        # aembed() would raise. Force the load here, off the event loop.
-        if not self.embedding_service.is_ready:
-            self._migration_progress["message"] = "Loading embedding model..."
+            new_dim = int(self.embedding_service.dimension)
+            new_model = str(getattr(self.embedding_service, "model_name", ""))
+            await self.db.set_migration_in_progress(True)
+            migration_started = True
+            self._migration_progress["message"] = (
+                f"Preparing curated and raw green slots (dim={new_dim})..."
+            )
             if progress_callback:
                 progress_callback(self._migration_progress)
-            await asyncio.to_thread(self.embedding_service.load_model)
 
-        # Blue-green: re-embed into the INACTIVE slot (green) while the active
-        # slot (blue) keeps serving search. Only after green is fully built do we
-        # flip the pointer — so a failure or restart leaves the old data intact.
-        new_dim = self.embedding_service.dimension
-        green = await self.db.inactive_embedding_table()
-        # Mark migration in progress (DB-persisted) so MemoryService dual-writes
-        # new memories into both slots until the swap.
-        await self.db.set_migration_in_progress(True)
-        self._migration_progress["message"] = (
-            f"Re-embedding into {green} (dim={new_dim})..."
-        )
-        if progress_callback:
-            progress_callback(self._migration_progress)
-        await self._recreate_vector_table(green, new_dim)
-
-        offset = 0
-        batch_num = 0
-
-        while True:
-            # Batch-fetch memories
-            cursor = await self.db.execute(
-                "SELECT id, content FROM memories ORDER BY created_at LIMIT ? OFFSET ?",
-                (batch_size, offset),
+            await self.db._migrator.prepare_curated_next(new_dim)
+            curated_rows = await self.db.fetchall(
+                "SELECT id, body, revision FROM curated_results "
+                "WHERE status = 'active' ORDER BY id"
             )
-            memories = cursor.fetchall()
+            expected_curated_ids = [str(row["id"]) for row in curated_rows]
+            for row in curated_rows:
+                vector = await self.embedding_service.aembed(str(row["body"] or ""))
+                if len(vector) != new_dim:
+                    raise ValueError(
+                        f"curated result {row['id']} returned dimension {len(vector)}, expected {new_dim}"
+                    )
+                await self.db._migrator.write_curated_next(row["id"], vector)
+            if not await self.db._migrator.validate_curated_next(
+                expected_curated_ids, new_dim
+            ):
+                raise ValueError("curated next validation failed")
 
-            if not memories:
-                break
-
-            batch_num += 1
-            self._migration_progress["message"] = f"Processing batch {batch_num}..."
-
+            await self._recreate_vector_table(green, new_dim)
+            await self.db.execute(
+                f"CREATE TEMP TABLE {temp_table} ("
+                "memory_id TEXT PRIMARY KEY, embedding BLOB NOT NULL, updated_at TEXT NOT NULL)"
+            )
+            memories = await self.db.fetchall(
+                "SELECT id, content FROM memories ORDER BY created_at, id"
+            )
+            stats["total"] = len(memories)
+            self._migration_progress["total"] = len(memories)
             for memory in memories:
                 try:
-                    memory_id = memory["id"]
-                    content = memory["content"]
-
-                    # Generate new embedding
-                    embedding = await self.embedding_service.aembed(content[:2000])
-                    embedding_bytes = self.embedding_service.to_bytes(embedding)
-
-                    # Update memories table
+                    vector = await self.embedding_service.aembed(
+                        str(memory["content"] or "")[:2000]
+                    )
+                    if len(vector) != new_dim:
+                        raise ValueError(
+                            f"memory {memory['id']} returned dimension {len(vector)}, expected {new_dim}"
+                        )
+                    values = [float(item) for item in vector]
+                    embedding_bytes = self._embedding_bytes(
+                        self.embedding_service, values
+                    )
+                    if len(embedding_bytes) != new_dim * 4:
+                        raise ValueError(
+                            f"memory {memory['id']} returned invalid embedding bytes"
+                        )
                     now = datetime.now(timezone.utc).isoformat()
                     await self.db.execute(
-                        "UPDATE memories SET embedding = ?, updated_at = ? WHERE id = ?",
-                        (embedding_bytes, now, memory_id),
-                    )
-
-                    # Update green slot (table name from fixed slot allowlist)
-                    embedding_json = json.dumps(embedding)
-                    await self.db.execute(
-                        f"DELETE FROM {green} WHERE memory_id = ?",
-                        (memory_id,),
+                        f"DELETE FROM {temp_table} WHERE memory_id = ?",
+                        (memory["id"],),
                     )
                     await self.db.execute(
-                        f"INSERT INTO {green} (memory_id, embedding) VALUES (?, ?)",
-                        (memory_id, embedding_json),
+                        f"INSERT INTO {temp_table}(memory_id, embedding, updated_at) VALUES (?, ?, ?)",
+                        (memory["id"], embedding_bytes, now),
                     )
-
+                    await self.db.execute(
+                        f"DELETE FROM {green} WHERE memory_id = ?", (memory["id"],)
+                    )
+                    vector_table_sql = await self.db._migrator._raw_table_sql(green)
+                    await self.db.execute(
+                        f"INSERT INTO {green}(memory_id, embedding) VALUES (?, ?)",
+                        (
+                            memory["id"],
+                            (
+                                json.dumps(values)
+                                if vector_table_sql
+                                and "USING VEC0" in vector_table_sql.upper()
+                                else embedding_bytes
+                            ),
+                        ),
+                    )
                     stats["migrated"] += 1
-
-                except Exception as e:
-                    logger.error(f"Failed to migrate memory {memory['id']}: {e}")
+                except Exception:
                     stats["failed"] += 1
-
-                # Update progress
-                processed = stats["migrated"] + stats["failed"]
-                self._migration_progress["processed"] = processed
-                self._migration_progress["failed"] = stats["failed"]
+                    self._migration_progress["failed"] = stats["failed"]
+                    raise
+                self._migration_progress["processed"] = stats["migrated"]
                 self._migration_progress["percent"] = int(
-                    (processed / stats["total"]) * 100
+                    stats["migrated"] / max(stats["total"], 1) * 100
                 )
-
                 if progress_callback:
                     progress_callback(self._migration_progress)
 
-            # Commit batch
-            self.db.connection.commit()
-            offset += batch_size
+            expected_memory_ids = [str(memory["id"]) for memory in memories]
+            if not await self.db._migrator.validate_raw_slot(
+                green, expected_memory_ids, new_dim
+            ):
+                raise ValueError("raw green validation failed")
 
-            # Small delay to distribute CPU load
-            await asyncio.sleep(0.01)
+            current_curated_rows = await self.db.fetchall(
+                "SELECT id, revision FROM curated_results WHERE status = 'active' ORDER BY id"
+            )
+            current_curated = tuple(
+                (str(row["id"]), int(row["revision"])) for row in current_curated_rows
+            )
+            if current_curated != snapshot["active_curated"]:
+                raise RuntimeError("active curated results changed during migration")
+            if await self._read_revision() != snapshot["read_revision"]:
+                raise RuntimeError("reconciler read revision changed during migration")
 
-        # Atomic blue-green swap: flip the active pointer to the freshly built
-        # green slot. From here search/writes target the new model's vectors.
-        await self.db.set_active_embedding_table(green)
-        # Stop dual-writing before reclaiming the old slot.
-        await self.db.set_migration_in_progress(False)
-        # Drop the now-inactive old slot (reclaimed; recreated next migration).
-        old = await self.db.inactive_embedding_table()
-        try:
-            self.db.connection.execute(f"DROP TABLE IF EXISTS {old}")
-            self.db.connection.commit()
-        except Exception as e:
-            logger.warning(f"Failed to drop old embedding slot {old}: {e}")
+            await self.db._migrator.promote_curated_next(new_dim)
+            promoted = True
+            staged_rows = await self.db.fetchall(
+                f"SELECT memory_id, embedding, updated_at FROM {temp_table}"
+            )
+            now = datetime.now(timezone.utc).isoformat()
+            metadata = {
+                "active_embedding_table": green,
+                "embedding_model": new_model,
+                "embedding_dimension": str(new_dim),
+                "reconciler_embedding_model": new_model,
+                "reconciler_embedding_dimension": str(new_dim),
+                "last_migration": now,
+                "migration_in_progress": "0",
+            }
+            target_model = await self.db.get_embedding_metadata(
+                "target_embedding_model"
+            )
+            if target_model and target_model == new_model:
+                metadata["target_embedding_model"] = ""
+                metadata["target_embedding_dimension"] = ""
+            async with self.db.transaction():
+                for row in staged_rows:
+                    await self.db.execute(
+                        "UPDATE memories SET embedding = ?, updated_at = ? WHERE id = ?",
+                        (row["embedding"], row["updated_at"], row["memory_id"]),
+                    )
+                for key, value in metadata.items():
+                    await self.db.execute(
+                        "INSERT INTO embedding_metadata(key, value, updated_at) VALUES (?, ?, ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                        (key, value, now),
+                    )
+            self.db._active_embedding_table = green
+            self.db.embedding_dim = new_dim
+            from .effective_read import EffectiveReadService
 
-        # Update metadata: set actual data model to new model
-        now = datetime.now(timezone.utc).isoformat()
-        new_model = self.embedding_service.model_name
-        new_dim = str(self.embedding_service.dimension)
-        await self.db.set_embedding_metadata("embedding_model", new_model)
-        await self.db.set_embedding_metadata("embedding_dimension", new_dim)
-        await self.db.set_embedding_metadata("last_migration", now)
+            await EffectiveReadService(self.db).bump_read_revision(
+                "embedding-migration"
+            )
+            await self.db._migrator.invalidate_curated_next()
+            try:
+                await self._drop_vector_table(snapshot["active_raw"])
+            except Exception as exc:
+                logger.warning("Failed to retire old raw vector slot: %s", exc)
 
-        # Clear target if it matches embedding_model
-        target = await self.db.get_embedding_metadata("target_embedding_model")
-        if target and target == new_model:
-            await self.db.set_embedding_metadata("target_embedding_model", "")
-            await self.db.set_embedding_metadata("target_embedding_dimension", "")
-
-        self._migration_progress["status"] = "completed"
-        self._migration_progress["message"] = (
-            f"Migration completed: {stats['migrated']} migrated, {stats['failed']} failed"
-        )
-
-        return {
-            "success": True,
-            "stats": stats,
-            "message": self._migration_progress["message"],
-        }
+            self._migration_progress["status"] = "completed"
+            self._migration_progress["message"] = (
+                f"Migration completed: {stats['migrated']} migrated, {stats['failed']} failed"
+            )
+            return {
+                "success": True,
+                "stats": stats,
+                "message": self._migration_progress["message"],
+            }
+        except Exception:
+            if migration_started:
+                await self._restore_migration_state(snapshot, green, promoted)
+            raise
+        finally:
+            try:
+                await self.db.execute(f"DROP TABLE IF EXISTS temp.{temp_table}")
+                self.db.connection.commit()
+            except Exception:
+                logger.exception("Failed to drop migration staging table")
 
     def get_migration_progress(self) -> Dict[str, Any]:
         """현재 마이그레이션 진행 상황 조회"""

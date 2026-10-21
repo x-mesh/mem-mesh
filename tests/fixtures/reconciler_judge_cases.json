@@ -1,0 +1,103 @@
+{
+  "cases": [
+    {
+      "id": "ephemeral_automated_poll_noise",
+      "evidence": [
+        {
+          "memory_id": "poll-trace",
+          "input_hash": "fixture-poll-v1",
+          "content": "Automated hook polling trace: waiting, no new output, waiting, no new output. This transient progress event contains no project decision, requirement, result, incident, or reusable knowledge.",
+          "metadata": {"source": "hook", "category": "task"}
+        }
+      ],
+      "expected_actions": ["noise_suppression", "archive", "quarantine"]
+    },
+    {
+      "id": "complementary_release_conditions",
+      "evidence": [
+        {
+          "memory_id": "release-stable",
+          "input_hash": "fixture-stable-v1",
+          "content": "For stable packages, Atlas checks the SHA-256 checksum and requires a signed manifest before release. A checksum mismatch blocks the release."
+        },
+        {
+          "memory_id": "release-nightly",
+          "input_hash": "fixture-nightly-v1",
+          "content": "For nightly packages, Atlas checks the SHA-256 checksum before release. The nightly checklist records the result. A checksum mismatch blocks the release."
+        }
+      ],
+      "expected_actions": ["merge"],
+      "required_terms": ["stable", "nightly", "SHA-256"],
+      "required_source_ids": ["release-stable", "release-nightly"]
+    },
+    {
+      "id": "unresolved_same_time_conflict",
+      "evidence": [
+        {
+          "memory_id": "flag-enabled",
+          "input_hash": "fixture-enabled-v1",
+          "content": "At 12:00 UTC on 2026-10-20, the Atlas production checkout flag was enabled. The operator confirmed it on the production dashboard."
+        },
+        {
+          "memory_id": "flag-disabled",
+          "input_hash": "fixture-disabled-v1",
+          "content": "At 12:00 UTC on 2026-10-20, the Atlas production checkout flag was disabled. The operator confirmed it on the production dashboard."
+        }
+      ],
+      "expected_actions": ["needs_review"],
+      "expected_review_reason": "contradiction"
+    },
+    {
+      "id": "uncertain_project_assignment",
+      "evidence": [
+        {
+          "memory_id": "atlas-scope",
+          "input_hash": "fixture-atlas-scope-v1",
+          "content": "Atlas is a web landing-page builder. Atlas has no Swift HTTP dashboard source files. This is confirmed for the Atlas codebase.",
+          "metadata": {"project_id": "Atlas"}
+        },
+        {
+          "memory_id": "uncertain-dashboard",
+          "input_hash": "fixture-uncertain-dashboard-v1",
+          "content": "This record describes a Swift HTTP dashboard fix in Borealis, a separate codebase. Its metadata labels it Atlas, but the source project assignment is unverified. Do not treat the Borealis fix as an Atlas fact without source verification.",
+          "metadata": {"project_id": "Atlas"}
+        }
+      ],
+      "expected_actions": ["needs_review"],
+      "expected_review_reason": "scope_mismatch"
+    },
+    {
+      "id": "unrelated_records",
+      "evidence": [
+        {
+          "memory_id": "db-migration",
+          "input_hash": "fixture-db-v1",
+          "content": "Atlas database migration 42 adds a nullable audit column to the orders table. It does not change the checkout user interface."
+        },
+        {
+          "memory_id": "theme-change",
+          "input_hash": "fixture-theme-v1",
+          "content": "Atlas landing page theme 7 changes the navigation colors and hero typography. It does not alter the orders database schema."
+        }
+      ],
+      "expected_actions": ["no_op", "keep"]
+    },
+    {
+      "id": "explicit_runbook_replacement",
+      "evidence": [
+        {
+          "memory_id": "runbook-old",
+          "input_hash": "fixture-runbook-old-v1",
+          "content": "Atlas deployment runbook version 1 requires manual staging upload. This version was valid until 2026-10-19."
+        },
+        {
+          "memory_id": "runbook-new",
+          "input_hash": "fixture-runbook-new-v1",
+          "content": "Atlas deployment runbook version 2 replaced version 1 on 2026-10-20. Deployments now use the signed automation pipeline. The manual staging upload is obsolete."
+        }
+      ],
+      "expected_actions": ["supersede"],
+      "required_source_ids": ["runbook-old", "runbook-new"]
+    }
+  ]
+}

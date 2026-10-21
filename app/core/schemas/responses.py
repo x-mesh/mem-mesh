@@ -87,6 +87,11 @@ class SearchResult(BaseModel):
         default=None,
         description="enrichment 토픽 태그 — 원본 tags와 별개로 유지",
     )
+    result_kind: str = Field(
+        default="canonical", description="canonical 또는 curated 파생 결과"
+    )
+    representative_memory_id: Optional[str] = Field(default=None)
+    citations: List[Dict[str, Any]] = Field(default_factory=list)
 
     model_config = {
         "json_schema_extra": {
@@ -155,6 +160,9 @@ class RelatedMemory(BaseModel):
     created_at: str = Field(description="생성 시간")
     category: Optional[str] = Field(None, description="카테고리")
     project_id: Optional[str] = Field(None, description="프로젝트 ID")
+    result_kind: str = Field(default="canonical")
+    representative_memory_id: Optional[str] = Field(default=None)
+    citations: List[Dict[str, str]] = Field(default_factory=list)
 
     model_config = {
         "json_schema_extra": {

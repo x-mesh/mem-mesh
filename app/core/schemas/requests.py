@@ -230,6 +230,7 @@ class AddParams(BaseModel):
     source: Optional[str] = Field(default=None)
     client: Optional[str] = Field(default=None, max_length=50)
     tags: Optional[List[str]] = Field(default=None)
+    reconciler_protected: bool = Field(default=False)
     anchors: Optional[Dict[str, Any]] = Field(
         default=None,
         description=(
@@ -325,6 +326,10 @@ class SearchParams(BaseModel):
         default=False,
         description="True면 사용자가 별표한 메모리만 반환 (표시·필터 전용 플래그)",
     )
+    read_view: str = Field(
+        default="effective",
+        description="읽기 모델: effective는 활성 curated 결과를 합성하고 raw는 canonical만 반환",
+    )
 
     @field_validator("anchored_path")
     @classmethod
@@ -337,6 +342,13 @@ class SearchParams(BaseModel):
         valid_modes = {"hybrid", "exact", "semantic", "fuzzy"}
         if v not in valid_modes:
             raise ValueError(f"Invalid search_mode: {v}. Must be one of {valid_modes}")
+        return v
+
+    @field_validator("read_view")
+    @classmethod
+    def validate_read_view(cls, v: str) -> str:
+        if v not in {"effective", "raw"}:
+            raise ValueError("read_view must be 'effective' or 'raw'")
         return v
 
     @field_validator("time_range")
@@ -416,11 +428,21 @@ class ContextParams(BaseModel):
     memory_id: str = Field(description="조회할 메모리 ID")
     depth: int = Field(default=2, ge=1, le=5, description="검색 깊이 (1-5)")
     project_id: Optional[str] = Field(default=None, description="프로젝트 ID 필터")
+    read_view: str = Field(
+        default="effective", description="effective 또는 raw 읽기 모델"
+    )
 
     @field_validator("project_id")
     @classmethod
     def validate_project_id(cls, v: Optional[str]) -> Optional[str]:
         return normalize_project_id(v)
+
+    @field_validator("read_view")
+    @classmethod
+    def validate_read_view(cls, v: str) -> str:
+        if v not in {"effective", "raw"}:
+            raise ValueError("read_view must be 'effective' or 'raw'")
+        return v
 
 
 class DeleteParams(BaseModel):
@@ -435,6 +457,7 @@ class UpdateParams(BaseModel):
     content: Optional[str] = Field(default=None, min_length=100, max_length=50000)
     category: Optional[str] = Field(default=None)
     tags: Optional[List[str]] = Field(default=None)
+    reconciler_protected: Optional[bool] = Field(default=None)
     project_id: Optional[str] = Field(default=None, description="이동할 프로젝트 ID")
 
     @field_validator("project_id")

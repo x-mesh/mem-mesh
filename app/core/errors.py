@@ -44,6 +44,8 @@ class ErrorCode:
     DUPLICATE_PROMOTION = "DUPLICATE_PROMOTION"
     RELAY_IDEMPOTENCY_CONFLICT = "RELAY_IDEMPOTENCY_CONFLICT"
     RELAY_DELIVERY_CONFLICT = "RELAY_DELIVERY_CONFLICT"
+    RECONCILER_CONFLICT = "RECONCILER_CONFLICT"
+    RECONCILER_VALIDATION = "RECONCILER_VALIDATION"
 
     # 429 Too Many Requests
     TOKEN_LIMIT_EXCEEDED = "TOKEN_LIMIT_EXCEEDED"
@@ -82,6 +84,8 @@ ERROR_HTTP_STATUS = {
     ErrorCode.DUPLICATE_PROMOTION: 409,
     ErrorCode.RELAY_IDEMPOTENCY_CONFLICT: 409,
     ErrorCode.RELAY_DELIVERY_CONFLICT: 409,
+    ErrorCode.RECONCILER_CONFLICT: 409,
+    ErrorCode.RECONCILER_VALIDATION: 422,
     ErrorCode.TOKEN_LIMIT_EXCEEDED: 429,
     ErrorCode.DATABASE_ERROR: 500,
     ErrorCode.EMBEDDING_ERROR: 500,
@@ -116,6 +120,8 @@ ERROR_JSONRPC_CODE = {
     ErrorCode.DUPLICATE_PROMOTION: -32602,
     ErrorCode.RELAY_IDEMPOTENCY_CONFLICT: -32602,
     ErrorCode.RELAY_DELIVERY_CONFLICT: -32602,
+    ErrorCode.RECONCILER_CONFLICT: -32602,
+    ErrorCode.RECONCILER_VALIDATION: -32602,
     ErrorCode.TOKEN_LIMIT_EXCEEDED: -32603,
     ErrorCode.DATABASE_ERROR: -32603,  # Internal error
     ErrorCode.EMBEDDING_ERROR: -32603,
@@ -143,6 +149,17 @@ class MemMeshError(Exception):
     @property
     def jsonrpc_code(self) -> int:
         return ERROR_JSONRPC_CODE.get(self.error_code, -32603)
+
+
+class ReconcilerConflictError(MemMeshError, ValueError):
+    error_code = ErrorCode.RECONCILER_CONFLICT
+    status_code = 409
+
+
+class ReconcilerValidationError(MemMeshError, ValueError):
+    error_code = ErrorCode.RECONCILER_VALIDATION
+    status_code = 422
+    retryable = True
 
 
 # ---------------------------------------------------------------------------

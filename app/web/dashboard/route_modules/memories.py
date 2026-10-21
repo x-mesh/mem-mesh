@@ -6,6 +6,7 @@ Provides endpoints for creating, reading, updating, and deleting memories.
 
 import json
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -53,6 +54,7 @@ async def add_memory(
             client=params.client or "web",
             tags=params.tags,
             anchors=params.anchors,
+            reconciler_protected=params.reconciler_protected,
         )
 
         # WebSocket real-time notification
@@ -100,6 +102,7 @@ async def get_memory(
             "tags": memory.tags,
             "anchors": memory.get_anchors(),
             "is_starred": memory.is_starred,
+            "reconciler_protected": memory.reconciler_protected,
             "source": memory.source,
             "client": memory.client,
             "created_at": memory.created_at,
@@ -117,12 +120,16 @@ async def get_memory_context(
     memory_id: str,
     depth: int = 2,
     project_id: str = None,
+    read_view: Literal["effective", "raw"] = "effective",
     service: ContextService = Depends(get_context_service),
 ) -> ContextResponse:
     """Get context around a specific memory"""
     try:
         return await service.get_context(
-            memory_id=memory_id, depth=depth, project_id=project_id
+            memory_id=memory_id,
+            depth=depth,
+            project_id=project_id,
+            read_view=read_view,
         )
     except ContextNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -145,6 +152,7 @@ async def update_memory(
             category=params.category,
             tags=params.tags,
             project_id=params.project_id,
+            reconciler_protected=params.reconciler_protected,
         )
 
         # WebSocket real-time notification

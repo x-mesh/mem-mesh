@@ -8,12 +8,28 @@ queue and approve/reject/dismiss. Approving a supersede demotes the loser to
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
+from app.core.config import get_settings
 from app.core.errors import DocProposalNotFoundError
+from app.core.schemas.reconciler import (
+    ReconcilerCancelRequest,
+    ReconcilerDecisionRequest,
+    ReconcilerRunRequest,
+)
 from app.core.services.curation import CurationService
 from app.core.services.doc_proposal import DocProposalService
-from app.web.common.dependencies import get_database, get_memory_service
+from app.core.services.llm_resolver import resolve_service_llm
+from app.core.services.memory_reconciler import (
+    MemoryReconcilerService,
+    ReconcilerConflictError,
+    ReconcilerValidationError,
+)
+from app.web.common.dependencies import (
+    get_database,
+    get_embedding_service,
+    get_memory_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +45,171 @@ def get_curation_service(
 
 def get_doc_proposal_service(db=Depends(get_database)) -> DocProposalService:
     return DocProposalService(db)
+
+
+async def get_reconciler_service(
+    db=Depends(get_database), embedding_service=Depends(get_embedding_service)
+) -> MemoryReconcilerService:
+    resolved = await resolve_service_llm(db, get_settings(), "reconcile")
+    return MemoryReconcilerService(
+        db,
+        embedding_service=embedding_service,
+        model=resolved["model"],
+        provider=resolved["provider"],
+        llm_base_url=resolved["base_url"],
+        llm_configured=bool(resolved["api_key"] and resolved["model"]),
+    )
+
+
+@router.post("/reconciler/runs")
+async def create_reconciler_run(
+    payload: ReconcilerRunRequest,
+    service: MemoryReconcilerService = Depends(get_reconciler_service),
+):
+    try:
+        return await service.create_run(
+            payload.project_id,
+            dry_run=payload.dry_run,
+            anchored_path=payload.anchored_path,
+            created_after=payload.created_after,
+            created_before=payload.created_before,
+            defer_detection=True,
+        )
+    except ReconcilerValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.get("/reconciler/runs/{run_id}")
+async def get_reconciler_run(
+    run_id: str,
+    service: MemoryReconcilerService = Depends(get_reconciler_service),
+):
+    try:
+        return await service.get_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/reconciler/runs")
+async def list_reconciler_runs(
+    project_id: str = Query(pattern=r"^[a-zA-Z0-9_-]+$", max_length=100),
+    limit: int = Query(default=10, ge=1, le=50),
+    service: MemoryReconcilerService = Depends(get_reconciler_service),
+):
+    return await service.list_runs(project_id, limit)
+
+
+@router.get("/reconciler/runs/{run_id}/candidates")
+async def list_reconciler_candidates(
+    run_id: str,
+    project_id: str = Query(pattern=r"^[a-zA-Z0-9_-]+$", max_length=100),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    service: MemoryReconcilerService = Depends(get_reconciler_service),
+):
+    try:
+        return await service.list_candidates(run_id, project_id, limit, offset)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/reconciler/metrics")
+async def get_reconciler_metrics(
+    project_id: str = Query(pattern=r"^[a-zA-Z0-9_-]+$", max_length=100),
+    service: MemoryReconcilerService = Depends(get_reconciler_service),
+):
+    return await service.get_metrics(project_id)
+
+
+@router.get("/reconciler/candidates/{candidate_id}")
+async def get_reconciler_candidate_detail(
+    candidate_id: str,
+    project_id: str = Query(pattern=r"^[a-zA-Z0-9_-]+$", max_length=100),
+    service: MemoryReconcilerService = Depends(get_reconciler_service),
+):
+    try:
+        return await service.get_candidate_detail(candidate_id, project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/reconciler/runs/{run_id}/cancel")
+async def cancel_reconciler_run(
+    run_id: str,
+    service: MemoryReconcilerService = Depends(get_reconciler_service),
+):
+    try:
+        return await service.cancel_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/reconciler/proposals")
+async def list_reconciler_proposals(
+    project_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+    service: MemoryReconcilerService = Depends(get_reconciler_service),
+):
+    proposals = await service.list_proposals(
+        project_id=project_id, status=status, limit=limit
+    )
+    return {"proposals": proposals, "count": len(proposals)}
+
+
+@router.post("/reconciler/proposals/{proposal_id}/decision")
+async def decide_reconciler_proposal(
+    proposal_id: str,
+    payload: ReconcilerDecisionRequest,
+    service: MemoryReconcilerService = Depends(get_reconciler_service),
+):
+    try:
+        return await service.decide_proposal(
+            proposal_id, payload.decision, payload.expected_revision
+        )
+    except ReconcilerConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ReconcilerValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/reconciler/results/{result_id}/cancel")
+async def cancel_reconciler_result(
+    result_id: str,
+    payload: ReconcilerCancelRequest,
+    service: MemoryReconcilerService = Depends(get_reconciler_service),
+):
+    try:
+        return await service.cancel_result(result_id, payload.expected_revision)
+    except ReconcilerConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/reconciler/results/{result_id}")
+async def get_reconciler_result(
+    result_id: str,
+    project_id: str = Query(pattern=r"^[a-zA-Z0-9_-]+$", max_length=100),
+    service: MemoryReconcilerService = Depends(get_reconciler_service),
+):
+    try:
+        return await service.get_result_detail(result_id, project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/reconciler/results/{result_id}/validate")
+async def validate_reconciler_result(
+    result_id: str,
+    service: MemoryReconcilerService = Depends(get_reconciler_service),
+):
+    try:
+        return await service.validate_result(result_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.get("/queue")

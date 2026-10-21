@@ -78,6 +78,20 @@ class MCPDispatcher:
                 return await self._dispatch_doc_proposals(args)
             elif tool_name == "doc_proposal_applied":
                 return await self._dispatch_doc_proposal_applied(args)
+            elif tool_name == "reconciler_run":
+                return await self._dispatch_reconciler_run(args)
+            elif tool_name == "reconciler_proposals":
+                return await self._dispatch_reconciler_proposals(args)
+            elif tool_name == "reconciler_candidates":
+                return await self._dispatch_reconciler_candidates(args)
+            elif tool_name == "reconciler_candidate":
+                return await self._dispatch_reconciler_candidate(args)
+            elif tool_name == "reconciler_result":
+                return await self._dispatch_reconciler_result(args)
+            elif tool_name == "reconciler_start":
+                return await self._dispatch_reconciler_start(args)
+            elif tool_name == "reconciler_cancel":
+                return await self._dispatch_reconciler_cancel(args)
             elif tool_name == "report_anchor_status":
                 return await self._dispatch_report_anchor_status(args)
             elif tool_name == "star":
@@ -107,6 +121,7 @@ class MCPDispatcher:
             client=args.get("client"),
             tags=args.get("tags"),
             anchors=args.get("anchors"),
+            reconciler_protected=args.get("reconciler_protected", False),
         )
         return format_tool_response(result)
 
@@ -129,6 +144,7 @@ class MCPDispatcher:
             scope=args.get("scope", "local"),
             anchored_path=args.get("anchored_path"),
             starred_only=args.get("starred_only", False),
+            read_view=args.get("read_view", "effective"),
         )
         return format_tool_response(result)
 
@@ -142,6 +158,7 @@ class MCPDispatcher:
             project_id=args.get("project_id"),
             response_format=args.get("response_format", "standard"),
             ids=args.get("ids"),
+            read_view=args.get("read_view", "effective"),
         )
         return format_tool_response(result)
 
@@ -154,6 +171,7 @@ class MCPDispatcher:
             content=args.get("content"),
             category=args.get("category"),
             tags=args.get("tags"),
+            reconciler_protected=args.get("reconciler_protected"),
         )
         return format_tool_response(result)
 
@@ -321,6 +339,81 @@ class MCPDispatcher:
         )
         return format_tool_response(result)
 
+    async def _dispatch_reconciler_run(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if "project_id" not in args or "run_id" not in args:
+            return format_tool_error("Missing required arguments: project_id, run_id")
+        result = await self._tool_handlers.reconciler_run(
+            project_id=args["project_id"], run_id=args["run_id"]
+        )
+        return format_tool_response(result)
+
+    async def _dispatch_reconciler_proposals(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        if "project_id" not in args:
+            return format_tool_error("Missing required argument: project_id")
+        result = await self._tool_handlers.reconciler_proposals(
+            project_id=args["project_id"],
+            status=args.get("status"),
+            limit=args.get("limit", 10),
+        )
+        return format_tool_response(result)
+
+    async def _dispatch_reconciler_candidates(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        if "project_id" not in args or "run_id" not in args:
+            return format_tool_error("Missing required arguments: project_id, run_id")
+        result = await self._tool_handlers.reconciler_candidates(
+            project_id=args["project_id"],
+            run_id=args["run_id"],
+            limit=args.get("limit", 50),
+            offset=args.get("offset", 0),
+        )
+        return format_tool_response(result)
+
+    async def _dispatch_reconciler_candidate(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        if "project_id" not in args or "candidate_id" not in args:
+            return format_tool_error(
+                "Missing required arguments: project_id, candidate_id"
+            )
+        result = await self._tool_handlers.reconciler_candidate(
+            project_id=args["project_id"], candidate_id=args["candidate_id"]
+        )
+        return format_tool_response(result)
+
+    async def _dispatch_reconciler_result(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if "project_id" not in args or "result_id" not in args:
+            return format_tool_error(
+                "Missing required arguments: project_id, result_id"
+            )
+        result = await self._tool_handlers.reconciler_result(
+            project_id=args["project_id"], result_id=args["result_id"]
+        )
+        return format_tool_response(result)
+
+    async def _dispatch_reconciler_start(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if "project_id" not in args:
+            return format_tool_error("Missing required argument: project_id")
+        result = await self._tool_handlers.reconciler_start(
+            project_id=args["project_id"],
+            dry_run=args.get("dry_run", True),
+            anchored_path=args.get("anchored_path"),
+            created_after=args.get("created_after"),
+            created_before=args.get("created_before"),
+        )
+        return format_tool_response(result)
+
+    async def _dispatch_reconciler_cancel(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        if "project_id" not in args or "run_id" not in args:
+            return format_tool_error("Missing required arguments: project_id, run_id")
+        result = await self._tool_handlers.reconciler_cancel(
+            project_id=args["project_id"], run_id=args["run_id"]
+        )
+        return format_tool_response(result)
+
     async def _dispatch_report_anchor_status(
         self, args: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -376,6 +469,9 @@ class MCPDispatcher:
                             "category": op.get("category", "task"),
                             "source": op.get("source", "mcp_batch"),
                             "tags": op.get("tags"),
+                            "reconciler_protected": op.get(
+                                "reconciler_protected", False
+                            ),
                         }
                     )
                     if not add_result.get("isError"):

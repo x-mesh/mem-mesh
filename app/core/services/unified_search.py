@@ -32,6 +32,7 @@ from ..database.base import (
 from ..embeddings.service import EmbeddingService
 from ..schemas.responses import SearchResponse, SearchResult
 from .cache_manager import get_cache_manager
+from .effective_read import EffectiveReadService
 from .noise_filter import SmartSearchFilter
 from .query_expander import get_query_expander
 from .score_normalizer import get_score_normalizer
@@ -108,6 +109,7 @@ class UnifiedSearchService:
         self.db = db
         self.embedding_service = embedding_service
         self.metrics_collector = metrics_collector
+        self.effective_read = EffectiveReadService(db, embedding_service)
 
         # Feature flags
         self.enable_quality_features = enable_quality_features
@@ -267,6 +269,7 @@ class UnifiedSearchService:
         record_access: bool = True,
         anchored_path: Optional[str] = None,
         starred_only: bool = False,
+        read_view: str = "effective",
     ) -> SearchResponse:
         """
         통합 검색 수행
@@ -294,6 +297,8 @@ class UnifiedSearchService:
         Returns:
             SearchResponse: 검색 결과
         """
+        if read_view not in {"effective", "raw"}:
+            raise ValueError("read_view must be 'effective' or 'raw'")
         start_time = time.perf_counter()
 
         # Handle URL-encoded spaces (+) and normalize
@@ -343,6 +348,31 @@ class UnifiedSearchService:
                     if id_response is not None:
                         return id_response
 
+        if read_view == "effective":
+            try:
+                active = await self.effective_read._active_results(project_scope)
+                if active:
+                    filters = {
+                        "project_id": project_scope,
+                        "category": categories or category,
+                        "source": source,
+                        "tag": tag,
+                        "anchored_path": anchored_path,
+                        "starred_only": starred_only,
+                    }
+                    return await self.effective_read.search(
+                        query=query,
+                        filters={
+                            key: value
+                            for key, value in filters.items()
+                            if value is not None and value is not False
+                        },
+                        limit=limit,
+                        offset=offset,
+                    )
+            except Exception:
+                logger.exception("Effective Reconciler search failed")
+
         # 1. Intent analysis (when quality feature is enabled)
         intent = None
         if self.enable_quality_features and self.intent_analyzer and query:
@@ -378,6 +408,8 @@ class UnifiedSearchService:
                 project_id=cache_project,
                 category=cache_cat,
                 limit=limit,
+                read_view=read_view,
+                read_revision=await self.effective_read.get_read_revision(),
             )
             if cached_results:
                 logger.info(
@@ -513,6 +545,8 @@ class UnifiedSearchService:
                 project_id=cache_project,
                 category=cache_cat,
                 limit=limit,
+                read_view=read_view,
+                read_revision=await self.effective_read.get_read_revision(),
             )
 
         # 9. Log search duration

@@ -221,6 +221,8 @@ class SmartCacheManager:
         project_id: Optional[str] = None,
         category: Optional[str] = None,
         limit: int = 5,
+        read_view: str = "raw",
+        read_revision: int = 0,
     ) -> Optional[Any]:
         """
         Get cached search results
@@ -229,7 +231,12 @@ class SmartCacheManager:
             Cached search results or None if not found
         """
         cache_key = self._generate_cache_key(
-            query, project_id=project_id, category=category, limit=limit
+            query,
+            project_id=project_id,
+            category=category,
+            limit=limit,
+            read_view=read_view,
+            read_revision=read_revision,
         )
         return self.search_cache.get(cache_key)
 
@@ -240,10 +247,17 @@ class SmartCacheManager:
         project_id: Optional[str] = None,
         category: Optional[str] = None,
         limit: int = 5,
+        read_view: str = "raw",
+        read_revision: int = 0,
     ) -> None:
         """Cache search results"""
         cache_key = self._generate_cache_key(
-            query, project_id=project_id, category=category, limit=limit
+            query,
+            project_id=project_id,
+            category=category,
+            limit=limit,
+            read_view=read_view,
+            read_revision=read_revision,
         )
         self.search_cache.set(cache_key, results)
 

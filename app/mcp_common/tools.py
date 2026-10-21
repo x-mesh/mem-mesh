@@ -53,6 +53,87 @@ class MCPToolHandlers:
     def storage(self) -> StorageBackend:
         return self._storage
 
+    async def reconciler_run(self, project_id: str, run_id: str) -> Dict[str, Any]:
+        from ..core.schemas.reconciler import ReconcilerRunLookup
+
+        request = ReconcilerRunLookup(project_id=project_id, run_id=run_id)
+        return await self._storage.get_reconciler_run(
+            request.project_id, request.run_id
+        )
+
+    async def reconciler_proposals(
+        self, project_id: str, status: Optional[str] = None, limit: int = 10
+    ) -> Dict[str, Any]:
+        from ..core.schemas.reconciler import ReconcilerProposalListRequest
+
+        request = ReconcilerProposalListRequest(
+            project_id=project_id, status=status, limit=limit
+        )
+        return await self._storage.list_reconciler_proposals(
+            request.project_id, request.status, request.limit
+        )
+
+    async def reconciler_candidates(
+        self, project_id: str, run_id: str, limit: int = 50, offset: int = 0
+    ) -> Dict[str, Any]:
+        from ..core.schemas.reconciler import ReconcilerCandidateListRequest
+
+        request = ReconcilerCandidateListRequest(
+            project_id=project_id, run_id=run_id, limit=limit, offset=offset
+        )
+        return await self._storage.list_reconciler_candidates(
+            request.project_id, request.run_id, request.limit, request.offset
+        )
+
+    async def reconciler_candidate(
+        self, project_id: str, candidate_id: str
+    ) -> Dict[str, Any]:
+        from ..core.schemas.reconciler import ReconcilerCandidateLookup
+
+        request = ReconcilerCandidateLookup(
+            project_id=project_id, candidate_id=candidate_id
+        )
+        return await self._storage.get_reconciler_candidate(
+            request.project_id, request.candidate_id
+        )
+
+    async def reconciler_result(
+        self, project_id: str, result_id: str
+    ) -> Dict[str, Any]:
+        from ..core.schemas.reconciler import ReconcilerResultLookup
+
+        request = ReconcilerResultLookup(project_id=project_id, result_id=result_id)
+        return await self._storage.get_reconciler_result(
+            request.project_id, request.result_id
+        )
+
+    async def reconciler_start(
+        self,
+        project_id: str,
+        dry_run: bool = True,
+        anchored_path: Optional[str] = None,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from ..core.schemas.reconciler import ReconcilerRunRequest
+
+        request = ReconcilerRunRequest(
+            project_id=project_id,
+            dry_run=dry_run,
+            anchored_path=anchored_path,
+            created_after=created_after,
+            created_before=created_before,
+        )
+        return await self._storage.start_reconciler_run(request)
+
+    async def reconciler_cancel(self, project_id: str, run_id: str) -> Dict[str, Any]:
+        from ..core.schemas.reconciler import ReconcilerRunLookup
+
+        request = ReconcilerRunLookup(project_id=project_id, run_id=run_id)
+        return await self._storage.cancel_reconciler_run(
+            request.project_id, request.run_id
+        )
+
     async def add(
         self,
         content: str,
@@ -62,6 +143,7 @@ class MCPToolHandlers:
         client: Optional[str] = None,
         tags: Optional[List[str]] = None,
         anchors: Optional[Dict[str, Any]] = None,
+        reconciler_protected: bool = False,
     ) -> Dict[str, Any]:
         """Add a new memory to the memory store
 
@@ -104,6 +186,7 @@ class MCPToolHandlers:
                 client=client,
                 tags=tags,
                 anchors=anchors,
+                reconciler_protected=reconciler_protected,
             )
             result = await self._storage.add_memory(params)
             logger.info("Successfully added memory", memory_id=result.id)
@@ -162,6 +245,7 @@ class MCPToolHandlers:
         scope: str = "local",
         anchored_path: Optional[str] = None,
         starred_only: bool = False,
+        read_view: str = "effective",
     ) -> Dict[str, Any]:
         """Search memories using hybrid search (vector + metadata)
 
@@ -239,6 +323,7 @@ class MCPToolHandlers:
                     temporal_mode=temporal_mode,
                     anchored_path=anchored_path,
                     starred_only=starred_only,
+                    read_view=read_view,
                 )
                 local_result = await self._storage.search_memories(params)
 
@@ -421,6 +506,20 @@ class MCPToolHandlers:
                     item["content"] = r["content"]
                 compressed_results.append(item)
 
+        for item, original in zip(compressed_results, result.results):
+            if original.result_kind == "curated":
+                item.update(
+                    original.model_dump(
+                        include={
+                            "id",
+                            "project_id",
+                            "result_kind",
+                            "representative_memory_id",
+                            "citations",
+                        }
+                    )
+                )
+
         return {
             "results": compressed_results,
             "total": len(compressed_results),
@@ -438,6 +537,7 @@ class MCPToolHandlers:
         project_id: Optional[str] = None,
         response_format: str = "standard",
         ids: Optional[List[str]] = None,
+        read_view: str = "effective",
     ) -> Dict[str, Any]:
         """Get context around a specific memory, or several memories at once
 
@@ -463,13 +563,20 @@ class MCPToolHandlers:
         )
 
         if ids is not None:
-            return await self._context_batch(ids, depth, project_id, response_format)
+            return await self._context_batch(
+                ids, depth, project_id, response_format, read_view
+            )
 
         if not memory_id:
             raise ValidationError("context requires either memory_id or ids")
 
         try:
-            result = await self._storage.get_context(memory_id, depth, project_id)
+            if read_view == "effective":
+                result = await self._storage.get_context(memory_id, depth, project_id)
+            else:
+                result = await self._storage.get_context(
+                    memory_id, depth, project_id, read_view
+                )
             logger.info("Context retrieved", memory_count=len(result.related_memories))
 
             # 응답 압축 (활성화된 경우)
@@ -491,6 +598,7 @@ class MCPToolHandlers:
         depth: int,
         project_id: Optional[str],
         response_format: str,
+        read_view: str = "effective",
     ) -> Dict[str, Any]:
         """Batch drill-down: one call for several full memories.
 
@@ -516,7 +624,12 @@ class MCPToolHandlers:
         not_found: List[str] = []
         for mid in ids:
             try:
-                result = await self._storage.get_context(mid, depth, project_id)
+                if read_view == "effective":
+                    result = await self._storage.get_context(mid, depth, project_id)
+                else:
+                    result = await self._storage.get_context(
+                        mid, depth, project_id, read_view
+                    )
             except ContextNotFoundError:
                 not_found.append(mid)
                 continue
@@ -539,8 +652,8 @@ class MCPToolHandlers:
 
     def _compress_context_response(self, result: "ContextResponse") -> Dict[str, Any]:
         """컨텍스트 응답 압축"""
-        primary = result.memory if hasattr(result, "memory") else {}
-        related = result.related_memories if hasattr(result, "related_memories") else []
+        primary = result.primary_memory
+        related = result.related_memories
 
         compressed = {
             "primary": {
@@ -556,7 +669,7 @@ class MCPToolHandlers:
             "related": [
                 {
                     "id": r.id[:8] if hasattr(r, "id") else "",
-                    "cat": r.category[:4] if hasattr(r, "category") else "",
+                    "cat": (r.category or "")[:4],
                     "score": (
                         round(r.similarity_score, 2)
                         if hasattr(r, "similarity_score")
@@ -573,6 +686,21 @@ class MCPToolHandlers:
             "compressed": True,
         }
 
+        for item, original in [(compressed["primary"], primary)] + list(
+            zip(compressed["related"], related[:5])
+        ):
+            if original.result_kind == "curated":
+                item.update(
+                    original.model_dump(
+                        include={
+                            "id",
+                            "project_id",
+                            "result_kind",
+                            "representative_memory_id",
+                            "citations",
+                        }
+                    )
+                )
         return compressed
 
     async def update(
@@ -581,6 +709,7 @@ class MCPToolHandlers:
         content: Optional[str] = None,
         category: Optional[str] = None,
         tags: Optional[List[str]] = None,
+        reconciler_protected: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """Update an existing memory
 
@@ -603,7 +732,12 @@ class MCPToolHandlers:
         )
 
         try:
-            params = UpdateParams(content=content, category=category, tags=tags)
+            params = UpdateParams(
+                content=content,
+                category=category,
+                tags=tags,
+                reconciler_protected=reconciler_protected,
+            )
             result = await self._storage.update_memory(memory_id, params)
             logger.info("Successfully updated memory", memory_id=memory_id)
 

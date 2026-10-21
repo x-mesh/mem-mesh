@@ -5,7 +5,7 @@ Provides endpoints for searching memories with various modes and filters.
 """
 
 import logging
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -111,6 +111,7 @@ class SearchRequest(BaseModel):
     scope: str = "local"
     anchored_path: Optional[str] = Field(default=None, max_length=500)
     starred_only: bool = False
+    read_view: Literal["effective", "raw"] = "effective"
 
 
 # Canonical memory categories (mirrors SearchParams.validate_category). Used to
@@ -149,6 +150,7 @@ async def _do_search(
     scope: str = "local",
     anchored_path: Optional[str] = None,
     starred_only: bool = False,
+    read_view: Literal["effective", "raw"] = "effective",
 ) -> SearchResponse:
     """Shared search logic for GET and POST endpoints."""
     # Single chokepoint for both GET (query param) and POST (body) search, so a
@@ -217,6 +219,7 @@ async def _do_search(
             temporal_mode=temporal_mode,
             anchored_path=anchored_path,
             starred_only=starred_only,
+            read_view=read_view,
         )
 
     async def _search() -> SearchResponse:
@@ -291,6 +294,7 @@ async def search_memories(
     scope: str = "local",
     anchored_path: Optional[str] = Query(None, max_length=500),
     starred_only: bool = False,
+    read_view: Literal["effective", "raw"] = "effective",
     service: UnifiedSearchService = Depends(get_search_service),
 ) -> SearchResponse:
     """
@@ -324,6 +328,7 @@ async def search_memories(
         scope=scope,
         anchored_path=anchored_path,
         starred_only=starred_only,
+        read_view=read_view,
     )
 
 
@@ -360,6 +365,7 @@ async def search_memories_post(
         scope=body.scope,
         anchored_path=body.anchored_path,
         starred_only=body.starred_only,
+        read_view=body.read_view,
     )
 
 

@@ -5,6 +5,7 @@ anchors는 클라이언트(에이전트)가 수집해 전달하는 표시·수�
 저장·조회 왕복이 보장되고 잘못된 값은 거부되어야 한다. 검색/임베딩에는 영향이 없다.
 """
 
+import asyncio
 import json
 import os
 import tempfile
@@ -314,6 +315,147 @@ class TestPinPromoteAnchors:
 
 
 class TestReportAnchorStatus:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("start", ["not-a-timestamp", "2026-10-21T00:01:00Z"])
+    async def test_invalid_anchor_timing_is_visible_and_not_zero(
+        self, memory_service, start
+    ):
+        from app.core.services.memory_reconciler import MemoryReconcilerService
+
+        resp = await memory_service.create(
+            content=LONG, project_id="anchor-clock", anchors=VALID_ANCHORS
+        )
+        await memory_service.report_anchor_status(resp.id, "stale")
+        await memory_service.report_anchor_status(resp.id, "fresh")
+        db = memory_service.db
+        await db.execute(
+            "UPDATE reconciler_validations SET created_at = ? WHERE stage = 'anchor_status' AND status = 'stale'",
+            (start,),
+        )
+        await db.execute(
+            "UPDATE reconciler_validations SET created_at = '2026-10-21T00:00:00Z' WHERE stage = 'anchor_status' AND status = 'fresh'"
+        )
+        metrics = await MemoryReconcilerService(db).get_metrics("anchor-clock")
+        assert metrics["anchor_resolution_seconds"]["count"] == 0
+        assert metrics["anchor_resolution_seconds"]["average"] is None
+        assert metrics["anchor_resolution_unmeasured_count"] == 1
+        assert metrics["anchor_timing_error_count"] == 1
+        other = await MemoryReconcilerService(db).get_metrics("another-project")
+        assert other["anchor_timing_error_count"] == 0
+        assert other["anchor_resolution_unmeasured_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_resolution_history_keeps_first_stale_report(self, memory_service):
+        from app.core.services.memory_reconciler import MemoryReconcilerService
+
+        resp = await memory_service.create(
+            content=LONG, project_id="anchor-timing", anchors=VALID_ANCHORS
+        )
+        await memory_service.report_anchor_status(resp.id, "fresh")
+        await memory_service.report_anchor_status(resp.id, "stale")
+        await memory_service.report_anchor_status(resp.id, "stale")
+        db = memory_service.db
+        await db.execute(
+            "UPDATE reconciler_validations SET created_at = '2026-10-21T00:00:00Z' WHERE stage = 'anchor_status' AND status = 'stale'"
+        )
+        await memory_service.report_anchor_status(resp.id, "fresh")
+        await db.execute(
+            "UPDATE reconciler_validations SET created_at = '2026-10-21T00:00:45Z' WHERE stage = 'anchor_status' AND status = 'fresh'"
+        )
+        metrics = await MemoryReconcilerService(db).get_metrics("anchor-timing")
+        assert metrics["anchor_resolution_seconds"] == {
+            "count": 1,
+            "average": 45.0,
+            "p95": 45.0,
+        }
+        assert metrics["anchor_open_episode_count"] == 0
+        assert metrics["anchor_resolution_unmeasured_count"] == 0
+        assert metrics["validation_count"] == 0
+        history = await db.fetchall(
+            "SELECT status FROM reconciler_validations WHERE stage = 'anchor_status' ORDER BY rowid"
+        )
+        assert [row["status"] for row in history] == ["fresh", "stale", "fresh"]
+        assert (await memory_service.get(resp.id)).content == LONG
+
+    @pytest.mark.asyncio
+    async def test_old_stale_report_has_no_invented_resolution_time(
+        self, memory_service
+    ):
+        from app.core.services.memory_reconciler import MemoryReconcilerService
+
+        resp = await memory_service.create(
+            content=LONG, project_id="anchor-old", anchors=VALID_ANCHORS
+        )
+        await memory_service.db.execute(
+            "UPDATE memories SET stale_status = 'stale', stale_checked_at = '2026-01-01T00:00:00Z' WHERE id = ?",
+            (resp.id,),
+        )
+        await memory_service.report_anchor_status(resp.id, "fresh")
+        metrics = await MemoryReconcilerService(memory_service.db).get_metrics(
+            "anchor-old"
+        )
+        assert metrics["anchor_resolution_seconds"] == {
+            "count": 0,
+            "average": None,
+            "p95": None,
+        }
+        assert metrics["anchor_resolution_unmeasured_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_concurrent_same_status_reports_record_one_transition(
+        self, memory_service
+    ):
+        from app.core.services.memory_reconciler import MemoryReconcilerService
+
+        resp = await memory_service.create(
+            content=LONG, project_id="anchor-concurrent", anchors=VALID_ANCHORS
+        )
+        await asyncio.gather(
+            *(memory_service.report_anchor_status(resp.id, "stale") for _ in range(3))
+        )
+        metrics = await MemoryReconcilerService(memory_service.db).get_metrics(
+            "anchor-concurrent"
+        )
+        assert metrics["anchor_open_episode_count"] == 1
+        assert metrics["anchor_oldest_open_seconds"] >= 0
+        assert {item["kind"]: item["count"] for item in metrics["alerts"]}[
+            "stale_anchor"
+        ] == 1
+        await memory_service.report_anchor_status(resp.id, "fresh")
+        await memory_service.report_anchor_status(resp.id, "stale")
+        reopened = await MemoryReconcilerService(memory_service.db).get_metrics(
+            "anchor-concurrent"
+        )
+        assert reopened["anchor_open_episode_count"] == 1
+        assert reopened["anchor_resolution_seconds"]["count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_anchor_history_failure_rolls_back_status(
+        self, memory_service, monkeypatch
+    ):
+        from app.core.errors import DatabaseError
+
+        resp = await memory_service.create(
+            content=LONG, project_id="anchor-atomic", anchors=VALID_ANCHORS
+        )
+        db = memory_service.db
+        original_execute = db.execute
+
+        async def fail_history(query, params=()):
+            if "INSERT INTO reconciler_validations" in query:
+                raise RuntimeError("history unavailable")
+            return await original_execute(query, params)
+
+        monkeypatch.setattr(db, "execute", fail_history)
+        with pytest.raises(DatabaseError, match="history unavailable"):
+            await memory_service.report_anchor_status(resp.id, "stale")
+        row = await db.fetchone(
+            "SELECT stale_status, stale_checked_at FROM memories WHERE id = ?",
+            (resp.id,),
+        )
+        assert row["stale_status"] is None
+        assert row["stale_checked_at"] is None
+
     """report_anchor_status: 클라이언트 검증 보고의 상태 전이 + 잘못된 보고 거부 [R14]"""
 
     @pytest.mark.asyncio

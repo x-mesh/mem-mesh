@@ -44,8 +44,10 @@ async def storage(db):
     # 이미 생성된 db의 경로를 사용
     backend = DirectStorageBackend(db.db_path)
     await backend.initialize()
-    yield backend
-    # 정리는 db fixture에서 처리
+    try:
+        yield backend
+    finally:
+        await backend.shutdown()
 
 
 @pytest.fixture

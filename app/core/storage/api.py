@@ -2,11 +2,13 @@
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Any, Optional
+from urllib.parse import quote
 
 import httpx
 
 from ..errors import ContextNotFoundError
+from ..schemas.reconciler import ReconcilerRunRequest
 from ..schemas.requests import AddParams, SearchParams, StatsParams, UpdateParams
 from ..schemas.responses import (
     AddResponse,
@@ -97,6 +99,83 @@ class APIStorageBackend(StorageBackend):
             logger.error(f"Error during APIStorageBackend shutdown: {e}")
             raise RuntimeError(f"Failed to shutdown API storage backend: {e}")
 
+    async def get_reconciler_run(self, project_id: str, run_id: str) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Storage backend not initialized")
+        run = await self._make_request_with_retry(
+            method="GET", url=f"/api/curation/reconciler/runs/{quote(run_id, safe='')}"
+        )
+        if run["project_id"] != project_id:
+            raise ValueError("reconciler run not found")
+        return run
+
+    async def list_reconciler_proposals(
+        self, project_id: str, status: Optional[str], limit: int
+    ) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Storage backend not initialized")
+        params: dict[str, Any] = {"project_id": project_id, "limit": limit}
+        if status is not None:
+            params["status"] = status
+        return await self._make_request_with_retry(
+            method="GET", url="/api/curation/reconciler/proposals", params=params
+        )
+
+    async def list_reconciler_candidates(
+        self, project_id: str, run_id: str, limit: int, offset: int
+    ) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Storage backend not initialized")
+        return await self._make_request_with_retry(
+            method="GET",
+            url=f"/api/curation/reconciler/runs/{quote(run_id, safe='')}/candidates",
+            params={"project_id": project_id, "limit": limit, "offset": offset},
+        )
+
+    async def get_reconciler_candidate(
+        self, project_id: str, candidate_id: str
+    ) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Storage backend not initialized")
+        return await self._make_request_with_retry(
+            method="GET",
+            url=f"/api/curation/reconciler/candidates/{quote(candidate_id, safe='')}",
+            params={"project_id": project_id},
+        )
+
+    async def get_reconciler_result(
+        self, project_id: str, result_id: str
+    ) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Storage backend not initialized")
+        return await self._make_request_with_retry(
+            method="GET",
+            url=f"/api/curation/reconciler/results/{quote(result_id, safe='')}",
+            params={"project_id": project_id},
+        )
+
+    async def start_reconciler_run(
+        self, request: ReconcilerRunRequest
+    ) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Storage backend not initialized")
+        return await self._make_request_with_retry(
+            method="POST",
+            url="/api/curation/reconciler/runs",
+            json_data=request.model_dump(mode="json", exclude_none=True),
+        )
+
+    async def cancel_reconciler_run(
+        self, project_id: str, run_id: str
+    ) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Storage backend not initialized")
+        await self.get_reconciler_run(project_id, run_id)
+        return await self._make_request_with_retry(
+            method="POST",
+            url=f"/api/curation/reconciler/runs/{quote(run_id, safe='')}/cancel",
+        )
+
     async def add_memory(self, params: AddParams) -> AddResponse:
         """메모리 추가
 
@@ -174,6 +253,8 @@ class APIStorageBackend(StorageBackend):
                 query_params["anchored_path"] = params.anchored_path
             if params.starred_only:
                 query_params["starred_only"] = True
+            if params.read_view != "effective":
+                query_params["read_view"] = params.read_view
 
             response_data = await self._make_request_with_retry(
                 method="GET", url="/api/memories/search", params=query_params
@@ -193,7 +274,11 @@ class APIStorageBackend(StorageBackend):
             raise RuntimeError(f"Failed to search memories via API: {e}")
 
     async def get_context(
-        self, memory_id: str, depth: int, project_id: Optional[str]
+        self,
+        memory_id: str,
+        depth: int,
+        project_id: Optional[str],
+        read_view: str = "effective",
     ) -> ContextResponse:
         """컨텍스트 조회
 
@@ -218,7 +303,7 @@ class APIStorageBackend(StorageBackend):
             )
 
             # Build query parameters
-            query_params = {"depth": depth}
+            query_params = {"depth": depth, "read_view": read_view}
             if project_id:
                 query_params["project_id"] = project_id
 

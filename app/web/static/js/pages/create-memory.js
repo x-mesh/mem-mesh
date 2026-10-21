@@ -11,6 +11,7 @@ class CreateMemoryPage extends HTMLElement {
       project_id: '',
       category: 'task',
       tags: [],
+      reconciler_protected: false,
       source: 'web-ui'
     };
     this.isDirty = false;
@@ -43,6 +44,7 @@ class CreateMemoryPage extends HTMLElement {
     const projectInput = this.querySelector('#project_id');
     const categorySelect = this.querySelector('#category');
     const tagsInput = this.querySelector('#tags');
+    const protectedInput = this.querySelector('#reconciler_protected');
     
     if (contentTextarea) {
       contentTextarea.addEventListener('input', this.handleContentChange.bind(this));
@@ -60,6 +62,12 @@ class CreateMemoryPage extends HTMLElement {
     if (tagsInput) {
       tagsInput.addEventListener('input', this.handleTagsChange.bind(this));
       tagsInput.addEventListener('keydown', this.handleTagsKeydown.bind(this));
+    }
+    if (protectedInput) {
+      protectedInput.addEventListener('change', (event) => {
+        this.formData.reconciler_protected = event.target.checked;
+        this.markDirty();
+      });
     }
     
     // Cancel button
@@ -105,6 +113,7 @@ class CreateMemoryPage extends HTMLElement {
         project_id: this.formData.project_id.trim() || undefined,
         category: this.formData.category,
         tags: this.formData.tags.filter(tag => tag.trim()),
+        reconciler_protected: Boolean(this.formData.reconciler_protected),
         source: this.formData.source
       };
       
@@ -444,11 +453,13 @@ class CreateMemoryPage extends HTMLElement {
     const projectInput = this.querySelector('#project_id');
     const categorySelect = this.querySelector('#category');
     const tagsInput = this.querySelector('#tags');
+    const protectedInput = this.querySelector('#reconciler_protected');
     
     if (contentTextarea) contentTextarea.value = this.formData.content;
     if (projectInput) projectInput.value = this.formData.project_id;
     if (categorySelect) categorySelect.value = this.formData.category;
     if (tagsInput) tagsInput.value = this.formData.tags.join(', ');
+    if (protectedInput) protectedInput.checked = Boolean(this.formData.reconciler_protected);
     
     this.updateCharacterCount();
     this.updateTagsDisplay();
@@ -464,6 +475,7 @@ class CreateMemoryPage extends HTMLElement {
       project_id: '',
       category: 'task',
       tags: [],
+      reconciler_protected: false,
       source: 'web-ui'
     };
     this.populateForm();
@@ -626,6 +638,12 @@ class CreateMemoryPage extends HTMLElement {
           <div class="tags-display" style="display: none;"></div>
           <small class="form-help">Separate multiple tags with commas</small>
         </div>
+        <div class="form-group">
+          <label for="reconciler_protected">
+            <input type="checkbox" id="reconciler_protected" name="reconciler_protected" />
+            Keep this memory out of Reconciler LLM evidence
+          </label>
+        </div>
         
         <div class="form-actions">
           <button type="button" class="cancel-btn secondary-button">Cancel</button>
@@ -642,6 +660,19 @@ customElements.define('create-memory-page', CreateMemoryPage);
 // Add component styles
 const style = document.createElement('style');
 style.textContent = `
+  .create-memory-page label[for="reconciler_protected"] {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.625rem;
+    line-height: 1.4;
+    cursor: pointer;
+  }
+  .create-memory-page input#reconciler_protected {
+    width: 1rem;
+    height: 1rem;
+    flex: none;
+    margin: 0.125rem 0 0;
+  }
   .create-memory-page {
     max-width: 800px;
     margin: 0 auto;

@@ -1,8 +1,11 @@
 """Relay worker and LLM adapter tests."""
 
+import json
 import os
 import tempfile
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -16,6 +19,47 @@ from app.core.services.relay_worker import (
     RelayWorker,
     build_relay_enricher,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "adapter,response,expected",
+    [
+        (
+            AnthropicRelayEnricher,
+            {
+                "content": [{"type": "text", "text": '{"action":"no_op"}'}],
+                "usage": {
+                    "input_tokens": 40,
+                    "output_tokens": 12,
+                    "cache_creation_input_tokens": 5,
+                    "cache_read_input_tokens": 7,
+                },
+            },
+            (40, 12, 5, 7),
+        ),
+        (
+            OpenAIRelayEnricher,
+            {
+                "choices": [{"message": {"content": '{"action":"no_op"}'}}],
+                "usage": {
+                    "prompt_tokens": 60,
+                    "completion_tokens": 15,
+                    "prompt_tokens_details": {"cached_tokens": 11},
+                },
+            },
+            (60, 15, 0, 11),
+        ),
+    ],
+)
+async def test_reconcile_adapter_keeps_reported_usage(adapter, response, expected):
+    reply = SimpleNamespace(status_code=200, json=lambda: response)
+    client = SimpleNamespace(post=AsyncMock(return_value=reply))
+    judge = adapter(api_key="test-key", http_client=client)
+
+    await judge.reconcile_group([{"memory_id": "m1", "content": "Fact"}])
+
+    assert tuple(judge.last_usage.values()) == expected
 
 
 @pytest.mark.parametrize(
@@ -60,6 +104,79 @@ def test_extract_json_object_rejects_truncated():
 
     with _pytest.raises(ValueError):
         RelayEnricher._extract_json_object('{"content":"unterminated ...')
+
+
+@pytest.mark.asyncio
+async def test_reconcile_group_sends_group_evidence_to_llm():
+    class CaptureEnricher(RelayEnricher):
+        async def _complete(self, *, user_content):
+            self.prompt = user_content
+            return {"action": "merge", "representative_memory_id": "m2"}
+
+    enricher = CaptureEnricher(api_key="test-key")
+    evidence = [
+        {"memory_id": "m1", "content": "First", "input_hash": "h1"},
+        {"memory_id": "m2", "content": "Second", "input_hash": "h2"},
+    ]
+
+    result = await enricher.reconcile_group(evidence)
+
+    assert result["action"] == "merge"
+    assert json.dumps(evidence, ensure_ascii=False, sort_keys=True) in enricher.prompt
+    assert "representative_memory_id" in enricher.prompt
+    assert "source_refs" in enricher.prompt
+    assert "Copy memory_id and input_hash exactly" in enricher.prompt
+    assert "use an empty claims array" in enricher.prompt
+    for action in (
+        "noise_suppression",
+        "archive",
+        "quarantine",
+        "add_relation",
+        "mark_stale",
+    ):
+        assert action in enricher.prompt
+    for key in (
+        "preserved_conditions",
+        "removed_repetition",
+        "uncertainties",
+        "review_reason",
+        "relations",
+    ):
+        assert key in enricher.prompt
+
+
+@pytest.mark.asyncio
+async def test_reconcile_group_repair_names_validation_error():
+    class CaptureEnricher(RelayEnricher):
+        async def _complete(self, *, user_content):
+            self.prompt = user_content
+            return {"action": "no_op"}
+
+    enricher = CaptureEnricher(api_key="test-key")
+    evidence = [{"memory_id": "m1", "content": "First", "input_hash": "h1"}]
+
+    await enricher._repair_reconcile_group(evidence, "claim source_refs are required")
+
+    assert "claim source_refs are required" in enricher.prompt
+    assert json.dumps(evidence, ensure_ascii=False, sort_keys=True) in enricher.prompt
+
+
+@pytest.mark.asyncio
+async def test_reconcile_worker_counts_candidate_result():
+    class Reconciler:
+        async def process_next(self, *, worker_id, enricher):
+            return {"candidate_id": "candidate-1", "processed": True}
+
+    worker = RelayWorker(
+        service=object(),
+        worker_id="worker-1",
+        reconcile_service=Reconciler(),
+        reconcile_enricher=object(),
+    )
+
+    stats = await worker.run_once()
+
+    assert stats["reconcile_processed"] == 1
 
 
 @asynccontextmanager
@@ -494,12 +611,14 @@ async def test_openai_relay_enricher_honors_custom_base_url_and_list_content():
 def test_build_relay_enricher_selects_provider_adapter():
     anthropic = build_relay_enricher(provider="anthropic", api_key="k")
     assert isinstance(anthropic, AnthropicRelayEnricher)
+    assert anthropic.provider_name == "anthropic"
     assert anthropic.base_url == "https://api.anthropic.com/v1/messages"
     # empty model resolves to the provider default, not the shared Anthropic id
     assert anthropic.model == "claude-sonnet-4-6"
 
     openai = build_relay_enricher(provider="OpenAI", api_key="k")
     assert isinstance(openai, OpenAIRelayEnricher)
+    assert openai.provider_name == "openai"
     assert openai.base_url == "https://api.openai.com/v1/chat/completions"
     assert openai.model == "gpt-4o-mini"
     assert openai.model_version == "gpt-4o-mini"

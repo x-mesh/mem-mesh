@@ -16,6 +16,7 @@ from app.core.database.base import (
     EMBEDDING_TABLE_SECONDARY,
     Database,
 )
+from app.core.services.embedding_manager import EmbeddingManagerService
 
 
 def _vec(*xs):
@@ -54,6 +55,62 @@ async def _create_slot(db, table):
     await db.execute(
         f"CREATE VIRTUAL TABLE {table} USING vec0("
         f"memory_id TEXT PRIMARY KEY, embedding FLOAT[4])"
+    )
+
+
+class _FakeEmbeddingService:
+    def __init__(self, dimension=6, fail_on=None, wrong_dimension_on=None):
+        self.model_name = "fake-new-model"
+        self.dimension = dimension
+        self.is_ready = True
+        self.fail_on = fail_on
+        self.wrong_dimension_on = wrong_dimension_on
+        self.calls = []
+
+    async def aembed(self, text):
+        self.calls.append(text)
+        if self.fail_on and self.fail_on in text:
+            raise RuntimeError("fake embedding failure")
+        dimension = (
+            2
+            if self.wrong_dimension_on and self.wrong_dimension_on in text
+            else self.dimension
+        )
+        return [float(index + 1) for index in range(dimension)]
+
+    @staticmethod
+    def to_bytes(vector):
+        return struct.pack(f"{len(vector)}f", *vector)
+
+
+async def _add_curated(db, result_id, memory_id, body, revision=1):
+    run_id = f"run-{result_id}"
+    candidate_id = f"candidate-{result_id}"
+    proposal_id = f"proposal-{result_id}"
+    now = "2026-06-15T00:00:00Z"
+    await db.execute(
+        "INSERT INTO reconciler_runs(id, project_id, status, dry_run, detector_version, policy_hash, model, prompt_version, budget_json, stats_json, created_at, updated_at) VALUES (?, 'p', 'completed', 0, 'test', 'policy', 'judge', 'prompt', '{}', '{}', ?, ?)",
+        (run_id, now, now),
+    )
+    await db.execute(
+        "INSERT INTO reconciler_candidates(id, run_id, project_id, group_key, memory_ids_json, input_policy_hash, created_at, updated_at) VALUES (?, ?, 'p', 'group', ?, 'policy', ?, ?)",
+        (candidate_id, run_id, json.dumps([memory_id]), now, now),
+    )
+    await db.execute(
+        "INSERT INTO reconciler_proposals(id, candidate_id, run_id, project_id, action, status, representative_memory_id, body, input_policy_hash, created_at, updated_at) VALUES (?, ?, ?, 'p', 'merge', 'applied', ?, ?, 'policy', ?, ?)",
+        (proposal_id, candidate_id, run_id, memory_id, body, now, now),
+    )
+    await db.execute(
+        "INSERT INTO curated_results(id, proposal_id, candidate_id, project_id, representative_memory_id, body, action, status, revision, input_policy_hash, created_at) VALUES (?, ?, ?, 'p', ?, ?, 'merge', 'active', ?, 'policy', ?)",
+        (result_id, proposal_id, candidate_id, memory_id, body, revision, now),
+    )
+    await db.execute(
+        "INSERT INTO curated_sources(result_id, memory_id, input_hash, source_role) VALUES (?, ?, ?, 'representative')",
+        (result_id, memory_id, "input-hash"),
+    )
+    await db.execute(
+        "INSERT INTO curated_results_fts(result_id, body, project_id) VALUES (?, ?, 'p')",
+        (result_id, body),
     )
 
 
@@ -116,3 +173,128 @@ async def test_dual_write_during_migration(db):
     await db.set_active_embedding_table(EMBEDDING_TABLE_SECONDARY)
     await db.set_migration_in_progress(False)
     assert await ms._write_vector_tables() == [EMBEDDING_TABLE_SECONDARY]
+
+
+async def test_manager_reembeds_curated_and_raw_slots_before_atomic_swap(db):
+    await _add(db, "m1", EMBEDDING_TABLE_PRIMARY, (0.1, 0.2, 0.3, 0.4))
+    await _add_curated(db, "cr1", "m1", "curated migration body")
+    await db.execute(
+        "INSERT INTO curated_results_vec_active(result_id, embedding) VALUES (?, ?)",
+        ("cr1", json.dumps([0.1, 0.2, 0.3, 0.4])),
+    )
+    await db.set_embedding_metadata("embedding_model", "fake-old-model")
+    await db.set_embedding_metadata("embedding_dimension", "4")
+    await db.set_embedding_metadata("reconciler_embedding_model", "fake-old-model")
+    await db.set_embedding_metadata("reconciler_embedding_dimension", "4")
+    revision_before = await db.fetchone(
+        "SELECT state_value FROM reconciler_state WHERE state_key = 'read_revision'"
+    )
+
+    observed = []
+    service = _FakeEmbeddingService()
+    original_aembed = service.aembed
+
+    async def observe(text):
+        if not observed:
+            observed.append(
+                (
+                    await db.active_embedding_table(),
+                    await db.fetchone(
+                        "SELECT embedding FROM curated_results_vec_active WHERE result_id = 'cr1'"
+                    ),
+                )
+            )
+        return await original_aembed(text)
+
+    service.aembed = observe
+    manager = EmbeddingManagerService(db, service)
+    manager._migration_progress["total"] = 1
+    result = await manager._run_migration(batch_size=1)
+
+    assert result["success"] is True
+    assert observed[0][0] == EMBEDDING_TABLE_PRIMARY
+    assert observed[0][1] is not None
+    assert await db.active_embedding_table() == EMBEDDING_TABLE_SECONDARY
+    assert (
+        await db.fetchone(
+            "SELECT name FROM sqlite_master WHERE name = ?", (EMBEDDING_TABLE_PRIMARY,)
+        )
+        is None
+    )
+    assert (
+        await db.fetchone("SELECT COUNT(*) AS count FROM curated_results_vec_next")
+    )["count"] == 0
+    assert (
+        await db.fetchone("SELECT COUNT(*) AS count FROM curated_results_vec_active")
+    )["count"] == 1
+    assert (
+        len(
+            (await db.fetchone("SELECT embedding FROM memories WHERE id = ?", ("m1",)))[
+                "embedding"
+            ]
+        )
+        == 24
+    )
+    assert await db.get_embedding_metadata("embedding_dimension") == "6"
+    assert await db.get_embedding_metadata("reconciler_embedding_dimension") == "6"
+    curated_sql = await db.fetchone(
+        "SELECT sql FROM sqlite_master WHERE name = 'curated_results_vec_active'"
+    )
+    assert "USING VEC0" in curated_sql["sql"].upper()
+    matches = await db.fetchall(
+        "SELECT result_id, distance FROM curated_results_vec_active WHERE embedding MATCH ? ORDER BY distance LIMIT 1",
+        (json.dumps([1, 2, 3, 4, 5, 6]),),
+    )
+    assert matches[0]["result_id"] == "cr1"
+    assert matches[0]["distance"] == pytest.approx(0.0)
+    revision_after = await db.fetchone(
+        "SELECT state_value FROM reconciler_state WHERE state_key = 'read_revision'"
+    )
+    assert int(revision_after["state_value"]) > int(revision_before["state_value"])
+
+
+@pytest.mark.parametrize("failure_kind", ["curated", "raw"])
+async def test_manager_failure_restores_old_active_state(db, failure_kind):
+    await _add(db, "m1", EMBEDDING_TABLE_PRIMARY, (0.1, 0.2, 0.3, 0.4))
+    await _add_curated(db, "cr1", "m1", "curated migration body")
+    old_curated = json.dumps([0.1, 0.2, 0.3, 0.4])
+    await db.execute(
+        "INSERT INTO curated_results_vec_active(result_id, embedding) VALUES (?, ?)",
+        ("cr1", old_curated),
+    )
+    old_curated_value = (
+        await db.fetchone(
+            "SELECT embedding FROM curated_results_vec_active WHERE result_id = 'cr1'"
+        )
+    )["embedding"]
+    await db.set_embedding_metadata("embedding_model", "fake-old-model")
+    await db.set_embedding_metadata("embedding_dimension", "4")
+    await db.set_embedding_metadata("reconciler_embedding_model", "fake-old-model")
+    await db.set_embedding_metadata("reconciler_embedding_dimension", "4")
+    old_memory = (
+        await db.fetchone("SELECT embedding, updated_at FROM memories WHERE id = 'm1'")
+    )["embedding"]
+
+    service = _FakeEmbeddingService(
+        fail_on="curated" if failure_kind == "curated" else None,
+        wrong_dimension_on="content m1" if failure_kind == "raw" else None,
+    )
+    manager = EmbeddingManagerService(db, service)
+    manager._migration_progress["total"] = 1
+    with pytest.raises(Exception):
+        await manager._run_migration(batch_size=1)
+
+    assert await db.active_embedding_table() == EMBEDDING_TABLE_PRIMARY
+    assert await db.migration_in_progress() is False
+    assert (await db.fetchone("SELECT embedding FROM memories WHERE id = 'm1'"))[
+        "embedding"
+    ] == old_memory
+    assert (
+        await db.fetchone(
+            "SELECT embedding FROM curated_results_vec_active WHERE result_id = 'cr1'"
+        )
+    )["embedding"] == old_curated_value
+    assert await db.get_embedding_metadata("embedding_dimension") == "4"
+    assert (
+        await db.fetchone("SELECT COUNT(*) AS count FROM curated_results_vec_next")
+    )["count"] == 0

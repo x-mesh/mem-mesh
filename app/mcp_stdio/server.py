@@ -15,9 +15,10 @@ FastMCP-only (2): cache_stats, clear_cache
 """
 
 import os
-from typing import List, Optional, Union
+from typing import Annotated, List, Optional, Union
 
 from fastmcp import FastMCP
+from pydantic import Field
 
 from ..core.config import Settings
 from ..core.notifier import HttpNotifier
@@ -116,10 +117,18 @@ async def add(
     client: Optional[str] = None,
     tags: Optional[list[str]] = None,
     anchors: Optional[dict] = None,
+    reconciler_protected: bool = False,
 ) -> dict:
     """Internal handler for add tool."""
     return await _get_handlers().add(
-        content, project_id, category, source, client, tags, anchors
+        content,
+        project_id,
+        category,
+        source,
+        client,
+        tags,
+        anchors,
+        reconciler_protected,
     )
 
 
@@ -139,6 +148,7 @@ async def search(
     scope: str = "local",
     anchored_path: Optional[str] = None,
     starred_only: bool = False,
+    read_view: str = "effective",
 ) -> dict:
     """Internal handler for search tool."""
     # Keyword-only: the handler's parameter order is not part of this contract,
@@ -158,6 +168,7 @@ async def search(
         scope=scope,
         anchored_path=anchored_path,
         starred_only=starred_only,
+        read_view=read_view,
     )
 
 
@@ -168,10 +179,11 @@ async def context(
     project_id: Optional[str] = None,
     response_format: str = "standard",
     ids: Optional[list[str]] = None,
+    read_view: str = "effective",
 ) -> dict:
     """Internal handler for context tool."""
     return await _get_handlers().context(
-        memory_id, depth, project_id, response_format, ids=ids
+        memory_id, depth, project_id, response_format, ids=ids, read_view=read_view
     )
 
 
@@ -181,9 +193,12 @@ async def update(
     content: Optional[str] = None,
     category: Optional[str] = None,
     tags: Optional[list[str]] = None,
+    reconciler_protected: Optional[bool] = None,
 ) -> dict:
     """Internal handler for update tool."""
-    return await _get_handlers().update(memory_id, content, category, tags)
+    return await _get_handlers().update(
+        memory_id, content, category, tags, reconciler_protected
+    )
 
 
 @mcp.tool(description=TOOL_DESCRIPTIONS["delete"])
@@ -370,6 +385,72 @@ async def doc_proposals(
 async def doc_proposal_applied(proposal_id: str) -> dict:
     """Internal handler for doc_proposal_applied tool."""
     return await _get_handlers().doc_proposal_applied(proposal_id)
+
+
+@mcp.tool(description=TOOL_DESCRIPTIONS["reconciler_run"])
+async def reconciler_run(
+    project_id: Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]+$", max_length=100)],
+    run_id: Annotated[str, Field(pattern=r"^rr_[0-9a-f]{32}$")],
+) -> dict:
+    return await _get_handlers().reconciler_run(project_id, run_id)
+
+
+@mcp.tool(description=TOOL_DESCRIPTIONS["reconciler_proposals"])
+async def reconciler_proposals(
+    project_id: Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]+$", max_length=100)],
+    status: Optional[Annotated[str, Field(max_length=32)]] = None,
+    limit: Annotated[int, Field(ge=1, le=50)] = 10,
+) -> dict:
+    return await _get_handlers().reconciler_proposals(project_id, status, limit)
+
+
+@mcp.tool(description=TOOL_DESCRIPTIONS["reconciler_candidates"])
+async def reconciler_candidates(
+    project_id: Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]+$", max_length=100)],
+    run_id: Annotated[str, Field(pattern=r"^rr_[0-9a-f]{32}$")],
+    limit: Annotated[int, Field(ge=1, le=100)] = 50,
+    offset: Annotated[int, Field(ge=0)] = 0,
+) -> dict:
+    return await _get_handlers().reconciler_candidates(
+        project_id, run_id, limit, offset
+    )
+
+
+@mcp.tool(description=TOOL_DESCRIPTIONS["reconciler_candidate"])
+async def reconciler_candidate(
+    project_id: Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]+$", max_length=100)],
+    candidate_id: Annotated[str, Field(pattern=r"^rc_[0-9a-f]{32}$")],
+) -> dict:
+    return await _get_handlers().reconciler_candidate(project_id, candidate_id)
+
+
+@mcp.tool(description=TOOL_DESCRIPTIONS["reconciler_result"])
+async def reconciler_result(
+    project_id: Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]+$", max_length=100)],
+    result_id: Annotated[str, Field(pattern=r"^cr_[0-9a-f]{32}$")],
+) -> dict:
+    return await _get_handlers().reconciler_result(project_id, result_id)
+
+
+@mcp.tool(description=TOOL_DESCRIPTIONS["reconciler_start"])
+async def reconciler_start(
+    project_id: Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]+$", max_length=100)],
+    dry_run: bool = True,
+    anchored_path: Optional[Annotated[str, Field(max_length=500)]] = None,
+    created_after: Optional[str] = None,
+    created_before: Optional[str] = None,
+) -> dict:
+    return await _get_handlers().reconciler_start(
+        project_id, dry_run, anchored_path, created_after, created_before
+    )
+
+
+@mcp.tool(description=TOOL_DESCRIPTIONS["reconciler_cancel"])
+async def reconciler_cancel(
+    project_id: Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]+$", max_length=100)],
+    run_id: Annotated[str, Field(pattern=r"^rr_[0-9a-f]{32}$")],
+) -> dict:
+    return await _get_handlers().reconciler_cancel(project_id, run_id)
 
 
 @mcp.tool()

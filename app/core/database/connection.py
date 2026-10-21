@@ -359,7 +359,7 @@ class DatabaseConnection:
 
     def commit(self) -> None:
         """Commit current transaction."""
-        if self.connection:
+        if self.connection and not _in_transaction.get():
             self.connection.commit()
 
     @asynccontextmanager

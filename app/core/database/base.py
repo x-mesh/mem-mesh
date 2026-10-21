@@ -41,6 +41,9 @@ EMBEDDING_TABLE_PRIMARY = "memory_embeddings"
 EMBEDDING_TABLE_SECONDARY = "memory_embeddings_b"
 EMBEDDING_TABLE_SLOTS = (EMBEDDING_TABLE_PRIMARY, EMBEDDING_TABLE_SECONDARY)
 EMBEDDING_TABLE_FALLBACK = "memories_vec_fallback"
+CURATED_VECTOR_TABLE_ACTIVE = "curated_results_vec_active"
+CURATED_VECTOR_TABLE_NEXT = "curated_results_vec_next"
+CURATED_VECTOR_TABLE_FALLBACK = "curated_results_vec_fallback"
 
 __all__ = [
     "Database",
@@ -49,6 +52,9 @@ __all__ = [
     "EMBEDDING_TABLE_PRIMARY",
     "EMBEDDING_TABLE_SECONDARY",
     "EMBEDDING_TABLE_SLOTS",
+    "CURATED_VECTOR_TABLE_ACTIVE",
+    "CURATED_VECTOR_TABLE_NEXT",
+    "CURATED_VECTOR_TABLE_FALLBACK",
     "category_filter_clause",
     "value_filter_clause",
     "anchored_path_filter_clause",
@@ -576,8 +582,8 @@ class Database:
         await self.execute(
             """
             INSERT INTO memories
-            (id, content, content_hash, project_id, category, status, source, client, embedding, tags, anchors, created_at, updated_at, content_bytes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, content, content_hash, project_id, category, status, source, client, embedding, tags, anchors, created_at, updated_at, content_bytes, reconciler_protected)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 data["id"],
@@ -594,6 +600,7 @@ class Database:
                 data["created_at"],
                 data["updated_at"],
                 len(data["content"]),  # denormalized; keeps content_bytes in sync
+                int(bool(data.get("reconciler_protected", False))),
             ),
         )
 

@@ -25,6 +25,7 @@ except ImportError:
     # None if no QueryExpander
     get_query_expander = None
 from .cache_manager import get_cache_manager
+from .effective_read import EffectiveReadService
 
 if TYPE_CHECKING:
     from .metrics_collector import MetricsCollector
@@ -108,6 +109,7 @@ class SearchService:
         self.metrics_collector = metrics_collector
         self.similarity_threshold = 0.5
         self.cache_manager = get_cache_manager()  # Initialize cache manager
+        self.effective_read = EffectiveReadService(db, embedding_service)
         logger.info("SearchService initialized with smart caching")
 
     async def search(
@@ -127,6 +129,7 @@ class SearchService:
         search_mode: str = "hybrid",
         anchored_path: Optional[str] = None,
         starred_only: bool = False,
+        read_view: str = "effective",
     ) -> SearchResponse:
         """
         하이브리드 검색 수행
@@ -182,6 +185,34 @@ class SearchService:
         project_scope = scope_ids or project_id
         cache_project = ",".join(sorted(scope_ids)) if scope_ids else project_id
 
+        if read_view == "effective":
+            try:
+                active = await self.effective_read._active_results(project_scope)
+                if active:
+                    filters = {
+                        "project_id": project_scope,
+                        "category": categories or category,
+                        "source": source,
+                        "tag": tag,
+                        "anchored_path": anchored_path,
+                        "starred_only": starred_only,
+                    }
+                    return await self.effective_read.search(
+                        query=query,
+                        filters={
+                            key: value
+                            for key, value in filters.items()
+                            if value is not None and value is not False
+                        },
+                        limit=limit,
+                        offset=offset,
+                    )
+            except Exception:
+                logger.exception("Effective Reconciler search failed")
+
+        if read_view not in {"effective", "raw"}:
+            raise ValueError("read_view must be 'effective' or 'raw'")
+
         try:
             # Check cache first (only when offset=0). anchored_path is not part
             # of the cache key, so anchored searches bypass the cache entirely
@@ -194,6 +225,12 @@ class SearchService:
                     project_id=cache_project,
                     category=cache_cat,
                     limit=limit,
+                    read_view=read_view,
+                    read_revision=(
+                        await self.effective_read.get_read_revision()
+                        if read_view == "effective"
+                        else 0
+                    ),
                 )
                 if cached_results:
                     logger.info(
@@ -331,6 +368,12 @@ class SearchService:
                     project_id=cache_project,
                     category=cache_cat,
                     limit=limit,
+                    read_view=read_view,
+                    read_revision=(
+                        await self.effective_read.get_read_revision()
+                        if read_view == "effective"
+                        else 0
+                    ),
                 )
                 logger.info(
                     f"[Cache] Cached search results for query: '{query[:50]}...'"

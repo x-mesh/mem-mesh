@@ -97,7 +97,7 @@ async def test_search_with_context_optimization_with_intent(
     project_id = "test-project"
 
     # Mock 세션 데이터
-    mock_db.fetchone.return_value = {
+    session_row = {
         "id": "session-1",
         "project_id": project_id,
         "user_id": "root",
@@ -108,6 +108,9 @@ async def test_search_with_context_optimization_with_intent(
         "created_at": "2026-02-03T00:00:00+00:00",
         "updated_at": "2026-02-03T00:00:00+00:00",
     }
+    mock_db.fetchone.side_effect = lambda query, params=(): (
+        None if "reconciler_state" in query else session_row
+    )
 
     # Mock 핀 통계
     mock_db.fetchall.return_value = []

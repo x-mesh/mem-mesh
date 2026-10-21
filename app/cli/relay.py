@@ -426,10 +426,16 @@ async def _build_relay_worker(
     conflict_detector = None
     reconcile_enricher = None
     if "reconcile" in active:
-        from app.core.services.reconcile import ReconcileService
+        from app.core.services.memory_reconciler import MemoryReconcilerService
 
-        reconcile_service = ReconcileService(
+        reconcile_embedding_service = embedding_service or EmbeddingService(
+            model_name=settings.embedding_model,
+            preload=False,
+            defer_loading=False,
+        )
+        reconcile_service = MemoryReconcilerService(
             db,
+            embedding_service=reconcile_embedding_service,
             max_attempts=max_attempts,
             backoff_max_seconds=backoff_max,
             lease_seconds=lease_seconds,

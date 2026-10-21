@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- 원본을 보존하는 Memory Reconciler와 파생 검색 인덱스, 근거 추적, 활성화 취소를 추가했다.
+- 워커의 실행 진행 상황, 프로젝트별 외부 LLM 정책, 처리 예산과 운영 지표를 추가했다.
+- Reconciler 결과를 조회하고 실행을 제어하는 MCP 도구와 평가 스크립트를 추가했다.
+
+### Changed
+
+- 기본 검색과 context는 활성 파생 결과를 사용하며, `raw` 조회는 원본을 제공한다.
+- Project Overview는 활성 파생 결과로 생성하며, 입력 범위와 캐시의 갱신 필요 여부를 표시한다.
+
+### Fixed
+
+- 배치 검색은 각 항목의 프로젝트, 검색 조건과 `read_view`를 유지한다.
+- MCP 압축 응답은 파생 결과의 전체 ID와 원본 근거를 유지한다.
+
 ## [1.39.1] - 2026-10-13
 
 **sentence-transformers 최소 버전을 5.6.0으로 올려 CVE-2026-68770을 막았다.**

@@ -17,6 +17,7 @@ class EditMemoryPage extends HTMLElement {
       project_id: '',
       category: 'task',
       tags: [],
+      reconciler_protected: false,
       source: 'web-ui'
     };
     this.isDirty = false;
@@ -55,6 +56,7 @@ class EditMemoryPage extends HTMLElement {
     const projectInput = this.querySelector('#project_id');
     const categorySelect = this.querySelector('#category');
     const tagsInput = this.querySelector('#tags');
+    const protectedInput = this.querySelector('#reconciler_protected');
     
     if (contentTextarea) {
       contentTextarea.addEventListener('input', this.handleContentChange.bind(this));
@@ -71,6 +73,12 @@ class EditMemoryPage extends HTMLElement {
     
     if (tagsInput) {
       tagsInput.addEventListener('input', this.handleTagsChange.bind(this));
+    }
+    if (protectedInput) {
+      protectedInput.addEventListener('change', (event) => {
+        this.formData.reconciler_protected = event.target.checked;
+        this.markDirty();
+      });
     }
     
     // Cancel button
@@ -115,7 +123,8 @@ class EditMemoryPage extends HTMLElement {
           content: memory.content || '',
           project_id: memory.project_id || '',
           category: memory.category || 'task',
-          tags: memory.tags || [],
+          tags: Array.isArray(memory.tags) ? memory.tags : JSON.parse(memory.tags || '[]'),
+          reconciler_protected: Boolean(memory.reconciler_protected),
           source: memory.source || 'web-ui'
         };
         
@@ -151,6 +160,7 @@ class EditMemoryPage extends HTMLElement {
         project_id: this.formData.project_id.trim() || undefined,
         category: this.formData.category,
         tags: this.formData.tags.filter(tag => tag.trim()),
+        reconciler_protected: Boolean(this.formData.reconciler_protected),
         source: this.formData.source
       };
       
@@ -261,7 +271,9 @@ class EditMemoryPage extends HTMLElement {
         content: this.originalData.content || '',
         project_id: this.originalData.project_id || '',
         category: this.originalData.category || 'task',
-        tags: this.originalData.tags || [],
+        tags: Array.isArray(this.originalData.tags)
+          ? this.originalData.tags : JSON.parse(this.originalData.tags || '[]'),
+        reconciler_protected: Boolean(this.originalData.reconciler_protected),
         source: this.originalData.source || 'web-ui'
       };
       
@@ -437,11 +449,13 @@ class EditMemoryPage extends HTMLElement {
     const projectInput = this.querySelector('#project_id');
     const categorySelect = this.querySelector('#category');
     const tagsInput = this.querySelector('#tags');
+    const protectedInput = this.querySelector('#reconciler_protected');
     
     if (contentTextarea) contentTextarea.value = this.formData.content;
     if (projectInput) projectInput.value = this.formData.project_id;
     if (categorySelect) categorySelect.value = this.formData.category;
     if (tagsInput) tagsInput.value = this.formData.tags.join(', ');
+    if (protectedInput) protectedInput.checked = Boolean(this.formData.reconciler_protected);
     
     this.updateCharacterCount();
     this.updateTagsDisplay();
@@ -607,6 +621,12 @@ class EditMemoryPage extends HTMLElement {
           <div class="tags-display" style="display: none;"></div>
           <small class="form-help">Separate multiple tags with commas</small>
         </div>
+        <div class="form-group">
+          <label for="reconciler_protected">
+            <input type="checkbox" id="reconciler_protected" name="reconciler_protected" />
+            Keep this memory out of Reconciler LLM evidence
+          </label>
+        </div>
         
         <div class="form-actions">
           <button type="button" class="cancel-btn secondary-button">Cancel</button>
@@ -623,6 +643,19 @@ customElements.define('edit-memory-page', EditMemoryPage);
 // Add component styles (reuse most styles from create-memory.js)
 const style = document.createElement('style');
 style.textContent = `
+  .edit-memory-page label[for="reconciler_protected"] {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.625rem;
+    line-height: 1.4;
+    cursor: pointer;
+  }
+  .edit-memory-page input#reconciler_protected {
+    width: 1rem;
+    height: 1rem;
+    flex: none;
+    margin: 0.125rem 0 0;
+  }
   .edit-memory-page {
     max-width: 800px;
     margin: 0 auto;

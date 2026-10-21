@@ -1,7 +1,14 @@
 """MCP search response compression now leverages enrichment (abstract + topic
 tags) so compact scans are denser and raw content is a drill-down (context/get)."""
 
-from app.core.schemas.responses import SearchResponse, SearchResult
+import pytest
+
+from app.core.schemas.responses import (
+    ContextResponse,
+    RelatedMemory,
+    SearchResponse,
+    SearchResult,
+)
 from app.mcp_common.tools import MCPToolHandlers
 
 
@@ -21,6 +28,68 @@ def _sr(**kw) -> SearchResult:
 
 def _tools() -> MCPToolHandlers:
     return MCPToolHandlers(storage=None, enable_compression=True)
+
+
+@pytest.mark.parametrize("format", ["minimal", "compact", "standard"])
+def test_curated_search_compression_preserves_lookup_id_and_evidence(format):
+    memory = _sr(
+        id="cr_" + "a" * 32,
+        result_kind="curated",
+        representative_memory_id="original-1",
+        citations=[{"memory_id": "original-1", "input_hash": "h1"}],
+    )
+    out = _tools()._compress_search_response(
+        SearchResponse(results=[memory], total=1), format, {}
+    )
+    item = out["results"][0]
+    assert item["id"] == memory.id
+    assert item["result_kind"] == "curated"
+    assert item["project_id"] == "p"
+    assert item["representative_memory_id"] == "original-1"
+    assert item["citations"] == memory.citations
+
+
+def test_compact_context_preserves_curated_primary_and_related_evidence():
+    primary = _sr(
+        id="cr_" + "a" * 32,
+        result_kind="curated",
+        citations=[{"memory_id": "original-1", "input_hash": "h1"}],
+    )
+    related = RelatedMemory(
+        id="cr_" + "b" * 32,
+        content="Related fact",
+        similarity_score=0.8,
+        relationship="similar",
+        created_at=primary.created_at,
+        project_id="p",
+        result_kind="curated",
+        citations=[{"memory_id": "original-2", "input_hash": "h2"}],
+    )
+    out = _tools()._compress_context_response(
+        ContextResponse(
+            primary_memory=primary,
+            related_memories=[related],
+            timeline=[primary.id, related.id],
+        )
+    )
+    assert out["primary"]["id"] == primary.id
+    assert out["primary"]["summary"]
+    assert out["primary"]["citations"] == primary.citations
+    assert out["primary"]["result_kind"] == "curated"
+    assert out["related"][0]["id"] == related.id
+    assert out["related"][0]["citations"][0]["memory_id"] == "original-2"
+
+
+def test_compact_context_populates_canonical_primary():
+    primary = _sr(id="canonical-memory-id")
+    out = _tools()._compress_context_response(
+        ContextResponse(
+            primary_memory=primary, related_memories=[], timeline=[primary.id]
+        )
+    )
+    assert out["primary"]["id"] == "canonica"
+    assert out["primary"]["category"] == "decision"
+    assert out["primary"]["summary"]
 
 
 def test_compact_uses_abstract_title_and_tags():

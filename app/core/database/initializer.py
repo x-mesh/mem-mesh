@@ -47,6 +47,7 @@ class DatabaseInitializer:
             await self._create_vector_tables()
             await self._create_fallback_tables()
             await self._create_fts_tables()
+            await self._create_reconciler_indexes()
 
             self.connection.commit()
             logger.info("Database tables and indexes initialized")
@@ -77,7 +78,8 @@ class DatabaseInitializer:
                 anchors TEXT,
                 stale_status TEXT,
                 stale_checked_at TEXT,
-                is_starred INTEGER DEFAULT 0
+                is_starred INTEGER DEFAULT 0,
+                reconciler_protected INTEGER NOT NULL DEFAULT 0
             )
         """)
 
@@ -612,3 +614,37 @@ class DatabaseInitializer:
 
         except Exception as e:
             logger.warning(f"Failed to create FTS tables (might be unsupported): {e}")
+
+    async def _create_reconciler_indexes(self) -> None:
+        """Create derived-only Reconciler search indexes."""
+
+        conn = self.connection.connection
+        try:
+            conn.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS curated_results_fts USING fts5(
+                    result_id UNINDEXED, body, project_id UNINDEXED
+                )
+                """)
+        except Exception as exc:
+            logger.warning("Failed to create curated FTS index: %s", exc)
+
+        for name in ("curated_results_vec_active", "curated_results_vec_next"):
+            try:
+                if self.connection.is_vec_available:
+                    conn.execute(
+                        f"CREATE VIRTUAL TABLE IF NOT EXISTS {name} USING vec0(result_id TEXT PRIMARY KEY, embedding FLOAT[{self.embedding_dim}])"
+                    )
+                else:
+                    conn.execute(
+                        f"CREATE TABLE IF NOT EXISTS {name} (result_id TEXT PRIMARY KEY, embedding BLOB NOT NULL)"
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to create curated vector table %s: %s", name, exc
+                )
+                conn.execute(
+                    f"CREATE TABLE IF NOT EXISTS {name} (result_id TEXT PRIMARY KEY, embedding BLOB NOT NULL)"
+                )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS curated_results_vec_fallback (result_id TEXT PRIMARY KEY, embedding BLOB NOT NULL)"
+        )

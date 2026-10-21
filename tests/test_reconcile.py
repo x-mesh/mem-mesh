@@ -67,6 +67,87 @@ async def _enqueue(db, new_id, old_id, new_hash, old_hash, sim=0.95):
 
 class TestReconcileService:
     @pytest.mark.asyncio
+    async def test_oversized_legacy_evidence_is_held_without_truncation(self, temp_db):
+        await _add(temp_db, "new", created_at=LATER)
+        await _add(temp_db, "old")
+        await temp_db.execute(
+            "UPDATE memories SET content = ? WHERE id = 'new'",
+            ("Distilled fact. " * 4000,),
+        )
+        await _enqueue(temp_db, "new", "old", "hnew", "hold")
+        result = await ReconcileService(temp_db).process_next(
+            worker_id="w", enricher=_FakeEnricher("keep_both")
+        )
+        assert result["processed"] is False
+        assert "character budget exceeded" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_legacy_transcript_never_reaches_llm(self, temp_db):
+        await _add(temp_db, "new", created_at=LATER)
+        await _add(temp_db, "old")
+        await temp_db.execute(
+            "UPDATE memories SET content = ? WHERE id = 'new'",
+            ('{"type":"tool_result","content":"private payload"}',),
+        )
+        await _enqueue(temp_db, "new", "old", "hnew", "hold")
+
+        class Spy(_FakeEnricher):
+            async def reconcile(self, new_content, old_content):
+                raise AssertionError("tool payload reached the LLM")
+
+        result = await ReconcileService(temp_db).process_next(
+            worker_id="w", enricher=Spy("keep_both")
+        )
+        assert "excluded evidence" in result["error"]
+        row = await temp_db.fetchone("SELECT status FROM reconcile_queue")
+        assert row["status"] == "dead_letter"
+
+    @pytest.mark.asyncio
+    async def test_legacy_evidence_redacts_credentials(self, temp_db):
+        await _add(temp_db, "new", created_at=LATER)
+        await _add(temp_db, "old")
+        await temp_db.execute(
+            "UPDATE memories SET content = 'API key: sk-abcdefghijklmnop' WHERE id = 'new'"
+        )
+        await _enqueue(temp_db, "new", "old", "hnew", "hold")
+
+        class Spy(_FakeEnricher):
+            async def reconcile(self, new_content, old_content):
+                assert "sk-abcdefghijklmnop" not in new_content
+                return await super().reconcile(new_content, old_content)
+
+        result = await ReconcileService(temp_db).process_next(
+            worker_id="w", enricher=Spy("keep_both")
+        )
+        assert result["processed"] is True
+
+    @pytest.mark.asyncio
+    async def test_protected_source_never_reaches_legacy_llm(self, temp_db):
+        await _add(temp_db, "new", created_at=LATER)
+        await _add(temp_db, "old")
+        await temp_db.execute(
+            "UPDATE memories SET reconciler_protected = 1 WHERE id = ?", ("old",)
+        )
+        await _enqueue(temp_db, "new", "old", "hnew", "hold")
+
+        class _Spy(_FakeEnricher):
+            async def reconcile(self, new_content, old_content):
+                raise AssertionError("protected source reached the LLM")
+
+        result = await ReconcileService(temp_db).process_next(
+            worker_id="w", enricher=_Spy("supersede_old")
+        )
+
+        assert result["processed"] is False
+        assert "protected" in result["error"]
+        row = await temp_db.fetchone(
+            "SELECT status, last_error FROM reconcile_queue WHERE new_memory_id = ?",
+            ("new",),
+        )
+        assert row["status"] == "dead_letter"
+        assert "protected" in row["last_error"]
+
+    @pytest.mark.asyncio
     async def test_process_supersede_old(self, temp_db):
         await _add(temp_db, "new", created_at=LATER)
         await _add(temp_db, "old")
