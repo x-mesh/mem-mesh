@@ -10,6 +10,7 @@ MCP (Model Context Protocol) 서버 구현체들이 공유하는 핵심 로직. 
 - MCPToolHandlers: 6개 MCP tool의 비즈니스 로직
 - StorageManager: 스토리지 초기화/종료 관리
 - JSON Schema 정의: tools/list 응답용
+- Reconciler 도구: 조회는 `reconciler_run`, `reconciler_candidates`, `reconciler_candidate`, `reconciler_result`, `reconciler_proposals`; 실행은 `reconciler_start`, `reconciler_cancel`. 모두 project 범위를 검증하고 direct/API storage를 사용
 
 ## Tech Stack & Constraints
 
@@ -54,7 +55,7 @@ handlers = MCPToolHandlers(storage_manager.storage)
 
 **Tool Logic Tests:**
 ```bash
-python -m pytest tests/test_mcp_tools.py -v
+python -m pytest tests/test_mcp_dispatcher.py tests/test_reconciler_protocol.py tests/test_batch_search_scope.py -v
 ```
 
 **Integration Tests:**

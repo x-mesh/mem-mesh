@@ -185,6 +185,7 @@ class MemoryService:
         tags: Optional[List[str]] = None,
         anchors: Optional[dict] = None,
         skip_quality_gate: bool = False,
+        reconciler_protected: bool = False,
     ) -> AddResponse:
         """
         새 메모리 생성 (중복 감지 포함)
@@ -240,6 +241,8 @@ class MemoryService:
             existing_memory = await self._find_duplicate(content_hash, project_id)
             if existing_memory:
                 logger.info("Duplicate memory found: %s", existing_memory["id"])
+                if reconciler_protected and not existing_memory["reconciler_protected"]:
+                    await self.update(existing_memory["id"], reconciler_protected=True)
                 return AddResponse(
                     id=existing_memory["id"],
                     status="duplicate",
@@ -255,7 +258,7 @@ class MemoryService:
             # async reconcile worker (per-add cross-encoder = L1 system-stall risk).
             # Gated by reconcile_enabled (env enable_conflict_detection OR app_config
             # reconcile.enabled) — F1 needs no NLI model, only vector candidates.
-            reconcile_on = await self._reconcile_enabled()
+            reconcile_on = not reconciler_protected and await self._reconcile_enabled()
             reconcile_candidates: list[dict] | None = None
             if reconcile_on:
                 reconcile_candidates = await self._find_reconcile_candidates(
@@ -275,6 +278,7 @@ class MemoryService:
                 embedding=embedding_bytes,
                 tags=json.dumps(tags) if tags else None,
                 anchors=json.dumps(anchors) if anchors else None,
+                reconciler_protected=reconciler_protected,
             )
 
             # 5. Save + enqueue reconcile in ONE transaction (C2: a canonical memory
@@ -426,6 +430,7 @@ class MemoryService:
             SELECT id, content_hash, embedding FROM memories
             WHERE project_id = ?
               AND COALESCE(status, 'canonical') = 'canonical'
+              AND reconciler_protected = 0
             """,
             (project_id,),
         )
@@ -473,6 +478,7 @@ class MemoryService:
         source: str = "unknown",
         tags: Optional[List[str]] = None,
         anchors: Optional[dict] = None,
+        reconciler_protected: bool = False,
     ) -> AddResponse:
         """
         미리 계산된 임베딩과 함께 새 메모리 생성.
@@ -513,6 +519,8 @@ class MemoryService:
         existing_memory = await self._find_duplicate(content_hash, project_id)
         if existing_memory:
             logger.info("Duplicate memory found: %s", existing_memory["id"])
+            if reconciler_protected and not existing_memory["reconciler_protected"]:
+                await self.update(existing_memory["id"], reconciler_protected=True)
             return AddResponse(
                 id=existing_memory["id"],
                 status="duplicate",
@@ -532,6 +540,7 @@ class MemoryService:
             tags=json.dumps(tags) if tags else None,
             anchors=json.dumps(anchors) if anchors else None,
             embedding=embedding_bytes,
+            reconciler_protected=reconciler_protected,
         )
 
         try:
@@ -594,6 +603,7 @@ class MemoryService:
         category: Optional[str] = None,
         tags: Optional[List[str]] = None,
         project_id: Optional[str] = None,
+        reconciler_protected: Optional[bool] = None,
     ) -> UpdateResponse:
         """
         메모리 업데이트 (content 변경 시 재임베딩)
@@ -649,7 +659,8 @@ class MemoryService:
                         """
                         UPDATE memories
                         SET content = ?, content_hash = ?, category = ?, tags = ?,
-                            project_id = ?, embedding = ?, updated_at = ?
+                            project_id = ?, embedding = ?, updated_at = ?,
+                            reconciler_protected = ?
                         WHERE id = ?
                         """,
                         (
@@ -664,6 +675,11 @@ class MemoryService:
                             project_id or existing_memory.project_id,
                             embedding_bytes,
                             datetime.utcnow().isoformat() + "Z",
+                            int(
+                                existing_memory.reconciler_protected
+                                if reconciler_protected is None
+                                else reconciler_protected
+                            ),
                             memory_id,
                         ),
                     )
@@ -678,7 +694,8 @@ class MemoryService:
                     await self.db.execute(
                         """
                         UPDATE memories
-                        SET category = ?, tags = ?, project_id = ?, updated_at = ?
+                        SET category = ?, tags = ?, project_id = ?, updated_at = ?,
+                            reconciler_protected = ?
                         WHERE id = ?
                         """,
                         (
@@ -690,6 +707,11 @@ class MemoryService:
                             ),
                             project_id or existing_memory.project_id,
                             datetime.utcnow().isoformat() + "Z",
+                            int(
+                                existing_memory.reconciler_protected
+                                if reconciler_protected is None
+                                else reconciler_protected
+                            ),
                             memory_id,
                         ),
                     )
@@ -806,13 +828,37 @@ class MemoryService:
                 "or pin_promote(anchors={...})."
             )
 
-        checked_at = datetime.utcnow().isoformat() + "Z"
         try:
-            await self.db.execute(
-                "UPDATE memories SET stale_status = ?, stale_checked_at = ? "
-                "WHERE id = ?",
-                (status, checked_at, memory_id),
-            )
+            async with self.db.transaction():
+                current = await self.db.fetchone(
+                    "SELECT project_id, stale_status FROM memories WHERE id = ?",
+                    (memory_id,),
+                )
+                if current is None:
+                    raise MemoryNotFoundError(memory_id)
+                checked_at = datetime.utcnow().isoformat() + "Z"
+                await self.db.execute(
+                    "UPDATE memories SET stale_status = ?, stale_checked_at = ? WHERE id = ?",
+                    (status, checked_at, memory_id),
+                )
+                if current["stale_status"] != status:
+                    await self.db.execute(
+                        "INSERT INTO reconciler_validations(id, stage, status, details_json, created_at) VALUES (?, 'anchor_status', ?, ?, ?)",
+                        (
+                            "rv_" + uuid4().hex,
+                            status,
+                            json.dumps(
+                                {
+                                    "memory_id": memory_id,
+                                    "project_id": current["project_id"],
+                                    "from_status": current["stale_status"],
+                                }
+                            ),
+                            checked_at,
+                        ),
+                    )
+        except MemoryNotFoundError:
+            raise
         except Exception as e:
             logger.error("Failed to record anchor status for %s: %s", memory_id, e)
             raise DatabaseError(f"Failed to record anchor status: {e}") from e
@@ -892,7 +938,7 @@ class MemoryService:
         """중복 메모리 검색"""
         try:
             row = await self.db.fetchone(
-                "SELECT id, created_at FROM memories WHERE content_hash = ? AND project_id = ?",
+                "SELECT id, created_at, reconciler_protected FROM memories WHERE content_hash = ? AND project_id = ?",
                 (content_hash, project_id),
             )
             return dict(row) if row else None
@@ -1018,6 +1064,7 @@ class MemoryService:
                     JOIN memories m ON m.id = e.memory_id
                     WHERE (m.project_id = ? OR ? IS NULL)
                       AND COALESCE(m.status, 'canonical') = 'canonical'
+                      AND m.reconciler_protected = 0
                       AND (? IS NULL OR m.id != ?)
                     ORDER BY distance ASC
                     LIMIT ?
@@ -1049,6 +1096,7 @@ class MemoryService:
                     ) ve ON m.id = ve.memory_id
                     WHERE (m.project_id = ? OR ? IS NULL)
                       AND COALESCE(m.status, 'canonical') = 'canonical'
+                      AND m.reconciler_protected = 0
                       AND (? IS NULL OR m.id != ?)
                     ORDER BY ve.distance ASC
                     LIMIT ?

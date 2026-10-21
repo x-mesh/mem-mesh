@@ -3,6 +3,7 @@ Quality Gate for Memory Content
 메모리 저장 전 품질 체크 및 콘텐츠 정제
 """
 
+import json
 import logging
 import re
 from typing import Optional
@@ -133,6 +134,58 @@ def is_conversation_dump(content: str) -> bool:
         return True
     # Two or more distinct speaker turns → a transcript.
     return len(_TURN_MARKER_RE.findall(content)) >= 2
+
+
+def reconciler_evidence_exclusion(content: str) -> Optional[str]:
+    if is_conversation_dump(content):
+        return "full_transcript"
+    text = content.strip()
+    if text.startswith("```") and text.endswith("```"):
+        text = "\n".join(text.splitlines()[1:-1])
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        lines = [line for line in text.splitlines() if line.strip()]
+        if len(lines) < 2:
+            return None
+        try:
+            payload = [json.loads(line) for line in lines]
+        except json.JSONDecodeError:
+            return None
+        except RecursionError:
+            return "structured_payload_depth_limit"
+    except RecursionError:
+        return "structured_payload_depth_limit"
+    pending = [payload]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, list):
+            pending.extend(item)
+        elif isinstance(item, dict):
+            kind = item.get("type")
+            role = item.get("role")
+            if (
+                isinstance(kind, str)
+                and kind
+                in {
+                    "tool_call",
+                    "tool_result",
+                    "tool_use",
+                    "function_call",
+                    "function_call_output",
+                }
+            ) or (isinstance(role, str) and role in {"tool", "function"}):
+                return "full_tool_payload"
+            if item.get("tool_calls") or item.get("tool_results"):
+                return "full_tool_payload"
+            if (
+                isinstance(role, str)
+                and role in {"user", "assistant", "system", "developer"}
+                and "content" in item
+            ):
+                return "full_transcript"
+            pending.extend(item.values())
+    return None
 
 
 def is_derivable_from_git(content: str, category: str = "") -> bool:

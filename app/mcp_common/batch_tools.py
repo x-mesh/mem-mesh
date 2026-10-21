@@ -53,6 +53,7 @@ class BatchOperationHandler:
         tags: Optional[List[str]] = None,
         categories: Optional[List[str]] = None,
         tags_list: Optional[List[Optional[List[str]]]] = None,
+        protected_list: Optional[List[bool]] = None,
     ) -> Dict[str, Any]:
         """
         Batch add multiple memories with single embedding generation
@@ -95,6 +96,11 @@ class BatchOperationHandler:
                         category=item_category,
                         source=source,
                         tags=item_tags,
+                        reconciler_protected=(
+                            bool(protected_list[i])
+                            if protected_list and i < len(protected_list)
+                            else False
+                        ),
                     )
                     results.append(
                         {
@@ -177,6 +183,7 @@ class BatchOperationHandler:
         limit: int = 5,
         anchored_path: Optional[str] = None,
         starred_only: bool = False,
+        read_view: str = "effective",
     ) -> Dict[str, Any]:
         """
         Batch search multiple queries with cached results
@@ -238,6 +245,7 @@ class BatchOperationHandler:
                         project_id=project_id,
                         category=category,
                         limit=limit,
+                        read_view=read_view,
                     )
 
                 if cached_result:
@@ -261,6 +269,7 @@ class BatchOperationHandler:
                         limit=limit,
                         anchored_path=anchored_path,
                         starred_only=starred_only,
+                        read_view=read_view,
                     )
 
                     results[query] = {
@@ -326,6 +335,9 @@ class BatchOperationHandler:
 
             categories = [op.get("category", "task") for op in add_operations]
             tags_list = [op.get("tags") for op in add_operations]
+            protected_list = [
+                bool(op.get("reconciler_protected", False)) for op in add_operations
+            ]
             batch_add_result = await self.batch_add_memories(
                 contents=contents,
                 project_id=add_operations[0].get("project_id"),
@@ -334,6 +346,7 @@ class BatchOperationHandler:
                 tags=add_operations[0].get("tags"),
                 categories=categories,
                 tags_list=tags_list,
+                protected_list=protected_list,
             )
 
             logger.info(
@@ -371,21 +384,32 @@ class BatchOperationHandler:
                         }
                     )
 
-        # Process batch search operations
-        if search_operations:
-            queries = [op.get("query", "") for op in search_operations]
+        search_groups = {}
+        for op in search_operations:
+            key = (
+                op.get("project_id", None),
+                op.get("category", None),
+                op.get("limit", 5),
+                op.get("anchored_path", None),
+                op.get("starred_only", False),
+                op.get("read_view", "effective"),
+            )
+            search_groups.setdefault(key, []).append(op)
+
+        for key, group in search_groups.items():
             batch_search_result = await self.batch_search(
-                queries=queries,
-                project_id=search_operations[0].get("project_id"),
-                category=search_operations[0].get("category"),
-                limit=search_operations[0].get("limit", 5),
-                anchored_path=search_operations[0].get("anchored_path"),
-                starred_only=search_operations[0].get("starred_only", False),
+                queries=[op.get("query", "") for op in group],
+                project_id=key[0],
+                category=key[1],
+                limit=key[2],
+                anchored_path=key[3],
+                starred_only=key[4],
+                read_view=key[5],
             )
 
             # Map results to original indices
             if batch_search_result.get("status") == "success":
-                for op in search_operations:
+                for op in group:
                     query = op.get("query", "")
                     search_results = batch_search_result.get("results", {})
                     if query in search_results:
@@ -420,7 +444,7 @@ class BatchOperationHandler:
                         )
             else:
                 # Mark all operations as failed on batch search failure
-                for op in search_operations:
+                for op in group:
                     results.append(
                         {
                             "index": op["index"],

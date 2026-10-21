@@ -718,11 +718,12 @@ class ProjectsPage extends HTMLElement {
       genBtn.disabled = true;
       genBtn.textContent = 'Generating…';
       // LLM summarization takes 10-30s — without a spinner the modal looks hung.
-      body.innerHTML = '<div class="overview-loading"><span class="ov-spinner"></span>Summarizing recent memories…</div>';
+      body.innerHTML = '<div class="overview-loading"><span class="ov-spinner"></span>Summarizing active derived results…</div>';
       try {
         api?.invalidateCache?.(`/projects/${encodeURIComponent(projectId)}/overview`);
         const res = await api.post(`/projects/${encodeURIComponent(projectId)}/overview`, {});
-        body.innerHTML = window.ProjectOverviewRender.html(res, { showGeneratedAt: true });
+        body.innerHTML = window.ProjectOverviewRender.html(res, { showGeneratedAt: true })
+          + this._overviewCoverageHtml(res);
         genBtn.textContent = 'Regenerate';
         genBtn.disabled = false;
       } catch (error) {
@@ -739,12 +740,19 @@ class ProjectsPage extends HTMLElement {
       api?.invalidateCache?.(`/projects/${encodeURIComponent(projectId)}/overview`);
       const cached = await api.get(`/projects/${encodeURIComponent(projectId)}/overview`);
       if (cached?.overview) {
-        body.innerHTML = window.ProjectOverviewRender.html(cached, { showGeneratedAt: true });
+        body.innerHTML = window.ProjectOverviewRender.html(cached, { showGeneratedAt: true })
+          + this._overviewCoverageHtml(cached);
         genBtn.textContent = cached.stale ? 'Refresh (memories changed)' : 'Regenerate';
         genBtn.hidden = false;
       } else {
-        body.innerHTML = '<div class="overview-empty">No overview yet. Generate one from this project’s recent memories.</div>';
+        const hasInputs = Number(cached?.coverage?.curated_results || 0) > 0;
+        body.innerHTML = (hasInputs
+          ? '<div class="overview-empty">No overview yet. Generate it from the active derived summaries.</div>'
+          : '<div class="overview-empty">No active derived summaries are available. Review the Reconciler results first. '
+            + '<a href="/curation" data-route="/curation">Open Memory Reconciler</a></div>')
+          + this._overviewCoverageHtml(cached);
         genBtn.textContent = 'Generate';
+        genBtn.disabled = !hasInputs;
         genBtn.hidden = false;
       }
     } catch (error) {
@@ -752,6 +760,31 @@ class ProjectsPage extends HTMLElement {
       genBtn.textContent = 'Generate';
       genBtn.hidden = false;
     }
+  }
+
+  _overviewCoverageHtml(data) {
+    const coverage = data?.coverage || {};
+    const total = Number(coverage.canonical_total || 0);
+    const covered = Number(coverage.covered_canonical || 0);
+    const pending = Number(data?.unreviewed_count || coverage.unreviewed || 0);
+    const state = data?.stale ? 'stale' : (!data?.overview ? 'unavailable' : (data?.partial ? 'partial' : 'current'));
+    const refs = (data?.source_references || []).slice(0, 12).map((ref) => {
+      const id = String(ref.memory_id || '');
+      const href = '/memory/' + encodeURIComponent(id);
+      return '<a class="overview-source" href="' + href + '" data-route="' + href
+        + '"><code>' + this._escapeHtml(id.slice(0, 8)) + '</code></a>';
+    }).join('');
+    return '<div class="overview-coverage" aria-label="Overview coverage">'
+      + '<div class="overview-coverage-row"><span>Coverage</span><strong>' + covered
+      + '/' + total + '</strong><span class="overview-state overview-state-' + state
+      + '">' + state + '</span></div><div class="overview-coverage-row"><span>Unreviewed</span><strong>'
+      + pending + '</strong><span class="overview-muted">'
+      + this._escapeHtml(data?.generated_at ? this.formatDate(data.generated_at) : 'Not generated')
+      + '</span></div>'
+      + (data?.stale_reason ? '<div class="overview-muted">'
+        + this._escapeHtml(data.stale_reason) + '</div>' : '')
+      + (refs ? '<div class="overview-sources"><span class="overview-muted">Sources</span>'
+        + refs + '</div>' : '') + '</div>';
   }
 
   /**
@@ -1060,7 +1093,7 @@ class ProjectsPage extends HTMLElement {
         <div class="project-actions">
           <button class="view-btn" data-project-id="${project.id}">View Memories</button>
           <button class="rename-btn" data-project-id="${project.id}" title="Rename this project, or merge it into an existing one">✏️ Rename</button>
-          <button class="overview-btn" data-project-id="${project.id}" title="LLM summary of this project's recent memories">📋 Overview</button>
+          <button class="overview-btn" data-project-id="${project.id}" title="Overview from active derived summaries">📋 Overview</button>
           <button class="maintenance-btn" data-project-id="${project.id}" title="Enrich / Improve / Reconcile all memories in this project">🔧 Maintenance</button>
           <button class="relay-share-btn" data-project-id="${project.id}">Share to relay</button>
           <button class="relay-autoshare-btn ${this._isAutoShareOn(project.id) ? 'on' : ''}" data-project-id="${project.id}">
@@ -1661,6 +1694,16 @@ style.textContent = `
   .ov-src { text-decoration: none; color: var(--primary-color); font-weight: 600; margin-right: 2px; }
   .ov-src:hover { text-decoration: underline; }
   .ov-foot { font-size: 0.72rem; color: var(--text-muted); margin-top: 10px; border-top: 1px solid var(--border-color); padding-top: 8px; }
+  .overview-coverage { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-color); font-size: 0.78rem; }
+  .overview-coverage-row, .overview-sources { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .overview-coverage-row strong { color: var(--text-primary); }
+  .overview-state { padding: 2px 7px; border: 1px solid var(--border-color); border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .overview-state-stale { color: var(--warning-text, #92400e); border-color: var(--warning-text, #92400e); }
+  .overview-state-partial { color: var(--info, #2563eb); border-color: var(--info, #2563eb); }
+  .overview-state-current { color: var(--success-color, #16a34a); border-color: var(--success-color, #16a34a); }
+  .overview-muted { color: var(--text-muted); }
+  .overview-source { color: var(--primary-color); text-decoration: none; }
+  .overview-source:hover { text-decoration: underline; }
 
   .maintenance-modal-overlay {
     position: fixed;

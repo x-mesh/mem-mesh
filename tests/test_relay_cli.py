@@ -290,6 +290,51 @@ async def test_relay_worker_verbose_reports_empty_outbox_queue(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_reconcile_only_worker_has_embedding_without_enabling_item_task(
+    tmp_path, monkeypatch
+):
+    import app.cli.relay as relay_cli
+
+    async def fake_resolve(db, settings, service):
+        return {
+            "provider": "openai",
+            "model": "test-model",
+            "source": "test",
+            "api_key": "test-key",
+            "base_url": "https://example.invalid",
+        }
+
+    monkeypatch.setattr(relay_cli, "resolve_service_llm", fake_resolve)
+    monkeypatch.setattr(relay_cli, "build_relay_enricher", lambda **kwargs: object())
+    db = Database(str(tmp_path / "relay.db"), embedding_dim=3)
+    await db.connect()
+    try:
+        worker = await relay_cli._build_relay_worker(
+            db=db,
+            settings=SimpleNamespace(
+                embedding_model="all-MiniLM-L6-v2",
+                relay_llm_timeout=5.0,
+                relay_http_timeout=5.0,
+            ),
+            service=RelayService(db),
+            relay_config={"prompt_version": "relay-v1"},
+            active={"reconcile"},
+            worker_id="worker-1",
+            max_attempts=3,
+            backoff_max=30.0,
+            lease_seconds=60,
+        )
+
+        assert worker.embedding_service is None
+        assert worker.reconcile_service.embedding_service is not None
+        assert (
+            worker.reconcile_service.embedding_service.model_name == "all-MiniLM-L6-v2"
+        )
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_refresh_worker_config_hot_reloads_without_rebuilding_heavy_resources(
     tmp_path,
 ):

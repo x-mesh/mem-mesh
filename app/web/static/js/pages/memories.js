@@ -455,7 +455,7 @@ class MemoriesPage extends HTMLElement {
     }
 
     footer.innerHTML = `
-      <span class="mem-count">${count} / ${total} memories</span>
+      <span class="mem-count">${count} / ${total} results</span>
       ${this.hasMore ? '<button class="mem-load-more-btn">Load more</button>' : ''}
       <button class="mem-shortcuts-hint" title="Keyboard shortcuts (?)"
         ><kbd>?</kbd> Shortcuts</button>

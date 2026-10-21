@@ -12,6 +12,7 @@ from ..database.base import Database
 from ..embeddings.service import EmbeddingService
 from ..errors import ContextNotFoundError
 from ..schemas.responses import ContextResponse, RelatedMemory, SearchResult
+from .effective_read import EffectiveReadService
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +36,15 @@ class ContextService:
         self.db = db
         self.embedding_service = embedding_service
         self.similarity_threshold = 0.3  # Context에서는 더 낮은 임계값 사용
+        self.effective_read = EffectiveReadService(db, embedding_service)
         logger.info("ContextService initialized")
 
     async def get_context(
-        self, memory_id: str, depth: int = 2, project_id: Optional[str] = None
+        self,
+        memory_id: str,
+        depth: int = 2,
+        project_id: Optional[str] = None,
+        read_view: str = "effective",
     ) -> ContextResponse:
         """
         메모리 맥락 조회
@@ -52,16 +58,47 @@ class ContextService:
             ContextResponse: 맥락 조회 결과
         """
         logger.info(f"Getting context for memory_id: {memory_id}, depth: {depth}")
+        if read_view not in {"effective", "raw"}:
+            raise ValueError("read_view must be 'effective' or 'raw'")
 
         # 1. 주요 메모리 로드
-        primary_memory = await self._get_primary_memory(memory_id)
-        if not primary_memory:
+        if read_view == "effective":
+            primary_memory = await self.effective_read.resolve_primary(
+                memory_id,
+                read_view=read_view,
+                filters={"project_id": project_id} if project_id else {},
+            )
+        else:
+            primary_memory = await self._get_primary_memory(memory_id)
+        if not primary_memory or (
+            project_id and primary_memory.project_id != project_id
+        ):
             raise ContextNotFoundError(f"Memory not found: {memory_id}")
 
         # 2. 관련 메모리 검색
-        related_memories = await self._find_related_memories(
-            primary_memory, depth, project_id
-        )
+        use_effective_related = primary_memory.result_kind == "curated"
+        if (
+            not use_effective_related
+            and read_view == "effective"
+            and primary_memory.project_id
+        ):
+            use_effective_related = (
+                await self.db.fetchone(
+                    "SELECT 1 FROM curated_results WHERE project_id = ? AND status = 'active' LIMIT 1",
+                    (primary_memory.project_id,),
+                )
+                is not None
+            )
+        if use_effective_related:
+            related_memories = await self.effective_read.related(
+                primary_memory,
+                depth=depth,
+                filters={"project_id": project_id} if project_id else {},
+            )
+        else:
+            related_memories = await self._find_related_memories(
+                primary_memory, depth, project_id
+            )
 
         # 3. 시간순 정렬된 timeline 생성
         timeline = await self._create_timeline(primary_memory, related_memories)

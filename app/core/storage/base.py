@@ -1,8 +1,9 @@
 """스토리지 백엔드 추상 인터페이스"""
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Any, Optional
 
+from ..schemas.reconciler import ReconcilerRunRequest
 from ..schemas.requests import AddParams, SearchParams, StatsParams, UpdateParams
 from ..schemas.responses import (
     AddResponse,
@@ -71,7 +72,11 @@ class StorageBackend(ABC):
 
     @abstractmethod
     async def get_context(
-        self, memory_id: str, depth: int, project_id: Optional[str]
+        self,
+        memory_id: str,
+        depth: int,
+        project_id: Optional[str],
+        read_view: str = "effective",
     ) -> ContextResponse:
         """컨텍스트 조회
 
@@ -138,4 +143,44 @@ class StorageBackend(ABC):
             ValueError: 잘못된 파라미터
             RuntimeError: 스토리지 오류
         """
+        pass
+
+    @abstractmethod
+    async def get_reconciler_run(self, project_id: str, run_id: str) -> dict[str, Any]:
+        pass
+
+    @abstractmethod
+    async def list_reconciler_proposals(
+        self, project_id: str, status: Optional[str], limit: int
+    ) -> dict[str, Any]:
+        pass
+
+    @abstractmethod
+    async def list_reconciler_candidates(
+        self, project_id: str, run_id: str, limit: int, offset: int
+    ) -> dict[str, Any]:
+        pass
+
+    @abstractmethod
+    async def get_reconciler_candidate(
+        self, project_id: str, candidate_id: str
+    ) -> dict[str, Any]:
+        pass
+
+    @abstractmethod
+    async def get_reconciler_result(
+        self, project_id: str, result_id: str
+    ) -> dict[str, Any]:
+        pass
+
+    @abstractmethod
+    async def start_reconciler_run(
+        self, request: ReconcilerRunRequest
+    ) -> dict[str, Any]:
+        pass
+
+    @abstractmethod
+    async def cancel_reconciler_run(
+        self, project_id: str, run_id: str
+    ) -> dict[str, Any]:
         pass

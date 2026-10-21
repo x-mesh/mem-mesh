@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Current schema version - increment when adding new migrations
-CURRENT_SCHEMA_VERSION = 16
+CURRENT_SCHEMA_VERSION = 20
 
 
 class SchemaMigrator:
@@ -49,6 +49,10 @@ class SchemaMigrator:
             14: self._migration_v14_stale_status,
             15: self._migration_v15_starred,
             16: self._migration_v16_hook_event_client_time,
+            17: self._migration_v17_reconciler,
+            18: self._migration_v18_external_llm_policy,
+            19: self._migration_v19_memory_read_revision,
+            20: self._migration_v20_reconciler_protection,
         }
 
     async def migrate(self) -> None:
@@ -532,3 +536,207 @@ class SchemaMigrator:
                 "ON memories(is_starred) WHERE is_starred = 1"
             )
             logger.info("Added is_starred on memories via migration v15")
+
+    async def _migration_v17_reconciler(self, migrator: "SchemaMigrator") -> None:
+        """Create the immutable Reconciler ledger and derived-result records."""
+
+        statements = [
+            """
+            CREATE TABLE IF NOT EXISTS reconciler_runs (
+                id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'created', dry_run INTEGER NOT NULL DEFAULT 1,
+                detector_version TEXT NOT NULL DEFAULT 'candidate-v1',
+                policy_hash TEXT NOT NULL, model TEXT, prompt_version TEXT,
+                budget_json TEXT NOT NULL DEFAULT '{}', stats_json TEXT NOT NULL DEFAULT '{}',
+                error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS reconciler_inputs (
+                id TEXT PRIMARY KEY, run_id TEXT NOT NULL, project_id TEXT NOT NULL,
+                memory_id TEXT NOT NULL, input_hash TEXT NOT NULL, content_hash TEXT,
+                metadata_hash TEXT NOT NULL, relation_hash TEXT NOT NULL, anchor_hash TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL, captured_at TEXT NOT NULL,
+                UNIQUE(run_id, memory_id), FOREIGN KEY(run_id) REFERENCES reconciler_runs(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS reconciler_candidates (
+                id TEXT PRIMARY KEY, run_id TEXT NOT NULL, project_id TEXT NOT NULL,
+                group_key TEXT NOT NULL, memory_ids_json TEXT NOT NULL,
+                signal_json TEXT NOT NULL DEFAULT '[]', input_policy_hash TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending_judgment', terminal_reason TEXT,
+                lease_owner TEXT, lease_until REAL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                UNIQUE(project_id, input_policy_hash), FOREIGN KEY(run_id) REFERENCES reconciler_runs(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS reconciler_proposals (
+                id TEXT PRIMARY KEY, candidate_id TEXT NOT NULL, run_id TEXT NOT NULL,
+                project_id TEXT NOT NULL, action TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'needs_approval', representative_memory_id TEXT,
+                body TEXT, claims_json TEXT NOT NULL DEFAULT '[]', proposal_json TEXT NOT NULL DEFAULT '{}',
+                input_policy_hash TEXT NOT NULL, expected_revision INTEGER NOT NULL DEFAULT 0,
+                decision TEXT, decision_actor TEXT, decision_at TEXT, result_id TEXT, error TEXT,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                UNIQUE(candidate_id, input_policy_hash), FOREIGN KEY(candidate_id) REFERENCES reconciler_candidates(id) ON DELETE CASCADE,
+                FOREIGN KEY(run_id) REFERENCES reconciler_runs(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS curated_results (
+                id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL UNIQUE, candidate_id TEXT NOT NULL,
+                project_id TEXT NOT NULL, representative_memory_id TEXT, body TEXT NOT NULL,
+                action TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'inactive', revision INTEGER NOT NULL DEFAULT 0,
+                input_policy_hash TEXT NOT NULL, created_at TEXT NOT NULL, activated_at TEXT,
+                cancelled_at TEXT, stale_at TEXT, stale_reason TEXT,
+                FOREIGN KEY(proposal_id) REFERENCES reconciler_proposals(id), FOREIGN KEY(candidate_id) REFERENCES reconciler_candidates(id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS curated_sources (
+                result_id TEXT NOT NULL, memory_id TEXT NOT NULL, input_hash TEXT NOT NULL,
+                source_role TEXT NOT NULL DEFAULT 'source', PRIMARY KEY(result_id, memory_id),
+                FOREIGN KEY(result_id) REFERENCES curated_results(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS curated_claims (
+                id TEXT PRIMARY KEY, result_id TEXT NOT NULL, claim_id TEXT NOT NULL,
+                text TEXT NOT NULL, conditions_json TEXT NOT NULL DEFAULT '[]',
+                UNIQUE(result_id, claim_id), FOREIGN KEY(result_id) REFERENCES curated_results(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS curated_claim_sources (
+                claim_id TEXT NOT NULL, result_id TEXT NOT NULL, memory_id TEXT NOT NULL,
+                input_hash TEXT NOT NULL, PRIMARY KEY(claim_id, memory_id),
+                FOREIGN KEY(claim_id) REFERENCES curated_claims(id) ON DELETE CASCADE,
+                FOREIGN KEY(result_id) REFERENCES curated_results(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS curated_relations (
+                id TEXT PRIMARY KEY, result_id TEXT NOT NULL, source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL, relation_type TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL, FOREIGN KEY(result_id) REFERENCES curated_results(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS reconciler_receipts (
+                id TEXT PRIMARY KEY, proposal_id TEXT, result_id TEXT, operation TEXT NOT NULL,
+                from_status TEXT, to_status TEXT, revision INTEGER NOT NULL DEFAULT 0,
+                actor TEXT, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL,
+                UNIQUE(proposal_id, operation, revision)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS reconciler_validations (
+                id TEXT PRIMARY KEY, proposal_id TEXT, result_id TEXT, stage TEXT NOT NULL,
+                status TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS reconciler_project_policy (
+                project_id TEXT PRIMARY KEY, auto_noise_suppression INTEGER NOT NULL DEFAULT 0,
+                auto_derived_relations INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS reconciler_state (
+                state_key TEXT PRIMARY KEY, state_value TEXT NOT NULL, updated_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS project_overview_sources (
+                project_id TEXT NOT NULL, result_id TEXT NOT NULL, result_revision INTEGER NOT NULL,
+                source_hash TEXT NOT NULL, generated_at TEXT NOT NULL, PRIMARY KEY(project_id, result_id),
+                FOREIGN KEY(result_id) REFERENCES curated_results(id)
+            )
+            """,
+        ]
+        for statement in statements:
+            await self.connection.execute(statement)
+
+        indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_reconciler_inputs_memory ON reconciler_inputs(memory_id, input_hash)",
+            "CREATE INDEX IF NOT EXISTS idx_reconciler_candidates_status ON reconciler_candidates(status, lease_until, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_reconciler_proposals_project_status ON reconciler_proposals(project_id, status, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_curated_results_project_status ON curated_results(project_id, status, revision)",
+            "CREATE INDEX IF NOT EXISTS idx_curated_sources_memory ON curated_sources(memory_id, result_id)",
+            "CREATE INDEX IF NOT EXISTS idx_curated_claim_sources_result ON curated_claim_sources(result_id, memory_id)",
+            "CREATE INDEX IF NOT EXISTS idx_curated_relations_active ON curated_relations(source_id, target_id, active)",
+        ]
+        for statement in indexes:
+            await self.connection.execute(statement)
+        logger.info("Added Memory Reconciler ledger via migration v17")
+
+    async def _migration_v18_external_llm_policy(
+        self, migrator: "SchemaMigrator"
+    ) -> None:
+        if await self._table_exists("reconciler_project_policy"):
+            await self._add_column_if_missing(
+                "reconciler_project_policy",
+                "allow_external_llm",
+                "INTEGER NOT NULL",
+                "0",
+            )
+
+    async def _migration_v19_memory_read_revision(
+        self, migrator: "SchemaMigrator"
+    ) -> None:
+        if not await self._table_exists("memories") or not await self._table_exists(
+            "reconciler_state"
+        ):
+            logger.warning(
+                "Skipped memory read revision triggers: required table missing"
+            )
+            return
+        update_columns = (
+            "content, content_hash, project_id, category, source, client, tags, "
+            "status, anchors, stale_status, is_starred, embedding, created_at, updated_at"
+        )
+        events = (
+            ("insert", "AFTER INSERT"),
+            ("update", f"AFTER UPDATE OF {update_columns}"),
+            ("delete", "AFTER DELETE"),
+        )
+        for name, event in events:
+            await self.connection.execute(
+                f"CREATE TRIGGER IF NOT EXISTS trg_memories_read_revision_{name} "
+                f"{event} ON memories BEGIN "
+                "INSERT INTO reconciler_state(state_key, state_value, updated_at) "
+                "VALUES ('read_revision', '1', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) "
+                "ON CONFLICT(state_key) DO UPDATE SET "
+                "state_value = CAST(CAST(state_value AS INTEGER) + 1 AS TEXT), "
+                "updated_at = excluded.updated_at; END"
+            )
+
+    async def _migration_v20_reconciler_protection(
+        self, migrator: "SchemaMigrator"
+    ) -> None:
+        if not await self._table_exists("memories"):
+            return
+        await self._add_column_if_missing(
+            "memories", "reconciler_protected", "INTEGER NOT NULL", "0"
+        )
+        if not await self._table_exists("reconciler_state"):
+            return
+        await self.connection.execute(
+            "DROP TRIGGER IF EXISTS trg_memories_read_revision_update"
+        )
+        update_columns = (
+            "content, content_hash, project_id, category, source, client, tags, "
+            "status, anchors, stale_status, is_starred, embedding, created_at, "
+            "updated_at, reconciler_protected"
+        )
+        await self.connection.execute(
+            "CREATE TRIGGER trg_memories_read_revision_update "
+            f"AFTER UPDATE OF {update_columns} ON memories BEGIN "
+            "INSERT INTO reconciler_state(state_key, state_value, updated_at) "
+            "VALUES ('read_revision', '1', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) "
+            "ON CONFLICT(state_key) DO UPDATE SET "
+            "state_value = CAST(CAST(state_value AS INTEGER) + 1 AS TEXT), "
+            "updated_at = excluded.updated_at; END"
+        )

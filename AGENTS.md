@@ -177,7 +177,7 @@ mcp_mem_mesh_batch_operations(operations=[
 
 > **MCP 전용.** `batch_operations` 는 REST API로 노출돼 있지 않다. HTTP
 > 클라이언트는 MCP JSON-RPC 2.0 엔드포인트 `POST /mcp/tools/call` 로
-> `{"name": "batch_operations", "arguments": {...}}` 형태로 호출해야 한다.
+> `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"batch_operations","arguments":{...}}}` 형태로 호출해야 한다.
 > 각 개별 연산(`add`, `search` 등)은 REST 엔드포인트를 갖고 있으므로,
 > 배치 호출이 불가능한 환경에서는 개별 호출을 직접 합성하면 된다.
 

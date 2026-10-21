@@ -51,6 +51,63 @@ async def test_schema_migrator_records_version(temp_db_path):
 
 
 @pytest.mark.asyncio
+async def test_memory_mutations_advance_read_revision_without_access_counter_churn(
+    temp_db_path,
+):
+    db = Database(temp_db_path)
+    await db.connect()
+    try:
+        before = await db.fetchone(
+            "SELECT state_value FROM reconciler_state WHERE state_key = 'read_revision'"
+        )
+        initial = int(before["state_value"]) if before else 0
+        await db.add_memory(
+            {
+                "id": "revision-test",
+                "content": "A canonical memory for revision tracking.",
+                "content_hash": "hash-one",
+                "project_id": "revision-project",
+                "category": "task",
+                "status": "canonical",
+                "source": "test",
+                "client": "pytest",
+                "embedding": b"\x00" * (db.embedding_dim * 4),
+                "tags": "[]",
+                "anchors": "{}",
+                "created_at": "2026-10-20T00:00:00+00:00",
+                "updated_at": "2026-10-20T00:00:00+00:00",
+            }
+        )
+        inserted = await db.fetchone(
+            "SELECT state_value FROM reconciler_state WHERE state_key = 'read_revision'"
+        )
+        await db.execute(
+            "UPDATE memories SET access_count = 1 WHERE id = ?", ("revision-test",)
+        )
+        accessed = await db.fetchone(
+            "SELECT state_value FROM reconciler_state WHERE state_key = 'read_revision'"
+        )
+        await db.execute(
+            "UPDATE memories SET content = ? WHERE id = ?",
+            ("A changed canonical memory.", "revision-test"),
+        )
+        updated = await db.fetchone(
+            "SELECT state_value FROM reconciler_state WHERE state_key = 'read_revision'"
+        )
+        await db.execute("DELETE FROM memories WHERE id = ?", ("revision-test",))
+        deleted = await db.fetchone(
+            "SELECT state_value FROM reconciler_state WHERE state_key = 'read_revision'"
+        )
+
+        assert int(inserted["state_value"]) == initial + 1
+        assert accessed["state_value"] == inserted["state_value"]
+        assert int(updated["state_value"]) == initial + 2
+        assert int(deleted["state_value"]) == initial + 3
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_schema_migrator_adds_missing_columns(temp_db_path):
     """Test that missing columns are added during migration."""
     # First, create a database with old schema (missing columns)
@@ -189,9 +246,94 @@ async def test_add_column_if_missing():
                 os.unlink(p)
 
 
-def test_current_schema_version_is_16():
-    """CURRENT_SCHEMA_VERSION bumped to 16 for hook_events.client_fired_at."""
-    assert CURRENT_SCHEMA_VERSION == 16
+def test_current_schema_version_includes_memory_reconciler():
+    """CURRENT_SCHEMA_VERSION includes the Memory Reconciler ledger."""
+    assert CURRENT_SCHEMA_VERSION == 20
+
+
+@pytest.mark.asyncio
+async def test_reconciler_protection_defaults_off_and_bumps_read_revision(temp_db_path):
+    db = Database(temp_db_path)
+    await db.connect()
+    try:
+        await db.add_memory(
+            {
+                "id": "protected-test",
+                "content": "A canonical memory used to verify protection metadata.",
+                "content_hash": "hash",
+                "project_id": "test-project",
+                "category": "task",
+                "source": "test",
+                "embedding": b"\x00" * 16,
+                "created_at": "2026-10-20T00:00:00Z",
+                "updated_at": "2026-10-20T00:00:00Z",
+            }
+        )
+        before = await db.fetchone(
+            "SELECT state_value FROM reconciler_state WHERE state_key = 'read_revision'"
+        )
+        row = await db.fetchone(
+            "SELECT reconciler_protected FROM memories WHERE id = 'protected-test'"
+        )
+        assert row["reconciler_protected"] == 0
+        await db.execute(
+            "UPDATE memories SET reconciler_protected = 1 WHERE id = 'protected-test'"
+        )
+        after = await db.fetchone(
+            "SELECT state_value FROM reconciler_state WHERE state_key = 'read_revision'"
+        )
+        assert int(after["state_value"]) == int(before["state_value"]) + 1
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_external_llm_policy_defaults_to_denied(temp_db_path):
+    db = Database(temp_db_path)
+    await db.connect()
+    try:
+        columns = await db.fetchall("PRAGMA table_info(reconciler_project_policy)")
+        assert "allow_external_llm" in {row["name"] for row in columns}
+        await db.execute(
+            "INSERT INTO reconciler_project_policy(project_id, updated_at) VALUES (?, datetime('now'))",
+            ("new-project",),
+        )
+        row = await db.fetchone(
+            "SELECT allow_external_llm FROM reconciler_project_policy WHERE project_id = ?",
+            ("new-project",),
+        )
+        assert row["allow_external_llm"] == 0
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_v18_preserves_existing_reconciler_policy_flags(temp_db_path):
+    db = Database(temp_db_path)
+    await db.connect()
+    await db.execute(
+        "INSERT INTO reconciler_project_policy(project_id, auto_noise_suppression, auto_derived_relations, revision, updated_at) VALUES ('existing', 1, 1, 7, datetime('now'))"
+    )
+    await db.execute(
+        "ALTER TABLE reconciler_project_policy DROP COLUMN allow_external_llm"
+    )
+    await db.execute("DELETE FROM _schema_migrations WHERE version >= 18")
+    await db.close()
+
+    upgraded = Database(temp_db_path)
+    await upgraded.connect()
+    try:
+        row = await upgraded.fetchone(
+            "SELECT auto_noise_suppression, auto_derived_relations, allow_external_llm, revision FROM reconciler_project_policy WHERE project_id = 'existing'"
+        )
+        assert dict(row) == {
+            "auto_noise_suppression": 1,
+            "auto_derived_relations": 1,
+            "allow_external_llm": 0,
+            "revision": 7,
+        }
+    finally:
+        await upgraded.close()
 
 
 @pytest.mark.asyncio

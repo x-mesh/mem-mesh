@@ -14,6 +14,7 @@ class MemoryDetailPage extends HTMLElement {
     super();
     this.memoryId = null;
     this.memory = null;
+    this.curatedDetail = null;
     this.contextData = [];
     this.isLoading = true;
     this.isEditing = false;
@@ -238,6 +239,10 @@ class MemoryDetailPage extends HTMLElement {
    */
   async loadMemoryData() {
     if (!this.memoryId) return;
+    if (this.memoryId.startsWith('cr_')) {
+      await this.loadCuratedData();
+      return;
+    }
     
     this.isLoading = true;
     this.render(); // 로딩 상태 즉시 렌더링
@@ -285,6 +290,42 @@ class MemoryDetailPage extends HTMLElement {
       console.log('Rendering final state with isLoading:', this.isLoading);
       this.render();
       if (this.memory) { this._loadEnrichment(); this._loadOverview(); }
+    }
+  }
+
+  async loadCuratedData() {
+    this.isLoading = true;
+    this.memory = null;
+    this.curatedDetail = null;
+    this.render();
+    try {
+      const context = await window.app.apiClient.getContext(this.memoryId, 2);
+      if (context.primary_memory?.result_kind !== 'curated') {
+        throw new Error('Derived result is unavailable');
+      }
+      const projectId = context.primary_memory.project_id;
+      const params = new URLSearchParams({ project_id: projectId });
+      const detail = await window.app.apiClient.get(
+        '/curation/reconciler/results/' + encodeURIComponent(this.memoryId) + '?' + params.toString()
+      );
+      if (!Array.isArray(detail?.sources) || !Array.isArray(detail?.claims)
+          || detail.sources.some(source => !source || typeof source !== 'object')
+          || detail.claims.some(claim => !claim || typeof claim !== 'object'
+            || !Array.isArray(claim.source_refs)
+            || claim.source_refs.some(source => !source || typeof source !== 'object'))) {
+        throw new Error('Invalid derived result evidence');
+      }
+      this.curatedDetail = detail;
+      this.memory = context.primary_memory;
+      this.contextData = context.related_memories || [];
+    } catch (error) {
+      console.error('Failed to load derived memory:', error);
+      if (error.status !== 404) {
+        window.app?.errorHandler?.showError('Failed to load derived memory');
+      }
+    } finally {
+      this.isLoading = false;
+      this.render();
     }
   }
 
@@ -1497,6 +1538,10 @@ class MemoryDetailPage extends HTMLElement {
       this.showNotFound();
       return;
     }
+    if (this.memory.result_kind === 'curated') {
+      this.renderCurated();
+      return;
+    }
     
     console.log('Rendering memory content for:', this.memory.id);
     
@@ -1556,6 +1601,12 @@ class MemoryDetailPage extends HTMLElement {
               <div class="meta-item">
                 <span class="meta-label">Project:</span>
                 <a class="project-badge" href="/projects?project_id=${encodeURIComponent(this.memory.project_id)}" aria-label="View project ${this.escapeHtml(this.memory.project_id)}">${this.escapeHtml(this.memory.project_id)}</a>
+              </div>
+            ` : ''}
+            ${this.memory.reconciler_protected ? `
+              <div class="meta-item">
+                <span class="meta-label">Reconciler:</span>
+                <span class="reconciler-protected-badge">LLM evidence excluded</span>
               </div>
             ` : ''}
             <div class="meta-item">
@@ -1705,6 +1756,72 @@ class MemoryDetailPage extends HTMLElement {
     
     console.log('=== RENDER COMPLETE ===');
   }
+
+  renderCurated() {
+    const memory = this.memory;
+    const detail = this.curatedDetail;
+    const sources = detail.sources || [];
+    const claims = detail.claims || [];
+    const sourceLink = (source) => {
+      const id = String(source.memory_id || '');
+      return '<a href="/memory/' + encodeURIComponent(id) + '" data-route="/memory/'
+        + encodeURIComponent(id) + '">' + this.escapeHtml(id) + '</a>';
+    };
+    const conditionText = (values) => {
+      if (!Array.isArray(values)) return '';
+      const characters = values.length > 3
+        && values.every((item) => typeof item === 'string' && item.length === 1);
+      return characters ? values.join('') : values.join('; ');
+    };
+    this.innerHTML = `
+      <div class="memory-header curated-memory-header">
+        <div class="header-actions">
+          <button class="back-btn" title="Go back">← Back</button>
+          <button class="refresh-btn" title="Refresh">Refresh</button>
+        </div>
+      </div>
+      <div class="memory-content curated-memory-content">
+        <div class="memory-main">
+          <div class="memory-meta">
+            <div class="meta-item"><span class="meta-label">Type:</span> Derived ${this.escapeHtml(detail.action || '')}</div>
+            <div class="meta-item"><span class="meta-label">Status:</span> ${this.escapeHtml(detail.status || '')}</div>
+            <div class="meta-item"><span class="meta-label">Project:</span> ${this.escapeHtml(memory.project_id || '')}</div>
+            <div class="meta-item"><span class="meta-label">ID:</span>
+              <code class="memory-id-value" title="Click to copy the full result ID">${this.escapeHtml(memory.id)}</code>
+            </div>
+          </div>
+          <div class="memory-body curated-memory-body">
+            <div class="memory-text">${this.formatContent(memory.content)}</div>
+            <section class="curated-memory-claims" aria-label="Claims and evidence">
+              <h3>Claims and evidence <span>(${claims.length})</span></h3>
+              <ol>${claims.map((claim) => `
+                <li>
+                  <p>${this.escapeHtml(claim.text || '')}</p>
+                  ${conditionText(claim.conditions) ? '<p class="curated-memory-condition">Condition: '
+                    + this.escapeHtml(conditionText(claim.conditions)) + '</p>' : ''}
+                  <div class="curated-memory-references">Evidence: ${(claim.source_refs || []).map((source) =>
+                    sourceLink(source) + ' <code title="' + this.escapeHtml(source.input_hash || '')
+                      + '">' + this.escapeHtml(String(source.input_hash || '').slice(0, 12)) + '</code>'
+                  ).join(', ')}</div>
+                </li>
+              `).join('')}</ol>
+              ${detail.rationale ? '<details><summary>Why this result</summary><p>'
+                + this.escapeHtml(detail.rationale) + '</p></details>' : ''}
+            </section>
+            <section class="curated-memory-sources" aria-label="Source memories">
+              <h3>Source memories <span>(${sources.length})</span></h3>
+              <p class="curated-memory-note">This summary is read-only. Source memories remain unchanged.</p>
+              <ul>${sources.map((source) => {
+                return '<li>' + sourceLink(source)
+                  + (source.source_role === 'representative' ? ' <span>representative</span>' : '')
+                  + '</li>';
+              }).join('')}</ul>
+            </section>
+          </div>
+        </div>
+      </div>
+    `;
+  }
 }
 
 // Define the custom element
@@ -1713,6 +1830,44 @@ customElements.define('memory-detail-page', MemoryDetailPage);
 // Add component styles
 const style = document.createElement('style');
 style.textContent = `
+  .memory-detail-page .curated-memory-header,
+  .memory-detail-page .memory-content.curated-memory-content {
+    width: min(100%, 960px);
+    margin-inline: auto;
+  }
+  .memory-detail-page .curated-memory-header { display: block; margin-bottom: 1rem; }
+  .memory-detail-page .curated-memory-header .header-actions { width: 100%; }
+  .memory-detail-page .memory-content.curated-memory-content { display: block; padding: 0; }
+  .memory-detail-page .curated-memory-content .memory-main { min-width: 0; }
+  .memory-detail-page .curated-memory-content .memory-meta { align-items: center; }
+  .memory-detail-page .curated-memory-body { padding: 2rem; }
+  .curated-memory-body .memory-text { max-width: 72ch; margin: 0; }
+  .curated-memory-claims { border-top: 1px solid var(--border-color); margin-top: 2rem; padding-top: 1.5rem; }
+  .curated-memory-claims h3 { margin: 0 0 1rem; font-size: 1rem; }
+  .curated-memory-claims h3 span { color: var(--text-secondary); font-weight: 400; }
+  .curated-memory-claims ol { margin: 0; padding-left: 1.25rem; }
+  .curated-memory-claims li { margin: 0 0 1rem; padding-left: 0.25rem; }
+  .curated-memory-claims li p { margin: 0 0 0.4rem; }
+  .curated-memory-condition,
+  .curated-memory-references { color: var(--text-secondary); font-size: 0.875rem; }
+  .curated-memory-references a { color: var(--primary-color); overflow-wrap: anywhere; }
+  .curated-memory-references code { font-size: 0.75rem; }
+  .curated-memory-claims details { margin-top: 1rem; }
+  .curated-memory-claims summary { cursor: pointer; }
+  .curated-memory-sources { border-top: 1px solid var(--border-color); margin-top: 2rem; padding-top: 1.5rem; }
+  .curated-memory-sources h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+  .curated-memory-sources h3 span,
+  .curated-memory-sources li span { color: var(--text-secondary); font-weight: 400; }
+  .curated-memory-note { color: var(--text-secondary); margin: 0 0 1rem; font-size: 0.875rem; }
+  .curated-memory-sources ul { margin: 0; padding-left: 1.25rem; }
+  .curated-memory-sources li { margin: 0.5rem 0; overflow-wrap: anywhere; }
+  .curated-memory-sources a { color: var(--primary-color); text-underline-offset: 2px; }
+  .curated-memory-sources a:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+  @media (max-width: 768px) {
+    .memory-detail-page .curated-memory-body { padding: 1.25rem; }
+    .memory-detail-page .curated-memory-header .header-actions { flex-direction: row; }
+    .memory-detail-page .curated-memory-content .memory-meta { align-items: flex-start; }
+  }
   .memory-detail-page {
     padding: var(--space-6) 0; /* 상하 패딩만 유지, 좌우는 main-content에서 처리 */
     width: 100%;
@@ -1892,6 +2047,14 @@ style.textContent = `
 
   .project-badge:hover {
     filter: brightness(0.92);
+  }
+
+  .reconciler-protected-badge {
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
   }
 
   .project-badge:focus-visible {

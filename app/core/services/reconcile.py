@@ -32,10 +32,12 @@ never touches request latency.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from ..database.base import Database
+from ..redaction import redact_secrets
 from ..schemas.relations import RelationCreate, RelationType
+from .quality_gate import reconciler_evidence_exclusion
 from .relation import RelationService
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ logger = logging.getLogger(__name__)
 # 'keep_both' produces no relation; 'merge'/'conflict' record a CONFLICTS pair
 # for the human to resolve.
 _TERMINAL_STATUSES = ("done", "stale", "dead_letter")
+MAX_RECONCILE_INPUT_CHARS = 48000
 
 
 class ReconcileService:
@@ -59,6 +62,7 @@ class ReconcileService:
         backoff_max_seconds: float = 3600.0,
         lease_seconds: int = 120,
         min_age_gap_days: float = 3.0,
+        can_send_llm: Optional[Callable[[str, str], Awaitable[bool]]] = None,
     ):
         self.db = db
         self.relation_service = RelationService(db)
@@ -70,6 +74,7 @@ class ReconcileService:
         # duplicate-record pairs (which dominated the candidate set) drop out
         # while every genuine reversal found survives.
         self.min_age_gap_days = min_age_gap_days
+        self.can_send_llm = can_send_llm
 
     @staticmethod
     def _now_iso() -> str:
@@ -139,7 +144,8 @@ class ReconcileService:
 
     async def _get_memory(self, memory_id: str) -> Optional[dict]:
         row = await self.db.fetchone(
-            "SELECT id, content, content_hash, status, created_at "
+            "SELECT id, content, content_hash, status, created_at, project_id, "
+            "reconciler_protected "
             "FROM memories WHERE id = ?",
             (memory_id,),
         )
@@ -211,8 +217,56 @@ class ReconcileService:
                 await self._finish(item["id"], "done")
                 return {"job_id": item["id"], "processed": True, "too_close": True}
 
-            # LLM judgment (off the write path).
-            payload = await enricher.reconcile(new["content"], old["content"])
+            if new["reconciler_protected"] or old["reconciler_protected"]:
+                reason = "source is protected from Reconciler LLM judgment"
+                await self.db.execute(
+                    "UPDATE reconcile_queue SET status = 'dead_letter', last_error = ?, "
+                    "locked_by = NULL, locked_at = NULL, updated_at = ? WHERE id = ?",
+                    (reason, self._now_iso(), item["id"]),
+                )
+                return {"job_id": item["id"], "processed": False, "error": reason}
+
+            if self.can_send_llm is not None:
+                project_id = str(new.get("project_id") or "")
+                if not project_id or project_id != str(old.get("project_id") or ""):
+                    policy_error = (
+                        "legacy reconcile project scope is unknown or mismatched"
+                    )
+                elif not await self.can_send_llm(
+                    project_id, getattr(enricher, "base_url", "")
+                ):
+                    policy_error = "external LLM is not allowed for this project"
+                else:
+                    policy_error = ""
+                if policy_error:
+                    await self.db.execute(
+                        "UPDATE reconcile_queue SET status = 'dead_letter', last_error = ?, locked_by = NULL, locked_at = NULL, updated_at = ? WHERE id = ?",
+                        (policy_error, self._now_iso(), item["id"]),
+                    )
+                    return {
+                        "job_id": item["id"],
+                        "processed": False,
+                        "error": policy_error,
+                    }
+
+            excluded = reconciler_evidence_exclusion(
+                new["content"]
+            ) or reconciler_evidence_exclusion(old["content"])
+            if excluded:
+                reason = f"excluded evidence: {excluded}; use distilled project facts"
+            elif len(new["content"]) + len(old["content"]) > MAX_RECONCILE_INPUT_CHARS:
+                reason = "legacy reconcile evidence character budget exceeded; split or review"
+            else:
+                reason = ""
+            if reason:
+                await self.db.execute(
+                    "UPDATE reconcile_queue SET status = 'dead_letter', last_error = ?, locked_by = NULL, locked_at = NULL, updated_at = ? WHERE id = ?",
+                    (reason, self._now_iso(), item["id"]),
+                )
+                return {"job_id": item["id"], "processed": False, "error": reason}
+            payload = await enricher.reconcile(
+                redact_secrets(new["content"]), redact_secrets(old["content"])
+            )
             verdict = str(payload.get("verdict", "conflict")).strip().lower()
             proposal = self._proposal(verdict, new["id"], old["id"])
 

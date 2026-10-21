@@ -49,6 +49,21 @@ Modular route structure for better maintainability:
 - `route_modules/search.py` - Search endpoints (63 lines)
   - GET /api/memories/search - Search memories
   - POST /api/memories/search - Advanced search
+- `route_modules/curation.py` - Reconciler run, proposal, activation, and cancellation endpoints
+  - POST /api/curation/reconciler/runs - Create a dry-run or activation-capable run
+  - GET /api/curation/reconciler/runs/{id} - Read run progress and counts
+  - GET /api/curation/reconciler/runs - List recent runs within a project
+  - GET /api/curation/reconciler/metrics - Read project-scoped run metrics
+  - GET /api/curation/reconciler/runs/{id}/candidates - Page through project-scoped candidates
+  - GET /api/curation/reconciler/candidates/{id} - Read a candidate's snapshot, proposal, result, receipt, and validation
+  - POST /api/curation/reconciler/runs/{id}/cancel - Stop remaining candidate work
+  - GET /api/curation/reconciler/proposals - List proposals
+  - POST /api/curation/reconciler/proposals/{id}/decision - Approve or reject a proposal
+  - POST /api/curation/reconciler/results/{id}/cancel - Cancel a curated result
+  - GET /api/curation/reconciler/results/{id} - Read status, claims, and source versions within a project
+- `route_modules/overview.py` - Project overview and reconciler policy endpoints
+  - GET/PUT /api/projects/{project_id}/policy - Read or update project opt-in policy
+    - `allow_external_llm` defaults to false and gates dry-run and live Reconciler LLM calls
 - `route_modules/stats.py` - Statistics endpoints (65 lines)
   - GET /api/memories/stats - Overall statistics
   - GET /api/memories/stats/projects - Project statistics

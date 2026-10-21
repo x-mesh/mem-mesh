@@ -11,7 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.core.config import get_settings
-from app.core.errors import ChatError
+from app.core.errors import ChatError, ReconcilerConflictError
+from app.core.schemas.reconciler import ReconcilerPolicy
+from app.core.services.memory_reconciler import MemoryReconcilerService
 from app.core.services.overview import OverviewScheduler, OverviewService
 from app.web.common.dependencies import get_database
 
@@ -34,6 +36,27 @@ def get_chat_service_dep(db=Depends(get_database)):
     return ChatService(db)
 
 
+def get_reconciler_service(db=Depends(get_database)) -> MemoryReconcilerService:
+    return MemoryReconcilerService(db)
+
+
+@router.get("/{project_id}/policy")
+async def get_project_reconciler_policy(
+    project_id: str,
+    service: MemoryReconcilerService = Depends(get_reconciler_service),
+) -> dict:
+    return await service.get_policy(project_id)
+
+
+@router.put("/{project_id}/policy")
+async def set_project_reconciler_policy(
+    project_id: str,
+    payload: ReconcilerPolicy,
+    service: MemoryReconcilerService = Depends(get_reconciler_service),
+) -> dict:
+    return await service.set_policy(project_id, payload)
+
+
 @router.get("/{project_id}/overview")
 async def get_project_overview(
     project_id: str,
@@ -53,7 +76,7 @@ async def generate_project_overview(
     service: OverviewService = Depends(get_overview_service),
     chat_service=Depends(get_chat_service_dep),
 ) -> dict:
-    """(Re)generate the overview from the project's recent memories."""
+    """Generate an overview from active derived summaries."""
     settings = get_settings()
     if not await chat_service.is_configured(settings):
         raise HTTPException(
@@ -63,6 +86,8 @@ async def generate_project_overview(
         result = await service.generate(
             project_id=project_id, chat_service=chat_service, settings=settings
         )
+    except ReconcilerConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     except ChatError as exc:
         raise HTTPException(status_code=exc.http_status, detail=str(exc))
     except Exception as exc:
@@ -70,7 +95,8 @@ async def generate_project_overview(
         raise HTTPException(status_code=500, detail=str(exc))
     if result.get("empty"):
         raise HTTPException(
-            status_code=404, detail="Project has no memories to summarize"
+            status_code=404,
+            detail="Project has no active derived summaries. Run Memory Reconciler first.",
         )
     return {"project_id": project_id, **result}
 

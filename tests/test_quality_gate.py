@@ -18,6 +18,7 @@ from app.core.services.quality_gate import (
     derivability_hint,
     is_conversation_dump,
     is_derivable_from_git,
+    reconciler_evidence_exclusion,
 )
 
 # A raw stop-hook Q&A pairing dump (Q: …\n\nA: … format).
@@ -26,6 +27,48 @@ _QA_DUMP = (
     "A: Store the memory, then enqueue it to the async improve worker so nothing "
     "blocks the save and no LLM runs synchronously on the add path."
 )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"messages":[{"role":"user","content":"raw conversation"}]}',
+        '{"type":"assistant","message":{"role":"assistant","content":"raw conversation"}}\n{"type":"user","message":{"role":"user","content":"next turn"}}',
+        '```json\n{"role":"tool","content":"raw output"}\n```',
+        '{"content":[{"type":"tool_use","name":"search","input":{"q":"private"}}]}',
+        '{"tool_calls":[{"function":{"name":"search","arguments":"{}"}}]}',
+        _QA_DUMP,
+    ],
+)
+def test_reconciler_excludes_complete_conversation_and_tool_formats(content):
+    assert reconciler_evidence_exclusion(content) is not None
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "Use tool_result blocks for the provider protocol.",
+        '{"project":"landing-maker","themes":7}',
+        '{"type":{"name":"record"},"role":["maintainer"]}',
+        "def add(a, b):\n    return a + b",
+        "User: one quoted line in a distilled note.",
+    ],
+)
+def test_reconciler_keeps_distilled_notes_and_ordinary_json(content):
+    assert reconciler_evidence_exclusion(content) is None
+
+
+def test_reconciler_holds_evidence_when_json_decoder_reports_depth_limit(monkeypatch):
+    def reject_nested_payload(_text):
+        raise RecursionError("decoder nesting limit")
+
+    monkeypatch.setattr(
+        "app.core.services.quality_gate.json.loads", reject_nested_payload
+    )
+    assert (
+        reconciler_evidence_exclusion('{"messages": []}')
+        == "structured_payload_depth_limit"
+    )
 
 
 # ── pure detection: is_conversation_dump ────────────────────────────────────

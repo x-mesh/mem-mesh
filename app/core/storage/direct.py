@@ -2,12 +2,13 @@
 
 import json
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from ..config import get_settings
 from ..database.base import Database
 from ..embeddings.service import EmbeddingService
 from ..errors import ContextNotFoundError
+from ..schemas.reconciler import ReconcilerRunRequest
 from ..schemas.requests import AddParams, SearchParams, StatsParams, UpdateParams
 from ..schemas.responses import (
     AddResponse,
@@ -191,6 +192,100 @@ class DirectStorageBackend(StorageBackend):
             logger.error(f"Error during DirectStorageBackend shutdown: {e}")
             raise RuntimeError(f"Failed to shutdown storage backend: {e}")
 
+    async def get_reconciler_run(self, project_id: str, run_id: str) -> dict[str, Any]:
+        if self.db is None:
+            raise RuntimeError("Storage backend not initialized")
+        from ..services.memory_reconciler import MemoryReconcilerService
+
+        run = await MemoryReconcilerService(self.db).get_run(run_id)
+        if run["project_id"] != project_id:
+            raise ValueError("reconciler run not found")
+        return run
+
+    async def list_reconciler_proposals(
+        self, project_id: str, status: Optional[str], limit: int
+    ) -> dict[str, Any]:
+        if self.db is None:
+            raise RuntimeError("Storage backend not initialized")
+        from ..services.memory_reconciler import MemoryReconcilerService
+
+        proposals = await MemoryReconcilerService(self.db).list_proposals(
+            project_id=project_id, status=status, limit=limit
+        )
+        return {"proposals": proposals, "count": len(proposals)}
+
+    async def list_reconciler_candidates(
+        self, project_id: str, run_id: str, limit: int, offset: int
+    ) -> dict[str, Any]:
+        if self.db is None:
+            raise RuntimeError("Storage backend not initialized")
+        from ..services.memory_reconciler import MemoryReconcilerService
+
+        return await MemoryReconcilerService(self.db).list_candidates(
+            run_id, project_id, limit, offset
+        )
+
+    async def get_reconciler_candidate(
+        self, project_id: str, candidate_id: str
+    ) -> dict[str, Any]:
+        if self.db is None:
+            raise RuntimeError("Storage backend not initialized")
+        from ..services.memory_reconciler import MemoryReconcilerService
+
+        return await MemoryReconcilerService(self.db).get_candidate_detail(
+            candidate_id, project_id
+        )
+
+    async def get_reconciler_result(
+        self, project_id: str, result_id: str
+    ) -> dict[str, Any]:
+        if self.db is None:
+            raise RuntimeError("Storage backend not initialized")
+        from ..services.memory_reconciler import MemoryReconcilerService
+
+        return await MemoryReconcilerService(self.db).get_result_detail(
+            result_id, project_id
+        )
+
+    async def start_reconciler_run(
+        self, request: ReconcilerRunRequest
+    ) -> dict[str, Any]:
+        if self.db is None:
+            raise RuntimeError("Storage backend not initialized")
+        from ..services.llm_resolver import resolve_service_llm
+        from ..services.memory_reconciler import MemoryReconcilerService
+
+        resolved = await resolve_service_llm(self.db, get_settings(), "reconcile")
+        service = MemoryReconcilerService(
+            self.db,
+            embedding_service=self.embedding_service,
+            model=resolved["model"],
+            provider=resolved["provider"],
+            llm_base_url=resolved["base_url"],
+            llm_configured=bool(resolved["api_key"] and resolved["model"]),
+        )
+        return await service.create_run(
+            request.project_id,
+            dry_run=request.dry_run,
+            anchored_path=request.anchored_path,
+            created_after=request.created_after,
+            created_before=request.created_before,
+            defer_detection=True,
+        )
+
+    async def cancel_reconciler_run(
+        self, project_id: str, run_id: str
+    ) -> dict[str, Any]:
+        if self.db is None:
+            raise RuntimeError("Storage backend not initialized")
+        from ..services.memory_reconciler import MemoryReconcilerService
+
+        service = MemoryReconcilerService(self.db)
+        run = await service.get_run(run_id)
+        if run["project_id"] != project_id:
+            raise ValueError("reconciler run not found")
+        return await service.cancel_run(run_id)
+
     async def add_memory(self, params: AddParams) -> AddResponse:
         """메모리 추가
 
@@ -218,6 +313,7 @@ class DirectStorageBackend(StorageBackend):
                 client=params.client,
                 tags=params.tags,
                 anchors=params.anchors,
+                reconciler_protected=params.reconciler_protected,
             )
 
             logger.info(f"Memory added successfully: {result.id}")
@@ -275,6 +371,7 @@ class DirectStorageBackend(StorageBackend):
                 temporal_mode=params.temporal_mode,
                 anchored_path=params.anchored_path,
                 starred_only=params.starred_only,
+                read_view=params.read_view,
             )
 
             logger.info(
@@ -308,6 +405,7 @@ class DirectStorageBackend(StorageBackend):
                 recency_weight=params.recency_weight,
                 anchored_path=params.anchored_path,
                 starred_only=params.starred_only,
+                read_view=params.read_view,
             )
 
             logger.info(
@@ -323,7 +421,11 @@ class DirectStorageBackend(StorageBackend):
             raise RuntimeError(f"Failed to search memories: {e}")
 
     async def get_context(
-        self, memory_id: str, depth: int, project_id: Optional[str]
+        self,
+        memory_id: str,
+        depth: int,
+        project_id: Optional[str],
+        read_view: str = "effective",
     ) -> ContextResponse:
         """컨텍스트 조회
 
@@ -346,7 +448,10 @@ class DirectStorageBackend(StorageBackend):
             logger.debug(f"Getting context for memory_id: {memory_id}, depth: {depth}")
 
             result = await self.context_service.get_context(
-                memory_id=memory_id, depth=depth, project_id=project_id
+                memory_id=memory_id,
+                depth=depth,
+                project_id=project_id,
+                read_view=read_view,
             )
 
             logger.info(
@@ -393,6 +498,7 @@ class DirectStorageBackend(StorageBackend):
                 category=params.category,
                 tags=params.tags,
                 project_id=params.project_id,
+                reconciler_protected=params.reconciler_protected,
             )
 
             logger.info(f"Memory updated successfully: {memory_id}")

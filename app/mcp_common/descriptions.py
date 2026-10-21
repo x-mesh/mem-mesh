@@ -15,6 +15,13 @@ MCP Tool Descriptions - 16개 도구 설명의 Single Source of Truth.
 """
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
+    "reconciler_run": "Read one Memory Reconciler run and its candidate progress within a project.",
+    "reconciler_proposals": "List Memory Reconciler proposals within a project. This tool does not approve or activate results.",
+    "reconciler_candidates": "List candidates and their status for one Memory Reconciler run within a project.",
+    "reconciler_candidate": "Read one Memory Reconciler candidate with its inputs, proposals, results, and validation history within a project.",
+    "reconciler_result": "Read one derived Memory Reconciler result with its status, claims, and cited source versions within a project.",
+    "reconciler_start": "Start a project-scoped Memory Reconciler run. Dry-run is the default; live runs can activate eligible derived results.",
+    "reconciler_cancel": "Cancel remaining candidate work for one project-scoped Memory Reconciler run. Existing active results remain unchanged.",
     # ===== T1: Used every session (2-3 sentences + 1 example) =====
     "session_resume": (
         "Query the active session for a project and restore its pins/context. "
@@ -28,6 +35,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Search memories using hybrid search (vector + FTS5). "
         'Use query="" for recent memories sorted by date. '
         "Supports project_id, category, time_range, date_from/date_to, and recency_weight filters. "
+        'Use read_view="raw" to bypass curated results and read canonical memories. '
         "Use anchored_path to scope results to memories git-anchored to a file or "
         "directory prefix (repo-relative, e.g. 'app/core/'); forces local scope. "
         'Example: {"query": "auth decision", "project_id": "my-app", "limit": 5}'
@@ -64,7 +72,8 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "context": (
         "Retrieve a memory and its related neighbors by memory_id, or several "
         "memories at once via ids=[...] (max 10; per-id not_found instead of "
-        "failing the batch). Use after search to drill into filtered results."
+        "failing the batch). Use after search to drill into filtered results. "
+        'Use read_view="raw" to keep the canonical view.'
     ),
     "update": "Update content, category, or tags of an existing memory by memory_id.",
     "batch_operations": (

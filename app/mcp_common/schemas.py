@@ -115,6 +115,11 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "maxItems": 20,
                     },
                     "anchors": ANCHORS_SCHEMA,
+                    "reconciler_protected": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Exclude this memory from Reconciler LLM evidence.",
+                    },
                 },
                 "required": ["content"],
                 "additionalProperties": False,
@@ -231,6 +236,12 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         ),
                         "default": False,
                     },
+                    "read_view": {
+                        "type": "string",
+                        "description": "Read view: effective includes valid curated results, raw returns canonical memories",
+                        "default": "effective",
+                        "enum": ["effective", "raw"],
+                    },
                 },
                 "required": ["query"],
                 "additionalProperties": False,
@@ -270,6 +281,12 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "description": "Response format: compact (summaries), standard (full)",
                         "default": "standard",
                         "enum": ["compact", "standard", "full"],
+                    },
+                    "read_view": {
+                        "type": "string",
+                        "description": "Read view: effective includes valid curated results, raw returns canonical memories",
+                        "default": "effective",
+                        "enum": ["effective", "raw"],
                     },
                     "ids": {
                         "type": "array",
@@ -321,6 +338,11 @@ def get_tool_schemas() -> List[Dict[str, Any]]:
                         "items": {"type": "string", "minLength": 1, "maxLength": 50},
                         "description": "New tags",
                         "maxItems": 20,
+                    },
+                    "reconciler_protected": {
+                        "anyOf": [{"type": "boolean"}, {"type": "null"}],
+                        "default": None,
+                        "description": "Set or clear Reconciler LLM evidence protection.",
                     },
                 },
                 "required": ["memory_id"],
@@ -629,7 +651,172 @@ def get_all_tool_schemas() -> List[Dict[str, Any]]:
         + get_doc_proposal_tool_schemas()
         + get_anchor_tool_schemas()
         + get_star_tool_schemas()
+        + get_reconciler_tool_schemas()
     )
+
+
+def get_reconciler_tool_schemas() -> List[Dict[str, Any]]:
+    return [
+        {
+            "name": "reconciler_start",
+            "description": TOOL_DESCRIPTIONS["reconciler_start"],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100,
+                    },
+                    "dry_run": {"type": "boolean", "default": True},
+                    "anchored_path": {
+                        "anyOf": [
+                            {"type": "string", "maxLength": 500},
+                            {"type": "null"},
+                        ],
+                        "default": None,
+                    },
+                    "created_after": {
+                        "anyOf": [{"type": "string"}, {"type": "null"}],
+                        "default": None,
+                    },
+                    "created_before": {
+                        "anyOf": [{"type": "string"}, {"type": "null"}],
+                        "default": None,
+                    },
+                },
+                "required": ["project_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "reconciler_cancel",
+            "description": TOOL_DESCRIPTIONS["reconciler_cancel"],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100,
+                    },
+                    "run_id": {"type": "string", "pattern": "^rr_[0-9a-f]{32}$"},
+                },
+                "required": ["project_id", "run_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "reconciler_result",
+            "description": TOOL_DESCRIPTIONS["reconciler_result"],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100,
+                    },
+                    "result_id": {"type": "string", "pattern": "^cr_[0-9a-f]{32}$"},
+                },
+                "required": ["project_id", "result_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "reconciler_candidates",
+            "description": TOOL_DESCRIPTIONS["reconciler_candidates"],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100,
+                    },
+                    "run_id": {"type": "string", "pattern": "^rr_[0-9a-f]{32}$"},
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 50,
+                    },
+                    "offset": {"type": "integer", "minimum": 0, "default": 0},
+                },
+                "required": ["project_id", "run_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "reconciler_candidate",
+            "description": TOOL_DESCRIPTIONS["reconciler_candidate"],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100,
+                    },
+                    "candidate_id": {
+                        "type": "string",
+                        "pattern": "^rc_[0-9a-f]{32}$",
+                    },
+                },
+                "required": ["project_id", "candidate_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "reconciler_run",
+            "description": TOOL_DESCRIPTIONS["reconciler_run"],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100,
+                    },
+                    "run_id": {
+                        "type": "string",
+                        "pattern": "^rr_[0-9a-f]{32}$",
+                    },
+                },
+                "required": ["project_id", "run_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "reconciler_proposals",
+            "description": TOOL_DESCRIPTIONS["reconciler_proposals"],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9_-]+$",
+                        "maxLength": 100,
+                    },
+                    "status": {
+                        "anyOf": [
+                            {"type": "string", "maxLength": 32},
+                            {"type": "null"},
+                        ],
+                        "default": None,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 10,
+                    },
+                },
+                "required": ["project_id"],
+                "additionalProperties": False,
+            },
+        },
+    ]
 
 
 def get_anchor_tool_schemas() -> List[Dict[str, Any]]:
@@ -819,6 +1006,10 @@ def get_batch_tool_schemas() -> List[Dict[str, Any]]:
                                     "description": "Tags",
                                     "maxItems": 20,
                                 },
+                                "reconciler_protected": {
+                                    "type": "boolean",
+                                    "description": "Exclude an added memory from Reconciler LLM evidence.",
+                                },
                                 "limit": {
                                     "type": "integer",
                                     "description": "Maximum results (for 'search' operations)",
@@ -841,6 +1032,12 @@ def get_batch_tool_schemas() -> List[Dict[str, Any]]:
                                         "(for 'search' operations)"
                                     ),
                                     "default": False,
+                                },
+                                "read_view": {
+                                    "type": "string",
+                                    "description": "Read view for search operations",
+                                    "default": "effective",
+                                    "enum": ["effective", "raw"],
                                 },
                                 "importance": {
                                     "type": "integer",

@@ -1,19 +1,4 @@
-"""Project overview (LLM narrative) generation + cache.
-
-Produces a grounded summary of a project from its recent memories — one LLM
-call over the batch (not a per-item loop), so it's fine to run on-demand /
-synchronously. The result is cached in ``project_overview`` keyed by project,
-with a ``source_hash`` of the input memories so the UI can tell when the cached
-overview is stale (memories added/edited since it was generated).
-
-Input items reuse the local enrichment layer (EnrichmentStore / memory_enrichment
-title+abstract) when present — dense and cheap — falling back to a content
-snippet. Category is passed through so the model can surface bug/incident/task
-items as ``open_issues``.
-
-Schema is lazy/memoized per Database instance (like EnrichmentStore) so no
-migration bump is needed.
-"""
+"""Project overview generation and cache from active curated results."""
 
 from __future__ import annotations
 
@@ -24,6 +9,10 @@ import weakref
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
+
+from app.core.errors import ChatProviderError, ReconcilerConflictError
+from app.core.services.effective_read import EffectiveReadService
 from app.core.services.enrich_store import EnrichmentStore
 
 logger = logging.getLogger(__name__)
@@ -32,9 +21,8 @@ _RECENT_LIMIT = 20
 _SNIPPET_CHARS = 300
 
 # Scheduled-refresh interval bounds (hours). Default is a half-day; a project's
-# overview is regenerated at most once per interval, and only when the project
-# saw memory activity within that same window (idle projects are skipped so we
-# never burn LLM calls re-summarizing unchanged projects).
+# overview is regenerated at most once per interval when inputs changed after
+# its last scheduled run.
 _MIN_INTERVAL_HOURS = 6
 _MAX_INTERVAL_HOURS = 24
 _DEFAULT_INTERVAL_HOURS = 12
@@ -52,11 +40,166 @@ def _first_line(content: str) -> str:
     return ""
 
 
+class _OverviewClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: StrictStr = Field(min_length=1)
+    memory_id: StrictStr = Field(min_length=1)
+
+
+class _OverviewContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: StrictStr = Field(min_length=1)
+    themes: list[StrictStr]
+    recent_activity: list[StrictStr]
+    open_issues: list[_OverviewClaim]
+    key_decisions: list[_OverviewClaim]
+    source_memory_ids: list[StrictStr] = Field(min_length=1)
+
+
 class OverviewService:
     _schema_ready: "weakref.WeakSet" = weakref.WeakSet()
 
     def __init__(self, db: Any):
         self.db = db
+        self.effective_read = EffectiveReadService(db)
+
+    @staticmethod
+    def _validated_content(data: Any, input_ids: set[str]) -> dict:
+        try:
+            content = _OverviewContent.model_validate(data)
+        except ValidationError as exc:
+            raise ChatProviderError("Invalid project overview response") from exc
+        cited_ids = set(content.source_memory_ids)
+        claim_ids = {
+            claim.memory_id for claim in content.open_issues + content.key_decisions
+        }
+        if not cited_ids <= input_ids or not claim_ids <= cited_ids:
+            raise ChatProviderError("Project overview references an unsupported source")
+        return content.model_dump()
+
+    async def _gather_reconciler_items(self, project_id: str) -> tuple[list, str, dict]:
+        rows = await self.effective_read._active_results(project_id)
+        items: list = []
+        source_references: list = []
+        result_parts: list[str] = []
+        for result in rows:
+            if result.get("action") in {
+                "archive",
+                "quarantine",
+                "noise_suppression",
+                "add_relation",
+                "mark_stale",
+            }:
+                continue
+            sources = await self.effective_read._source_rows(result["id"])
+            if not sources:
+                continue
+            if not await self.effective_read.revalidate_result(
+                str(result["id"]), bump_revision=False
+            ):
+                continue
+            body = str(result.get("body") or "")
+            items.append(
+                {
+                    "id": str(result["id"]),
+                    "category": "curated",
+                    "title": _first_line(body)[:80],
+                    "abstract": body[:_SNIPPET_CHARS],
+                    "content": body,
+                    "created_at": str(result.get("created_at") or ""),
+                    "representative_memory_id": result.get("representative_memory_id"),
+                    "revision": int(result.get("revision") or 0),
+                    "citations": [
+                        {
+                            "memory_id": str(source["memory_id"]),
+                            "input_hash": str(source["input_hash"]),
+                        }
+                        for source in sources
+                    ],
+                }
+            )
+            source_references.extend(items[-1]["citations"])
+            result_parts.append(
+                f"{result['id']}:{result.get('revision', 0)}:"
+                + ",".join(
+                    f"{source['memory_id']}:{source['input_hash']}"
+                    for source in sources
+                )
+            )
+        coverage = {
+            "canonical_total": 0,
+            "covered_canonical": 0,
+            "curated_results": len(items),
+        }
+        canonical_rows = await self.db.fetchall(
+            "SELECT id, content_hash, updated_at FROM memories "
+            "WHERE project_id = ? AND COALESCE(status, 'canonical') = 'canonical' "
+            "ORDER BY id",
+            (project_id,),
+        )
+        canonical_ids = {str(row["id"]) for row in canonical_rows}
+        covered_ids = {str(ref["memory_id"]) for ref in source_references}
+        coverage["canonical_total"] = len(canonical_ids)
+        coverage["covered_canonical"] = len(canonical_ids & covered_ids)
+        pending = await self.db.fetchone(
+            "SELECT COUNT(DISTINCT c.group_key) AS count "
+            "FROM reconciler_proposals p "
+            "JOIN reconciler_runs r ON r.id = p.run_id "
+            "JOIN reconciler_candidates c ON c.id = p.candidate_id "
+            "WHERE p.project_id = ? AND r.dry_run = 0 "
+            "AND p.status IN ('needs_approval', 'needs_review', 'approved', 'conflict', 'stale')",
+            (project_id,),
+        )
+        coverage["unreviewed"] = int(pending["count"]) if pending else 0
+        source_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "results": result_parts,
+                    "canonical": [
+                        (row["id"], row["content_hash"], row["updated_at"])
+                        for row in canonical_rows
+                    ],
+                    "unreviewed": coverage["unreviewed"],
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        return (
+            items,
+            source_hash,
+            {
+                "coverage": coverage,
+                "unreviewed_count": coverage["unreviewed"],
+                "partial": bool(
+                    coverage["covered_canonical"] < coverage["canonical_total"]
+                    or coverage["unreviewed"]
+                ),
+                "source_references": source_references,
+            },
+        )
+
+    async def _cached_dependencies_valid(
+        self, project_id: str, row: Any, current_hash: str, item_count: int
+    ) -> bool:
+        dependencies = await self.db.fetchall(
+            """
+            SELECT s.result_id, s.result_revision, s.source_hash, cr.revision
+            FROM project_overview_sources s
+            JOIN curated_results cr ON cr.id = s.result_id
+            WHERE s.project_id = ? AND cr.project_id = ? AND cr.status = 'active'
+            """,
+            (project_id, project_id),
+        )
+        if not dependencies or len(dependencies) != item_count:
+            return False
+        return current_hash == row["source_hash"] and all(
+            int(item["result_revision"]) == int(item["revision"])
+            and item["source_hash"] == row["source_hash"]
+            for item in dependencies
+        )
 
     async def ensure_schema(self) -> None:
         if self.db in OverviewService._schema_ready:
@@ -127,24 +270,60 @@ class OverviewService:
         generated. ``stale`` is True when the project's memories changed since
         the overview was made."""
         await self.ensure_schema()
+        items, current_hash, metadata = await self._gather_reconciler_items(project_id)
         row = await self.db.fetchone(
             "SELECT overview_json, source_hash, item_count, model, created_at "
             "FROM project_overview WHERE project_id = ?",
             (project_id,),
         )
         if not row:
-            return None
+            return {
+                "overview": None,
+                "stale": False,
+                "item_count": 0,
+                "model": None,
+                "generated_at": None,
+                "empty": True,
+                **metadata,
+                "unavailable": True,
+            }
+        dependencies_valid = await self._cached_dependencies_valid(
+            project_id, row, current_hash, len(items)
+        )
+        if not dependencies_valid:
+            return {
+                "overview": None,
+                "stale": True,
+                "item_count": int(row["item_count"] or 0),
+                "model": row["model"],
+                "generated_at": row["created_at"],
+                **metadata,
+                "unavailable": True,
+            }
         try:
-            overview = json.loads(row["overview_json"])
-        except (json.JSONDecodeError, TypeError):
-            return None
-        _items, current_hash = await self._gather_items(project_id)
+            overview = self._validated_content(
+                json.loads(row["overview_json"]),
+                {item["id"] for item in items}
+                | {source["memory_id"] for source in metadata["source_references"]},
+            )
+        except (json.JSONDecodeError, TypeError, ChatProviderError):
+            return {
+                "overview": None,
+                "stale": True,
+                "item_count": int(row["item_count"] or 0),
+                "model": row["model"],
+                "generated_at": row["created_at"],
+                **metadata,
+                "unavailable": True,
+            }
         return {
             "overview": overview,
-            "stale": current_hash != row["source_hash"],
+            "stale": False,
             "item_count": row["item_count"],
             "model": row["model"],
             "generated_at": row["created_at"],
+            **metadata,
+            "unavailable": False,
         }
 
     async def generate(
@@ -152,18 +331,37 @@ class OverviewService:
     ) -> dict:
         """Gather recent memories, ask the chat LLM for an overview, cache it."""
         await self.ensure_schema()
-        items, source_hash = await self._gather_items(project_id)
+        items, source_hash, metadata = await self._gather_reconciler_items(project_id)
         if not items:
-            return {"overview": None, "stale": False, "item_count": 0, "empty": True}
+            return {
+                "overview": None,
+                "stale": False,
+                "item_count": 0,
+                "empty": True,
+                **metadata,
+                "unavailable": True,
+            }
 
-        data = await chat_service.generate_project_overview(
+        response = await chat_service.generate_project_overview(
             project_id=project_id, items=items, settings=settings
         )
-        model = str(data.pop("model", "") or "")
+        if not isinstance(response, dict):
+            raise ChatProviderError("Invalid project overview response")
+        model = str(response.get("model") or "")
+        data = self._validated_content(
+            {key: value for key, value in response.items() if key != "model"},
+            {item["id"] for item in items}
+            | {source["memory_id"] for source in metadata["source_references"]},
+        )
         overview_json = json.dumps(data, ensure_ascii=False)
         now = _utc_now()
         # PRIMARY KEY(project_id) → DELETE + INSERT (no INSERT OR REPLACE churn).
         async with self.db.transaction():
+            _, current_hash, _ = await self._gather_reconciler_items(project_id)
+            if current_hash != source_hash:
+                raise ReconcilerConflictError(
+                    "Project overview inputs changed during generation; retry"
+                )
             await self.db.execute(
                 "DELETE FROM project_overview WHERE project_id = ?", (project_id,)
             )
@@ -173,12 +371,29 @@ class OverviewService:
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (project_id, overview_json, source_hash, len(items), model, now),
             )
+            await self.db.execute(
+                "DELETE FROM project_overview_sources WHERE project_id = ?",
+                (project_id,),
+            )
+            for item in items:
+                await self.db.execute(
+                    "INSERT INTO project_overview_sources(project_id, result_id, result_revision, source_hash, generated_at) VALUES (?, ?, ?, ?, ?)",
+                    (
+                        project_id,
+                        item["id"],
+                        item["revision"],
+                        source_hash,
+                        now,
+                    ),
+                )
         return {
             "overview": data,
             "stale": False,
             "item_count": len(items),
             "model": model,
             "generated_at": now,
+            **metadata,
+            "unavailable": False,
         }
 
 
@@ -199,18 +414,10 @@ class OverviewScheduler:
     most ONE due project and regenerates it, so the relay worker's single-task
     pacing is preserved (no burst of LLM calls; see CLAUDE.md L1/L5).
 
-    "Due" means two things at once, both keyed off the same ``interval_hours``
-    window ending now:
-
-    * not run in the last interval (``last_run_at`` older than the window), and
-    * memory activity within the last interval (a canonical memory whose
-      created/updated time falls inside the window).
-
-    The activity gate is what stops idle projects from being re-summarized every
-    cycle forever — once a project stops receiving memories, the next sweep finds
-    no in-window activity and skips it. Regeneration itself still reuses
-    ``OverviewService`` staleness: if the cached overview is somehow already
-    current, ``last_run_at`` is advanced without spending an LLM call.
+    A project is due after its interval if canonical memory changed or a curated
+    result became active since its last run. A project without a prior run needs
+    recent canonical activity or an active curated result. The cache check skips
+    an LLM call when the stored overview is current.
 
     Schema is lazy/memoized per Database instance (like OverviewService).
     """
@@ -269,24 +476,35 @@ class OverviewScheduler:
         ]
 
     async def _claim_due_project(self, cutoff_iso: str) -> Optional[str]:
-        """One enabled project that is due (stale run) AND had in-window memory
-        activity. Oldest-run-first so all due projects get fair rotation."""
+        """Select one enabled project with input changes after its last run."""
         row = await self.db.fetchone(
             """
             SELECT s.project_id AS project_id
             FROM overview_schedule s
             WHERE s.enabled = 1
               AND (s.last_run_at IS NULL OR s.last_run_at < ?)
-              AND EXISTS (
-                    SELECT 1 FROM memories m
-                    WHERE m.project_id = s.project_id
-                      AND COALESCE(m.status, 'canonical') = 'canonical'
-                      AND COALESCE(m.updated_at, m.created_at) >= ?
+              AND (
+                    EXISTS (
+                        SELECT 1 FROM memories m
+                        WHERE m.project_id = s.project_id
+                          AND COALESCE(m.status, 'canonical') = 'canonical'
+                          AND COALESCE(m.updated_at, m.created_at) > COALESCE(s.last_run_at, ?)
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM curated_results cr
+                        WHERE cr.project_id = s.project_id
+                          AND (s.last_run_at IS NULL OR MAX(COALESCE(cr.activated_at, cr.created_at), COALESCE(cr.cancelled_at, ''), COALESCE(cr.stale_at, '')) > s.last_run_at)
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM reconciler_proposals p
+                        WHERE p.project_id = s.project_id
+                          AND p.updated_at > COALESCE(s.last_run_at, ?)
+                    )
               )
             ORDER BY s.last_run_at IS NOT NULL, s.last_run_at ASC
             LIMIT 1
             """,
-            (cutoff_iso, cutoff_iso),
+            (cutoff_iso, cutoff_iso, cutoff_iso),
         )
         return str(row["project_id"]) if row else None
 

@@ -7,6 +7,9 @@ FastMCP-based stdio server (`app.mcp_stdio.server`) is the entry point for the d
 
 **Note:** Tool parameter signatures in this file must stay in sync with `app/mcp_common/schemas.py`. FastMCP uses `@mcp.tool()` decorators (not shared JSON schemas), so any schema change requires updating both files.
 
+Reconciler read-only tools: `reconciler_run`, `reconciler_candidates`, `reconciler_candidate`, `reconciler_result`, `reconciler_proposals`.
+Reconciler run tools: `reconciler_start`, `reconciler_cancel`. Protected proposal approval stays in the dashboard API.
+
 ## Tech Stack & Constraints
 - `fastmcp.FastMCP` for tool registration and JSON-RPC handling; each tool function is decorated with `@mcp.tool()`.
 - Shared storage modules (`mcp_common.storage`, `mcp_common.tools`, `mcp_common.batch_tools`) provide cohesive MCP tool logic and batch mutation helpers.

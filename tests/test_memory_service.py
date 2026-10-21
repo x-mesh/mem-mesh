@@ -44,6 +44,70 @@ class TestMemoryService:
     """MemoryService 테스트 클래스"""
 
     @pytest.mark.asyncio
+    async def test_memory_api_exposes_reconciler_protection(self, memory_service):
+        from fastapi import FastAPI
+        from httpx import ASGITransport, AsyncClient
+
+        from app.web.common.dependencies import get_memory_service
+        from app.web.dashboard.route_modules.memories import router
+
+        app = FastAPI()
+        app.include_router(router, prefix="/api")
+        app.dependency_overrides[get_memory_service] = lambda: memory_service
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            created = await client.post(
+                "/api/memories",
+                json={
+                    "content": "A protected test memory stays available for canonical reads but must not enter Reconciler LLM evidence when the project allows external judgment.",
+                    "project_id": "test-project",
+                    "reconciler_protected": True,
+                },
+            )
+            assert created.status_code == 200
+            memory_id = created.json()["id"]
+            assert (await client.get(f"/api/memories/{memory_id}")).json()[
+                "reconciler_protected"
+            ] is True
+            updated = await client.put(
+                f"/api/memories/{memory_id}",
+                json={"reconciler_protected": False},
+            )
+            assert updated.status_code == 200
+            assert (await client.get(f"/api/memories/{memory_id}")).json()[
+                "reconciler_protected"
+            ] is False
+
+    @pytest.mark.asyncio
+    async def test_reconciler_protection_is_atomic_and_survives_updates(
+        self, memory_service
+    ):
+        created = await memory_service.create(
+            content="This protected release procedure stays in canonical memory and must not enter the Reconciler judge evidence during an opted-in project run.",
+            project_id="test-project",
+            source="test",
+            reconciler_protected=True,
+        )
+        assert (await memory_service.get(created.id)).reconciler_protected is True
+
+        await memory_service.update(created.id, category="decision")
+        assert (await memory_service.get(created.id)).reconciler_protected is True
+
+        await memory_service.update(created.id, reconciler_protected=False)
+        assert (await memory_service.get(created.id)).reconciler_protected is False
+
+        duplicate = await memory_service.create(
+            content="This protected release procedure stays in canonical memory and must not enter the Reconciler judge evidence during an opted-in project run.",
+            project_id="test-project",
+            source="test",
+            reconciler_protected=True,
+        )
+        assert duplicate.status == "duplicate"
+        assert duplicate.id == created.id
+        assert (await memory_service.get(created.id)).reconciler_protected is True
+
+    @pytest.mark.asyncio
     async def test_create_memory_success(self, memory_service):
         """메모리 생성 성공 테스트"""
         # Given
